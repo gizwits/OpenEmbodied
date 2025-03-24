@@ -33,6 +33,8 @@ choice CONNECTION_TYPE
         bool "MQTT + UDP"
     config CONNECTION_TYPE_WEBSOCKET
         bool "Websocket"
+    config CONNECTION_TYPE_COZE_WEBSOCKET
+        bool "Coze Websocket"
 endchoice
 
 config WEBSOCKET_URL
@@ -41,6 +43,14 @@ config WEBSOCKET_URL
     default "wss://api.tenclass.net/xiaozhi/v1/"
     help
         Communication with the server through websocket after wake up.
+
+config COZE_WEBSOCKET_URL
+    depends on CONNECTION_TYPE_COZE_WEBSOCKET
+    string "Coze Websocket URL"
+    default "ws://ws.coze.cn/v1/chat"
+    help
+        Communication with the Coze server through websocket after wake up.
+        
 
 config WEBSOCKET_ACCESS_TOKEN
     depends on CONNECTION_TYPE_WEBSOCKET

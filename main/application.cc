@@ -361,7 +361,7 @@ void Application::Start() {
 
     // Initialize the protocol
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
-#ifdef CONFIG_CONNECTION_TYPE_WEBSOCKET
+#if defined(CONFIG_CONNECTION_TYPE_WEBSOCKET) || defined(CONFIG_CONNECTION_TYPE_COZE_WEBSOCKET)
     protocol_ = std::make_unique<WebsocketProtocol>();
 #else
     protocol_ = std::make_unique<MqttProtocol>();
