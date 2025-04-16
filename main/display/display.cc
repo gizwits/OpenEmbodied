@@ -15,6 +15,10 @@
 #define TAG "Display"
 
 Display::Display() {
+    // Load theme from settings
+    Settings settings("display", false);
+    current_theme_name_ = settings.GetString("theme", "light");
+
     // Notification timer
     esp_timer_create_args_t notification_timer_args = {
         .callback = [](void *arg) {
@@ -71,7 +75,9 @@ Display::~Display() {
         lv_obj_del(battery_label_);
         lv_obj_del(emotion_label_);
     }
-
+    if( low_battery_popup_ != nullptr ) {
+        lv_obj_del(low_battery_popup_);
+    }
     if (pm_lock_ != nullptr) {
         esp_pm_lock_delete(pm_lock_);
     }
@@ -172,6 +178,7 @@ void Display::Update() {
         kDeviceStateStarting,
         kDeviceStateWifiConfiguring,
         kDeviceStateListening,
+        kDeviceStateActivating,
     };
     if (std::find(allowed_states.begin(), allowed_states.end(), device_state) != allowed_states.end()) {
         icon = board.GetNetworkStateIcon();
@@ -248,4 +255,10 @@ void Display::SetChatMessage(const char* role, const char* content) {
         return;
     }
     lv_label_set_text(chat_message_label_, content);
+}
+
+void Display::SetTheme(const std::string& theme_name) {
+    current_theme_name_ = theme_name;
+    Settings settings("display", true);
+    settings.SetString("theme", theme_name);
 }

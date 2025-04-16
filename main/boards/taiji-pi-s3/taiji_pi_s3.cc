@@ -7,7 +7,7 @@
 #include "iot/thing_manager.h"
 
 #include <esp_log.h>
-#include <driver/i2c.h>
+#include <driver/i2c_master.h>
 #include <driver/ledc.h>
 #include <wifi_station.h>
 #include <esp_lcd_panel_io.h>
@@ -198,7 +198,7 @@ private:
     void InitializeIot() {
         auto& thing_manager = iot::ThingManager::GetInstance();
         thing_manager.AddThing(iot::CreateThing("Speaker"));
-        thing_manager.AddThing(iot::CreateThing("Backlight"));
+        thing_manager.AddThing(iot::CreateThing("Screen"));
     }
     void InitializeMute() {
         gpio_reset_pin(AUDIO_MUTE_PIN);

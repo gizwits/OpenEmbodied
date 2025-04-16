@@ -126,6 +126,8 @@ choice BOARD_TYPE
         bool "ESP32S3_KORVO2_V3开发板"
     config BOARD_TYPE_ESP_SPARKBOT
         bool "ESP-SparkBot开发板"
+    config BOARD_TYPE_ESP_SPOT_S3
+        bool "ESP-Spot-S3"
     config BOARD_TYPE_ESP32S3_Touch_AMOLED_1_8
         bool "Waveshare ESP32-S3-Touch-AMOLED-1.8"
     config BOARD_TYPE_ESP32S3_Touch_LCD_1_85C
@@ -134,6 +136,8 @@ choice BOARD_TYPE
         bool "Waveshare ESP32-S3-Touch-LCD-1.85"
     config BOARD_TYPE_ESP32S3_Touch_LCD_1_46
         bool "Waveshare ESP32-S3-Touch-LCD-1.46"
+    config BOARD_TYPE_ESP32S3_Touch_LCD_3_5
+        bool "Waveshare ESP32-S3-Touch-LCD-3.5"
     config BOARD_TYPE_TUDOUZI
         bool "土豆子"
     config BOARD_TYPE_LILYGO_T_CIRCLE_S3
@@ -142,6 +146,8 @@ choice BOARD_TYPE
         bool "LILYGO T-CameraPlus-S3"
     config BOARD_TYPE_MOVECALL_MOJI_ESP32S3
          bool "Movecall Moji 小智AI衍生版"
+    config BOARD_TYPE_MOVECALL_CUICAN_ESP32S3
+         bool "Movecall CuiCan 璀璨·AI吊坠"
     config BOARD_TYPE_ATK_DNESP32S3
         bool "正点原子DNESP32S3开发板"
     config BOARD_TYPE_ATK_DNESP32S3_BOX
@@ -150,6 +156,10 @@ choice BOARD_TYPE
         bool "嘟嘟开发板CHATX(wifi)"
     config BOARD_TYPE_ESP32S3_Taiji_Pi
         bool "太极小派esp32s3"
+    config BOARD_TYPE_XINGZHI_Cube_0_85TFT_WIFI
+        bool "无名科技星智0.85(WIFI)"
+    config BOARD_TYPE_XINGZHI_Cube_0_85TFT_ML307
+        bool "无名科技星智0.85(ML307)"
     config BOARD_TYPE_XINGZHI_Cube_0_96OLED_WIFI
         bool "无名科技星智0.96(WIFI)"
     config BOARD_TYPE_XINGZHI_Cube_0_96OLED_ML307
@@ -160,6 +170,8 @@ choice BOARD_TYPE
         bool "无名科技星智1.54(ML307)"
     config BOARD_TYPE_SENSECAP_WATCHER
         bool "SenseCAP Watcher"
+    config BOARD_TYPE_DOIT_S3_AIBOX
+        bool "四博智联AI陪伴盒子"
 endchoice
 
 choice DISPLAY_OLED_TYPE
@@ -172,6 +184,8 @@ choice DISPLAY_OLED_TYPE
         bool "SSD1306, 分辨率128*32"
     config OLED_SSD1306_128X64
         bool "SSD1306, 分辨率128*64"
+    config OLED_SH1106_128X64
+        bool "SH1106, 分辨率128*64"
 endchoice
 
 choice DISPLAY_LCD_TYPE
@@ -201,7 +215,9 @@ choice DISPLAY_LCD_TYPE
     config LCD_ST7735_128X128
         bool "ST7735, 分辨率128*128"
     config LCD_ST7796_320X480
-        bool "ST7796, 分辨率320*480"
+        bool "ST7796, 分辨率320*480 IPS"
+    config LCD_ST7796_320X480_NO_IPS
+        bool "ST7796, 分辨率320*480, 非IPS"    
     config LCD_ILI9341_240X320
         bool "ILI9341, 分辨率240*320"
     config LCD_ILI9341_240X320_NO_IPS
@@ -230,23 +246,25 @@ config USE_WECHAT_MESSAGE_STYLE
     help
         使用微信聊天界面风格
 
-config USE_DARK_MODE
-    bool "使用深色模式"
-    default n
+config USE_WAKE_WORD_DETECT
+    bool "启用唤醒词检测"
+    default y
+    depends on IDF_TARGET_ESP32S3 && SPIRAM
     help
-        使用深色模式       
+        需要 ESP32 S3 与 AFE 支持
 
 config USE_AUDIO_PROCESSOR
     bool "启用音频降噪、增益处理"
     default y
-    depends on IDF_TARGET_ESP32S3 && USE_AFE
+    depends on IDF_TARGET_ESP32S3 && SPIRAM
     help
         需要 ESP32 S3 与 AFE 支持
 
-config USE_WAKE_WORD_DETECT
-    bool "启用唤醒词检测"
-    default y
-    depends on IDF_TARGET_ESP32S3 && USE_AFE
+config USE_REALTIME_CHAT
+    bool "启用可语音打断的实时对话模式（需要 AEC 支持）"
+    default n
+    depends on USE_AUDIO_PROCESSOR && (BOARD_TYPE_ESP_BOX_3 || BOARD_TYPE_ESP_BOX || BOARD_TYPE_ESP_BOX_LITE || BOARD_TYPE_LICHUANG_DEV || BOARD_TYPE_ESP32S3_KORVO2_V3)
     help
-        需要 ESP32 S3 与 AFE 支持
+        需要 ESP32 S3 与 AEC 开启，因为性能不够，不建议和微信聊天界面风格同时开启
+        
 endmenu

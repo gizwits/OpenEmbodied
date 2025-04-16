@@ -29,6 +29,9 @@ protected:
 private:
     WebSocket* websocket_ = nullptr;
     EventGroupHandle_t event_group_handle_;
+
+    void ParseServerHello(const cJSON* root);
+    bool SendText(const std::string& text) override;
 };
 
 #endif

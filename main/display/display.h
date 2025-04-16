@@ -25,6 +25,8 @@ public:
     virtual void SetEmotion(const char* emotion);
     virtual void SetChatMessage(const char* role, const char* content);
     virtual void SetIcon(const char* icon);
+    virtual void SetTheme(const std::string& theme_name);
+    virtual std::string GetTheme() { return current_theme_name_; }
 
     inline int width() const { return width_; }
     inline int height() const { return height_; }
@@ -44,10 +46,12 @@ protected:
     lv_obj_t *battery_label_ = nullptr;
     lv_obj_t* chat_message_label_ = nullptr;
     lv_obj_t* low_battery_popup_ = nullptr;
-
+    lv_obj_t* low_battery_label_ = nullptr;
+    
     const char* battery_icon_ = nullptr;
     const char* network_icon_ = nullptr;
     bool muted_ = false;
+    std::string current_theme_name_;
 
     esp_timer_handle_t notification_timer_ = nullptr;
     esp_timer_handle_t update_timer_ = nullptr;
@@ -63,7 +67,7 @@ protected:
 class DisplayLockGuard {
 public:
     DisplayLockGuard(Display *display) : display_(display) {
-        if (!display_->Lock(3000)) {
+        if (!display_->Lock(30000)) {
             ESP_LOGE("Display", "Failed to lock display");
         }
     }
