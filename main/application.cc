@@ -382,7 +382,8 @@ void Application::Start() {
         Alert(Lang::Strings::ERROR, message.c_str(), "sad", Lang::Sounds::P3_EXCLAMATION);
     });
     protocol_->OnIncomingAudio([this](std::vector<uint8_t>&& data) {
-        const int max_packets_in_queue = 300 / OPUS_FRAME_DURATION_MS;
+        const int BUFFER_TIME_MS = 10000;  // 缓冲10秒的数据
+        const int max_packets_in_queue = BUFFER_TIME_MS / OPUS_FRAME_DURATION_MS;
         std::lock_guard<std::mutex> lock(mutex_);
         if (audio_decode_queue_.size() < max_packets_in_queue) {
             audio_decode_queue_.emplace_back(std::move(data));
@@ -723,11 +724,15 @@ void Application::OnAudioInput() {
             if (protocol_->IsAudioChannelBusy()) {
                 return;
             }
+#if CONFIG_CONNECTION_TYPE_COZE_WEBSOCKET
+            protocol_->SendAudio(data);
+#else
             opus_encoder_->Encode(std::move(data), [this](std::vector<uint8_t>&& opus) {
                 Schedule([this, opus = std::move(opus)]() {
                     protocol_->SendAudio(opus);
                 });
             });
+#endif
         });
         return;
     }
