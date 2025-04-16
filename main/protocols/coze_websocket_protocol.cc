@@ -11,9 +11,11 @@
 
 #define TAG "WS"
 
-#define BOT_ID "7481549254856114230"
-#define VOICE_ID "7426720361733013513"
-#define CONFIG_WEBSOCKET_ACCESS_TOKEN "pat_RzK1r9uuCdUyB5o7PyU786AmYNHPsn68GNWuOkYlfHEgY2SruD2QRRwlRXnImRfU"
+// Received message on topic: llm/nd7ec83a/config/response
+// in_str:{"method":"websocket.auth.response","body":{"platform_type":1,"token_quota":500000,"coze_websocket":{"bot_id":"7483788991729270847","voice_id":"7426720361753968677","user_id":"nd7ec83a","conv_id":"7486307379559104521","access_token":"czs_qNqGYuaxk7GQXXz5l6RwjaUYyE6y0sqCuRUl1enbJUPkMYQWgosyTdLpCDOZcEZOr","expires_in":3540}}}
+#define BOT_ID "7483788991729270847"
+#define VOICE_ID "7426720361753968677"
+#define CONFIG_WEBSOCKET_ACCESS_TOKEN "czs_qNqGYuaxk7GQXXz5l6RwjaUYyE6y0sqCuRUl1enbJUPkMYQWgosyTdLpCDOZcEZOr"
 
 WebsocketProtocol::WebsocketProtocol() {
     event_group_handle_ = xEventGroupCreate();
@@ -62,7 +64,46 @@ void WebsocketProtocol::SendAudio(const std::vector<uint8_t>& data) {
     message += "}";
     message += "}";
 
-    ESP_LOGI(TAG, "Send message: %s", message.c_str());
+    // 发送消息
+    websocket_->Send(message);
+    
+    // 清理
+    free(base64_buffer);
+}
+
+void WebsocketProtocol::SendAudio(const std::vector<int16_t>& data) {
+    if (websocket_ == nullptr || !websocket_->IsConnected() || data.empty()) {
+        return;
+    }
+    
+    // 将 int16_t 数据转换为 base64
+    size_t data_size = data.size() * sizeof(int16_t);
+    size_t out_len = 4 * ((data_size + 2) / 3);  // base64 编码后的长度
+    char *base64_buffer = (char*)malloc(out_len + 1);
+    if (!base64_buffer) {
+        ESP_LOGE(TAG, "Failed to allocate base64 buffer");
+        return;
+    }
+
+    size_t encoded_len;
+    mbedtls_base64_encode((unsigned char *)base64_buffer, out_len + 1, &encoded_len,
+                         (const unsigned char*)data.data(), data_size);
+    base64_buffer[encoded_len] = '\0';
+
+    // 创建事件 ID (使用随机数，确保为正数)
+    char event_id[32];
+    uint32_t random_value = esp_random();
+    snprintf(event_id, sizeof(event_id), "%lu", random_value);
+
+    // 构建消息
+    std::string message = "{";
+    message += "\"id\":\"" + std::string(event_id) + "\",";
+    message += "\"event_type\":\"input_audio_buffer.append\",";
+    message += "\"data\":{";
+    message += "\"delta\":\"" + std::string(base64_buffer) + "\"";
+    message += "}";
+    message += "}";
+
     // 发送消息
     websocket_->Send(message);
     
@@ -167,8 +208,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
     uint32_t random_value = esp_random();
     snprintf(event_id, sizeof(event_id), "%lu", random_value);
     
-    std::string conversation_id = "7483457529922469928";  // You may want to manage this differently
-    std::string user_id = "nb47c6f2";  // You may want to set this appropriately
+    std::string conversation_id = "7486307379559104521";  // You may want to manage this differently
+    std::string user_id = "nd7ec83a";  // You may want to set this appropriately
     std::string codec = "opus";
     std::string message = "{";
     message += "\"id\":\"" + std::string(event_id) + "\",";
@@ -184,7 +225,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "},";
     message += "\"input_audio\":{";
     message += "\"format\":\"pcm\",";
-    message += "\"codec\":\"opus\",";
+    message += "\"codec\":\"pcm\",";
     message += "\"sample_rate\":16000,";
     message += "\"channel\":1,";
     message += "\"bit_depth\":16";
@@ -215,5 +256,6 @@ bool WebsocketProtocol::OpenAudioChannel() {
 
 void WebsocketProtocol::ParseServerHello(const cJSON* root) {
     // COZE 的音频信息是由设备发起的，因此这里直接返回
+    server_sample_rate_ = 16000;
     xEventGroupSetBits(event_group_handle_, WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT);
 }

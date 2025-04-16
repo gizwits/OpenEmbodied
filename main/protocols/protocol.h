@@ -45,6 +45,7 @@ public:
     virtual bool OpenAudioChannel() = 0;
     virtual void CloseAudioChannel() = 0;
     virtual bool IsAudioChannelOpened() const = 0;
+    virtual void SendAudio(const std::vector<int16_t>& data) = 0;
     virtual void SendAudio(const std::vector<uint8_t>& data) = 0;
     virtual void SendWakeWordDetected(const std::string& wake_word);
     virtual void SendStartListening(ListeningMode mode);

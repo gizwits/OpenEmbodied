@@ -13,20 +13,22 @@
 class WebsocketProtocol : public Protocol {
 public:
     WebsocketProtocol();
-    ~WebsocketProtocol();
+    virtual ~WebsocketProtocol();
 
-    void Start() override;
-    void SendAudio(const std::vector<uint8_t>& data) override;
-    bool OpenAudioChannel() override;
-    void CloseAudioChannel() override;
-    bool IsAudioChannelOpened() const override;
+    virtual void Start() override;
+    virtual bool OpenAudioChannel() override;
+    virtual void CloseAudioChannel() override;
+    virtual bool IsAudioChannelOpened() const override;
+    virtual void SendAudio(const std::vector<int16_t>& data) override;
+    virtual void SendAudio(const std::vector<uint8_t>& data) override;
+
+protected:
+    virtual void SendText(const std::string& text) override;
+    virtual void ParseServerHello(const cJSON* root);
 
 private:
-    EventGroupHandle_t event_group_handle_;
     WebSocket* websocket_ = nullptr;
-
-    void ParseServerHello(const cJSON* root);
-    void SendText(const std::string& text) override;
+    EventGroupHandle_t event_group_handle_;
 };
 
 #endif

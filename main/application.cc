@@ -469,7 +469,7 @@ void Application::Start() {
 
     xTaskCreate([](void* arg) {
         Application* app = (Application*)arg;
-        app->CheckNewVersion();
+        // app->CheckNewVersion();
         vTaskDelete(NULL);
     }, "check_new_version", 4096 * 2, this, 2, nullptr);
 
@@ -477,11 +477,12 @@ void Application::Start() {
     audio_processor_.Initialize(codec->input_channels(), codec->input_reference());
     audio_processor_.OnOutput([this](std::vector<int16_t>&& data) {
         background_task_->Schedule([this, data = std::move(data)]() mutable {
-            opus_encoder_->Encode(std::move(data), [this](std::vector<uint8_t>&& opus) {
-                Schedule([this, opus = std::move(opus)]() {
-                    protocol_->SendAudio(opus);
-                });
-            });
+            // opus_encoder_->Encode(std::move(data), [this](std::vector<uint8_t>&& opus) {
+            //     Schedule([this, opus = std::move(opus)]() {
+            //         protocol_->SendAudio(opus);
+            //     });
+            // });
+            protocol_->SendAudio(data);
         });
     });
 #endif
