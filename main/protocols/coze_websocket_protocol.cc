@@ -13,9 +13,9 @@
 
 // Received message on topic: llm/nd7ec83a/config/response
 // in_str:{"method":"websocket.auth.response","body":{"platform_type":1,"token_quota":500000,"coze_websocket":{"bot_id":"7483788991729270847","voice_id":"7426720361753968677","user_id":"nd7ec83a","conv_id":"7486307379559104521","access_token":"czs_qNqGYuaxk7GQXXz5l6RwjaUYyE6y0sqCuRUl1enbJUPkMYQWgosyTdLpCDOZcEZOr","expires_in":3540}}}
-#define BOT_ID "7483788991729270847"
+#define BOT_ID "7493054372197793843"
 #define VOICE_ID "7426720361753968677"
-#define CONFIG_WEBSOCKET_ACCESS_TOKEN "czs_qNqGYuaxk7GQXXz5l6RwjaUYyE6y0sqCuRUl1enbJUPkMYQWgosyTdLpCDOZcEZOr"
+#define CONFIG_WEBSOCKET_ACCESS_TOKEN "czs_hFs9t1P2uGAK8SFq2oz631QMfRFeJp38byWpKdFnNdT8JinUN1WpZo399yHFAVWm9"
 
 WebsocketProtocol::WebsocketProtocol() {
     event_group_handle_ = xEventGroupCreate();
@@ -35,40 +35,7 @@ void WebsocketProtocol::SendAudio(const std::vector<uint8_t>& data) {
     if (websocket_ == nullptr || !websocket_->IsConnected() || data.empty()) {
         return;
     }
-    
-    // 计算 base64 编码后的长度
-    size_t out_len = 4 * ((data.size() + 2) / 3);  // base64 编码后的长度
-    char *base64_buffer = (char*)malloc(out_len + 1);  // +1 for null terminator
-    if (!base64_buffer) {
-        ESP_LOGE(TAG, "Failed to allocate base64 buffer");
-        return;
-    }
-
-    // 进行 base64 编码
-    size_t encoded_len;
-    mbedtls_base64_encode((unsigned char *)base64_buffer, out_len + 1, &encoded_len, 
-                         data.data(), data.size());
-    base64_buffer[encoded_len] = '\0';
-
-    // 创建事件 ID (使用随机数，确保为正数)
-    char event_id[32];
-    uint32_t random_value = esp_random();
-    snprintf(event_id, sizeof(event_id), "%lu", random_value);
-
-    // 构建消息
-    std::string message = "{";
-    message += "\"id\":\"" + std::string(event_id) + "\",";
-    message += "\"event_type\":\"input_audio_buffer.append\",";
-    message += "\"data\":{";
-    message += "\"delta\":\"" + std::string(base64_buffer) + "\"";
-    message += "}";
-    message += "}";
-
-    // 发送消息
-    websocket_->Send(message);
-    
-    // 清理
-    free(base64_buffer);
+    return;
 }
 
 void WebsocketProtocol::SendAudio(const std::vector<int16_t>& data) {
@@ -111,12 +78,35 @@ void WebsocketProtocol::SendAudio(const std::vector<int16_t>& data) {
     free(base64_buffer);
 }
 
-void WebsocketProtocol::SendText(const std::string& text) {
+bool WebsocketProtocol::SendText(const std::string& text) {
+    if (websocket_ == nullptr) {
+        return false;
+    }
+    // TODO: 发送文本消息
+    return true;
+}
+
+void WebsocketProtocol::SendStopListening() {
     if (websocket_ == nullptr) {
         return;
     }
-    // TODO
 
+    // 创建事件 ID (使用随机数，确保为正数)
+    char event_id[32];
+    uint32_t random_value = esp_random();
+    snprintf(event_id, sizeof(event_id), "%lu", random_value);
+
+    // 构建完整的消息
+    char message[256];
+    snprintf(message, sizeof(message),
+        "{"
+            "\"id\":\"%s\","
+            "\"event_type\":\"input_audio_buffer.complete\","
+            "\"data\":{}"
+        "}", event_id);
+
+    // 发送消息
+    websocket_->Send(message);
 }
 
 bool WebsocketProtocol::IsAudioChannelOpened() const {
@@ -141,7 +131,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     websocket_->SetHeader("Authorization", token.c_str());
 
     websocket_->OnData([this](const char* data, size_t len, bool binary) {
-        ESP_LOGI(TAG, "Received data: %s", data);
+        // ESP_LOGI(TAG, "Received data: %s", data);
         if (!data || len == 0) {
             return;
         }
@@ -169,7 +159,53 @@ bool WebsocketProtocol::OpenAudioChannel() {
         }
 
         if(event_type == "conversation.audio.delta") {
-            // 需要做分包处理
+            // 查找 content 字段
+            constexpr std::string_view content_key = "\"content\":\"";
+            size_t content_start = str_data.find(content_key);
+            if (content_start != std::string_view::npos) {
+                content_start += content_key.length();
+                
+                // 找到 content 结束的位置 (下一个未转义的引号)
+                size_t content_end = content_start;
+                bool escaped = false;
+                
+                while (content_end < str_data.length()) {
+                    if (str_data[content_end] == '\\') {
+                        escaped = !escaped;
+                    } else if (str_data[content_end] == '"' && !escaped) {
+                        break;
+                    } else {
+                        escaped = false;
+                    }
+                    content_end++;
+                }
+                
+                if (content_end < str_data.length()) {
+                    // 提取 base64 编码的内容
+                    std::string_view base64_content = str_data.substr(content_start, content_end - content_start);
+                    
+                    // 计算解码后的长度
+                    size_t output_len = 0;
+                    mbedtls_base64_decode(nullptr, 0, &output_len, 
+                        (const unsigned char*)base64_content.data(), 
+                        base64_content.length());
+
+                    // 分配内存并解码
+                    std::vector<uint8_t> decoded_data(output_len);
+                    size_t actual_len = 0;
+                    int ret = mbedtls_base64_decode(
+                        decoded_data.data(), decoded_data.size(), &actual_len,
+                        (const unsigned char*)base64_content.data(), 
+                        base64_content.length());
+
+                    if (ret == 0 && actual_len > 0) {
+                        // 回调处理解码后的音频数据
+                        if (on_incoming_audio_ != nullptr) {
+                            on_incoming_audio_(std::move(decoded_data));
+                        }
+                    }
+                }
+            }
         } else {
             auto root = cJSON_Parse(data);
             if (event_type == "chat.created") {
@@ -208,7 +244,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     uint32_t random_value = esp_random();
     snprintf(event_id, sizeof(event_id), "%lu", random_value);
     
-    std::string conversation_id = "7486307379559104521";  // You may want to manage this differently
+    std::string conversation_id = "7493113219385524265";  // You may want to manage this differently
     std::string user_id = "nd7ec83a";  // You may want to set this appropriately
     std::string codec = "opus";
     std::string message = "{";

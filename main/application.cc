@@ -499,8 +499,18 @@ void Application::Start() {
             if (protocol_->IsAudioChannelBusy()) {
                 return;
             }
+
+#if CONFIG_CONNECTION_TYPE_COZE_WEBSOCKET
             // coze 直接用原始数据
             protocol_->SendAudio(data);
+            
+#else
+            opus_encoder_->Encode(std::move(data), [this](std::vector<uint8_t>&& opus) {
+                Schedule([this, opus = std::move(opus)]() {
+                    protocol_->SendAudio(opus);
+                });
+            });
+#endif
         });
     });
     audio_processor_.OnVadStateChange([this](bool speaking) {

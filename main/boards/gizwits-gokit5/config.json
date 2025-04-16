@@ -2,7 +2,7 @@
     "target": "esp32s3",
     "builds": [
         {
-            "name": "gizwits-dev",
+            "name": "gizwits-gokit5",
             "sdkconfig_append": []
         }
     ]
