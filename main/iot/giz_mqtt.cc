@@ -12,19 +12,25 @@
 #define TAG "GIZ_MQTT"
 
 // MqttClient implementation
-bool MqttClient::initialize(const Config& config) {
+bool MqttClient::initialize() {
     
     if (mqtt_ != nullptr) {
         ESP_LOGW(TAG, "Mqtt client already started");
         delete mqtt_;
     }
 
-    endpoint_ = config.mqtt_address;
+    // 调用 
+    GServer::gatProvision([this](mqtt_config_t* config) {
+        endpoint_ = config->mqtt_address;
+        port_ = std::stoi(config->mqtt_port);
+        ESP_LOGI(TAG, "MQTT endpoint: %s, port: %d", endpoint_.c_str(), port_);
+    });
+
     client_id_ = Auth::getDeviceId();
     
     // 准备认证信息
     char userName[128] = {0};
-    uint8_t szNonce[11] = {0}; 
+    uint8_t szNonce[11] = {0};
     GServer::gatCreatNewPassCode(PASSCODE_LEN, szNonce);
     int mlen = snprintf(userName, sizeof(userName) - 1, "%s|signmethod=sha256,signnonce=%s", 
                         client_id_.c_str(), szNonce);
@@ -61,7 +67,7 @@ bool MqttClient::initialize(const Config& config) {
             message_callback_(topic, payload);
         }
 
-        ESP_LOGI(TAG, "OnMessage topic: %s, payload: %s", topic.c_str(), payload.c_str());
+        // ESP_LOGI(TAG, "OnMessage topic: %s, payload: %s", topic.c_str(), payload.c_str());
         
         mqtt_msg_t msg = {0};
         msg.topic = strdup(topic.c_str());
@@ -82,8 +88,8 @@ bool MqttClient::initialize(const Config& config) {
     ESP_LOGI(TAG, "  客户端 ID: %s", client_id_.c_str());
     ESP_LOGI(TAG, "  token: %s", password_.c_str());
 
-    ESP_LOGI(TAG, "Connecting to endpoint %s:%d", endpoint_.c_str(), config.mqtt_port);
-    if (!mqtt_->Connect(endpoint_, config.mqtt_port, client_id_, username_, password_)) {
+    ESP_LOGI(TAG, "Connecting to endpoint %s:%d", endpoint_.c_str(), port_);
+    if (!mqtt_->Connect(endpoint_, port_, client_id_, username_, password_)) {
         ESP_LOGE(TAG, "Failed to connect to endpoint");
         return false;
     }
@@ -119,15 +125,16 @@ bool MqttClient::initialize(const Config& config) {
     ESP_LOGI(TAG, "  %s (QoS 1)", push_topic.c_str());
     ESP_LOGI(TAG, "  %s (QoS 1)", server_notify_topic.c_str());
     
-    if (!mqtt_->Subscribe(response_topic, 0)) {
+    vTaskDelay(pdMS_TO_TICKS(10));
+    if (mqtt_->Subscribe(response_topic, 0) != 0) {
         ESP_LOGE(TAG, "Failed to subscribe to response topic");
     }
     
-    if (!mqtt_->Subscribe(push_topic, 1)) {
+    if (mqtt_->Subscribe(push_topic, 1) != 0) {
         ESP_LOGE(TAG, "Failed to subscribe to push topic");
     }
     
-    if (!mqtt_->Subscribe(server_notify_topic, 1)) {
+    if (mqtt_->Subscribe(server_notify_topic, 1) != 0) {
         ESP_LOGE(TAG, "Failed to subscribe to server notify topic");
     }
     

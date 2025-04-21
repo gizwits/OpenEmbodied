@@ -67,7 +67,7 @@ public:
     static int32_t gatProvision(std::function<void(mqtt_config_t*)> callback);
     
     // 执行Onboarding
-    static int32_t gatOnboarding(std::function<void(onboarding_response_t*)> callback);
+    static int32_t activationDevice(std::function<void(onboarding_response_t*)> callback);
 
 private:
     // 16进制转字符串

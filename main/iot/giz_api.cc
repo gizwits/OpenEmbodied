@@ -207,92 +207,39 @@ const char* GServer::gatCreateETag(uint8_t *szNonce, uint8_t *body) {
 }
 
 int GServer::gatProvision_prase_cb(const char* in_str, int in_len) {
-    int status_code = 0;
     mqtt_config_t mqtt_config = {0};
+    char* params = strdup(in_str);
+    char* saveptr = nullptr;
+    char* token = strtok_r(params, "&", &saveptr);
 
-    // 查找响应码
-    const char *status_line = strstr(in_str, "HTTP/1.");
-    if (status_line != nullptr) {
-        status_line = strchr(status_line, ' ');
-        if (status_line != nullptr) {
-            status_line++;
-            status_code = atoi(status_line);
+    while (token != nullptr) {
+        if (strncmp(token, "address=", 8) == 0) {
+            strncpy(mqtt_config.mqtt_address, token + 8, sizeof(mqtt_config.mqtt_address) - 1);
+        } else if (strncmp(token, "port=", 5) == 0) {
+            strncpy(mqtt_config.mqtt_port, token + 5, sizeof(mqtt_config.mqtt_port) - 1);
+        } else if (strncmp(token, "restart_time=", 13) == 0) {
+            // mqtt_config.restart_time = atoi(token + 13);
+        } else if (strncmp(token, "tz_offset=", 10) == 0) {
+            // mqtt_config.tz_offset = atoi(token + 10);
         }
+        token = strtok_r(nullptr, "&", &saveptr);
     }
 
-    ESP_LOGI(TAG, "Response header: %s", in_str);
-    ESP_LOGI(TAG, "Status code: %d", status_code);
+    free(params);
 
-    if (status_code != 200) {
-        ESP_LOGE(TAG, "HTTP error: %d", status_code);
-        return -1; 
+    ESP_LOGI(TAG, "Parsed MQTT config: address=%s, port=%s",
+             mqtt_config.mqtt_address, mqtt_config.mqtt_port);
+
+    if (mqtt_config.mqtt_address[0] == '\0' || mqtt_config.mqtt_port[0] == '\0') {
+        ESP_LOGE(TAG, "Invalid MQTT config: missing address or port");
+        return -1;
     }
 
-    // 查找响应体
-    const char *body_start = strstr(in_str, "\r\n\r\n");
-    if (body_start == nullptr) {
-        ESP_LOGE(TAG, "Invalid response format");
-        return -2;
-    }
-    body_start += 4;
-
-    ESP_LOGI(TAG, "Response body: %s", body_start);
-
-    // 解析响应体
-    const char *start = body_start;
-    const char *end;
-
-    while (1) {
-        end = strchr(start, '&');
-        if (end == nullptr) {
-            end = start + strlen(start);
-        }
-
-        char pair[256] = {0};
-        int length = end - start;
-        if (length >= sizeof(pair)) {
-            ESP_LOGE(TAG, "Key-value pair too long");
-            return -3;
-        }
-
-        strncpy(pair, start, length);
-        pair[length] = '\0';
-
-        char *separator = strchr(pair, '=');
-        if (separator != nullptr) {
-            *separator = '\0';
-            char *key = pair;
-            char *value = separator + 1;
-
-            if (strcmp(key, "product_key") == 0) {
-                strncpy(mqtt_config.product_key, value, sizeof(mqtt_config.product_key) - 1);
-                mqtt_config.product_key[sizeof(mqtt_config.product_key) - 1] = '\0';
-            } else if (strcmp(key, "product_secret") == 0) {
-                strncpy(mqtt_config.product_secret, value, sizeof(mqtt_config.product_secret) - 1);
-                mqtt_config.product_secret[sizeof(mqtt_config.product_secret) - 1] = '\0';
-            } else if (strcmp(key, "address") == 0) {
-                strncpy(mqtt_config.mqtt_address, value, sizeof(mqtt_config.mqtt_address) - 1);
-                mqtt_config.mqtt_address[sizeof(mqtt_config.mqtt_address) - 1] = '\0';
-            } else if (strcmp(key, "port") == 0) {
-                strncpy(mqtt_config.mqtt_port, value, sizeof(mqtt_config.mqtt_port) - 1);
-                mqtt_config.mqtt_port[sizeof(mqtt_config.mqtt_port) - 1] = '\0';
-            }
-        }
-
-        if (*end == '\0') {
-            break;
-        }
-        start = end + 1;
+    if (mqtt_config_cb) {
+        mqtt_config_cb(&mqtt_config);
     }
 
-    // 如果配置有效且回调函数存在，则调用回调
-    if (strlen(mqtt_config.mqtt_address) > 0 && strlen(mqtt_config.mqtt_port) > 0) {
-        if (mqtt_config_cb) {
-            mqtt_config_cb(&mqtt_config);
-        }
-    }
-
-    return status_code;
+    return 0;
 }
 
 int32_t GServer::gatProvision(std::function<void(mqtt_config_t*)> callback) {
@@ -329,7 +276,7 @@ int32_t GServer::gatProvision(std::function<void(mqtt_config_t*)> callback) {
     return gatProvision_prase_cb(response.c_str(), response.length());
 }
 
-int32_t GServer::gatOnboarding(std::function<void(onboarding_response_t*)> callback) {
+int32_t GServer::activationDevice(std::function<void(onboarding_response_t*)> callback) {
     onboarding_cb = callback;
     
     std::string did = Auth::getDeviceId();

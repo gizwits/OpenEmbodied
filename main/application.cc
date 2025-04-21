@@ -372,16 +372,16 @@ void Application::Start() {
     protocol_ = std::make_unique<WebsocketProtocol>();
 
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
-    MqttClient::Config mqtt_config;
+    // MqttClient::Config mqtt_config;
     mqtt_client_ = std::make_unique<MqttClient>();
-    mqtt_config.mqtt_address = "114.132.156.204";
-    mqtt_config.mqtt_port = 1883;
+    // mqtt_config.mqtt_address = "114.132.156.204";
+    // mqtt_config.mqtt_port = 1883;
 
     mqtt_client_->OnRoomParamsUpdated([this](const std::string& bot_id, const std::string& voice_id, const std::string& conv_id, const std::string& access_token) {
         protocol_->UpdateRoomParams(bot_id, voice_id, conv_id, access_token);
     });
 
-    if (!mqtt_client_->initialize(mqtt_config)) {
+    if (!mqtt_client_->initialize()) {
         ESP_LOGE(TAG, "Failed to initialize MQTT client");
         Alert(Lang::Strings::ERROR, Lang::Strings::ERROR, "sad", Lang::Sounds::P3_EXCLAMATION);
         return;

@@ -36,17 +36,13 @@ typedef struct {
 
 class MqttClient {
 public:
-    struct Config {
-        std::string mqtt_address;
-        int mqtt_port;
-    };
 
     static MqttClient& getInstance() {
         static MqttClient instance;
         return instance;
     }
 
-    bool initialize(const Config& config);
+    bool initialize();
     bool publish(const std::string& topic, const std::string& payload);
     bool subscribe(const std::string& topic);
     void setMessageCallback(std::function<void(const std::string&, const std::string&)> callback);
@@ -75,6 +71,7 @@ private:
     bool is_first_connect_ = true;
     std::string password_;
     std::string endpoint_;
+    int port_ = 1883;
     std::string client_id_;
     std::string username_;
 
