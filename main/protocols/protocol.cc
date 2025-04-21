@@ -130,3 +130,17 @@ bool Protocol::IsAudioChannelBusy() const {
     return busy_sending_audio_;
 }
 
+
+void Protocol::UpdateRoomParams(const std::string& bot_id, const std::string& voice_id, const std::string& conv_id, const std::string& access_token) {
+    ESP_LOGI(TAG, "Updating WebSocket parameters:");
+    ESP_LOGI(TAG, "  bot_id: %s", bot_id.c_str());
+    ESP_LOGI(TAG, "  voice_id: %s", voice_id.c_str());
+    ESP_LOGI(TAG, "  conv_id: %s", conv_id.c_str());
+    ESP_LOGI(TAG, "  access_token: %s", access_token.c_str());
+
+    // 保存
+    conversation_id_ = conv_id;
+    access_token_ = access_token;
+    bot_id_ = bot_id;
+    voice_id_ = voice_id;
+}

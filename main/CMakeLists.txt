@@ -12,6 +12,10 @@ set(SOURCES "audio_codecs/audio_codec.cc"
             "protocols/protocol.cc"
             "iot/thing.cc"
             "iot/thing_manager.cc"
+            "iot/giz_mqtt.cc"
+            "iot/giz_api.cc"
+            "iot/protocol/iot_protocol.cc"
+            "auth.cc"
             "system_info.cc"
             "application.cc"
             "ota.cc"
@@ -147,13 +151,7 @@ file(GLOB BOARD_SOURCES
 )
 list(APPEND SOURCES ${BOARD_SOURCES})
 
-if(CONFIG_CONNECTION_TYPE_MQTT_UDP)
-    list(APPEND SOURCES "protocols/mqtt_protocol.cc")
-elseif(CONFIG_CONNECTION_TYPE_WEBSOCKET)
-    list(APPEND SOURCES "protocols/websocket_protocol.cc")
-elseif(CONFIG_CONNECTION_TYPE_COZE_WEBSOCKET)
-    list(APPEND SOURCES "protocols/coze_websocket_protocol.cc")
-endif()
+list(APPEND SOURCES "protocols/websocket_protocol.cc")
 
 if(CONFIG_USE_AUDIO_PROCESSOR)
     list(APPEND SOURCES "audio_processing/audio_processor.cc")

@@ -1,0 +1,366 @@
+#include "giz_mqtt.h"
+#include "giz_api.h"
+#include "board.h"
+#include <esp_log.h>
+#include <ml307_mqtt.h>
+#include "protocol/iot_protocol.h"
+#include <cstring>
+#include "auth.h"
+#include <arpa/inet.h>
+#include "application.h"
+
+#define TAG "GIZ_MQTT"
+
+// MqttClient implementation
+bool MqttClient::initialize(const Config& config) {
+    
+    if (mqtt_ != nullptr) {
+        ESP_LOGW(TAG, "Mqtt client already started");
+        delete mqtt_;
+    }
+
+    endpoint_ = config.mqtt_address;
+    client_id_ = Auth::getDeviceId();
+    
+    // 准备认证信息
+    char userName[128] = {0};
+    uint8_t szNonce[11] = {0}; 
+    GServer::gatCreatNewPassCode(PASSCODE_LEN, szNonce);
+    int mlen = snprintf(userName, sizeof(userName) - 1, "%s|signmethod=sha256,signnonce=%s", 
+                        client_id_.c_str(), szNonce);
+    if (mlen < 0 || mlen >= sizeof(userName) - 1) {
+        ESP_LOGE(TAG, "用户名缓冲区溢出");
+        return false;
+    }
+    
+    const char *token = GServer::gatCreateToken(szNonce);
+    if (token == NULL) {
+        ESP_LOGE(TAG, "创建令牌失败");
+        return false;
+    }
+
+    username_ = userName;
+    password_ = token;
+    // 不需要释放 token，因为它是静态分配的
+
+    if (endpoint_.empty()) {
+        ESP_LOGW(TAG, "MQTT endpoint is not specified");
+        return false;
+    }
+
+    mqtt_ = Board::GetInstance().CreateMqtt();
+    mqtt_->SetKeepAlive(20);
+
+    mqtt_->OnDisconnected([this]() {
+        ESP_LOGI(TAG, "Disconnected from endpoint");
+        mqtt_event_ = 0;
+    });
+
+    mqtt_->OnMessage([this](const std::string& topic, const std::string& payload) {
+        if (message_callback_) {
+            message_callback_(topic, payload);
+        }
+
+        ESP_LOGI(TAG, "OnMessage topic: %s, payload: %s", topic.c_str(), payload.c_str());
+        
+        mqtt_msg_t msg = {0};
+        msg.topic = strdup(topic.c_str());
+        msg.topic_len = topic.length();
+        msg.payload = strdup(payload.c_str());
+        msg.payload_len = payload.length();
+        msg.data = msg.payload;
+        msg.data_len = msg.payload_len;
+        
+        if (message_queue_) {
+            xQueueSendToBack(message_queue_, &msg, portMAX_DELAY);
+        }
+    });
+
+    ESP_LOGI(TAG, "MQTT 连接参数:");
+    ESP_LOGI(TAG, "  URL: %s", endpoint_.c_str());
+    ESP_LOGI(TAG, "  用户名: %s", username_.c_str());
+    ESP_LOGI(TAG, "  客户端 ID: %s", client_id_.c_str());
+    ESP_LOGI(TAG, "  token: %s", password_.c_str());
+
+    ESP_LOGI(TAG, "Connecting to endpoint %s:%d", endpoint_.c_str(), config.mqtt_port);
+    if (!mqtt_->Connect(endpoint_, config.mqtt_port, client_id_, username_, password_)) {
+        ESP_LOGE(TAG, "Failed to connect to endpoint");
+        return false;
+    }
+
+    // Create message queue
+    message_queue_ = xQueueCreate(50, sizeof(mqtt_msg_t));
+    if (!message_queue_) {
+        ESP_LOGE(TAG, "Failed to create message queue");
+        return false;
+    }
+
+    // Create semaphore
+    mqtt_sem_ = xSemaphoreCreateBinary();
+    if (!mqtt_sem_) {
+        ESP_LOGE(TAG, "Failed to create semaphore");
+        vQueueDelete(message_queue_);
+        message_queue_ = nullptr;
+        return false;
+    }
+
+    // Create tasks
+    xTaskCreate(messageReceiveHandler, "mqtt_rcv", 4096, this, 5, nullptr);
+    xTaskCreate(messageResendHandler, "mqtt_resend", 4096, this, 5, nullptr);
+
+    ESP_LOGI(TAG, "Connected to endpoint");
+    // 订阅配置响应和推送
+    std::string response_topic = "llm/" + client_id_ + "/config/response";
+    std::string push_topic = "llm/" + client_id_ + "/config/push";
+    std::string server_notify_topic = "ser2cli_res/" + client_id_;
+    
+    ESP_LOGI(TAG, "Subscribing to topics:");
+    ESP_LOGI(TAG, "  %s (QoS 0)", response_topic.c_str());
+    ESP_LOGI(TAG, "  %s (QoS 1)", push_topic.c_str());
+    ESP_LOGI(TAG, "  %s (QoS 1)", server_notify_topic.c_str());
+    
+    if (!mqtt_->Subscribe(response_topic, 0)) {
+        ESP_LOGE(TAG, "Failed to subscribe to response topic");
+    }
+    
+    if (!mqtt_->Subscribe(push_topic, 1)) {
+        ESP_LOGE(TAG, "Failed to subscribe to push topic");
+    }
+    
+    if (!mqtt_->Subscribe(server_notify_topic, 1)) {
+        ESP_LOGE(TAG, "Failed to subscribe to server notify topic");
+    }
+    
+    // 获取房间信息
+    getRoomInfo();
+    mqtt_event_ = 1;
+    return true;
+}
+
+bool MqttClient::publish(const std::string& topic, const std::string& payload) {
+    if (mqtt_ == nullptr) {
+        ESP_LOGE(TAG, "MQTT client not initialized");
+        return false;
+    }
+    ESP_LOGI(TAG, "publish topic: %s, payload: %s", topic.c_str(), payload.c_str());
+    return mqtt_->Publish(topic, payload);
+}
+
+bool MqttClient::subscribe(const std::string& topic) {
+    if (mqtt_ == nullptr) {
+        ESP_LOGE(TAG, "MQTT client not initialized");
+        return false;
+    }
+    return mqtt_->Subscribe(topic);
+}
+
+void MqttClient::setMessageCallback(std::function<void(const std::string&, const std::string&)> callback) {
+    message_callback_ = callback;
+}
+
+
+void MqttClient::sendTokenReport(int total, int output, int input) {
+    char msg[256];
+    int len = snprintf(msg, sizeof(msg),
+        "{\r\n"
+        "    \"method\": \"token.report\",\r\n"
+        "    \"body\": {\r\n"
+        "        \"total\": %d,\r\n"
+        "        \"output\": %d,\r\n"
+        "        \"input\": %d\r\n"
+        "    }\r\n"
+        "}", total, output, input);
+
+    if (len > 0 && len < sizeof(msg)) {
+        publish("report", std::string(msg, len));
+    }
+}
+
+void MqttClient::OnRoomParamsUpdated(std::function<void(const std::string&, const std::string&, const std::string&, const std::string&)> callback) {
+    room_params_updated_callback_ = callback;
+}
+
+bool MqttClient::getRoomInfo() {
+    const char* msg = 
+        "{\r\n"
+        "    \"method\": \"websocket.auth.request\"\r\n"
+        "}";
+
+    if (!publish("llm/" + client_id_ + "/config/request", msg)) {
+        return false;
+    }
+
+    if (timer_) {
+        xTimerDelete(timer_, 0);
+    }
+
+    timer_ = xTimerCreate("SingleShotTimer", pdMS_TO_TICKS(5000), pdFALSE, this, timerCallback);
+    if (timer_ && xTimerStart(timer_, 0) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to start timer");
+        return false;
+    }
+
+    return true;
+}
+
+int MqttClient::sendResetToCloud() {
+    if (mqtt_ == nullptr || mqtt_event_ == 0) {
+        return -2;
+    }
+
+    uint8_t buf[8] = {0};
+    uint32_t version = htonl(0x00000003);
+    uint16_t cmd = htons(0x021E);
+    uint16_t subDataLen = htons(0);
+
+    memcpy(buf, &version, 4);
+    memcpy(buf + 4, &cmd, 2);
+    memcpy(buf + 6, &subDataLen, 2);
+
+    return publish("cli2ser_req", std::string((char*)buf, sizeof(buf))) ? 0 : -1;
+}
+
+int MqttClient::getPublishedId() {
+    return mqtt_published_id_;
+}
+
+void MqttClient::deinit() {
+    if (timer_) {
+        xTimerDelete(timer_, 0);
+        timer_ = nullptr;
+    }
+
+    if (mqtt_sem_) {
+        vSemaphoreDelete(mqtt_sem_);
+        mqtt_sem_ = nullptr;
+    }
+
+    if (message_queue_) {
+        vQueueDelete(message_queue_);
+        message_queue_ = nullptr;
+    }
+
+    if (mqtt_) {
+        delete mqtt_;
+        mqtt_ = nullptr;
+    }
+}
+
+void MqttClient::messageReceiveHandler(void* arg) {
+    MqttClient* client = static_cast<MqttClient*>(arg);
+    mqtt_msg_t msg;
+
+    while (1) {
+        if (xQueueReceive(client->message_queue_, &msg, portMAX_DELAY) == pdTRUE) {
+            client->handleMqttMessage(&msg);
+            free(msg.topic);
+            free(msg.payload);
+        }
+        vTaskDelay(10);
+    }
+}
+
+void MqttClient::messageResendHandler(void* arg) {
+    MqttClient* client = static_cast<MqttClient*>(arg);
+
+    while (1) {
+        if (xSemaphoreTake(client->mqtt_sem_, portMAX_DELAY) == pdTRUE) {
+            if (++client->mqtt_request_failure_count_ > MQTT_REQUEST_FAILURE_COUNT) {
+                if (client->timer_) {
+                    xTimerDelete(client->timer_, 0);
+                    client->timer_ = nullptr;
+                }
+            } else {
+                client->getRoomInfo();
+            }
+        }
+    }
+}
+
+void MqttClient::timerCallback(TimerHandle_t xTimer) {
+    MqttClient* client = static_cast<MqttClient*>(pvTimerGetTimerID(xTimer));
+    xSemaphoreGive(client->mqtt_sem_);
+}
+
+bool MqttClient::parseRealtimeAgent(const char* in_str, int in_len, room_params_t* params) {
+    cJSON* root = cJSON_Parse(in_str);
+    if (!root) return false;
+
+    bool success = false;
+    cJSON* method = cJSON_GetObjectItem(root, "method");
+    
+    if (method && strcmp(method->valuestring, "websocket.auth.response") == 0) {
+        cJSON* body = cJSON_GetObjectItem(root, "body");
+        if (body) {
+            cJSON* coze_websocket = cJSON_GetObjectItem(body, "coze_websocket");
+            if (coze_websocket) {
+                cJSON* bot_id = cJSON_GetObjectItem(coze_websocket, "bot_id");
+                cJSON* voice_id = cJSON_GetObjectItem(coze_websocket, "voice_id");
+                cJSON* user_id = cJSON_GetObjectItem(coze_websocket, "user_id");
+                cJSON* conv_id = cJSON_GetObjectItem(coze_websocket, "conv_id");
+                cJSON* access_token = cJSON_GetObjectItem(coze_websocket, "access_token");
+
+                if (bot_id && voice_id && user_id && conv_id && access_token) {
+                    strncpy(params->bot_id, bot_id->valuestring, sizeof(params->bot_id) - 1);
+                    strncpy(params->voice_id, voice_id->valuestring, sizeof(params->voice_id) - 1);
+                    strncpy(params->user_id, user_id->valuestring, sizeof(params->user_id) - 1);
+                    strncpy(params->conv_id, conv_id->valuestring, sizeof(params->conv_id) - 1);
+                    strncpy(params->access_token, access_token->valuestring, sizeof(params->access_token) - 1);
+                    success = true;
+                }
+            }
+        }
+    }
+
+    cJSON_Delete(root);
+    return success;
+}
+
+bool MqttClient::parseM2MCtrlMsg(const char* in_str, int in_len) {
+    cJSON* json = cJSON_Parse(in_str);
+    if (!json) return false;
+
+    cJSON* method = cJSON_GetObjectItem(json, "method");
+    if (method && method->valuestring) {
+        if (strcmp(method->valuestring, "rtc.room.join") == 0) {
+            // Handle room join
+            xSemaphoreGive(mqtt_sem_);
+        } else if (strcmp(method->valuestring, "rtc.room.leave") == 0) {
+            // Handle room leave
+        } else if (strcmp(method->valuestring, "websocket.config.change") == 0) {
+            getRoomInfo();
+        }
+    }
+
+    cJSON_Delete(json);
+    return true;
+}
+
+void MqttClient::handleMqttMessage(mqtt_msg_t* msg) {
+    if (!msg) return;
+    ESP_LOGI(TAG, "handleMqttMessage topic: %s, payload: %s", msg->topic, msg->payload);
+    if (strstr(msg->topic, "response")) {
+        room_params_t params = {0};
+        if (parseRealtimeAgent(msg->payload, msg->payload_len, &params)) {
+            // 收到响应后停止定时器
+            if (timer_) {
+                xTimerDelete(timer_, 0);
+                timer_ = nullptr;
+            }
+            room_params_updated_callback_(params.bot_id, params.voice_id, params.conv_id, params.access_token);
+        }
+    } else if (strstr(msg->topic, "push")) {
+        parseM2MCtrlMsg(msg->payload, msg->payload_len);
+    } else if (strstr(msg->topic, "ser2cli_res")) {
+        auto result = iot::protocol::parse_protocol_data(
+            reinterpret_cast<const uint8_t*>(msg->data), 
+            msg->data_len
+        );
+        if (result.success && result.cmd == iot::protocol::CMD_VERSION_REPORT_RESP) {
+            // Handle version report response
+            if (!result.version_info.download_url.empty()) {
+                // run_start_ota_task(result.version_info.module_sw_ver, result.version_info.download_url);
+            }
+        }
+    }
+}

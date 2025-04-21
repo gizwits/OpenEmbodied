@@ -17,6 +17,7 @@
 #include <opus_resampler.h>
 
 #include "protocol.h"
+#include "iot/giz_mqtt.h"
 #include "ota.h"
 #include "background_task.h"
 
@@ -88,6 +89,8 @@ private:
     std::mutex mutex_;
     std::list<std::function<void()>> main_tasks_;
     std::unique_ptr<Protocol> protocol_;
+    std::unique_ptr<MqttClient> mqtt_client_;
+
     EventGroupHandle_t event_group_ = nullptr;
     esp_timer_handle_t clock_timer_handle_ = nullptr;
     volatile DeviceState device_state_ = kDeviceStateUnknown;
