@@ -1,5 +1,6 @@
 ## IDF Component Manager Manifest File
 dependencies:
+  espressif/esp32-camera: "^2.0.15"
   waveshare/esp_lcd_sh8601: "1.0.2"
   espressif/esp_lcd_ili9341: "==1.2.0"
   espressif/esp_lcd_gc9a01: "^2.0.1"
@@ -23,6 +24,7 @@ dependencies:
   lvgl/lvgl: "~9.2.2"
   esp_lvgl_port: "~2.4.4"
   espressif/esp_io_expander_tca95xx_16bit: "^2.0.0"
+  espressif/esp_jpeg: "^1.2.1"
   tny-robotics/sh1106-esp-idf:
     version: "^1.0.0"
     rules:

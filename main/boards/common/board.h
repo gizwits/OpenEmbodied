@@ -13,6 +13,7 @@
 void* create_board();
 class AudioCodec;
 class Display;
+class BoardCamera;
 class Board {
 private:
     Board(const Board&) = delete; // 禁用拷贝构造函数
@@ -48,11 +49,11 @@ public:
     virtual bool GetBatteryLevel(int &level, bool& charging, bool& discharging);
     virtual std::string GetJson();
     virtual void SetPowerSaveMode(bool enabled) = 0;
+    virtual BoardCamera* GetCamera() { return nullptr; }
 };
 
 #define DECLARE_BOARD(BOARD_CLASS_NAME) \
 void* create_board() { \
     return new BOARD_CLASS_NAME(); \
 }
-
 #endif // BOARD_H

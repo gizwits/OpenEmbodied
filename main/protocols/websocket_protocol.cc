@@ -8,6 +8,7 @@
 #include <esp_log.h>
 #include <arpa/inet.h>
 #include "assets/lang_config.h"
+#include "mcp/mcp.h"
 
 #define TAG "WS"
 
@@ -258,6 +259,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 auto message_json = cJSON_Parse(message.c_str());
                 on_incoming_json_(message_json);
                 cJSON_Delete(message_json);
+            } else if (event_type == "conversation.chat.requires_action") {
+                CozeMCPParser::getInstance().handle_mcp(str_data);
             }
         }
         last_incoming_time_ = std::chrono::steady_clock::now();

@@ -9,6 +9,8 @@
 #include "iot/thing_manager.h"
 #include "assets/lang_config.h"
 #include "iot/giz_mqtt.h"
+#include "esp_camera.h"
+#include "camera/board_camera.h"
 
 #include <cstring>
 #include <esp_log.h>
@@ -368,6 +370,7 @@ void Application::Start() {
     board.StartNetwork();
 
     CheckNewVersion();
+
     // Initialize MQTT client
     protocol_ = std::make_unique<WebsocketProtocol>();
 
@@ -407,12 +410,14 @@ void Application::Start() {
                 protocol_->server_sample_rate(), codec->output_sample_rate());
         }
         SetDecodeSampleRate(protocol_->server_sample_rate(), protocol_->server_frame_duration());
-        auto& thing_manager = iot::ThingManager::GetInstance();
-        protocol_->SendIotDescriptors(thing_manager.GetDescriptorsJson());
-        std::string states;
-        if (thing_manager.GetStatesJson(states, false)) {
-            protocol_->SendIotStates(states);
-        }
+
+        // Coze 没有办法从设备推上去支持什么 MCP
+        // auto& thing_manager = iot::ThingManager::GetInstance();
+        // protocol_->SendIotDescriptors(thing_manager.GetDescriptorsJson());
+        // std::string states;
+        // if (thing_manager.GetStatesJson(states, false)) {
+        //     protocol_->SendIotStates(states);
+        // }
     });
     protocol_->OnAudioChannelClosed([this, &board]() {
         board.SetPowerSaveMode(true);
@@ -572,6 +577,15 @@ void Application::Start() {
     PlaySound(Lang::Sounds::P3_SUCCESS);
     
     // Enter the main event loop
+
+
+    auto camera = board.GetCamera();
+    camera_fb_t* fb = camera->capture();
+    if (!fb) {
+        ESP_LOGE(TAG, "Failed to capture image");
+    }
+    ESP_LOGI(TAG, "Capture image success");
+    
     MainEventLoop();
 }
 
@@ -816,9 +830,6 @@ void Application::SetDeviceState(DeviceState state) {
             display->SetStatus(Lang::Strings::LISTENING);
             display->SetEmotion("neutral");
 
-            // Update the IoT states before sending the start listening command
-            UpdateIotStates();
-
             // Make sure the audio processor is running
 #if CONFIG_USE_AUDIO_PROCESSOR
             if (!audio_processor_.IsRunning()) {
@@ -882,14 +893,6 @@ void Application::SetDecodeSampleRate(int sample_rate, int frame_duration) {
     if (opus_decoder_->sample_rate() != codec->output_sample_rate()) {
         ESP_LOGI(TAG, "Resampling audio from %d to %d", opus_decoder_->sample_rate(), codec->output_sample_rate());
         output_resampler_.Configure(opus_decoder_->sample_rate(), codec->output_sample_rate());
-    }
-}
-
-void Application::UpdateIotStates() {
-    auto& thing_manager = iot::ThingManager::GetInstance();
-    std::string states;
-    if (thing_manager.GetStatesJson(states, true)) {
-        protocol_->SendIotStates(states);
     }
 }
 
