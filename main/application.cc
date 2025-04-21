@@ -453,7 +453,7 @@ void Application::Start() {
             } else if (strcmp(state->valuestring, "sentence_start") == 0) {
                 auto text = cJSON_GetObjectItem(root, "text");
                 if (text != NULL) {
-                    ESP_LOGI(TAG, "<< %s", text->valuestring);
+                    // ESP_LOGI(TAG, "<< %s", text->valuestring);
                     Schedule([this, display, message = std::string(text->valuestring)]() {
                         display->SetChatMessage("assistant", message.c_str());
                     });
@@ -575,16 +575,6 @@ void Application::Start() {
     // Play the success sound to indicate the device is ready
     ResetDecoder();
     PlaySound(Lang::Sounds::P3_SUCCESS);
-    
-    // Enter the main event loop
-
-
-    auto camera = board.GetCamera();
-    camera_fb_t* fb = camera->capture();
-    if (!fb) {
-        ESP_LOGE(TAG, "Failed to capture image");
-    }
-    ESP_LOGI(TAG, "Capture image success");
     
     MainEventLoop();
 }

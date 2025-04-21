@@ -92,7 +92,7 @@ private:
         config.pixel_format = PIXFORMAT_RGB565;
         config.frame_size = FRAMESIZE_QVGA;
         config.jpeg_quality = 12;
-        config.fb_count = 2;
+        config.fb_count = 1;  // 只使用一个帧缓冲区
         config.fb_location = CAMERA_FB_IN_PSRAM;
         config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
 
@@ -185,7 +185,7 @@ public:
         InitializeButtons();
         InitializeIot();
         GetBacklight()->RestoreBrightness();
-        InitializeCamera();
+        // InitializeCamera();
     }
 
     virtual AudioCodec* GetAudioCodec() override {

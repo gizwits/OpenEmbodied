@@ -40,7 +40,7 @@ void WebsocketProtocol::SendAudio(const std::vector<int16_t>& data) {
     if (websocket_ == nullptr || !websocket_->IsConnected() || data.empty()) {
         return;
     }
-    
+    // ESP_LOGI(TAG, "Send audio data size: %d", data.size());
     // 将 int16_t 数据转换为 base64
     size_t data_size = data.size() * sizeof(int16_t);
     size_t out_len = 4 * ((data_size + 2) / 3);  // base64 编码后的长度
@@ -237,7 +237,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 auto message_json = cJSON_Parse(message.c_str());
                 on_incoming_json_(message_json);
                 cJSON_Delete(message_json);
-            } else if (event_type == "input_audio_buffer.speech_stopped") {
+            } else if (event_type == "conversation.chat.completed") {
                 std::string message = "{";
                 message += "\"type\":\"tts\",";
                 message += "\"state\":\"stop\"";
@@ -329,7 +329,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "\"frame_size_ms\":60,";
     message += "\"limit_config\":{";
     message += "\"period\":1,";
-    message += "\"max_frame_num\":30";
+    message += "\"max_frame_num\":18";
     message += "}";
     message += "},";
     message += "\"speech_rate\":0,";
