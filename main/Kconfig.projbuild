@@ -29,6 +29,36 @@ config COZE_WEBSOCKET_URL
     help
         Communication with the Coze server through websocket after wake up.
         
+config PRODUCT_KEY
+    string "Product Key"
+    default "0971c20fda8344c3aeef39fda9438284"
+    help
+        Product key for Gizwits.
+        
+config PRODUCT_SECRET
+    string "Product Secret"
+    default "e3c65ae1c1bb42bc831285a3d7de3421"
+    help
+        Product secret for Gizwits.
+
+config DEVICE_ID
+    string "Device ID"
+    default ""
+    help
+        Device ID for Gizwits.
+
+config AUTH_KEY
+    string "Auth Key"
+    default ""
+    help
+        Auth key for Gizwits.
+
+config COZE_WEBSOCKET_URL
+    string "Coze Websocket URL"
+    default "ws://ws.coze.cn/v1/chat"
+    help
+        Communication with the Coze server through websocket after wake up.
+        
 config WEBSOCKET_ACCESS_TOKEN
     depends on CONNECTION_TYPE_WEBSOCKET
     string "Websocket Access Token"
