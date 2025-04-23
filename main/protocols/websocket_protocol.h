@@ -1,9 +1,8 @@
 #ifndef _WEBSOCKET_PROTOCOL_H_
 #define _WEBSOCKET_PROTOCOL_H_
 
-
 #include "protocol.h"
-
+#include "esp_heap_caps.h"
 #include <web_socket.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>

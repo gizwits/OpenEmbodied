@@ -8,7 +8,7 @@
 #include <esp_log.h>
 #include <arpa/inet.h>
 #include "assets/lang_config.h"
-#include "mcp/mcp.h"
+#include "protocols/mcp.h"
 
 #define TAG "WS"
 
@@ -80,7 +80,7 @@ bool WebsocketProtocol::SendText(const std::string& text) {
     if (websocket_ == nullptr) {
         return false;
     }
-    // TODO: 发送文本消息
+    websocket_->Send(text);
     return true;
 }
 

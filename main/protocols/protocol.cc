@@ -3,6 +3,7 @@
 #include <esp_log.h>
 
 #define TAG "Protocol"
+#include <esp_random.h>
 
 void Protocol::OnIncomingJson(std::function<void(const cJSON* root)> callback) {
     on_incoming_json_ = callback;
@@ -32,18 +33,20 @@ void Protocol::SetError(const std::string& message) {
 }
 
 void Protocol::SendAbortSpeaking(AbortReason reason) {
-    std::string message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"abort\"";
-    if (reason == kAbortReasonWakeWordDetected) {
-        message += ",\"reason\":\"wake_word_detected\"";
-    }
-    message += "}";
+
+    char event_id[32];
+    uint32_t random_value = esp_random();
+    snprintf(event_id, sizeof(event_id), "%lu", random_value);
+    
+    std::string message = "{\"id\":\"" + std::string(event_id) + "\",\"event_type\":\"conversation.chat.cancel\"}";
+
     SendText(message);
 }
 
 void Protocol::SendWakeWordDetected(const std::string& wake_word) {
-    std::string json = "{\"session_id\":\"" + session_id_ + 
-                      "\",\"type\":\"listen\",\"state\":\"detect\",\"text\":\"" + wake_word + "\"}";
-    SendText(json);
+    // std::string json = "{\"session_id\":\"" + session_id_ + 
+    //                   "\",\"type\":\"listen\",\"state\":\"detect\",\"text\":\"" + wake_word + "\"}";
+    // SendText(json);
 }
 
 void Protocol::SendStartListening(ListeningMode mode) {

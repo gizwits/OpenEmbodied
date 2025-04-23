@@ -57,7 +57,7 @@ camera_fb_t* BoardCamera::capture() {
         }
 
         // Create new frame buffer for JPEG using PSRAM
-        camera_fb_t* jpeg_fb = (camera_fb_t*)heap_caps_malloc(sizeof(camera_fb_t), MALLOC_CAP_SPIRAM);
+        camera_fb_t* jpeg_fb = (camera_fb_t*)heap_caps_malloc(sizeof(camera_fb_t), MALLOC_CAP_DEFAULT);
         if (!jpeg_fb) {
             lastError = "Failed to allocate memory for JPEG frame buffer";
             ESP_LOGE(TAG, "%s", lastError.c_str());
@@ -67,7 +67,7 @@ camera_fb_t* BoardCamera::capture() {
         }
 
         // Allocate JPEG buffer in PSRAM
-        uint8_t* psram_buf = (uint8_t*)heap_caps_malloc(jpeg_size, MALLOC_CAP_SPIRAM);
+        uint8_t* psram_buf = (uint8_t*)heap_caps_malloc(jpeg_size, MALLOC_CAP_DEFAULT);
         if (!psram_buf) {
             lastError = "Failed to allocate PSRAM for JPEG data";
             ESP_LOGE(TAG, "%s", lastError.c_str());

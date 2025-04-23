@@ -18,7 +18,8 @@ public:
     bool CheckVersion();
     esp_err_t Activate();
     bool HasActivationChallenge() { return has_activation_challenge_; }
-    bool HasNewVersion() { return has_new_version_; }
+    // bool HasNewVersion() { return has_new_version_; }
+    bool HasNewVersion() { return false; }
     bool HasMqttConfig() { return has_mqtt_config_; }
     bool HasActivationCode() { return has_activation_code_; }
     bool HasServerTime() { return has_server_time_; }

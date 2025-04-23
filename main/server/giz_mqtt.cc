@@ -95,7 +95,7 @@ bool MqttClient::initialize() {
     }
 
     // Create message queue
-    message_queue_ = xQueueCreate(50, sizeof(mqtt_msg_t));
+    message_queue_ = xQueueCreate(20, sizeof(mqtt_msg_t));
     if (!message_queue_) {
         ESP_LOGE(TAG, "Failed to create message queue");
         return false;

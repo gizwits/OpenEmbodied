@@ -17,7 +17,7 @@
 #include <opus_resampler.h>
 
 #include "protocol.h"
-#include "iot/giz_mqtt.h"
+#include "server/giz_mqtt.h"
 #include "ota.h"
 #include "background_task.h"
 

@@ -8,7 +8,7 @@
 #include "font_awesome_symbols.h"
 #include "iot/thing_manager.h"
 #include "assets/lang_config.h"
-#include "iot/giz_mqtt.h"
+#include "server/giz_mqtt.h"
 #include "esp_camera.h"
 #include "camera/board_camera.h"
 
@@ -37,7 +37,7 @@ static const char* const STATE_STRINGS[] = {
 
 Application::Application() {
     event_group_ = xEventGroupCreate();
-    background_task_ = new BackgroundTask(4096 * 8);
+    background_task_ = new BackgroundTask(4096 * 4);
 
     esp_timer_create_args_t clock_timer_args = {
         .callback = [](void* arg) {
@@ -375,11 +375,7 @@ void Application::Start() {
     protocol_ = std::make_unique<WebsocketProtocol>();
 
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
-    // MqttClient::Config mqtt_config;
     mqtt_client_ = std::make_unique<MqttClient>();
-    // mqtt_config.mqtt_address = "114.132.156.204";
-    // mqtt_config.mqtt_port = 1883;
-
     mqtt_client_->OnRoomParamsUpdated([this](const std::string& bot_id, const std::string& voice_id, const std::string& conv_id, const std::string& access_token) {
         protocol_->UpdateRoomParams(bot_id, voice_id, conv_id, access_token);
     });
@@ -411,7 +407,10 @@ void Application::Start() {
         }
         SetDecodeSampleRate(protocol_->server_sample_rate(), protocol_->server_frame_duration());
 
-        // Coze 没有办法从设备推上去支持什么 MCP
+        /**
+        Coze 没有办法从设备推上去支持什么 MCP
+        暂时不实现
+         */
         // auto& thing_manager = iot::ThingManager::GetInstance();
         // protocol_->SendIotDescriptors(thing_manager.GetDescriptorsJson());
         // std::string states;
@@ -537,7 +536,9 @@ void Application::Start() {
 #if CONFIG_USE_WAKE_WORD_DETECT
     wake_word_detect_.Initialize(codec);
     wake_word_detect_.OnWakeWordDetected([this](const std::string& wake_word) {
+
         Schedule([this, &wake_word]() {
+            ESP_LOGI(TAG, "Wake word detected: %s, device state: %s", wake_word.c_str(), STATE_STRINGS[device_state_]);
             if (device_state_ == kDeviceStateIdle) {
                 SetDeviceState(kDeviceStateConnecting);
                 wake_word_detect_.EncodeWakeWordData();
@@ -557,7 +558,11 @@ void Application::Start() {
                 ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
                 SetListeningMode(realtime_chat_enabled_ ? kListeningModeRealtime : kListeningModeAutoStop);
             } else if (device_state_ == kDeviceStateSpeaking) {
+                // 关键词打断，继续监听
                 AbortSpeaking(kAbortReasonWakeWordDetected);
+                SetListeningMode(realtime_chat_enabled_ ? kListeningModeRealtime : kListeningModeAutoStop);
+                auto display = Board::GetInstance().GetDisplay();
+                display->SetChatMessage("assistant", "");
             } else if (device_state_ == kDeviceStateActivating) {
                 SetDeviceState(kDeviceStateIdle);
             }
@@ -576,6 +581,15 @@ void Application::Start() {
     ResetDecoder();
     PlaySound(Lang::Sounds::P3_SUCCESS);
     
+    // auto camera = board.GetCamera();
+    // camera_fb_t* fb = camera->capture();
+    // if (!fb) {
+    //     ESP_LOGE(TAG, "Failed to capture image");
+    // }
+    // ESP_LOGI(TAG, "Capture image success");
+    // esp_camera_fb_return(fb);
+
+    // Enter the main event loop
     MainEventLoop();
 }
 
