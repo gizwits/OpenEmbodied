@@ -6,6 +6,7 @@
 #include "esp_timer.h"
 #include <esp_log.h>
 #include "esp_err.h"
+#include "iot/thing_manager.h"
 
 
 const char* CozeMCPParser::TAG = "VolcRTCApp";
@@ -107,20 +108,21 @@ void CozeMCPParser::handle_mcp(std::string_view data) {
         cJSON_Delete(root);
         return;
     }
+
+    // 创建一个json
+    cJSON *mcp_data = cJSON_CreateObject();
+    cJSON *params_data = cJSON_CreateObject();
+    cJSON_AddStringToObject(params_data, "conv_id", conv_id->valuestring);
+    cJSON_AddStringToObject(params_data, "tool_call_id", tool_call_id->valuestring);
+    cJSON_AddStringToObject(params_data, "event_id", event_id);
     
-    // 音量
     if (strcmp(name->valuestring, "volume") == 0) {
         cJSON *volume = cJSON_GetObjectItem(args_json, "volume");
         if (volume && cJSON_IsNumber(volume)) {
-            ESP_LOGI(TAG, "Got volume value: %d", volume->valueint);
             // 创建 json
-            cJSON *json_data = cJSON_CreateObject();
-            cJSON_AddNumberToObject(json_data, "volume", volume->valueint);
-            cJSON_Delete(json_data);
-            // send_tool_output_response(event_id, 
-            //                          cJSON_GetStringValue(conv_id), 
-            //                          cJSON_GetStringValue(tool_call_id), 
-            //                          "{\\\"volume_control_results\\\": \\\"1\\\"}");
+            cJSON_AddStringToObject(mcp_data, "method", "SetVolume");
+            cJSON_AddStringToObject(mcp_data, "name", "Speaker");
+            cJSON_AddNumberToObject(params_data, "volume", volume->valueint);
         } else {
             ESP_LOGW(TAG, "brightness field not found or not a number");
         }
@@ -133,16 +135,28 @@ void CozeMCPParser::handle_mcp(std::string_view data) {
             //                         "{\\\"music_play_results\\\": \\\"1\\\"}");
         }
     } else if (strcmp(name->valuestring, "sleep_control") == 0) {
-        // send_tool_output_response(event_id, 
-        //                 cJSON_GetStringValue(conv_id), 
-        //                 cJSON_GetStringValue(tool_call_id), 
-        //                 "{\\\"sleep_control_results\\\": \\\"1\\\"}");
-    } else {
-        // plugin_notify(data);
+    } else if (strcmp(name->valuestring, "brightness") == 0) {
+        cJSON *brightness = cJSON_GetObjectItem(args_json, "brightness");
+        if (brightness && cJSON_IsNumber(brightness)) {
+            cJSON_AddStringToObject(mcp_data, "method", "SetBrightness");
+            cJSON_AddStringToObject(mcp_data, "name", "Screen");
+            cJSON_AddNumberToObject(params_data, "brightness", brightness->valueint);
+        }
+    }
+
+    cJSON_AddItemToObject(mcp_data, "parameters", params_data);
+
+    // 判断 mcp_data 是否有 method 字段
+    if (cJSON_HasObjectItem(mcp_data, "method")) {
+        // 执行 MCP
+        auto& thing_manager = iot::ThingManager::GetInstance();
+        thing_manager.Invoke(mcp_data);
     }
     // 释放内存
     cJSON_Delete(args_json);
     cJSON_Delete(root);
+    // cJSON_Delete(params_data);
+    cJSON_Delete(mcp_data);
 }
 
 void CozeMCPParser::send_tool_output_response(const char *event_id, const char *conv_id, const char *tool_call_id, const char *output) {

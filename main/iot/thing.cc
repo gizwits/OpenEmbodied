@@ -36,6 +36,7 @@ std::string Thing::GetDescriptorJson() {
     return json_str;
 }
 
+// 获取属性
 std::string Thing::GetStateJson() {
     std::string json_str = "{";
     json_str += "\"name\":\"" + name_ + "\",";

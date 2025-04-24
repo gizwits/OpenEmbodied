@@ -145,5 +145,6 @@ void Protocol::UpdateRoomParams(const std::string& bot_id, const std::string& vo
     conversation_id_ = conv_id;
     access_token_ = access_token;
     bot_id_ = bot_id;
+    // bot_id_ = "7457488358320144420";
     voice_id_ = voice_id;
 }

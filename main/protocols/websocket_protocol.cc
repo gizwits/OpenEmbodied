@@ -237,7 +237,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 auto message_json = cJSON_Parse(message.c_str());
                 on_incoming_json_(message_json);
                 cJSON_Delete(message_json);
-            } else if (event_type == "conversation.chat.completed") {
+            } else if (event_type == "conversation.audio.completed") {
                 std::string message = "{";
                 message += "\"type\":\"tts\",";
                 message += "\"state\":\"stop\"";
