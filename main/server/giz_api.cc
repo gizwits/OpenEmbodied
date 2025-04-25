@@ -9,12 +9,12 @@
 #include "mbedtls/aes.h"
 #include "mbedtls/sha256.h"
 #include "auth.h"
+#include "settings.h"
 
 #define TAG "GServer"
 
 // 初始化静态成员变量
 std::function<void(mqtt_config_t*)> GServer::mqtt_config_cb = nullptr;
-std::function<void(onboarding_response_t*)> GServer::onboarding_cb = nullptr;
 
 GServer::GServer() {
     memset(szNonce, 0, sizeof(szNonce));
@@ -206,7 +206,7 @@ const char* GServer::gatCreateETag(uint8_t *szNonce, uint8_t *body) {
     return ETag;
 }
 
-int GServer::gatProvision_prase_cb(const char* in_str, int in_len) {
+int GServer::getProvision_prase_cb(const char* in_str, int in_len) {
     mqtt_config_t mqtt_config = {0};
     char* params = strdup(in_str);
     char* saveptr = nullptr;
@@ -242,7 +242,7 @@ int GServer::gatProvision_prase_cb(const char* in_str, int in_len) {
     return 0;
 }
 
-int32_t GServer::gatProvision(std::function<void(mqtt_config_t*)> callback) {
+int32_t GServer::getProvision(std::function<void(mqtt_config_t*)> callback) {
     mqtt_config_cb = callback;
     std::string did = Auth::getDeviceId();
     std::string url = "http://agent.gizwitsapi.com/v2/devices/" + did + "/bootstrap";
@@ -273,12 +273,11 @@ int32_t GServer::gatProvision(std::function<void(mqtt_config_t*)> callback) {
     std::string response = http->GetBody();
     delete http;
 
-    return gatProvision_prase_cb(response.c_str(), response.length());
+    return getProvision_prase_cb(response.c_str(), response.length());
 }
 
-int32_t GServer::activationDevice(std::function<void(onboarding_response_t*)> callback) {
-    onboarding_cb = callback;
-    
+int32_t GServer::activationDevice(std::function<void(mqtt_config_t*)> callback) {
+    mqtt_config_cb = callback;
     std::string did = Auth::getDeviceId();
     std::string url = "http://agent.gizwitsapi.com/v2/devices/" + did + "/network";
     ESP_LOGI(TAG, "Onboarding URL: %s", url.c_str());
@@ -289,15 +288,14 @@ int32_t GServer::activationDevice(std::function<void(onboarding_response_t*)> ca
     const char *token = gatCreateToken(szNonce);
 
     // 准备请求体
-    char uid[32] = {0};
-    // bool result = storage_load_uid(uid);
-    bool result = true;
-    ESP_LOGI(TAG, "UID: %s, result: %d", uid, result);
+    Settings settings("wifi", true);
+    std::string uid = settings.GetString("uid", "");
+    ESP_LOGI(TAG, "UID: %s", uid.c_str());
     
     static uint8_t sOnboardingData[128];
     int len = snprintf((char*)sOnboardingData, sizeof(sOnboardingData) - 1, 
                       "is_reset=1&random_code=%s&lan_proto_ver=v5.0&user_id=%s", 
-                      getRandomCode(), uid);
+                      getRandomCode(), uid.c_str());
     sOnboardingData[len] = '\0';
     
     const char *ETag = gatCreateETag(szNonce, sOnboardingData);
@@ -323,23 +321,9 @@ int32_t GServer::activationDevice(std::function<void(onboarding_response_t*)> ca
 
     std::string response = http->GetBody();
     delete http;
+    ESP_LOGI(TAG, "response: %s", response.c_str());
 
-    // 解析响应
-    onboarding_response_t onboarding_response;
-    onboarding_response.success = false;
-    
-    if (response.find("success") != std::string::npos) {
-        onboarding_response.success = true;
-        onboarding_response.message = "Onboarding successful";
-    } else {
-        onboarding_response.message = "Onboarding failed";
-    }
-
-    if (onboarding_cb) {
-        onboarding_cb(&onboarding_response);
-    }
-
-    return onboarding_response.success ? 0 : -1;
+    return getProvision_prase_cb(response.c_str(), response.length());
 }
 
 char* GServer::get_trace_id() {

@@ -61,13 +61,13 @@ public:
     static const char* gatCreateETag(uint8_t *szNonce, uint8_t *body);
     
     // 解析MQTT配置
-    static int gatProvision_prase_cb(const char* in_str, int in_len);
+    static int getProvision_prase_cb(const char* in_str, int in_len);
     
     // 获取MQTT配置
-    static int32_t gatProvision(std::function<void(mqtt_config_t*)> callback);
+    static int32_t getProvision(std::function<void(mqtt_config_t*)> callback);
     
     // 执行Onboarding
-    static int32_t activationDevice(std::function<void(onboarding_response_t*)> callback);
+    static int32_t activationDevice(std::function<void(mqtt_config_t*)> callback);
 
 private:
     // 16进制转字符串
@@ -78,7 +78,6 @@ private:
 
     // 静态成员变量
     static std::function<void(mqtt_config_t*)> mqtt_config_cb;
-    static std::function<void(onboarding_response_t*)> onboarding_cb;
 
     // 非静态成员变量
     uint8_t szNonce[PASSCODE_LEN];

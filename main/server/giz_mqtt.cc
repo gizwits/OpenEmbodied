@@ -8,6 +8,7 @@
 #include "auth.h"
 #include <arpa/inet.h>
 #include "application.h"
+#include "settings.h"
 
 #define TAG "GIZ_MQTT"
 
@@ -19,12 +20,46 @@ bool MqttClient::initialize() {
         delete mqtt_;
     }
 
-    // 调用 
-    GServer::gatProvision([this](mqtt_config_t* config) {
-        endpoint_ = config->mqtt_address;
-        port_ = std::stoi(config->mqtt_port);
-        ESP_LOGI(TAG, "MQTT endpoint: %s, port: %d", endpoint_.c_str(), port_);
-    });
+    Settings settings("wifi", true);
+    bool need_activation = settings.GetInt("need_activation");
+    // 创建信号量用于等待回调完成
+    SemaphoreHandle_t config_sem = xSemaphoreCreateBinary();
+    if (config_sem == nullptr) {
+        ESP_LOGE(TAG, "Failed to create semaphore");
+        return false;
+    }
+
+    if (need_activation == 1) {
+        ESP_LOGI(TAG, "need_activation is true");
+        // 调用注册
+        GServer::activationDevice([this, config_sem, &settings](mqtt_config_t* config) {
+            endpoint_ = config->mqtt_address;
+            port_ = std::stoi(config->mqtt_port);
+            ESP_LOGI(TAG, "MQTT endpoint: %s, port: %d", endpoint_.c_str(), port_);
+            xSemaphoreGive(config_sem);
+
+            settings.SetInt("need_activation", 0);
+        });
+    } else {
+        ESP_LOGI(TAG, "need_activation is false");
+        // 调用Provision 获取相关信息
+        GServer::getProvision([this, config_sem](mqtt_config_t* config) {
+            endpoint_ = config->mqtt_address;
+            port_ = std::stoi(config->mqtt_port);
+            ESP_LOGI(TAG, "MQTT endpoint: %s, port: %d", endpoint_.c_str(), port_);
+            xSemaphoreGive(config_sem);
+        });
+    }
+
+    // 等待回调完成，超时时间设为10秒
+    if (xSemaphoreTake(config_sem, pdMS_TO_TICKS(10000)) != pdTRUE) {
+        ESP_LOGE(TAG, "Timeout waiting for MQTT config");
+        vSemaphoreDelete(config_sem);
+        return false;
+    }
+    vSemaphoreDelete(config_sem);
+
+    settings.SetInt("need_activation", 0);
 
     client_id_ = Auth::getDeviceId();
     

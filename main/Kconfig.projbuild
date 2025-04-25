@@ -53,6 +53,8 @@ config AUTH_KEY
     help
         Auth key for Gizwits.
 
+
+
 config COZE_WEBSOCKET_URL
     string "Coze Websocket URL"
     default "ws://ws.coze.cn/v1/chat"
@@ -245,6 +247,23 @@ choice DISPLAY_ESP32S3_KORVO2_V3
         bool "ST7789, 分辨率240*280"
     config LCD_ILI9341
         bool "ILI9341, 分辨率240*320"
+endchoice
+
+choice CONNECTION_TYPE
+    prompt "WiFi Connection Type"
+    default CONNECTION_TYPE_BLE
+    help
+        Select the WiFi connection type
+
+    config CONNECTION_TYPE_BLE
+        bool "WiFi with BLE"
+        help
+            Connect to WiFi using BLE provisioning
+
+    config CONNECTION_TYPE_AP
+        bool "WiFi with AP"
+        help
+            Connect to WiFi using Access Point mode
 endchoice
 
 config USE_WECHAT_MESSAGE_STYLE

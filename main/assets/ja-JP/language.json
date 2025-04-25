@@ -29,6 +29,7 @@
         "SERVER_ERROR": "送信に失敗しました。ネットワークを確認してください",
 
         "CONNECT_TO_HOTSPOT": "スマートフォンをWi-Fi ",
+        "OPEN_MINI_APP": "ミニアプリを開く",
         "ACCESS_VIA_BROWSER": " に接続し、ブラウザでアクセスしてください ",
         "WIFI_CONFIG_MODE": "ネットワーク設定モード",
         "ENTERING_WIFI_CONFIG_MODE": "ネットワーク設定中...",

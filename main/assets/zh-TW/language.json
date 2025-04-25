@@ -29,6 +29,7 @@
         "SERVER_ERROR": "發送失敗，請檢查網絡",
 
         "CONNECT_TO_HOTSPOT": "手機連接WiFi ",
+        "OPEN_MINI_APP": "打開機智魔方小程序",
         "ACCESS_VIA_BROWSER": "，瀏覽器訪問 ",
         "WIFI_CONFIG_MODE": "網路設定模式",
         "ENTERING_WIFI_CONFIG_MODE": "正在設定網路...",
