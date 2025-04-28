@@ -6,6 +6,16 @@
 #include <functional>
 #include <chrono>
 
+struct RoomParams {
+    std::string bot_id;
+    std::string voice_id;
+    std::string conv_id;
+    std::string access_token;
+    std::string voice_lang;
+    std::string api_domain;
+    std::string user_id;
+};
+
 struct BinaryProtocol3 {
     uint8_t type;
     uint8_t reserved;
@@ -57,8 +67,7 @@ public:
     virtual void SendAbortSpeaking(AbortReason reason);
     virtual void SendIotDescriptors(const std::string& descriptors);
     virtual void SendIotStates(const std::string& states);
-    virtual void UpdateRoomParams(const std::string& bot_id, const std::string& voice_id, const std::string& conv_id, const std::string& access_token);
-
+    virtual void UpdateRoomParams(const RoomParams& params);
 
 protected:
     std::function<void(const cJSON* root)> on_incoming_json_;
@@ -67,10 +76,7 @@ protected:
     std::function<void()> on_audio_channel_closed_;
     std::function<void(const std::string& message)> on_network_error_;
 
-    std::string conversation_id_;
-    std::string access_token_;
-    std::string bot_id_;
-    std::string voice_id_;
+    RoomParams room_params_;
 
     int server_sample_rate_ = 24000;
     int server_frame_duration_ = 60;

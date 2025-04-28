@@ -376,8 +376,19 @@ void Application::Start() {
 
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
     mqtt_client_ = std::make_unique<MqttClient>();
-    mqtt_client_->OnRoomParamsUpdated([this](const std::string& bot_id, const std::string& voice_id, const std::string& conv_id, const std::string& access_token) {
-        protocol_->UpdateRoomParams(bot_id, voice_id, conv_id, access_token);
+    mqtt_client_->OnRoomParamsUpdated([this](const RoomParams& params) {
+        protocol_->UpdateRoomParams(params);
+        // 判断 protocol_ 是否启动
+        // 如果启动了，就断开重新连接
+        if (protocol_->IsAudioChannelOpened()) {
+            // 先停止所有正在进行的操作
+            Schedule([this]() {
+                protocol_->SendAbortSpeaking(kAbortReasonNone);
+                protocol_->CloseAudioChannel();
+            });
+        } else {
+            // 没有连接的情况下，不用动，按照小智的流程，等待下一个触发点
+        }
     });
 
     if (!mqtt_client_->initialize()) {
@@ -508,6 +519,7 @@ void Application::Start() {
             }
         }
     });
+
     protocol_->Start();
 
 #if CONFIG_USE_AUDIO_PROCESSOR
@@ -540,7 +552,7 @@ void Application::Start() {
     wake_word_detect_.OnWakeWordDetected([this](const std::string& wake_word) {
 
         Schedule([this, &wake_word]() {
-            ESP_LOGI(TAG, "Wake word detected: %s, device state: %s", wake_word.c_str(), STATE_STRINGS[device_state_]);
+            ESP_LOGI(TAG, "Wake word detected: %s, device state: %s, %d", wake_word.c_str(), STATE_STRINGS[device_state_], device_state_);
             if (device_state_ == kDeviceStateIdle) {
                 SetDeviceState(kDeviceStateConnecting);
                 wake_word_detect_.EncodeWakeWordData();
@@ -550,13 +562,13 @@ void Application::Start() {
                     return;
                 }
                 
-                std::vector<uint8_t> opus;
-                // Encode and send the wake word data to the server
-                while (wake_word_detect_.GetWakeWordOpus(opus)) {
-                    protocol_->SendAudio(opus);
-                }
+                // std::vector<uint8_t> opus;
+                // // Encode and send the wake word data to the server
+                // while (wake_word_detect_.GetWakeWordOpus(opus)) {
+                //     protocol_->SendAudio(opus);
+                // }
                 // Set the chat state to wake word detected
-                protocol_->SendWakeWordDetected(wake_word);
+                // protocol_->SendWakeWordDetected(wake_word);
                 ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
                 SetListeningMode(realtime_chat_enabled_ ? kListeningModeRealtime : kListeningModeAutoStop);
             } else if (device_state_ == kDeviceStateSpeaking) {

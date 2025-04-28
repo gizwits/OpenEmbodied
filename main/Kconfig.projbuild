@@ -53,14 +53,6 @@ config AUTH_KEY
     help
         Auth key for Gizwits.
 
-
-
-config COZE_WEBSOCKET_URL
-    string "Coze Websocket URL"
-    default "ws://ws.coze.cn/v1/chat"
-    help
-        Communication with the Coze server through websocket after wake up.
-        
 config WEBSOCKET_ACCESS_TOKEN
     depends on CONNECTION_TYPE_WEBSOCKET
     string "Websocket Access Token"

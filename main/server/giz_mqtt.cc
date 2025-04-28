@@ -218,7 +218,7 @@ void MqttClient::sendTokenReport(int total, int output, int input) {
     }
 }
 
-void MqttClient::OnRoomParamsUpdated(std::function<void(const std::string&, const std::string&, const std::string&, const std::string&)> callback) {
+void MqttClient::OnRoomParamsUpdated(std::function<void(const RoomParams&)> callback) {
     room_params_updated_callback_ = callback;
 }
 
@@ -341,6 +341,9 @@ bool MqttClient::parseRealtimeAgent(const char* in_str, int in_len, room_params_
                 cJSON* user_id = cJSON_GetObjectItem(coze_websocket, "user_id");
                 cJSON* conv_id = cJSON_GetObjectItem(coze_websocket, "conv_id");
                 cJSON* access_token = cJSON_GetObjectItem(coze_websocket, "access_token");
+                cJSON* voice_lang = cJSON_GetObjectItem(coze_websocket, "voice_lang");
+                cJSON* api_domain = cJSON_GetObjectItem(coze_websocket, "api_domain");
+
 
                 if (bot_id && voice_id && user_id && conv_id && access_token) {
                     strncpy(params->bot_id, bot_id->valuestring, sizeof(params->bot_id) - 1);
@@ -348,6 +351,8 @@ bool MqttClient::parseRealtimeAgent(const char* in_str, int in_len, room_params_
                     strncpy(params->user_id, user_id->valuestring, sizeof(params->user_id) - 1);
                     strncpy(params->conv_id, conv_id->valuestring, sizeof(params->conv_id) - 1);
                     strncpy(params->access_token, access_token->valuestring, sizeof(params->access_token) - 1);
+                    strncpy(params->voice_lang, voice_lang->valuestring, sizeof(params->voice_lang) - 1);
+                    strncpy(params->api_domain, api_domain->valuestring, sizeof(params->api_domain) - 1);
                     success = true;
                 }
             }
@@ -363,10 +368,12 @@ bool MqttClient::parseM2MCtrlMsg(const char* in_str, int in_len) {
     if (!json) return false;
 
     cJSON* method = cJSON_GetObjectItem(json, "method");
+    ESP_LOGI(TAG, "parseM2MCtrlMsg method: %s", method->valuestring);
     if (method && method->valuestring) {
         if (strcmp(method->valuestring, "rtc.room.join") == 0) {
             // Handle room join
             xSemaphoreGive(mqtt_sem_);
+
         } else if (strcmp(method->valuestring, "rtc.room.leave") == 0) {
             // Handle room leave
         } else if (strcmp(method->valuestring, "websocket.config.change") == 0) {
@@ -389,7 +396,15 @@ void MqttClient::handleMqttMessage(mqtt_msg_t* msg) {
                 xTimerDelete(timer_, 0);
                 timer_ = nullptr;
             }
-            room_params_updated_callback_(params.bot_id, params.voice_id, params.conv_id, params.access_token);
+            RoomParams room_params;
+            room_params.bot_id = params.bot_id;
+            room_params.voice_id = params.voice_id;
+            room_params.conv_id = params.conv_id;
+            room_params.access_token = params.access_token;
+            room_params.voice_lang = params.voice_lang;
+            room_params.api_domain = params.api_domain;
+            room_params.user_id = params.user_id;
+            room_params_updated_callback_(room_params);
         }
     } else if (strstr(msg->topic, "push")) {
         parseM2MCtrlMsg(msg->payload, msg->payload_len);

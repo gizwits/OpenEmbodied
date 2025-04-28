@@ -122,14 +122,14 @@ bool WebsocketProtocol::OpenAudioChannel() {
     if (websocket_ != nullptr) {
         delete websocket_;
     }
-    if (bot_id_.empty() || access_token_.empty() || voice_id_.empty()) {
+    if (room_params_.bot_id.empty() || room_params_.access_token.empty() || room_params_.voice_id.empty()) {
         ESP_LOGE(TAG, "Bot ID or access token or voice id is empty");
         return false;
     }
 
     error_occurred_ = false;
-    std::string url = CONFIG_COZE_WEBSOCKET_URL + std::string("?bot_id=") + std::string(bot_id_);
-    std::string token = "Bearer " + std::string(access_token_);
+    std::string url = std::string("ws://") + std::string(room_params_.api_domain) + std::string("/v1/chat") + std::string("?bot_id=") + std::string(room_params_.bot_id);
+    std::string token = "Bearer " + std::string(room_params_.access_token);
 
     message_cache_ = "";
     websocket_ = Board::GetInstance().CreateWebSocket();
@@ -295,7 +295,6 @@ bool WebsocketProtocol::OpenAudioChannel() {
     uint32_t random_value = esp_random();
     snprintf(event_id, sizeof(event_id), "%lu", random_value);
     
-    std::string user_id = "nd7ec83a";  // You may want to set this appropriately
     std::string codec = "opus";
     std::string message = "{";
     message += "\"id\":\"" + std::string(event_id) + "\",";
@@ -308,8 +307,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "},";
     message += "\"chat_config\":{";
     message += "\"auto_save_history\":true,";
-    message += "\"conversation_id\":\"" + conversation_id_ + "\",";
-    message += "\"user_id\":\"" + user_id + "\",";
+    message += "\"conversation_id\":\"" + room_params_.conv_id + "\",";
+    message += "\"user_id\":\"" + room_params_.user_id + "\",";
     message += "\"meta_data\":{},";
     message += "\"custom_variables\":{},";
     message += "\"extra_params\":{}";
@@ -321,6 +320,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "\"channel\":1,";
     message += "\"bit_depth\":16";
     message += "},";
+    message += "\"asr_config\":{\"user_language\":\"" + std::string(room_params_.voice_lang) + "\"},";
     message += "\"output_audio\":{";
     message += "\"codec\":\"" + codec + "\",";
     message += "\"opus_config\":{";
@@ -333,7 +333,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "}";
     message += "},";
     message += "\"speech_rate\":0,";
-    message += "\"voice_id\":\"" + std::string(voice_id_) + "\"";
+    message += "\"voice_id\":\"" + std::string(room_params_.voice_id) + "\"";
     message += "}";
     message += "}";
     message += "}";

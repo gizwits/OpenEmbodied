@@ -50,22 +50,22 @@ void Protocol::SendWakeWordDetected(const std::string& wake_word) {
 }
 
 void Protocol::SendStartListening(ListeningMode mode) {
-    std::string message = "{\"session_id\":\"" + session_id_ + "\"";
-    message += ",\"type\":\"listen\",\"state\":\"start\"";
-    if (mode == kListeningModeRealtime) {
-        message += ",\"mode\":\"realtime\"";
-    } else if (mode == kListeningModeAutoStop) {
-        message += ",\"mode\":\"auto\"";
-    } else {
-        message += ",\"mode\":\"manual\"";
-    }
-    message += "}";
-    SendText(message);
+    // std::string message = "{\"session_id\":\"" + session_id_ + "\"";
+    // message += ",\"type\":\"listen\",\"state\":\"start\"";
+    // if (mode == kListeningModeRealtime) {
+    //     message += ",\"mode\":\"realtime\"";
+    // } else if (mode == kListeningModeAutoStop) {
+    //     message += ",\"mode\":\"auto\"";
+    // } else {
+    //     message += ",\"mode\":\"manual\"";
+    // }
+    // message += "}";
+    // SendText(message);
 }
 
 void Protocol::SendStopListening() {
-    std::string message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"listen\",\"state\":\"stop\"}";
-    SendText(message);
+    // std::string message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"listen\",\"state\":\"stop\"}";
+    // SendText(message);
 }
 
 void Protocol::SendIotDescriptors(const std::string& descriptors) {
@@ -114,8 +114,8 @@ void Protocol::SendIotDescriptors(const std::string& descriptors) {
 }
 
 void Protocol::SendIotStates(const std::string& states) {
-    std::string message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"iot\",\"update\":true,\"states\":" + states + "}";
-    SendText(message);
+    // std::string message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"iot\",\"update\":true,\"states\":" + states + "}";
+    // SendText(message);
 }
 
 bool Protocol::IsTimeout() const {
@@ -134,17 +134,13 @@ bool Protocol::IsAudioChannelBusy() const {
 }
 
 
-void Protocol::UpdateRoomParams(const std::string& bot_id, const std::string& voice_id, const std::string& conv_id, const std::string& access_token) {
+void Protocol::UpdateRoomParams(const RoomParams& params) {
     ESP_LOGI(TAG, "Updating WebSocket parameters:");
-    ESP_LOGI(TAG, "  bot_id: %s", bot_id.c_str());
-    ESP_LOGI(TAG, "  voice_id: %s", voice_id.c_str());
-    ESP_LOGI(TAG, "  conv_id: %s", conv_id.c_str());
-    ESP_LOGI(TAG, "  access_token: %s", access_token.c_str());
+    ESP_LOGI(TAG, "  bot_id: %s", params.bot_id.c_str());
+    ESP_LOGI(TAG, "  voice_id: %s", params.voice_id.c_str());
+    ESP_LOGI(TAG, "  conv_id: %s", params.conv_id.c_str());
+    ESP_LOGI(TAG, "  access_token: %s", params.access_token.c_str());
 
     // 保存
-    conversation_id_ = conv_id;
-    access_token_ = access_token;
-    bot_id_ = bot_id;
-    bot_id_ = "7457488358320144420";
-    voice_id_ = voice_id;
+    room_params_ = params;
 }
