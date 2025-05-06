@@ -23,6 +23,7 @@ private:
 protected:
     Board();
     std::string GenerateUuid();
+    bool wifi_config_mode_ = false;
 
     // 软件生成的设备唯一标识
     std::string uuid_;
@@ -50,6 +51,7 @@ public:
     virtual std::string GetJson();
     virtual void SetPowerSaveMode(bool enabled) = 0;
     virtual BoardCamera* GetCamera() { return nullptr; }
+    virtual bool IsWifiConfigMode();
 };
 
 #define DECLARE_BOARD(BOARD_CLASS_NAME) \

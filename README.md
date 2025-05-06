@@ -1,5 +1,9 @@
 # 小智 AI 聊天机器人 （XiaoZhi AI Chatbot）
 
+## 首先致谢虾哥的开源项目：https://github.com/78/xiaozhi-esp32
+## 其次致谢：https://github.com/xinnan-tech/xiaozhi-esp32-server
+
+
 （中文 | [English](README_en.md) | [日本語](README_ja.md)）
 
 ## 视频介绍

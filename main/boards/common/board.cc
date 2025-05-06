@@ -48,6 +48,10 @@ bool Board::GetBatteryLevel(int &level, bool& charging, bool& discharging) {
     return false;
 }
 
+bool Board::IsWifiConfigMode() {
+    return wifi_config_mode_;
+}
+
 Display* Board::GetDisplay() {
     static NoDisplay display;
     return &display;

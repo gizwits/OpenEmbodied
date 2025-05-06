@@ -9,8 +9,6 @@
 #include "iot/thing_manager.h"
 #include "assets/lang_config.h"
 #include "server/giz_mqtt.h"
-#include "esp_camera.h"
-#include "camera/board_camera.h"
 
 #include <cstring>
 #include <esp_log.h>
@@ -37,7 +35,7 @@ static const char* const STATE_STRINGS[] = {
 
 Application::Application() {
     event_group_ = xEventGroupCreate();
-    background_task_ = new BackgroundTask(4096 * 4);
+    background_task_ = new BackgroundTask(4096 * 3);
 
     esp_timer_create_args_t clock_timer_args = {
         .callback = [](void* arg) {
@@ -595,14 +593,6 @@ void Application::Start() {
     ResetDecoder();
     PlaySound(Lang::Sounds::P3_SUCCESS);
     
-    // auto camera = board.GetCamera();
-    // camera_fb_t* fb = camera->capture();
-    // if (!fb) {
-    //     ESP_LOGE(TAG, "Failed to capture image");
-    // }
-    // ESP_LOGI(TAG, "Capture image success");
-    // esp_camera_fb_return(fb);
-
     // Enter the main event loop
     MainEventLoop();
 }

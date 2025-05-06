@@ -6,7 +6,7 @@
 #include "config.h"
 #include "i2c_device.h"
 #include "iot/thing_manager.h"
-#include "camera/board_camera.h"
+// #include "camera/board_camera.h"
 
 
 #include <esp_log.h>
@@ -43,7 +43,7 @@ private:
     Button boot_button_;
     LcdDisplay* display_;
     Pca9557* pca9557_;
-    BoardCamera* camera_;
+    // BoardCamera* camera_;
 
 
     void InitializeI2c() {
@@ -67,44 +67,44 @@ private:
     }
 
 
-    void InitializeCamera() {
-        camera_config_t config;
-        config.ledc_channel = LEDC_CHANNEL_1;  // LEDC通道选择  用于生成XCLK时钟 但是S3不用
-        config.ledc_timer = LEDC_TIMER_1; // LEDC timer选择  用于生成XCLK时钟 但是S3不用
-        config.pin_d0 = CAMERA_PIN_D0;
-        config.pin_d1 = CAMERA_PIN_D1;
-        config.pin_d2 = CAMERA_PIN_D2;
-        config.pin_d3 = CAMERA_PIN_D3;
-        config.pin_d4 = CAMERA_PIN_D4;
-        config.pin_d5 = CAMERA_PIN_D5;
-        config.pin_d6 = CAMERA_PIN_D6;
-        config.pin_d7 = CAMERA_PIN_D7;
-        config.pin_xclk = CAMERA_PIN_XCLK;
-        config.pin_pclk = CAMERA_PIN_PCLK;
-        config.pin_vsync = CAMERA_PIN_VSYNC;
-        config.pin_href = CAMERA_PIN_HREF;
-        config.pin_sccb_sda = -1;   // 这里写-1 表示使用已经初始化的I2C接口
-        config.pin_sccb_scl = CAMERA_PIN_SIOC;
-        config.sccb_i2c_port = 1;  // 修改为 I2C_NUM_1
-        config.pin_pwdn = CAMERA_PIN_PWDN;
-        config.pin_reset = CAMERA_PIN_RESET;
-        config.xclk_freq_hz = XCLK_FREQ_HZ;
-        config.pixel_format = PIXFORMAT_RGB565;
-        config.frame_size = FRAMESIZE_QVGA;
-        config.jpeg_quality = 12;
-        config.fb_count = 1;  // 只使用一个帧缓冲区
-        config.fb_location = CAMERA_FB_IN_PSRAM;
-        config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+    // void InitializeCamera() {
+    //     camera_config_t config;
+    //     config.ledc_channel = LEDC_CHANNEL_1;  // LEDC通道选择  用于生成XCLK时钟 但是S3不用
+    //     config.ledc_timer = LEDC_TIMER_1; // LEDC timer选择  用于生成XCLK时钟 但是S3不用
+    //     config.pin_d0 = CAMERA_PIN_D0;
+    //     config.pin_d1 = CAMERA_PIN_D1;
+    //     config.pin_d2 = CAMERA_PIN_D2;
+    //     config.pin_d3 = CAMERA_PIN_D3;
+    //     config.pin_d4 = CAMERA_PIN_D4;
+    //     config.pin_d5 = CAMERA_PIN_D5;
+    //     config.pin_d6 = CAMERA_PIN_D6;
+    //     config.pin_d7 = CAMERA_PIN_D7;
+    //     config.pin_xclk = CAMERA_PIN_XCLK;
+    //     config.pin_pclk = CAMERA_PIN_PCLK;
+    //     config.pin_vsync = CAMERA_PIN_VSYNC;
+    //     config.pin_href = CAMERA_PIN_HREF;
+    //     config.pin_sccb_sda = -1;   // 这里写-1 表示使用已经初始化的I2C接口
+    //     config.pin_sccb_scl = CAMERA_PIN_SIOC;
+    //     config.sccb_i2c_port = 1;  // 修改为 I2C_NUM_1
+    //     config.pin_pwdn = CAMERA_PIN_PWDN;
+    //     config.pin_reset = CAMERA_PIN_RESET;
+    //     config.xclk_freq_hz = XCLK_FREQ_HZ;
+    //     config.pixel_format = PIXFORMAT_RGB565;
+    //     config.frame_size = FRAMESIZE_QVGA;
+    //     config.jpeg_quality = 12;
+    //     config.fb_count = 1;  // 只使用一个帧缓冲区
+    //     config.fb_location = CAMERA_FB_IN_PSRAM;
+    //     config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
 
-        camera_ = new BoardCamera();
-        if (!camera_->init(config)) {
-            ESP_LOGE(TAG, "Failed to initialize camera: %s", camera_->getLastError().c_str());
-            delete camera_;
-            camera_ = nullptr;
-        }
+    //     camera_ = new BoardCamera();
+    //     if (!camera_->init(config)) {
+    //         ESP_LOGE(TAG, "Failed to initialize camera: %s", camera_->getLastError().c_str());
+    //         delete camera_;
+    //         camera_ = nullptr;
+    //     }
 
-        ESP_LOGI(TAG, "Camera initialized");
-    }
+    //     ESP_LOGI(TAG, "Camera initialized");
+    // }
     void InitializeSpi() {
         spi_bus_config_t buscfg = {};
         buscfg.mosi_io_num = GPIO_NUM_40;
@@ -214,7 +214,8 @@ public:
         return &backlight;
     }
     virtual BoardCamera* GetCamera() override {
-        return camera_;
+        // return camera_;
+        return nullptr;
     }
 };
 

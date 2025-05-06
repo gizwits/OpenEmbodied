@@ -5,7 +5,6 @@
 
 class WifiBoard : public Board {
 protected:
-    bool wifi_config_mode_ = false;
 
     WifiBoard();
     void EnterWifiConfigMode();
@@ -21,6 +20,7 @@ public:
     virtual const char* GetNetworkStateIcon() override;
     virtual void SetPowerSaveMode(bool enabled) override;
     virtual void ResetWifiConfiguration();
+    virtual bool IsWifiConfigMode() override;
 };
 
 #endif // WIFI_BOARD_H
