@@ -7,7 +7,11 @@
 （中文 | [English](README_en.md) | [日本語](README_ja.md)）
 
 ## 可以量产的AI方案
-Gizwits 的 AIOT 平台，结合 Coze 打造的可商用方案
+[Gizwits](https://www.gizwits.com/) AIOT 结合 Coze 打造的可商用方案
+
+支持和兼容所有小智适配的硬件
+
+同时您也可以在 [Coze](https://www.coze.cn/) 平台上编排更专业的智能体
 
 ## 配网指引
 

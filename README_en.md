@@ -7,7 +7,12 @@ Second, thanks to: https://github.com/xinnan-tech/xiaozhi-esp32-server
 ([中文](README.md) | English | [日本語](README_ja.md))
 
 ## Mass-Producible AI Solution
-A commercial solution combining Gizwits' AIOT platform with Coze
+A commercial solution combining [Gizwits](https://www.gizwits.com/)' AIOT platform with Coze
+
+Support and compatibility with all hardware compatible with Xiaozhi
+
+At the same time, you can also access [Coze](https://www.coze.cn/)Arrange more professional intelligent agents on the platform
+
 
 ## Network Configuration Guide
 

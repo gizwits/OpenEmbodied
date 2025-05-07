@@ -7,7 +7,11 @@
 （[中文](README.md) | [English](README_en.md) | 日本語）
 
 ## 量産可能なAIソリューション
-GizwitsのAIOTプラットフォームとCozeを組み合わせた商用利用可能なソリューション
+[Gizwits](https://www.gizwits.com/)のAIOTプラットフォームとCozeを組み合わせた商用利用可能なソリューション
+
+すべてのスモールフィットハードウェアをサポートし、互換性を提供
+
+また、[Coze](https://www.coze.cn/)プラットフォーム上でより専門的なエージェントを編成する
 
 ## ネットワーク設定ガイド
 
