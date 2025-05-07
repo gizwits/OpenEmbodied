@@ -35,7 +35,7 @@ static const char* const STATE_STRINGS[] = {
 
 Application::Application() {
     event_group_ = xEventGroupCreate();
-    background_task_ = new BackgroundTask(4096 * 3);
+    background_task_ = new BackgroundTask(4096 * 8);
 
     esp_timer_create_args_t clock_timer_args = {
         .callback = [](void* arg) {
@@ -527,7 +527,12 @@ void Application::Start() {
             if (protocol_->IsAudioChannelBusy()) {
                 return;
             }
-            protocol_->SendAudio(data);
+            // protocol_->SendAudio(data);
+            opus_encoder_->Encode(std::move(data), [this](std::vector<uint8_t>&& opus) {
+                Schedule([this, opus = std::move(opus)]() {
+                    protocol_->SendAudio(opus);
+                });
+            });
         });
     });
     audio_processor_.OnVadStateChange([this](bool speaking) {
@@ -746,7 +751,12 @@ void Application::OnAudioInput() {
             if (protocol_->IsAudioChannelBusy()) {
                 return;
             }
-            protocol_->SendAudio(data);
+            // protocol_->SendAudio(data);
+            opus_encoder_->Encode(std::move(data), [this](std::vector<uint8_t>&& opus) {
+                Schedule([this, opus = std::move(opus)]() {
+                    protocol_->SendAudio(opus);
+                });
+            });
         });
         return;
     }

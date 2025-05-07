@@ -20,7 +20,6 @@ public:
     virtual void SendStopListening() override;
     virtual void CloseAudioChannel() override;
     virtual bool IsAudioChannelOpened() const override;
-    virtual void SendAudio(const std::vector<int16_t>& data) override;
     virtual void SendAudio(const std::vector<uint8_t>& data) override;
 
 private:

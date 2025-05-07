@@ -33,16 +33,8 @@ void WebsocketProtocol::SendAudio(const std::vector<uint8_t>& data) {
     if (websocket_ == nullptr || !websocket_->IsConnected() || data.empty()) {
         return;
     }
-    return;
-}
-
-void WebsocketProtocol::SendAudio(const std::vector<int16_t>& data) {
-    if (websocket_ == nullptr || !websocket_->IsConnected() || data.empty()) {
-        return;
-    }
     // ESP_LOGI(TAG, "Send audio data size: %d", data.size());
-    // 将 int16_t 数据转换为 base64
-    size_t data_size = data.size() * sizeof(int16_t);
+    size_t data_size = data.size() * sizeof(uint8_t);
     size_t out_len = 4 * ((data_size + 2) / 3);  // base64 编码后的长度
     char *base64_buffer = (char*)malloc(out_len + 1);
     if (!base64_buffer) {
@@ -134,6 +126,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message_cache_ = "";
     websocket_ = Board::GetInstance().CreateWebSocket();
     websocket_->SetHeader("Authorization", token.c_str());
+    websocket_->SetHeader("x-tt-env", "ppe_uplink_opus");
+    websocket_->SetHeader("x-use-ppe", "1");
 
     websocket_->OnData([this](const char* data, size_t len, bool binary) {
         // ESP_LOGI(TAG, "Received data: %s", data);
@@ -315,7 +309,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "},";
     message += "\"input_audio\":{";
     message += "\"format\":\"pcm\",";
-    message += "\"codec\":\"pcm\",";
+    message += "\"codec\":\"opus\",";
     message += "\"sample_rate\":16000,";
     message += "\"channel\":1,";
     message += "\"bit_depth\":16";
