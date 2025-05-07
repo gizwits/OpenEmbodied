@@ -1,7 +1,7 @@
 # Gizwits + Coze + 小智
 
-## 首先致谢虾哥的开源项目：https://github.com/78/xiaozhi-esp32
-## 其次致谢：https://github.com/xinnan-tech/xiaozhi-esp32-server
+首先致谢虾哥的开源项目：https://github.com/78/xiaozhi-esp32
+其次致谢：https://github.com/xinnan-tech/xiaozhi-esp32-server
 
 （中文 | [English](README_en.md) | [日本語](README_ja.md)）
 
@@ -11,7 +11,7 @@ Gizwits 的 AIOT 平台，结合 Coze 打造的可商用方案
 ## 配网指引
 
 ### 打开小程序点击右上角加号配网
-![小程序](https://goms-1251025085.cos.ap-guangzhou.myqcloud.com/cdn/test/%E6%89%AB%E7%A0%81_%E6%90%9C%E7%B4%A2%E8%81%94%E5%90%88%E4%BC%A0%E6%92%AD%E6%A0%B7%E5%BC%8F-%E6%A0%87%E5%87%86%E8%89%B2%E7%89%88.png)
+![小程序](docs/mini_app.png)
 
 ### web配网
 [点击跳转](http://aicube.jzyjzy.club/)
