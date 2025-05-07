@@ -41,18 +41,6 @@ config PRODUCT_SECRET
     help
         Product secret for Gizwits.
 
-config DEVICE_ID
-    string "Device ID"
-    default ""
-    help
-        Device ID for Gizwits.
-
-config AUTH_KEY
-    string "Auth Key"
-    default ""
-    help
-        Auth key for Gizwits.
-
 config WEBSOCKET_ACCESS_TOKEN
     depends on CONNECTION_TYPE_WEBSOCKET
     string "Websocket Access Token"

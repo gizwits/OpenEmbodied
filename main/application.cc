@@ -9,8 +9,9 @@
 #include "iot/thing_manager.h"
 #include "assets/lang_config.h"
 #include "server/giz_mqtt.h"
-
+#include "auth.h"
 #include <cstring>
+
 #include <esp_log.h>
 #include <cJSON.h>
 #include <driver/gpio.h>
@@ -332,6 +333,8 @@ void Application::StopListening() {
 
 void Application::Start() {
     auto& board = Board::GetInstance();
+
+    Auth::getInstance().init();
     SetDeviceState(kDeviceStateStarting);
 
     /* Setup the display */

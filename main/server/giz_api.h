@@ -25,6 +25,7 @@ struct mqtt_config_t {
     char product_secret[32];
     char mqtt_address[64];
     char mqtt_port[8];
+    char device_id[32];
 };
 
 struct onboarding_response_t {
@@ -65,14 +66,21 @@ public:
     
     // 获取MQTT配置
     static int32_t getProvision(std::function<void(mqtt_config_t*)> callback);
+
+    // 获取MQTT配置
+    static int32_t getLimitProvision(std::function<void(mqtt_config_t*)> callback);
     
     // 执行Onboarding
     static int32_t activationDevice(std::function<void(mqtt_config_t*)> callback);
+
+    // 创建限流token
+    static const char* gatCreateLimitToken(uint8_t *szNonce);
 
 private:
     // 16进制转字符串
     static void hexToStr(uint8_t *dest, uint8_t *src, int32_t srcLen, int8_t flag);
     
+
     // 获取trace_id
     static char* get_trace_id();
 

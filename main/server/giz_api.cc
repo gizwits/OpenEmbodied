@@ -83,20 +83,52 @@ const char* GServer::gatCreateToken(uint8_t *szNonce) {
     uint8_t device_mac[MAC_LEN + 1] = {0};
     int ret;
 
-    // 获取设备MAC地址
-    ret = esp_wifi_get_mac(WIFI_IF_STA, mac_hex);
-    if (ret != 0) {
-        ESP_LOGE(TAG, "get mac failed");
-        return nullptr;
+    uint8_t* mac_ptr = GServer::gatNetMACGet();
+    if (mac_ptr != nullptr) {
+        memcpy(device_mac, mac_ptr, MAC_LEN + 1);
     }
-    // 转换为hex字符串
-    hexToStr(device_mac, mac_hex, NETIF_MAX_HWADDR_LEN, 0);
-    device_mac[MAC_LEN] = 0;
 
     memset(input, 0, sizeof(input));
-    std::string product_key = Auth::getProductKey();
-    std::string auth_key = Auth::getAuthKey();
+    std::string product_key = Auth::getInstance().getProductKey();
+    std::string auth_key = Auth::getInstance().getAuthKey();
     snprintf(input, sizeof(input) - 1, "%s,%s,%s,%s", product_key.c_str(), device_mac, auth_key.c_str(), szNonce);
+
+    ESP_LOGI(TAG, "token input: %s", input);
+    // 生成SHA256 token
+    memset(token, 0, sizeof(token));
+    mbedtls_sha256_context sha256_ctx;
+    mbedtls_sha256_init(&sha256_ctx);
+    mbedtls_sha256_starts(&sha256_ctx, 0);  // 0 means SHA256, not SHA224
+    mbedtls_sha256_update(&sha256_ctx, (const unsigned char*)input, strlen(input));
+    mbedtls_sha256_finish(&sha256_ctx, (unsigned char*)token_bin);
+    mbedtls_sha256_free(&sha256_ctx);
+    
+    hexToStr((uint8_t *)token, (uint8_t *)token_bin, 32, 0);
+    return token;
+}
+
+
+const char* GServer::gatCreateLimitToken(uint8_t *szNonce) {
+    char input[32 * 4 + 1];
+    char token_bin[CLOUD_TOKEN_BIN_LEN + 1];
+    static char token[CLOUD_TOKEN_SZ_LEN + 1];
+    uint8_t mac_hex[MAC_LEN + 1] = {0};
+    uint8_t device_mac[MAC_LEN + 1] = {0};
+    int ret;
+
+    uint8_t* mac_ptr = GServer::gatNetMACGet();
+    if (mac_ptr != nullptr) {
+        memcpy(device_mac, mac_ptr, MAC_LEN + 1);
+    } else {
+        ESP_LOGE(TAG, "Failed to get MAC address");
+        return nullptr;
+    }
+
+    memset(input, 0, sizeof(input));
+    std::string product_key = Auth::getInstance().getProductKey();
+    std::string product_secret = Auth::getInstance().getProductSecret();
+    std::string auth_key = Auth::getInstance().getAuthKey();
+    snprintf(input, sizeof(input) - 1, "%s,%s,%s,%s", product_key.c_str(), device_mac, product_secret.c_str(), szNonce);
 
     ESP_LOGI(TAG, "token input: %s", input);
     // 生成SHA256 token
@@ -174,7 +206,7 @@ uint8_t* GServer::getRandomCode() {
     esp_wifi_get_config(WIFI_IF_STA, &wifi_config);
     ESP_LOGI(TAG, "Connected SSID: %s", wifi_config.sta.ssid);
     ESP_LOGI(TAG, "Connected password: %s", wifi_config.sta.password);
-    std::string product_key = Auth::getProductKey();
+    std::string product_key = Auth::getInstance().getProductKey();
     return genRandomCode((const char*)wifi_config.sta.ssid, (const char*)wifi_config.sta.password, product_key.c_str(), 0);
 }
 
@@ -187,7 +219,7 @@ const char* GServer::gatCreateETag(uint8_t *szNonce, uint8_t *body) {
     int ret;
     
     memset(input, 0, sizeof(input));
-    std::string auth_key = Auth::getAuthKey();
+    std::string auth_key = Auth::getInstance().getAuthKey();
     snprintf(input, sizeof(input) - 1, "%s,%s,%s", auth_key.c_str(), szNonce, body);
                 
     // 生成SHA256 token
@@ -221,6 +253,8 @@ int GServer::getProvision_prase_cb(const char* in_str, int in_len) {
             // mqtt_config.restart_time = atoi(token + 13);
         } else if (strncmp(token, "tz_offset=", 10) == 0) {
             // mqtt_config.tz_offset = atoi(token + 10);
+        } else if (strncmp(token, "device_id=", 10) == 0) {
+            strncpy(mqtt_config.device_id, token + 10, sizeof(mqtt_config.device_id) - 1);
         }
         token = strtok_r(nullptr, "&", &saveptr);
     }
@@ -244,7 +278,7 @@ int GServer::getProvision_prase_cb(const char* in_str, int in_len) {
 
 int32_t GServer::getProvision(std::function<void(mqtt_config_t*)> callback) {
     mqtt_config_cb = callback;
-    std::string did = Auth::getDeviceId();
+    std::string did = Auth::getInstance().getDeviceId();
     std::string url = "http://agent.gizwitsapi.com/v2/devices/" + did + "/bootstrap";
     ESP_LOGI(TAG, "Provision URL: %s", url.c_str());
 
@@ -276,9 +310,47 @@ int32_t GServer::getProvision(std::function<void(mqtt_config_t*)> callback) {
     return getProvision_prase_cb(response.c_str(), response.length());
 }
 
+
+int32_t GServer::getLimitProvision(std::function<void(mqtt_config_t*)> callback) {
+    mqtt_config_cb = callback;
+    std::string did = Auth::getInstance().getDeviceId();
+    std::string product_key = Auth::getInstance().getProductKey();
+    std::string mac = (char*)GServer::gatNetMACGet();
+
+    std::string url = "http://agent.gizwitsapi.com/v2/products/" + product_key + "/devices/" + mac + "/bootstrap";
+    ESP_LOGI(TAG, "Provision URL: %s", url.c_str());
+
+    // 创建token
+    static uint8_t szNonce[PASSCODE_LEN + 1];
+    gatCreatNewPassCode(PASSCODE_LEN, szNonce);
+    const char *token = gatCreateLimitToken(szNonce);
+
+    // 使用Board的HTTP客户端
+    auto& board = Board::GetInstance();
+    auto http = board.CreateHttp();
+    
+    // 设置请求头
+    http->SetHeader("X-Sign-Method", "sha256");
+    http->SetHeader("X-Sign-Nonce", (const char*)szNonce);
+    http->SetHeader("X-Sign-Token", token);
+    http->SetHeader("X-Trace-Id", get_trace_id());
+
+    // 发送GET请求
+    if (!http->Open("GET", url)) {
+        ESP_LOGE(TAG, "Failed to open HTTP connection");
+        delete http;
+        return -1;
+    }
+
+    std::string response = http->GetBody();
+    delete http;
+
+    return getProvision_prase_cb(response.c_str(), response.length());
+}
+
 int32_t GServer::activationDevice(std::function<void(mqtt_config_t*)> callback) {
     mqtt_config_cb = callback;
-    std::string did = Auth::getDeviceId();
+    std::string did = Auth::getInstance().getDeviceId();
     std::string url = "http://agent.gizwitsapi.com/v2/devices/" + did + "/network";
     ESP_LOGI(TAG, "Onboarding URL: %s", url.c_str());
 

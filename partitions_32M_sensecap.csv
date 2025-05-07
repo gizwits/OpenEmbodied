@@ -5,6 +5,7 @@ nvs,        data,   nvs,        ,     840K,
 otadata,    data,   ota,        ,     0x2000,
 phy_init,   data,   phy,        ,     0x1000,
 model,      data,   spiffs,     ,     0xF0000,
+auth,       data,   nvs,        0x100000,  0x10000,
 # According to scripts/versions.py, app partition must be aligned to 1MB
 ota_0,      app,    ota_0,      0x200000,     12M,
 ota_1,      app,    ota_1,      ,             12M,

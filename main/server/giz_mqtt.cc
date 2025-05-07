@@ -29,26 +29,43 @@ bool MqttClient::initialize() {
         return false;
     }
 
-    if (need_activation == 1) {
-        ESP_LOGI(TAG, "need_activation is true");
-        // 调用注册
-        GServer::activationDevice([this, config_sem, &settings](mqtt_config_t* config) {
+    /**
+    这里有两种情况，如果authkey 为空的情况下，使用临时授权
+     */
+    client_id_ = Auth::getInstance().getDeviceId();
+    bool has_authkey = !Auth::getInstance().getAuthKey().empty();
+
+    if (!has_authkey) {
+        ESP_LOGI(TAG, "authkey is empty");
+        GServer::getLimitProvision([this, config_sem](mqtt_config_t* config) {
             endpoint_ = config->mqtt_address;
             port_ = std::stoi(config->mqtt_port);
+            client_id_ = config->device_id;
             ESP_LOGI(TAG, "MQTT endpoint: %s, port: %d", endpoint_.c_str(), port_);
             xSemaphoreGive(config_sem);
-
-            settings.SetInt("need_activation", 0);
         });
     } else {
-        ESP_LOGI(TAG, "need_activation is false");
-        // 调用Provision 获取相关信息
-        GServer::getProvision([this, config_sem](mqtt_config_t* config) {
-            endpoint_ = config->mqtt_address;
-            port_ = std::stoi(config->mqtt_port);
-            ESP_LOGI(TAG, "MQTT endpoint: %s, port: %d", endpoint_.c_str(), port_);
-            xSemaphoreGive(config_sem);
-        });
+        if (need_activation == 1) {
+            ESP_LOGI(TAG, "need_activation is true");
+            // 调用注册
+            GServer::activationDevice([this, config_sem, &settings](mqtt_config_t* config) {
+                endpoint_ = config->mqtt_address;
+                port_ = std::stoi(config->mqtt_port);
+                ESP_LOGI(TAG, "MQTT endpoint: %s, port: %d", endpoint_.c_str(), port_);
+                xSemaphoreGive(config_sem);
+
+                settings.SetInt("need_activation", 0);
+            });
+        } else {
+            ESP_LOGI(TAG, "need_activation is false");
+            // 调用Provision 获取相关信息
+            GServer::getProvision([this, config_sem](mqtt_config_t* config) {
+                endpoint_ = config->mqtt_address;
+                port_ = std::stoi(config->mqtt_port);
+                ESP_LOGI(TAG, "MQTT endpoint: %s, port: %d", endpoint_.c_str(), port_);
+                xSemaphoreGive(config_sem);
+            });
+        }
     }
 
     // 等待回调完成，超时时间设为10秒
@@ -60,8 +77,6 @@ bool MqttClient::initialize() {
     vSemaphoreDelete(config_sem);
 
     settings.SetInt("need_activation", 0);
-
-    client_id_ = Auth::getDeviceId();
     
     // 准备认证信息
     char userName[128] = {0};
@@ -73,8 +88,13 @@ bool MqttClient::initialize() {
         ESP_LOGE(TAG, "用户名缓冲区溢出");
         return false;
     }
+    const char *token;
     
-    const char *token = GServer::gatCreateToken(szNonce);
+    if (has_authkey) {
+        token = GServer::gatCreateToken(szNonce);
+    } else {
+        token = GServer::gatCreateLimitToken(szNonce);
+    }
     if (token == NULL) {
         ESP_LOGE(TAG, "创建令牌失败");
         return false;

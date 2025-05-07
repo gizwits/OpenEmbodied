@@ -1,14 +1,28 @@
-#ifndef AUTH_H
-#define AUTH_H
-
+#pragma once
 #include <string>
 
 class Auth {
 public:
-    static std::string getAuthKey();
-    static std::string getDeviceId();
-    static std::string getProductKey();
-    static std::string getProductSecret();
-};
+    static Auth& getInstance() {
+        static Auth instance;
+        return instance;
+    }
 
-#endif // AUTH_H
+    void init();
+    std::string getAuthKey();
+    std::string getDeviceId();
+    std::string getProductKey();
+    std::string getProductSecret();
+
+private:
+    Auth() = default;
+    ~Auth() = default;
+    Auth(const Auth&) = delete;
+    Auth& operator=(const Auth&) = delete;
+
+    std::string m_auth_key;
+    std::string m_device_id;
+    std::string m_product_key;
+    std::string m_product_secret;
+    bool m_is_initialized = false;
+};
