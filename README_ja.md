@@ -1,6 +1,21 @@
-# シャオジー AI チャットボット
+# Gizwits + Coze + 小智
 
-([中文](README.md) | [English](README_en.md) | 日本語)
+まず、蝦哥さんのオープンソースプロジェクトに感謝いたします：https://github.com/gizwits/xiaozhi-gizwits-esp32
+
+次に、以下のプロジェクトにも感謝いたします：https://github.com/xinnan-tech/xiaozhi-esp32-server
+
+（[中文](README.md) | [English](README_en.md) | 日本語）
+
+## 量産可能なAIソリューション
+GizwitsのAIOTプラットフォームとCozeを組み合わせた商用利用可能なソリューション
+
+## ネットワーク設定ガイド
+
+### ミニプログラムで右上のプラスボタンをクリックして設定
+![ミニプログラム](docs/mini_app.png)
+
+### Web設定
+[クリックして移動](http://aicube.jzyjzy.club/)
 
 ## プロジェクト紹介
 

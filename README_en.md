@@ -1,6 +1,21 @@
-# XiaoZhi AI Chatbot
+# Gizwits + Coze + XiaoZhi
+
+First, thanks to Brother Xia's open source project: https://github.com/gizwits/xiaozhi-gizwits-esp32
+
+Second, thanks to: https://github.com/xinnan-tech/xiaozhi-esp32-server
 
 ([中文](README.md) | English | [日本語](README_ja.md))
+
+## Mass-Producible AI Solution
+A commercial solution combining Gizwits' AIOT platform with Coze
+
+## Network Configuration Guide
+
+### Open the Mini Program and click the plus sign in the top right corner to configure the network
+![Mini Program](docs/mini_app.png)
+
+### Web Configuration
+[Click to jump](http://aicube.jzyjzy.club/)
 
 ## Introduction
 

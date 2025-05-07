@@ -1,11 +1,12 @@
 # Gizwits + Coze + 小智
 
-首先致谢虾哥的开源项目：https://github.com/78/xiaozhi-esp32
+首先致谢虾哥的开源项目：https://github.com/gizwits/xiaozhi-gizwits-esp32
+
 其次致谢：https://github.com/xinnan-tech/xiaozhi-esp32-server
 
 （中文 | [English](README_en.md) | [日本語](README_ja.md)）
 
-## 能量产的AI方案
+## 可以量产的AI方案
 Gizwits 的 AIOT 平台，结合 Coze 打造的可商用方案
 
 ## 配网指引
@@ -155,10 +156,10 @@ Gizwits 的 AIOT 平台，结合 Coze 打造的可商用方案
 
 ## Star History
 
-<a href="https://star-history.com/#78/xiaozhi-esp32&Date">
+<a href="https://star-history.com/#gizwits/xiaozhi-gizwits-esp32&Date">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=78/xiaozhi-esp32&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=78/xiaozhi-esp32&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=78/xiaozhi-esp32&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=gizwits/xiaozhi-gizwits-esp32&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=gizwits/xiaozhi-gizwits-esp32&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=gizwits/xiaozhi-gizwits-esp32&type=Date" />
  </picture>
 </a>
