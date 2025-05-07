@@ -12,8 +12,6 @@
 
 #define TAG "WS"
 
-// Received message on topic: llm/nd7ec83a/config/response
-// in_str:{"method":"websocket.auth.response","body":{"platform_type":1,"token_quota":500000,"coze_websocket":{"bot_id":"7483788991729270847","voice_id":"7426720361753968677","user_id":"nd7ec83a","conv_id":"7486307379559104521","access_token":"czs_qNqGYuaxk7GQXXz5l6RwjaUYyE6y0sqCuRUl1enbJUPkMYQWgosyTdLpCDOZcEZOr","expires_in":3540}}}
 
 WebsocketProtocol::WebsocketProtocol() {
     event_group_handle_ = xEventGroupCreate();
@@ -26,47 +24,53 @@ WebsocketProtocol::~WebsocketProtocol() {
     vEventGroupDelete(event_group_handle_);
 }
 
-void WebsocketProtocol::Start() {
+bool WebsocketProtocol::Start() {
+    return true;
 }
 
 void WebsocketProtocol::SendAudio(const std::vector<uint8_t>& data) {
     if (websocket_ == nullptr || !websocket_->IsConnected() || data.empty()) {
         return;
     }
-    // ESP_LOGI(TAG, "Send audio data size: %d", data.size());
-    size_t data_size = data.size() * sizeof(uint8_t);
-    size_t out_len = 4 * ((data_size + 2) / 3);  // base64 编码后的长度
-    char *base64_buffer = (char*)malloc(out_len + 1);
-    if (!base64_buffer) {
-        ESP_LOGE(TAG, "Failed to allocate base64 buffer");
-        return;
+
+    // Calculate required base64 buffer size
+    size_t out_len = 4 * ((data.size() + 2) / 3);
+    
+    // Resize base64 buffer if needed
+    if (out_len + 1 > base64_buffer_size_) {
+        base64_buffer_.reset(new char[out_len + 1]);
+        base64_buffer_size_ = out_len + 1;
+        if (!base64_buffer_) {
+            ESP_LOGE(TAG, "Failed to allocate base64 buffer");
+            return;
+        }
     }
 
     size_t encoded_len;
-    mbedtls_base64_encode((unsigned char *)base64_buffer, out_len + 1, &encoded_len,
-                         (const unsigned char*)data.data(), data_size);
-    base64_buffer[encoded_len] = '\0';
+    mbedtls_base64_encode((unsigned char *)base64_buffer_.get(), base64_buffer_size_, &encoded_len,
+                         (const unsigned char*)data.data(), data.size());
+    base64_buffer_[encoded_len] = '\0';
 
-    // 创建事件 ID (使用随机数，确保为正数)
+    // Create event ID
     char event_id[32];
     uint32_t random_value = esp_random();
     snprintf(event_id, sizeof(event_id), "%lu", random_value);
 
-    // 构建消息
-    std::string message = "{";
-    message += "\"id\":\"" + std::string(event_id) + "\",";
-    message += "\"event_type\":\"input_audio_buffer.append\",";
-    message += "\"data\":{";
-    message += "\"delta\":\"" + std::string(base64_buffer) + "\"";
-    message += "}";
-    message += "}";
+    // Reuse message buffer
+    message_buffer_.clear();
+    message_buffer_.reserve(256 + out_len);  // Pre-allocate space
+    message_buffer_ = "{";
+    message_buffer_ += "\"id\":\"" + std::string(event_id) + "\",";
+    message_buffer_ += "\"event_type\":\"input_audio_buffer.append\",";
+    message_buffer_ += "\"data\":{";
+    message_buffer_ += "\"delta\":\"" + std::string(base64_buffer_.get()) + "\"";
+    message_buffer_ += "}";
+    message_buffer_ += "}";
 
-    // 发送消息
-    websocket_->Send(message);
-    
-    // 清理
-    free(base64_buffer);
+    // Send message
+    websocket_->Send(message_buffer_);
 }
+
 
 bool WebsocketProtocol::SendText(const std::string& text) {
     if (websocket_ == nullptr) {
@@ -120,7 +124,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     }
 
     error_occurred_ = false;
-    std::string url = std::string("ws://") + std::string(room_params_.api_domain) + std::string("/v1/chat") + std::string("?bot_id=") + std::string(room_params_.bot_id);
+    std::string url = std::string("ws://") + room_params_.api_domain + std::string("/v1/chat") + std::string("?bot_id=") + std::string(room_params_.bot_id);
     std::string token = "Bearer " + std::string(room_params_.access_token);
 
     message_cache_ = "";
@@ -130,11 +134,10 @@ bool WebsocketProtocol::OpenAudioChannel() {
     websocket_->SetHeader("x-use-ppe", "1");
 
     websocket_->OnData([this](const char* data, size_t len, bool binary) {
-        // ESP_LOGI(TAG, "Received data: %s", data);
         if (!data || len == 0) {
             return;
         }
-        std::string_view str_data(data, len);  // 将 const char* 转换为 string_view
+        std::string_view str_data(data, len);
 
         constexpr std::string_view key = "\"event_type\":\"";
         size_t event_start = str_data.find(key);
@@ -143,28 +146,22 @@ bool WebsocketProtocol::OpenAudioChannel() {
         }
 
         event_start += key.length();
-
-        // 找到事件类型结束的引号位置
         size_t event_end = str_data.find('"', event_start);
         if (event_end == std::string_view::npos) {
             return;
         }
 
-        // 提取事件类型
         std::string_view event_type = str_data.substr(event_start, event_end - event_start);
-
         if (event_type.empty() || event_type.length() >= 64) {
             return;
         }
 
         if(event_type == "conversation.audio.delta") {
-            // 查找 content 字段
             constexpr std::string_view content_key = "\"content\":\"";
             size_t content_start = str_data.find(content_key);
             if (content_start != std::string_view::npos) {
                 content_start += content_key.length();
                 
-                // 找到 content 结束的位置 (下一个未转义的引号)
                 size_t content_end = content_start;
                 bool escaped = false;
                 
@@ -180,82 +177,113 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 }
                 
                 if (content_end < str_data.length()) {
-                    // 提取 base64 编码的内容
                     std::string_view base64_content = str_data.substr(content_start, content_end - content_start);
                     
-                    // 计算解码后的长度
+                    // Calculate decoded size
                     size_t output_len = 0;
                     mbedtls_base64_decode(nullptr, 0, &output_len, 
                         (const unsigned char*)base64_content.data(), 
                         base64_content.length());
 
-                    // 分配内存并解码
-                    std::vector<uint8_t> decoded_data(output_len);
+                    // Reuse buffer for decoded data
+                    if (output_len > audio_data_buffer_.capacity()) {
+                        audio_data_buffer_.reserve(output_len);
+                    }
+                    audio_data_buffer_.resize(output_len);
+
                     size_t actual_len = 0;
                     int ret = mbedtls_base64_decode(
-                        decoded_data.data(), decoded_data.size(), &actual_len,
+                        audio_data_buffer_.data(), audio_data_buffer_.size(), &actual_len,
                         (const unsigned char*)base64_content.data(), 
                         base64_content.length());
 
                     if (ret == 0 && actual_len > 0) {
-                        // 回调处理解码后的音频数据
                         if (on_incoming_audio_ != nullptr) {
-                            on_incoming_audio_(std::move(decoded_data));
+                            std::vector<uint8_t> audio_data(audio_data_buffer_.begin(), audio_data_buffer_.begin() + actual_len);
+                            on_incoming_audio_(std::move(audio_data));
                         }
                     }
                 }
             }
         } else {
-            auto root = cJSON_Parse(data);
+            // Reuse cJSON root
+            cJSON* root = cJSON_Parse(data);
+            if (!root) {
+                return;
+            }
+
             if (event_type == "chat.created") {
                 ParseServerHello(root);
             } else if (event_type == "conversation.audio_transcript.update") {
-                // 识别到的文本
                 auto data_json = cJSON_GetObjectItem(root, "data");
                 auto content_json = cJSON_GetObjectItem(data_json, "content");
-                std::string message = "{";
-                message += "\"type\":\"stt\",";
-                message += "\"text\":\"" + std::string(content_json->valuestring) + "\"";
-                message += "}";
-                 auto message_json = cJSON_Parse(message.c_str());
-                on_incoming_json_(message_json);
-                cJSON_Delete(message_json);
-
+                
+                // Reuse message buffer
+                message_buffer_.clear();
+                message_buffer_ = "{";
+                message_buffer_ += "\"type\":\"stt\",";
+                message_buffer_ += "\"text\":\"" + std::string(content_json->valuestring) + "\"";
+                message_buffer_ += "}";
+                
+                auto message_json = cJSON_Parse(message_buffer_.c_str());
+                if (message_json) {
+                    on_incoming_json_(message_json);
+                    cJSON_Delete(message_json);
+                }
             } else if (event_type == "conversation.chat.in_progress") {
-                // 清空字幕缓存
-                message_cache_ = "";
-                std::string message = "{";
-                message += "\"type\":\"tts\",";
-                message += "\"state\":\"start\"";
-                message += "}";
-                auto message_json = cJSON_Parse(message.c_str());
-                on_incoming_json_(message_json);
-                cJSON_Delete(message_json);
+                message_cache_.clear();
+                message_buffer_.clear();
+                message_buffer_ = "{";
+                message_buffer_ += "\"type\":\"tts\",";
+                message_buffer_ += "\"state\":\"start\"";
+                message_buffer_ += "}";
+                
+                auto message_json = cJSON_Parse(message_buffer_.c_str());
+                if (message_json) {
+                    on_incoming_json_(message_json);
+                    cJSON_Delete(message_json);
+                }
             } else if (event_type == "conversation.audio.completed") {
-                std::string message = "{";
-                message += "\"type\":\"tts\",";
-                message += "\"state\":\"stop\"";
-                message += "}";
-                auto message_json = cJSON_Parse(message.c_str());
-                on_incoming_json_(message_json);
-                cJSON_Delete(message_json);
+                message_buffer_.clear();
+                message_buffer_ = "{";
+                message_buffer_ += "\"type\":\"tts\",";
+                message_buffer_ += "\"state\":\"stop\"";
+                message_buffer_ += "}";
+                
+                auto message_json = cJSON_Parse(message_buffer_.c_str());
+                if (message_json) {
+                    on_incoming_json_(message_json);
+                    cJSON_Delete(message_json);
+                }
+            } else if (event_type == "input_audio_buffer.speech_started") {
+                auto& app = Application::GetInstance();
+                app.AbortSpeaking(kAbortReasonNone);
+            } else if (event_type == "input_audio_buffer.speech_stopped") {
+                
             } else if (event_type == "conversation.message.delta") {
-                // 解析 content
                 auto data_json = cJSON_GetObjectItem(root, "data");
                 auto content_json = cJSON_GetObjectItem(data_json, "content");
 
                 message_cache_ += std::string(content_json->valuestring);
-                std::string message = "{";
-                message += "\"type\":\"tts\",";
-                message += "\"state\":\"sentence_start\",";
-                message += "\"text\":\"" + message_cache_ + "\"";
-                message += "}";
-                auto message_json = cJSON_Parse(message.c_str());
-                on_incoming_json_(message_json);
-                cJSON_Delete(message_json);
+                message_buffer_.clear();
+                message_buffer_ = "{";
+                message_buffer_ += "\"type\":\"tts\",";
+                message_buffer_ += "\"state\":\"sentence_start\",";
+                message_buffer_ += "\"text\":\"" + message_cache_ + "\"";
+                message_buffer_ += "}";
+                
+                auto message_json = cJSON_Parse(message_buffer_.c_str());
+                if (message_json) {
+                    on_incoming_json_(message_json);
+                    cJSON_Delete(message_json);
+                }
             } else if (event_type == "conversation.chat.requires_action") {
                 CozeMCPParser::getInstance().handle_mcp(str_data);
+            } else if (event_type == "error") {
+                ESP_LOGE(TAG, "Error: %s", str_data.data());
             }
+            
+            cJSON_Delete(root);
         }
         last_incoming_time_ = std::chrono::steady_clock::now();
     });
@@ -289,11 +317,31 @@ bool WebsocketProtocol::OpenAudioChannel() {
     uint32_t random_value = esp_random();
     snprintf(event_id, sizeof(event_id), "%lu", random_value);
     
+    std::string user_id = "nd7ec83a";  // You may want to set this appropriately
     std::string codec = "opus";
     std::string message = "{";
     message += "\"id\":\"" + std::string(event_id) + "\",";
     message += "\"event_type\":\"chat.update\",";
     message += "\"data\":{";
+    message += "\"event_subscriptions\": [";
+    message += "\"chat.created\",";
+    message += "\"chat.updated\",";
+    message += "\"conversation.chat.created\",";
+    message += "\"conversation.chat.in_progress\",";
+    message += "\"conversation.audio.delta\",";
+    message += "\"conversation.audio.completed\",";
+    message += "\"conversation.chat.completed\",";
+    message += "\"conversation.chat.failed\",";
+    message += "\"error\",";
+    message += "\"input_audio_buffer.completed\",";
+    message += "\"input_audio_buffer.cleared\",";
+    message += "\"conversation.cleared\",";
+    message += "\"conversation.chat.canceled\",";
+    message += "\"conversation.audio_transcript.completed\",";
+    message += "\"conversation.chat.requires_action\",";
+    message += "\"input_audio_buffer.speech_started\",";
+    message += "\"input_audio_buffer.speech_stopped\"";
+    message += "],";
     message += "\"turn_detection\": {";
     message += "\"type\": \"server_vad\",";  // 判停类型，client_vad/server_vad，默认为 client_vad
     message += "\"prefix_padding_ms\": 300,"; // server_vad模式下，VAD 检测到语音之前要包含的音频量，单位为 ms。默认为 600ms
@@ -314,7 +362,6 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "\"channel\":1,";
     message += "\"bit_depth\":16";
     message += "},";
-    message += "\"asr_config\":{\"user_language\":\"" + std::string(room_params_.voice_lang) + "\"},";
     message += "\"output_audio\":{";
     message += "\"codec\":\"" + codec + "\",";
     message += "\"opus_config\":{";
@@ -323,7 +370,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "\"frame_size_ms\":60,";
     message += "\"limit_config\":{";
     message += "\"period\":1,";
-    message += "\"max_frame_num\":18";
+    message += "\"max_frame_num\":17";
     message += "}";
     message += "},";
     message += "\"speech_rate\":0,";
@@ -334,7 +381,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     
     websocket_->Send(message);
 
-    ESP_LOGI(TAG, "Send message: %s", message.c_str());
+    // ESP_LOGI(TAG, "Send message: %s", message.c_str());
 
     return true;
 }
