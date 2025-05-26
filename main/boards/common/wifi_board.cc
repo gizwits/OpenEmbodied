@@ -18,9 +18,10 @@
 #include <esp_log.h>
 
 #include <wifi_station.h>
-#include <wifi_configuration_ap.h>
-#include <wifi_configuration_ble.h>
+#include <auth.h>
 #include <wifi_connection_manager.h>
+#include <wifi_configuration.h>
+
 #include <ssid_manager.h>
 
 static const char *TAG = "WifiBoard";
@@ -43,31 +44,11 @@ void WifiBoard::EnterWifiConfigMode() {
     application.SetDeviceState(kDeviceStateWifiConfiguring);
 
     // 初始化 WiFi模块
-    WifiConnectionManager::GetInstance().InitializeWiFi();
-#ifdef CONFIG_CONNECTION_TYPE_AP
-    auto& wifi_ap = WifiConfigurationAp::GetInstance();
-    wifi_ap.SetLanguage(Lang::CODE);
-    wifi_ap.SetSsidPrefix("XPG-GAgent");
-    wifi_ap.Start();
-    wifi_ap.StartWebServer();
-    std::string hint = Lang::Strings::CONNECT_TO_HOTSPOT;
-    hint += wifi_ap.GetSsid();
-    hint += Lang::Strings::ACCESS_VIA_BROWSER;
-    hint += wifi_ap.GetWebServerUrl();
-    hint += "\n\n";
-    // 播报配置 WiFi 的提示
-    application.Alert(Lang::Strings::WIFI_CONFIG_MODE, hint.c_str(), "", Lang::Sounds::P3_WIFICONFIG);
-#endif
 
-#ifdef CONFIG_CONNECTION_TYPE_BLE 
-    auto& ble_config = WifiConfigurationBle::getInstance();
-    ble_config.init(CONFIG_PRODUCT_KEY);  // 传入产品密钥
-
+    WifiConfiguration::GetInstance().Initialize(Auth::getInstance().getProductKey(), "XPG-GAgent");
     std::string hint = Lang::Strings::OPEN_MINI_APP;
     hint += "\n\n";
     application.Alert(Lang::Strings::WIFI_CONFIG_MODE, hint.c_str(), "", Lang::Sounds::P3_WIFICONFIG);
-#endif
-    
     
     // Wait forever until reset after configuration
     while (true) {
@@ -77,6 +58,45 @@ void WifiBoard::EnterWifiConfigMode() {
         vTaskDelay(pdMS_TO_TICKS(10000));
     }
 }
+// void WifiBoard::EnterWifiConfigMode() {
+//     auto& application = Application::GetInstance();
+//     application.SetDeviceState(kDeviceStateWifiConfiguring);
+
+//     // 初始化 WiFi模块
+//     WifiConnectionManager::GetInstance().InitializeWiFi();
+// #ifdef CONFIG_CONNECTION_TYPE_AP
+//     auto& wifi_ap = WifiConfigurationAp::GetInstance();
+//     wifi_ap.SetLanguage(Lang::CODE);
+//     wifi_ap.SetSsidPrefix("XPG-GAgent");
+//     wifi_ap.Start();
+//     wifi_ap.StartWebServer();
+//     std::string hint = Lang::Strings::CONNECT_TO_HOTSPOT;
+//     hint += wifi_ap.GetSsid();
+//     hint += Lang::Strings::ACCESS_VIA_BROWSER;
+//     hint += wifi_ap.GetWebServerUrl();
+//     hint += "\n\n";
+//     // 播报配置 WiFi 的提示
+//     application.Alert(Lang::Strings::WIFI_CONFIG_MODE, hint.c_str(), "", Lang::Sounds::P3_WIFICONFIG);
+// #endif
+
+// #ifdef CONFIG_CONNECTION_TYPE_BLE 
+//     auto& ble_config = WifiConfigurationBle::getInstance();
+//     ble_config.init(CONFIG_PRODUCT_KEY);  // 传入产品密钥
+
+//     std::string hint = Lang::Strings::OPEN_MINI_APP;
+//     hint += "\n\n";
+//     application.Alert(Lang::Strings::WIFI_CONFIG_MODE, hint.c_str(), "", Lang::Sounds::P3_WIFICONFIG);
+// #endif
+    
+    
+//     // Wait forever until reset after configuration
+//     while (true) {
+//         int free_sram = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+//         int min_free_sram = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+//         ESP_LOGI(TAG, "Free internal: %u minimal internal: %u", free_sram, min_free_sram);
+//         vTaskDelay(pdMS_TO_TICKS(10000));
+//     }
+// }
 
 bool WifiBoard::IsWifiConfigMode() {
     return wifi_config_mode_;

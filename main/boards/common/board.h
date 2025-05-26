@@ -52,7 +52,6 @@ public:
     virtual bool GetBatteryLevel(int &level, bool& charging, bool& discharging);
     virtual std::string GetJson();
     virtual void SetPowerSaveMode(bool enabled) = 0;
-    virtual BoardCamera* GetCamera() { return nullptr; }
     virtual bool IsWifiConfigMode();
     virtual std::string GetBoardJson() = 0;
     virtual std::string GetDeviceStatusJson() = 0;

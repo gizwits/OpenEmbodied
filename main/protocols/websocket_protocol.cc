@@ -30,11 +30,11 @@ bool WebsocketProtocol::Start() {
     return true;
 }
 
-void WebsocketProtocol::SendAudio(const std::vector<uint8_t>& data) {
-    if (websocket_ == nullptr || !websocket_->IsConnected() || data.empty()) {
+void WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
+    if (websocket_ == nullptr || !websocket_->IsConnected() || packet.payload.empty()) {
         return;
     }
-
+    const std::vector<uint8_t>& data = packet.payload;
     // Calculate required base64 buffer size
     size_t out_len = 4 * ((data.size() + 2) / 3);
     
@@ -202,7 +202,9 @@ bool WebsocketProtocol::OpenAudioChannel() {
                     if (ret == 0 && actual_len > 0) {
                         if (on_incoming_audio_ != nullptr) {
                             std::vector<uint8_t> audio_data(audio_data_buffer_.begin(), audio_data_buffer_.begin() + actual_len);
-                            on_incoming_audio_(std::move(audio_data));
+                            AudioStreamPacket packet;
+                            packet.payload = std::move(audio_data);
+                            on_incoming_audio_(std::move(packet));
                         }
                     }
                 }
@@ -297,7 +299,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
         }
     });
 
-    ESP_LOGI(TAG, "Connecting to websocket server: %s with version: %d", url.c_str(), version_);
+    ESP_LOGI(TAG, "Connecting to websocket server: %s", url.c_str());
     if (!websocket_->Connect(url.c_str())) {
         ESP_LOGE(TAG, "Failed to connect to websocket server");
         SetError(Lang::Strings::SERVER_NOT_CONNECTED);
@@ -393,7 +395,7 @@ std::string WebsocketProtocol::GetHelloMessage() {
     // keys: message type, version, audio_params (format, sample_rate, channels)
     cJSON* root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "type", "hello");
-    cJSON_AddNumberToObject(root, "version", version_);
+    cJSON_AddNumberToObject(root, "version", 1);
     cJSON* features = cJSON_CreateObject();
 #if CONFIG_USE_SERVER_AEC
     cJSON_AddBoolToObject(features, "aec", true);

@@ -36,14 +36,28 @@ bool MqttClient::initialize() {
     bool has_authkey = !Auth::getInstance().getAuthKey().empty();
 
     if (!has_authkey) {
-        ESP_LOGI(TAG, "authkey is empty");
-        GServer::getLimitProvision([this, config_sem](mqtt_config_t* config) {
-            endpoint_ = config->mqtt_address;
-            port_ = std::stoi(config->mqtt_port);
-            client_id_ = config->device_id;
-            ESP_LOGI(TAG, "MQTT endpoint: %s, port: %d", endpoint_.c_str(), port_);
-            xSemaphoreGive(config_sem);
-        });
+        if (need_activation == 1) {
+            GServer::activationLimitDevice([this, config_sem, &settings](mqtt_config_t* config) {
+                endpoint_ = config->mqtt_address;
+                port_ = std::stoi(config->mqtt_port);
+                client_id_ = config->device_id;
+                ESP_LOGI(TAG, "MQTT endpoint: %s, port: %d", endpoint_.c_str(), port_);
+                // 保存did
+                ESP_LOGI(TAG, "Device ID: %s", config->device_id);
+                settings.SetString("did", config->device_id);
+                xSemaphoreGive(config_sem);
+                settings.SetInt("need_activation", 0);
+            });
+            
+        } else {
+            GServer::getLimitProvision([this, config_sem](mqtt_config_t* config) {
+                endpoint_ = config->mqtt_address;
+                port_ = std::stoi(config->mqtt_port);
+                ESP_LOGI(TAG, "MQTT endpoint: %s, port: %d", endpoint_.c_str(), port_);
+                xSemaphoreGive(config_sem);
+            });
+        }
+        
     } else {
         if (need_activation == 1) {
             ESP_LOGI(TAG, "need_activation is true");

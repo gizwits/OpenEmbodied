@@ -20,7 +20,7 @@ public:
     virtual void SendStopListening() override;
     virtual void CloseAudioChannel() override;
     virtual bool IsAudioChannelOpened() const override;
-    virtual void SendAudio(const std::vector<uint8_t>& data) override;
+    virtual void SendAudio(const AudioStreamPacket& packet) override;
 
 private:
     WebSocket* websocket_ = nullptr;

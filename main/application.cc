@@ -11,6 +11,7 @@
 #include "server/giz_mqtt.h"
 #include "auth.h"
 #include "mcp_server.h"
+#include "settings.h"
 
 #if CONFIG_USE_AUDIO_PROCESSOR
 #include "afe_audio_processor.h"
@@ -426,6 +427,72 @@ void Application::Start() {
         Alert(Lang::Strings::ERROR, Lang::Strings::ERROR, "sad", Lang::Sounds::P3_EXCLAMATION);
         return;
     }
+
+    // Settings settings("wifi", true);
+    // bool need_activation = settings.GetInt("need_activation");
+    // bool has_authkey = !Auth::getInstance().getAuthKey().empty();
+
+    // if(need_activation == 1) {
+    //     if (!has_authkey) {
+    //         GServer::activationLimitDevice([this, &settings](mqtt_config_t* config) {
+    //             ESP_LOGI(TAG, "Device ID: %s", config->device_id);
+    //             settings.SetString("did", config->device_id);
+    //             settings.SetInt("need_activation", 0);
+    //             GServer::getWebsocketConfig([this](RoomParams* config) {
+    //                 if (config) {
+    //                     protocol_->UpdateRoomParams(*config);
+    //                 }
+    //             });
+    //         });
+    //     } else {
+    //         GServer::activationDevice([this, &settings](mqtt_config_t* config) {
+    //             settings.SetInt("need_activation", 0);
+    //             GServer::getWebsocketConfig([this](RoomParams* config) {
+    //                 if (config) {
+    //                     protocol_->UpdateRoomParams(*config);
+    //                 }
+    //             });
+    //         });
+    //     }
+    // } else {
+    //     GServer::getWebsocketConfig([this](RoomParams* config) {
+    //         if (config) {
+    //             protocol_->UpdateRoomParams(*config);
+    //         }
+    //     });
+    // }
+
+    // if (!has_authkey) {
+    //     if (need_activation == 1) {
+    //         GServer::activationLimitDevice([this, &settings](mqtt_config_t* config) {
+    //             ESP_LOGI(TAG, "Device ID: %s", config->device_id);
+    //             settings.SetString("did", config->device_id);
+    //             settings.SetInt("need_activation", 0);
+    //             GServer::getWebsocketConfig([this](RoomParams* config) {
+    //                 if (config) {
+    //                     protocol_->UpdateRoomParams(*config);
+    //                 }
+    //             });
+    //         });
+            
+    //     } else {
+            
+    //     }
+        
+    // } else {
+    //     if (need_activation == 1) {
+    //         ESP_LOGI(TAG, "need_activation is true");
+    //         // 调用注册
+    //         GServer::activationDevice([this, &settings](mqtt_config_t* config) {
+    //             settings.SetInt("need_activation", 0);
+    //             GServer::getWebsocketConfig([this](RoomParams* config) {
+    //                 if (config) {
+    //                     protocol_->UpdateRoomParams(*config);
+    //                 }
+    //             });
+    //         });
+    //     }
+    // }
 
     // Initialize the protocol
     protocol_->OnNetworkError([this](const std::string& message) {
@@ -1010,7 +1077,7 @@ bool Application::CanEnterSleepMode() {
 void Application::SendMcpMessage(const std::string& payload) {
     Schedule([this, payload]() {
         if (protocol_) {
-            protocol_->SendMcpMessage(payload);
+            // protocol_->SendMcpMessage(payload);
         }
     });
 }

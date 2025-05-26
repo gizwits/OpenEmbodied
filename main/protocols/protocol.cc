@@ -118,10 +118,10 @@ void Protocol::SendIotStates(const std::string& states) {
     // SendText(message);
 }
 
-void Protocol::SendMcpMessage(const std::string& payload) {
-    std::string message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"mcp\",\"payload\":" + payload + "}";
-    SendText(message);
-}
+// void Protocol::SendMcpMessage(const std::string& payload) {
+//     std::string message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"mcp\",\"payload\":" + payload + "}";
+//     SendText(message);
+// }
 
 bool Protocol::IsTimeout() const {
     const int kTimeoutSeconds = 120;

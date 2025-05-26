@@ -2,6 +2,7 @@
 #include "esp_partition.h"
 #include "esp_log.h"
 #include <string.h>
+#include "settings.h"
 
 static const char *TAG = "Auth";
 
@@ -38,6 +39,9 @@ void Auth::init() {
     
     // 从auth分区读取数据
     err = read_nvs_data("auth", 0, buffer, sizeof(buffer));
+
+    Settings settings("wifi", true);
+
     if (err == ESP_OK) {
         char auth_key[33] = {0};
         char did[9] = {0};
@@ -80,12 +84,16 @@ void Auth::init() {
             ESP_LOGW(TAG, "Failed to parse auth data, using default values");
             m_product_key = CONFIG_PRODUCT_KEY;
             m_product_secret = CONFIG_PRODUCT_SECRET;
+            m_device_id = settings.GetString("did", "");
+
+            ESP_LOGI(TAG, "Device ID: %s", m_device_id.c_str());
             m_is_initialized = true;
         }
     } else {
         ESP_LOGE(TAG, "Failed to read auth data, using default values");
         m_product_key = CONFIG_PRODUCT_KEY;
         m_product_secret = CONFIG_PRODUCT_SECRET;
+        m_device_id = settings.GetString("did", "");
         m_is_initialized = true;
     }
 }
