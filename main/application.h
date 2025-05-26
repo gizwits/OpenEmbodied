@@ -11,6 +11,7 @@
 #include <list>
 #include <vector>
 #include <condition_variable>
+#include <memory>
 
 #include <opus_encoder.h>
 #include <opus_decoder.h>
@@ -20,12 +21,10 @@
 #include "server/giz_mqtt.h"
 #include "ota.h"
 #include "background_task.h"
+#include "audio_processor.h"
 
 #if CONFIG_USE_WAKE_WORD_DETECT
 #include "wake_word_detect.h"
-#endif
-#if CONFIG_USE_AUDIO_PROCESSOR
-#include "audio_processor.h"
 #endif
 
 #define SCHEDULE_EVENT (1 << 0)
@@ -73,6 +72,7 @@ public:
     void WakeWordInvoke(const std::string& wake_word);
     void PlaySound(const std::string_view& sound);
     bool CanEnterSleepMode();
+    void SendMcpMessage(const std::string& payload);
 
 private:
     Application();
@@ -81,9 +81,7 @@ private:
 #if CONFIG_USE_WAKE_WORD_DETECT
     WakeWordDetect wake_word_detect_;
 #endif
-#if CONFIG_USE_AUDIO_PROCESSOR
-    AudioProcessor audio_processor_;
-#endif
+    std::unique_ptr<AudioProcessor> audio_processor_;
     Ota ota_;
     std::mutex mutex_;
     std::list<std::function<void()>> main_tasks_;
@@ -94,7 +92,7 @@ private:
     esp_timer_handle_t clock_timer_handle_ = nullptr;
     volatile DeviceState device_state_ = kDeviceStateUnknown;
     ListeningMode listening_mode_ = kListeningModeAutoStop;
-#if CONFIG_USE_REALTIME_CHAT
+#if CONFIG_USE_DEVICE_AEC || CONFIG_USE_SERVER_AEC
     bool realtime_chat_enabled_ = true;
 #else
     bool realtime_chat_enabled_ = false;
@@ -109,8 +107,13 @@ private:
     TaskHandle_t audio_loop_task_handle_ = nullptr;
     BackgroundTask* background_task_ = nullptr;
     std::chrono::steady_clock::time_point last_output_time_;
-    std::list<std::vector<uint8_t>> audio_decode_queue_;
+    std::list<AudioStreamPacket> audio_decode_queue_;
     std::condition_variable audio_decode_cv_;
+
+    // 新增：用于维护音频包的timestamp队列
+    std::list<uint32_t> timestamp_queue_;
+    std::mutex timestamp_mutex_;
+    std::atomic<uint32_t> last_output_timestamp_ = 0;
 
     std::unique_ptr<OpusEncoderWrapper> opus_encoder_;
     std::unique_ptr<OpusDecoderWrapper> opus_decoder_;

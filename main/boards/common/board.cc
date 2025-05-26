@@ -51,10 +51,17 @@ bool Board::GetBatteryLevel(int &level, bool& charging, bool& discharging) {
 bool Board::IsWifiConfigMode() {
     return wifi_config_mode_;
 }
+bool Board::GetTemperature(float& esp32temp){
+    return false;
+}
 
 Display* Board::GetDisplay() {
     static NoDisplay display;
     return &display;
+}
+
+Camera* Board::GetCamera() {
+    return nullptr;
 }
 
 Led* Board::GetLed() {

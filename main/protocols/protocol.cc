@@ -9,7 +9,7 @@ void Protocol::OnIncomingJson(std::function<void(const cJSON* root)> callback) {
     on_incoming_json_ = callback;
 }
 
-void Protocol::OnIncomingAudio(std::function<void(std::vector<uint8_t>&& data)> callback) {
+void Protocol::OnIncomingAudio(std::function<void(AudioStreamPacket&& packet)> callback) {
     on_incoming_audio_ = callback;
 }
 
@@ -116,6 +116,11 @@ void Protocol::SendIotDescriptors(const std::string& descriptors) {
 void Protocol::SendIotStates(const std::string& states) {
     // std::string message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"iot\",\"update\":true,\"states\":" + states + "}";
     // SendText(message);
+}
+
+void Protocol::SendMcpMessage(const std::string& payload) {
+    std::string message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"mcp\",\"payload\":" + payload + "}";
+    SendText(message);
 }
 
 bool Protocol::IsTimeout() const {

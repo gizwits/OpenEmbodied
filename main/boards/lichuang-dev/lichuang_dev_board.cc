@@ -6,14 +6,17 @@
 #include "config.h"
 #include "i2c_device.h"
 #include "iot/thing_manager.h"
-// #include "camera/board_camera.h"
-
+#include "esp32_camera.h"
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
 #include <driver/i2c_master.h>
 #include <driver/spi_common.h>
 #include <wifi_station.h>
+#include <esp_lcd_touch_ft5x06.h>
+#include <esp_lvgl_port.h>
+#include <lvgl.h>
+
 
 #define TAG "LichuangDevBoard"
 
@@ -35,6 +38,36 @@ public:
     }
 };
 
+class CustomAudioCodec : public BoxAudioCodec {
+private:
+    Pca9557* pca9557_;
+
+public:
+    CustomAudioCodec(i2c_master_bus_handle_t i2c_bus, Pca9557* pca9557) 
+        : BoxAudioCodec(i2c_bus, 
+                       AUDIO_INPUT_SAMPLE_RATE, 
+                       AUDIO_OUTPUT_SAMPLE_RATE,
+                       AUDIO_I2S_GPIO_MCLK, 
+                       AUDIO_I2S_GPIO_BCLK, 
+                       AUDIO_I2S_GPIO_WS, 
+                       AUDIO_I2S_GPIO_DOUT, 
+                       AUDIO_I2S_GPIO_DIN,
+                       GPIO_NUM_NC, 
+                       AUDIO_CODEC_ES8311_ADDR, 
+                       AUDIO_CODEC_ES7210_ADDR, 
+                       AUDIO_INPUT_REFERENCE),
+          pca9557_(pca9557) {
+    }
+
+    virtual void EnableOutput(bool enable) override {
+        BoxAudioCodec::EnableOutput(enable);
+        if (enable) {
+            pca9557_->SetOutputState(1, 1);
+        } else {
+            pca9557_->SetOutputState(1, 0);
+        }
+    }
+};
 
 class LichuangDevBoard : public WifiBoard {
 private:
@@ -43,8 +76,7 @@ private:
     Button boot_button_;
     LcdDisplay* display_;
     Pca9557* pca9557_;
-    // BoardCamera* camera_;
-
+    Esp32Camera* camera_;
 
     void InitializeI2c() {
         // Initialize I2C peripheral
@@ -169,12 +201,74 @@ private:
                                     });
     }
 
-    // 物联网初始化，添加对 AI 可见设备
-    void InitializeIot() {
-        auto& thing_manager = iot::ThingManager::GetInstance();
-        thing_manager.AddThing(iot::CreateThing("Speaker"));
-        thing_manager.AddThing(iot::CreateThing("Screen"));
-        thing_manager.AddThing(iot::CreateThing("Camera"));
+    void InitializeTouch()
+    {
+        esp_lcd_touch_handle_t tp;
+        esp_lcd_touch_config_t tp_cfg = {
+            .x_max = DISPLAY_WIDTH,
+            .y_max = DISPLAY_HEIGHT,
+            .rst_gpio_num = GPIO_NUM_NC, // Shared with LCD reset
+            .int_gpio_num = GPIO_NUM_NC, 
+            .levels = {
+                .reset = 0,
+                .interrupt = 0,
+            },
+            .flags = {
+                .swap_xy = 1,
+                .mirror_x = 1,
+                .mirror_y = 0,
+            },
+        };
+        esp_lcd_panel_io_handle_t tp_io_handle = NULL;
+        esp_lcd_panel_io_i2c_config_t tp_io_config = ESP_LCD_TOUCH_IO_I2C_FT5x06_CONFIG();
+        tp_io_config.scl_speed_hz = 400000;
+
+        esp_lcd_new_panel_io_i2c(i2c_bus_, &tp_io_config, &tp_io_handle);
+        esp_lcd_touch_new_i2c_ft5x06(tp_io_handle, &tp_cfg, &tp);
+        assert(tp);
+
+        /* Add touch input (for selected screen) */
+        const lvgl_port_touch_cfg_t touch_cfg = {
+            .disp = lv_display_get_default(), 
+            .handle = tp,
+        };
+
+        lvgl_port_add_touch(&touch_cfg);
+    }
+
+    void InitializeCamera() {
+        // Open camera power
+        pca9557_->SetOutputState(2, 0);
+
+        camera_config_t config = {};
+        config.ledc_channel = LEDC_CHANNEL_2;  // LEDC通道选择  用于生成XCLK时钟 但是S3不用
+        config.ledc_timer = LEDC_TIMER_2; // LEDC timer选择  用于生成XCLK时钟 但是S3不用
+        config.pin_d0 = CAMERA_PIN_D0;
+        config.pin_d1 = CAMERA_PIN_D1;
+        config.pin_d2 = CAMERA_PIN_D2;
+        config.pin_d3 = CAMERA_PIN_D3;
+        config.pin_d4 = CAMERA_PIN_D4;
+        config.pin_d5 = CAMERA_PIN_D5;
+        config.pin_d6 = CAMERA_PIN_D6;
+        config.pin_d7 = CAMERA_PIN_D7;
+        config.pin_xclk = CAMERA_PIN_XCLK;
+        config.pin_pclk = CAMERA_PIN_PCLK;
+        config.pin_vsync = CAMERA_PIN_VSYNC;
+        config.pin_href = CAMERA_PIN_HREF;
+        config.pin_sccb_sda = -1;   // 这里写-1 表示使用已经初始化的I2C接口
+        config.pin_sccb_scl = CAMERA_PIN_SIOC;
+        config.sccb_i2c_port = 1;
+        config.pin_pwdn = CAMERA_PIN_PWDN;
+        config.pin_reset = CAMERA_PIN_RESET;
+        config.xclk_freq_hz = XCLK_FREQ_HZ;
+        config.pixel_format = PIXFORMAT_RGB565;
+        config.frame_size = FRAMESIZE_VGA;
+        config.jpeg_quality = 12;
+        config.fb_count = 1;
+        config.fb_location = CAMERA_FB_IN_PSRAM;
+        config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+
+        camera_ = new Esp32Camera(config);
     }
 
 public:
@@ -182,26 +276,23 @@ public:
         InitializeI2c();
         InitializeSpi();
         InitializeSt7789Display();
+        InitializeTouch();
         InitializeButtons();
-        InitializeIot();
+        InitializeCamera();
+
+#if CONFIG_IOT_PROTOCOL_XIAOZHI
+        auto& thing_manager = iot::ThingManager::GetInstance();
+        thing_manager.AddThing(iot::CreateThing("Speaker"));
+        thing_manager.AddThing(iot::CreateThing("Screen"));
+#endif
         GetBacklight()->RestoreBrightness();
         // InitializeCamera();
     }
 
     virtual AudioCodec* GetAudioCodec() override {
-        static BoxAudioCodec audio_codec(
+        static CustomAudioCodec audio_codec(
             i2c_bus_, 
-            AUDIO_INPUT_SAMPLE_RATE, 
-            AUDIO_OUTPUT_SAMPLE_RATE,
-            AUDIO_I2S_GPIO_MCLK, 
-            AUDIO_I2S_GPIO_BCLK, 
-            AUDIO_I2S_GPIO_WS, 
-            AUDIO_I2S_GPIO_DOUT, 
-            AUDIO_I2S_GPIO_DIN,
-            GPIO_NUM_NC, 
-            AUDIO_CODEC_ES8311_ADDR, 
-            AUDIO_CODEC_ES7210_ADDR, 
-            AUDIO_INPUT_REFERENCE);
+            pca9557_);
         return &audio_codec;
     }
 
@@ -213,9 +304,9 @@ public:
         static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
         return &backlight;
     }
-    virtual BoardCamera* GetCamera() override {
-        // return camera_;
-        return nullptr;
+
+    virtual Camera* GetCamera() override {
+        return camera_;
     }
 };
 

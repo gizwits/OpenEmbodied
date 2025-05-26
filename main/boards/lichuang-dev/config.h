@@ -37,6 +37,7 @@
 #define DISPLAY_BACKLIGHT_PIN GPIO_NUM_42
 #define DISPLAY_BACKLIGHT_OUTPUT_INVERT true
 
+/* Camera pins */
 #define CAMERA_PIN_PWDN -1
 #define CAMERA_PIN_RESET -1
 #define CAMERA_PIN_XCLK 5
@@ -54,8 +55,6 @@
 #define CAMERA_PIN_VSYNC 3
 #define CAMERA_PIN_HREF 46
 #define CAMERA_PIN_PCLK 7
-#define PCA9557_OUTPUT_PORT             0x01
-
 
 #define XCLK_FREQ_HZ 24000000
 
