@@ -45,10 +45,9 @@
 - Wi-Fi / ML307 Cat.1 4G
 - BOOT 键唤醒和打断，支持点击和长按两种触发方式
 - 离线语音唤醒 [ESP-SR](https://github.com/espressif/esp-sr)
-- 流式语音对话（WebSocket 或 UDP 协议）
-- 支持国语、粤语、英语、日语、韩语 5 种语言识别 [SenseVoice](https://github.com/FunAudioLLM/SenseVoice)
-- 声纹识别，识别是谁在喊 AI 的名字 [3D Speaker](https://github.com/modelscope/3D-Speaker)
-- 大模型 TTS（火山引擎 或 CosyVoice）
+- 流式语音对话（WebSocket）
+- 支持国语、粤语、英语、日语、韩语 等多种语言识别
+- 大模型 TTS
 - 大模型 LLM（Qwen, DeepSeek, Doubao）
 - 可配置的提示词和音色（自定义角色）
 - 短期记忆，每轮对话后自我总结
@@ -61,18 +60,9 @@
 - ✅ ESP32-S3
 - ✅ ESP32-C3
 - ✅ ESP32-P4
+- ✅ ESP32-C2 [ESP-SR]([https://github.com/espressif/esp-sr](https://github.com/gizwits/ai-esp32-c2))
 
 ## 硬件部分
-
-### 面包板手工制作实践
-
-详见飞书文档教程：
-
-👉 [《小智 AI 聊天机器人百科全书》](https://ccnphfhqs21z.feishu.cn/wiki/F5krwD16viZoF0kKkvDcrZNYnhb?from=from_copylink)
-
-面包板效果图如下：
-
-![面包板效果图](docs/wiring2.jpg)
 
 ### 已支持的开源硬件
 
@@ -130,15 +120,6 @@
 
 ## 固件部分
 
-### 免开发环境烧录
-
-新手第一次操作建议先不要搭建开发环境，直接使用免开发环境烧录的固件。
-
-固件默认接入 [xiaozhi.me](https://xiaozhi.me) 官方服务器，目前个人用户注册账号可以免费使用 Qwen 实时模型。
-
-👉 [Flash烧录固件（无IDF开发环境）](https://ccnphfhqs21z.feishu.cn/wiki/Zpz4wXBtdimBrLk25WdcXzxcnNS) 
-
-
 ### 开发环境
 
 - Cursor 或 VSCode
@@ -154,22 +135,20 @@
 
 ## 智能体配置
 
-如果你已经拥有一个小智 AI 聊天机器人设备，可以登录 [xiaozhi.me](https://xiaozhi.me) 控制台进行配置。
+- [智能体发布到机智云Gokit5说明](https://ucnvydcxb9v5.feishu.cn/wiki/M51dwh0q7izeAbkm1ikcXZYtnud?from=from_copylink)
+- [创建小程序](https://devdocs.gizwits.com/zh-cn/AppDev/Applets.html#%E5%B0%8F%E7%A8%8B%E5%BA%8F%E5%8A%9F%E8%83%BD%E7%AE%80%E4%BB%8B)
+- [智能体发布到机智云Gokit5说明](https://cb7sb1iltn.feishu.cn/docx/UikfduMgwoHWryx8vw4cRvxinSc?from=from_copylink)
 
-👉 [后台操作视频教程（旧版界面）](https://www.bilibili.com/video/BV1jUCUY2EKM/)
-
-## 技术原理与私有化部署
-
-👉 [一份详细的 WebSocket 通信协议文档](docs/websocket.md)
-
-在个人电脑上部署服务器，可以参考另一位作者同样以 MIT 许可证开源的项目 [xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server)
+## 技术原理
+- [MQTT](https://doc.weixin.qq.com/doc/w3_APAAZwbkAKUpg8ZerLGQcCFlkCuh1?scode=AFoA3gcjAA8hJRmc5YACQAaAbkAKU)
+- [Coze socket](https://www.coze.cn/open/docs/developer_guides/streaming_chat_api)
 
 ## Star History
 
-<a href="https://www.star-history.com/#gizwits/xiaozhi-gizwits-esp32&Date">
+<a href="https://www.star-history.com/#gizwits/ai-esp32&Date">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=gizwits/xiaozhi-gizwits-esp32&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=gizwits/xiaozhi-gizwits-esp32&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=gizwits/xiaozhi-gizwits-esp32&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=gizwits/ai-esp32&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=gizwits/ai-esp32&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=gizwits/ai-esp32&type=Date" />
  </picture>
 </a>
