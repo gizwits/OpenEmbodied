@@ -1,6 +1,6 @@
 # Gizwits + Coze + 小智
 
-まず、蝦哥のオープンソースプロジェクトに感謝いたします：https://github.com/gizwits/xiaozhi-gizwits-esp32
+まず、蝦哥のオープンソースプロジェクトに感謝いたします：https://github.com/78/xiaozhi-esp32
 
 次に、https://github.com/xinnan-tech/xiaozhi-esp32-server にも感謝いたします。
 
