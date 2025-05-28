@@ -1,6 +1,6 @@
 # Gizwits + Coze + 小智
 
-首先致谢虾哥的开源项目：https://github.com/gizwits/xiaozhi-gizwits-esp32
+首先致谢虾哥的开源项目：https://github.com/78/xiaozhi-esp32
 
 其次致谢：https://github.com/xinnan-tech/xiaozhi-esp32-server
 
