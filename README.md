@@ -51,7 +51,7 @@
 - ✅ ESP32-S3
 - ✅ ESP32-C3
 - ✅ ESP32-P4
-- ✅ ESP32-C2 [ESP-SR]([https://github.com/espressif/esp-sr](https://github.com/gizwits/ai-esp32-c2))
+- ✅ [ESP32-C2]([https://github.com/espressif/esp-sr](https://github.com/gizwits/ai-esp32-c2))
 
 ## 硬件部分
 
