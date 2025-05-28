@@ -1,6 +1,6 @@
 # Gizwits + Coze + Xiaozhi
 
-First, thanks to Brother Xia's open source project: https://github.com/gizwits/xiaozhi-gizwits-esp32
+First, thanks to Brother Xia's open source project: https://github.com/78/xiaozhi-esp32
 
 Second, thanks to: https://github.com/xinnan-tech/xiaozhi-esp32-server
 
