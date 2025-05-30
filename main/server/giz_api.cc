@@ -309,6 +309,8 @@ int32_t GServer::getProvision(std::function<void(mqtt_config_t*)> callback) {
         return -1;
     }
 
+    auto status_code = http->GetStatusCode();
+
     std::string response = http->ReadAll();
     delete http;
 
@@ -344,6 +346,8 @@ int32_t GServer::getLimitProvision(std::function<void(mqtt_config_t*)> callback)
         delete http;
         return -1;
     }
+
+    auto status_code = http->GetStatusCode();
 
     std::string response = http->ReadAll();
     delete http;
@@ -390,15 +394,21 @@ int32_t GServer::activationLimitDevice(std::function<void(mqtt_config_t*)> callb
     http->SetHeader("X-Trace-Id", get_trace_id());
     http->SetHeader("Content-Type", "text/plain");
 
+    // 将字节数组转换为字符串
+    std::string content((char*)sOnboardingData, len);
+    http->SetContent(std::move(content));
+
     // 发送POST请求
     if (!http->Open("POST", url)) {
-        http->Write((const char*)sOnboardingData, len);
         ESP_LOGE(TAG, "Failed to open HTTP connection");
         delete http;
         return -1;
     }
 
+    auto status_code = http->GetStatusCode();
+
     std::string response = http->ReadAll();
+    http->Close();
     delete http;
     ESP_LOGI(TAG, "response: %s", response.c_str());
 
@@ -441,15 +451,21 @@ int32_t GServer::activationDevice(std::function<void(mqtt_config_t*)> callback) 
     http->SetHeader("X-Trace-Id", get_trace_id());
     http->SetHeader("Content-Type", "text/plain");
 
+    // 将字节数组转换为字符串
+    std::string content((char*)sOnboardingData, len);
+    http->SetContent(std::move(content));
+
     // 发送POST请求
     if (!http->Open("POST", url)) {
-        http->Write((const char*)sOnboardingData, len);
         ESP_LOGE(TAG, "Failed to open HTTP connection");
         delete http;
         return -1;
     }
 
+    auto status_code = http->GetStatusCode();
+
     std::string response = http->ReadAll();
+    http->Close();
     delete http;
     ESP_LOGI(TAG, "response: %s", response.c_str());
 
@@ -523,15 +539,22 @@ int32_t GServer::getFirmwareUpdate(const char* hw_version, const char* sw_versio
     http->SetHeader("X-Trace-Id", get_trace_id());
     http->SetHeader("Content-Type", "text/plain");
 
+
+    // 将字节数组转换为字符串
+    std::string content((char*)sFirmwareData, len);
+    http->SetContent(std::move(content));
+
     // 发送PUT请求
     if (!http->Open("PUT", url)) {
-        http->Write((const char*)sFirmwareData, len);
         ESP_LOGE(TAG, "Failed to open HTTP connection");
         delete http;
         return -1;
     }
 
+    auto status_code = http->GetStatusCode();
+
     std::string response = http->ReadAll();
+    http->Close();
     delete http;
     ESP_LOGI(TAG, "Firmware update response: %s", response.c_str());
 
@@ -612,6 +635,8 @@ int32_t GServer::getWebsocketConfig(std::function<void(RoomParams*)> callback) {
         delete http;
         return -1;
     }
+
+    auto status_code = http->GetStatusCode();
 
     std::string response = http->ReadAll();
     delete http;
