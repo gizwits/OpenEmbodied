@@ -541,8 +541,8 @@ int32_t GServer::getFirmwareUpdate(const char* hw_version, const char* sw_versio
 
 
     // 将字节数组转换为字符串
-    std::string content((char*)sFirmwareData, len);
-    http->SetContent(std::move(content));
+    // std::string content((char*)sFirmwareData, len);
+    // http->SetContent(std::move(content));
 
     // 发送PUT请求
     if (!http->Open("PUT", url)) {
@@ -550,13 +550,13 @@ int32_t GServer::getFirmwareUpdate(const char* hw_version, const char* sw_versio
         delete http;
         return -1;
     }
+    http->Write((const char*)sFirmwareData, len);
 
     auto status_code = http->GetStatusCode();
 
     std::string response = http->ReadAll();
     http->Close();
     delete http;
-    ESP_LOGI(TAG, "Firmware update response: %s", response.c_str());
 
     // 解析响应
     char* params = strdup(response.c_str());
