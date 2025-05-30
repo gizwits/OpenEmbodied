@@ -1,6 +1,6 @@
 # Gizwits + Coze + 小智
 
-首先致谢虾哥的开源项目：https://github.com/gizwits/xiaozhi-gizwits-esp32
+首先致谢虾哥的开源项目：https://github.com/78/xiaozhi-esp32
 
 其次致谢：https://github.com/xinnan-tech/xiaozhi-esp32-server
 
@@ -51,7 +51,7 @@
 - ✅ ESP32-S3
 - ✅ ESP32-C3
 - ✅ ESP32-P4
-- ✅ ESP32-C2 [ESP-SR]([https://github.com/espressif/esp-sr](https://github.com/gizwits/ai-esp32-c2))
+- ✅ [ESP32-C2]([https://github.com/espressif/esp-sr](https://github.com/gizwits/ai-esp32-c2))
 
 ## 硬件部分
 

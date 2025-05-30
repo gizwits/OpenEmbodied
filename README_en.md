@@ -1,6 +1,6 @@
 # Gizwits + Coze + Xiaozhi
 
-First, thanks to Brother Xia's open source project: https://github.com/gizwits/xiaozhi-gizwits-esp32
+First, thanks to Brother Xia's open source project: https://github.com/78/xiaozhi-esp32
 
 Second, thanks to: https://github.com/xinnan-tech/xiaozhi-esp32-server
 
@@ -50,7 +50,7 @@ You can also orchestrate more professional agents on the [Coze](https://www.coze
 - ✅ ESP32-S3
 - ✅ ESP32-C3
 - ✅ ESP32-P4
-- ✅ ESP32-C2 [ESP-SR](https://github.com/gizwits/ai-esp32-c2)
+- ✅ [ESP32-C2](https://github.com/gizwits/ai-esp32-c2)
 
 ## Hardware Section
 
