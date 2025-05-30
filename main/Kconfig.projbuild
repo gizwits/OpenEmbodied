@@ -31,13 +31,13 @@ config COZE_WEBSOCKET_URL
         
 config PRODUCT_KEY
     string "Product Key"
-    default "0971c20fda8344c3aeef39fda9438284"
+    default "f1029d2150c242a38c2088ecf6b92121"
     help
         Product key for Gizwits.
         
 config PRODUCT_SECRET
     string "Product Secret"
-    default "e3c65ae1c1bb42bc831285a3d7de3421"
+    default "05677a80e5cb4cea958d45264e11df3e"
     help
         Product secret for Gizwits.
 
