@@ -2,8 +2,10 @@
 #include "system_info.h"
 #include "settings.h"
 #include "assets/lang_config.h"
-
+#include "auth.h"
+#include "server/giz_api.h"
 #include <cJSON.h>
+
 #include <esp_log.h>
 #include <esp_partition.h>
 #include <esp_ota_ops.h>
@@ -62,19 +64,23 @@ bool Ota::CheckVersion() {
     // Use GServer to check for firmware updates
     auto& gserver = GServer::getInstance();
     bool has_update = false;
+    std::string did = Auth::getInstance().getDeviceId();
     
-    gserver.getFirmwareUpdate(
-        hw_version.c_str(),
-        current_version_.c_str(),
-        [this, &has_update](const char* package_type, const char* package_md5, const char* package_url) {
-            firmware_version_ = package_type;
-            firmware_url_ = package_url;
-            has_update = true;
-            ESP_LOGI(TAG, "New firmware available: type=%s, url=%s", package_type, package_url);
-        }
-    );
+     if (!did.empty()) {
+        // 存在 did的情况
+        gserver.getFirmwareUpdate(
+            hw_version.c_str(),
+            current_version_.c_str(),
+            [this, &has_update](const char* package_type, const char* package_md5, const char* package_url) {
+                firmware_version_ = package_type;
+                firmware_url_ = package_url;
+                has_update = true;
+                ESP_LOGI(TAG, "New firmware available: type=%s, url=%s", package_type, package_url);
+            }
+        );
 
-    has_new_version_ = has_update;
+        has_new_version_ = has_update;
+    }
     return true;
 }
 
