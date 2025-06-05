@@ -17,67 +17,111 @@
 #include <esp_lvgl_port.h>
 #include <lvgl.h>
 
-
 #define TAG "LichuangDevBoard"
+
+static TaskHandle_t button_task_handle = nullptr;
+static TaskHandle_t camera_task_handle = nullptr;
+void button_task(void *arg)
+{
+    while (true)
+    {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        auto &application = Application::GetInstance();
+        application.camera_status = !(application.camera_status);
+        application.OnLongPressCamera(1);
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+}
+
+void camera_task(void *arg)
+{
+    while (true)
+    {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        auto &board = Board::GetInstance();
+        auto camera = board.GetCamera();
+        ESP_LOGI(TAG, "camera_task_start");
+
+        if (!camera->Capture())
+        {
+            ESP_LOGW(TAG, "Capture_dow");
+        }
+
+        camera->Explain_kouzi("speak");
+    }
+    vTaskDelete(NULL);
+}
 
 LV_FONT_DECLARE(font_puhui_20_4);
 LV_FONT_DECLARE(font_awesome_20_4);
 
-class Pca9557 : public I2cDevice {
+class Pca9557 : public I2cDevice
+{
 public:
-    Pca9557(i2c_master_bus_handle_t i2c_bus, uint8_t addr) : I2cDevice(i2c_bus, addr) {
+    Pca9557(i2c_master_bus_handle_t i2c_bus, uint8_t addr) : I2cDevice(i2c_bus, addr)
+    {
         WriteReg(0x01, 0x03);
         WriteReg(0x03, 0xf8);
     }
 
-    void SetOutputState(uint8_t bit, uint8_t level) {
+    void SetOutputState(uint8_t bit, uint8_t level)
+    {
         uint8_t data = ReadReg(0x01);
         data = (data & ~(1 << bit)) | (level << bit);
         WriteReg(0x01, data);
     }
 };
 
-class CustomAudioCodec : public BoxAudioCodec {
+class CustomAudioCodec : public BoxAudioCodec
+{
 private:
-    Pca9557* pca9557_;
+    Pca9557 *pca9557_;
 
 public:
-    CustomAudioCodec(i2c_master_bus_handle_t i2c_bus, Pca9557* pca9557) 
-        : BoxAudioCodec(i2c_bus, 
-                       AUDIO_INPUT_SAMPLE_RATE, 
-                       AUDIO_OUTPUT_SAMPLE_RATE,
-                       AUDIO_I2S_GPIO_MCLK, 
-                       AUDIO_I2S_GPIO_BCLK, 
-                       AUDIO_I2S_GPIO_WS, 
-                       AUDIO_I2S_GPIO_DOUT, 
-                       AUDIO_I2S_GPIO_DIN,
-                       GPIO_NUM_NC, 
-                       AUDIO_CODEC_ES8311_ADDR, 
-                       AUDIO_CODEC_ES7210_ADDR, 
-                       AUDIO_INPUT_REFERENCE),
-          pca9557_(pca9557) {
+    CustomAudioCodec(i2c_master_bus_handle_t i2c_bus, Pca9557 *pca9557)
+        : BoxAudioCodec(i2c_bus,
+                        AUDIO_INPUT_SAMPLE_RATE,
+                        AUDIO_OUTPUT_SAMPLE_RATE,
+                        AUDIO_I2S_GPIO_MCLK,
+                        AUDIO_I2S_GPIO_BCLK,
+                        AUDIO_I2S_GPIO_WS,
+                        AUDIO_I2S_GPIO_DOUT,
+                        AUDIO_I2S_GPIO_DIN,
+                        GPIO_NUM_NC,
+                        AUDIO_CODEC_ES8311_ADDR,
+                        AUDIO_CODEC_ES7210_ADDR,
+                        AUDIO_INPUT_REFERENCE),
+          pca9557_(pca9557)
+    {
     }
 
-    virtual void EnableOutput(bool enable) override {
+    virtual void EnableOutput(bool enable) override
+    {
         BoxAudioCodec::EnableOutput(enable);
-        if (enable) {
+        if (enable)
+        {
             pca9557_->SetOutputState(1, 1);
-        } else {
+        }
+        else
+        {
             pca9557_->SetOutputState(1, 0);
         }
     }
 };
 
-class LichuangDevBoard : public WifiBoard {
+class LichuangDevBoard : public WifiBoard
+{
 private:
     i2c_master_bus_handle_t i2c_bus_;
     i2c_master_dev_handle_t pca9557_handle_;
     Button boot_button_;
-    LcdDisplay* display_;
-    Pca9557* pca9557_;
-    Esp32Camera* camera_;
+    LcdDisplay *display_;
+    Pca9557 *pca9557_;
+    Esp32Camera *camera_;
 
-    void InitializeI2c() {
+    void InitializeI2c()
+    {
         // Initialize I2C peripheral
         i2c_master_bus_config_t i2c_bus_cfg = {
             .i2c_port = (i2c_port_t)1,
@@ -97,7 +141,8 @@ private:
         pca9557_ = new Pca9557(i2c_bus_, 0x19);
     }
 
-    void InitializeSpi() {
+    void InitializeSpi()
+    {
         spi_bus_config_t buscfg = {};
         buscfg.mosi_io_num = GPIO_NUM_40;
         buscfg.miso_io_num = GPIO_NUM_NC;
@@ -108,17 +153,34 @@ private:
         ESP_ERROR_CHECK(spi_bus_initialize(SPI3_HOST, &buscfg, SPI_DMA_CH_AUTO));
     }
 
-    void InitializeButtons() {
-        boot_button_.OnClick([this]() {
+    void InitializeButtons()
+    {
+        boot_button_.OnClick([this]()
+                             {
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
                 ResetWifiConfiguration();
             }
-            app.ToggleChatState();
-        });
+            app.ToggleChatState(); });
+
+        // boot_button_.OnLongPress([this]()
+        //                      {
+        //                         BaseType_t hp_task_woken = pdFALSE;
+        //                          vTaskNotifyGiveFromISR(button_task_handle, &hp_task_woken);
+        //                          portYIELD_FROM_ISR(hp_task_woken); });
+        // xTaskCreate(button_task, "button_task", 2048, nullptr, 4, &button_task_handle);
+
+        boot_button_.OnLongPress([this]()
+                                 {
+                                     BaseType_t camera_task_woken = pdFALSE;
+                                     ESP_LOGI(TAG, "Capture_dow_start");
+                                     vTaskNotifyGiveFromISR(camera_task_handle, &camera_task_woken);
+                                     portYIELD_FROM_ISR(camera_task_woken); });
+        xTaskCreate(camera_task, "camera_task", 4096, nullptr, 4, &camera_task_handle);
     }
 
-    void InitializeSt7789Display() {
+    void InitializeSt7789Display()
+    {
         esp_lcd_panel_io_handle_t panel_io = nullptr;
         esp_lcd_panel_handle_t panel = nullptr;
         // 液晶屏控制IO初始化
@@ -140,7 +202,7 @@ private:
         panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
         panel_config.bits_per_pixel = 16;
         ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(panel_io, &panel_config, &panel));
-        
+
         esp_lcd_panel_reset(panel);
         pca9557_->SetOutputState(0, 0);
 
@@ -149,16 +211,16 @@ private:
         esp_lcd_panel_swap_xy(panel, DISPLAY_SWAP_XY);
         esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
         display_ = new SpiLcdDisplay(panel_io, panel,
-                                    DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY,
-                                    {
-                                        .text_font = &font_puhui_20_4,
-                                        .icon_font = &font_awesome_20_4,
+                                     DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY,
+                                     {
+                                         .text_font = &font_puhui_20_4,
+                                         .icon_font = &font_awesome_20_4,
 #if CONFIG_USE_WECHAT_MESSAGE_STYLE
-                                        .emoji_font = font_emoji_32_init(),
+                                         .emoji_font = font_emoji_32_init(),
 #else
-                                        .emoji_font = font_emoji_64_init(),
+                                         .emoji_font = font_emoji_64_init(),
 #endif
-                                    });
+                                     });
     }
 
     void InitializeTouch()
@@ -168,7 +230,7 @@ private:
             .x_max = DISPLAY_WIDTH,
             .y_max = DISPLAY_HEIGHT,
             .rst_gpio_num = GPIO_NUM_NC, // Shared with LCD reset
-            .int_gpio_num = GPIO_NUM_NC, 
+            .int_gpio_num = GPIO_NUM_NC,
             .levels = {
                 .reset = 0,
                 .interrupt = 0,
@@ -189,20 +251,21 @@ private:
 
         /* Add touch input (for selected screen) */
         const lvgl_port_touch_cfg_t touch_cfg = {
-            .disp = lv_display_get_default(), 
+            .disp = lv_display_get_default(),
             .handle = tp,
         };
 
         lvgl_port_add_touch(&touch_cfg);
     }
 
-    void InitializeCamera() {
+    void InitializeCamera()
+    {
         // Open camera power
         pca9557_->SetOutputState(2, 0);
 
         camera_config_t config = {};
-        config.ledc_channel = LEDC_CHANNEL_2;  // LEDC通道选择  用于生成XCLK时钟 但是S3不用
-        config.ledc_timer = LEDC_TIMER_2; // LEDC timer选择  用于生成XCLK时钟 但是S3不用
+        config.ledc_channel = LEDC_CHANNEL_2; // LEDC通道选择  用于生成XCLK时钟 但是S3不用
+        config.ledc_timer = LEDC_TIMER_2;     // LEDC timer选择  用于生成XCLK时钟 但是S3不用
         config.pin_d0 = CAMERA_PIN_D0;
         config.pin_d1 = CAMERA_PIN_D1;
         config.pin_d2 = CAMERA_PIN_D2;
@@ -215,16 +278,17 @@ private:
         config.pin_pclk = CAMERA_PIN_PCLK;
         config.pin_vsync = CAMERA_PIN_VSYNC;
         config.pin_href = CAMERA_PIN_HREF;
-        config.pin_sccb_sda = -1;   // 这里写-1 表示使用已经初始化的I2C接口
+        config.pin_sccb_sda = -1; // 这里写-1 表示使用已经初始化的I2C接口
         config.pin_sccb_scl = CAMERA_PIN_SIOC;
         config.sccb_i2c_port = 1;
         config.pin_pwdn = CAMERA_PIN_PWDN;
         config.pin_reset = CAMERA_PIN_RESET;
         config.xclk_freq_hz = XCLK_FREQ_HZ;
         config.pixel_format = PIXFORMAT_RGB565;
-        config.frame_size = FRAMESIZE_VGA;
+        // config.frame_size = FRAMESIZE_VGA;//(320*2)x(240*2)
+        config.frame_size = FRAMESIZE_QVGA; // 320x240
         config.jpeg_quality = 12;
-        config.fb_count = 1;
+        config.fb_count = 2;
         config.fb_location = CAMERA_FB_IN_PSRAM;
         config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
 
@@ -232,39 +296,45 @@ private:
     }
 
 public:
-    LichuangDevBoard() : boot_button_(BOOT_BUTTON_GPIO) {
+    LichuangDevBoard() : boot_button_(BOOT_BUTTON_GPIO)
+    {
         InitializeI2c();
         InitializeSpi();
         InitializeSt7789Display();
         InitializeTouch();
+        // InitializeButtons();
+        InitializeCamera();
         InitializeButtons();
-        // InitializeCamera();
 
 #if CONFIG_IOT_PROTOCOL_XIAOZHI
-        auto& thing_manager = iot::ThingManager::GetInstance();
+        auto &thing_manager = iot::ThingManager::GetInstance();
         thing_manager.AddThing(iot::CreateThing("Speaker"));
         thing_manager.AddThing(iot::CreateThing("Screen"));
 #endif
         GetBacklight()->RestoreBrightness();
     }
 
-    virtual AudioCodec* GetAudioCodec() override {
+    virtual AudioCodec *GetAudioCodec() override
+    {
         static CustomAudioCodec audio_codec(
-            i2c_bus_, 
+            i2c_bus_,
             pca9557_);
         return &audio_codec;
     }
 
-    virtual Display* GetDisplay() override {
+    virtual Display *GetDisplay() override
+    {
         return display_;
     }
-    
-    virtual Backlight* GetBacklight() override {
+
+    virtual Backlight *GetBacklight() override
+    {
         static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
         return &backlight;
     }
 
-    virtual Camera* GetCamera() override {
+    virtual Camera *GetCamera() override
+    {
         return camera_;
     }
 };

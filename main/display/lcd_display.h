@@ -30,7 +30,7 @@ protected:
     
     lv_draw_buf_t draw_buf_;
     lv_obj_t* status_bar_ = nullptr;
-    lv_obj_t* content_ = nullptr;
+   
     lv_obj_t* container_ = nullptr;
     lv_obj_t* side_bar_ = nullptr;
     lv_obj_t* preview_image_ = nullptr;
@@ -47,10 +47,19 @@ protected:
     LcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel, DisplayFonts fonts, int width, int height);
     
 public:
+    lv_obj_t* content_ = nullptr;
     ~LcdDisplay();
     virtual void SetEmotion(const char* emotion) override;
     virtual void SetIcon(const char* icon) override;
     virtual void SetPreviewImage(const lv_img_dsc_t* img_dsc) override;
+
+
+    void clear_ui() ;
+    virtual lv_obj_t* get_container_()  override; 
+     virtual lv_obj_t* get_content_()  override; 
+
+    virtual lv_obj_t* get_image_()  override; 
+
 #if CONFIG_USE_WECHAT_MESSAGE_STYLE
     virtual void SetChatMessage(const char* role, const char* content) override; 
 #endif  

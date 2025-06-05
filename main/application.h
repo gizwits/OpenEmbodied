@@ -32,6 +32,8 @@
 #define AUDIO_OUTPUT_READY_EVENT (1 << 2)
 #define CHECK_NEW_VERSION_DONE_EVENT (1 << 3)
 
+#define Camera_stat_end (1 << 5)
+
 enum DeviceState {
     kDeviceStateUnknown,
     kDeviceStateStarting,
@@ -74,6 +76,10 @@ public:
     void PlaySound(const std::string_view& sound);
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
+    void OnLongPressCamera(bool camera_status);//录像
+    bool camera_status = false;
+
+
 
 private:
     Application();

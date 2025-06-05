@@ -22,6 +22,7 @@ Button::Button(gpio_num_t gpio_num, bool active_high, uint16_t long_press_time, 
     if (gpio_num == GPIO_NUM_NC) {
         return;
     }
+    // ESP_LOGW(TAG,"________________________________________________");
     button_config_t button_config = {
         .long_press_time = long_press_time,
         .short_press_time = short_press_time

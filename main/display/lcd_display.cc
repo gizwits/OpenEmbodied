@@ -112,7 +112,7 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
         .io_handle = panel_io_,
         .panel_handle = panel_,
         .control_handle = nullptr,
-        .buffer_size = static_cast<uint32_t>(width_ * 20),
+        .buffer_size = static_cast<uint32_t>(width_ * 40),
         .double_buffer = false,
         .trans_size = 0,
         .hres = static_cast<uint32_t>(width_),
@@ -644,7 +644,7 @@ void LcdDisplay::SetupUI() {
     lv_label_set_text(emotion_label_, FONT_AWESOME_AI_CHIP);
 
     preview_image_ = lv_image_create(content_);
-    lv_obj_set_size(preview_image_, width_ * 0.5, height_ * 0.5);
+    lv_obj_set_size(preview_image_, width_ , height_);
     lv_obj_align(preview_image_, LV_ALIGN_CENTER, 0, 0);
     lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
 
@@ -783,7 +783,7 @@ void LcdDisplay::SetPreviewImage(const lv_img_dsc_t* img_dsc) {
     
     if (img_dsc != nullptr) {
         // zoom factor 0.5
-        lv_img_set_zoom(preview_image_, 128 * width_ / img_dsc->header.w);
+        // lv_img_set_zoom(preview_image_, 128 * width_ / img_dsc->header.w);
         // 设置图片源并显示预览图片
         lv_img_set_src(preview_image_, img_dsc);
         lv_obj_clear_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
@@ -791,6 +791,7 @@ void LcdDisplay::SetPreviewImage(const lv_img_dsc_t* img_dsc) {
         if (emotion_label_ != nullptr) {
             lv_obj_add_flag(emotion_label_, LV_OBJ_FLAG_HIDDEN);
         }
+         
     } else {
         // 隐藏预览图片并显示emotion_label_
         lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
@@ -799,6 +800,27 @@ void LcdDisplay::SetPreviewImage(const lv_img_dsc_t* img_dsc) {
         }
     }
 }
+
+void LcdDisplay::clear_ui(){
+    // lv_obj_t* status_bar_ = nullptr;
+    // lv_obj_t* content_ = nullptr;
+    // lv_obj_t* container_ = nullptr;
+    // lv_obj_t* side_bar_ = nullptr;
+    // lv_obj_t* preview_image_ = nullptr;
+    lv_obj_clear_flag(status_bar_ , LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(content_ , LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(side_bar_, LV_OBJ_FLAG_HIDDEN);
+}
+lv_obj_t* LcdDisplay::get_container_(){
+    return container_;
+}
+lv_obj_t* LcdDisplay::get_content_(){
+    return content_;
+}
+lv_obj_t* LcdDisplay::get_image_(){
+    return preview_image_;
+}
+
 
 void LcdDisplay::SetTheme(const std::string& theme_name) {
     DisplayLockGuard lock(this);

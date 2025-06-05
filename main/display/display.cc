@@ -248,3 +248,16 @@ void Display::SetTheme(const std::string& theme_name) {
     Settings settings("display", true);
     settings.SetString("theme", theme_name);
 }
+lv_obj_t* Display::get_container_(){
+    // Do nothing
+    return nullptr;
+}
+lv_obj_t* Display::get_content_(){
+    // Do nothing
+    return nullptr;
+}
+
+lv_obj_t* Display::get_image_(){
+    // Do nothing
+    return nullptr;
+}

@@ -49,7 +49,7 @@ void BackgroundTask::WaitForCompletion() {
 
 void BackgroundTask::BackgroundTaskLoop() {
     ESP_LOGI(TAG, "background_task started");
-    while (true) {
+    while (1) {
         std::unique_lock<std::mutex> lock(mutex_);
         condition_variable_.wait(lock, [this]() { return !main_tasks_.empty(); });
         
