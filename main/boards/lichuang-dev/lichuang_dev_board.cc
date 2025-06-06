@@ -238,7 +238,7 @@ public:
         InitializeSt7789Display();
         InitializeTouch();
         InitializeButtons();
-        // InitializeCamera();
+        InitializeCamera();
 
 #if CONFIG_IOT_PROTOCOL_XIAOZHI
         auto& thing_manager = iot::ThingManager::GetInstance();
