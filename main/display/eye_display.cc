@@ -136,7 +136,7 @@ void EyeDisplay::StartIdleAnimation() {
     lv_anim_set_time(&left_anim_, 2000);
     lv_anim_set_delay(&left_anim_, 0);
     lv_anim_set_exec_cb(&left_anim_, (lv_anim_exec_xcb_t)lv_obj_set_height);
-    lv_anim_set_path_cb(&left_anim_, lv_anim_path_ease_in_out);
+    lv_anim_set_path_cb(&left_anim_, lv_anim_path_linear);  // 使用线性动画路径
     lv_anim_set_repeat_count(&left_anim_, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_playback_time(&left_anim_, 2000);
     lv_anim_set_playback_delay(&left_anim_, 0);
@@ -148,7 +148,7 @@ void EyeDisplay::StartIdleAnimation() {
     lv_anim_set_time(&right_anim_, 2000);
     lv_anim_set_delay(&right_anim_, 0);
     lv_anim_set_exec_cb(&right_anim_, (lv_anim_exec_xcb_t)lv_obj_set_height);
-    lv_anim_set_path_cb(&right_anim_, lv_anim_path_ease_in_out);
+    lv_anim_set_path_cb(&right_anim_, lv_anim_path_linear);  // 使用线性动画路径
     lv_anim_set_repeat_count(&right_anim_, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_playback_time(&right_anim_, 2000);
     lv_anim_set_playback_delay(&right_anim_, 0);
@@ -163,7 +163,7 @@ void EyeDisplay::StartThinkingAnimation() {
     lv_anim_set_time(&left_anim_, 500);
     lv_anim_set_delay(&left_anim_, 0);
     lv_anim_set_exec_cb(&left_anim_, (lv_anim_exec_xcb_t)lv_obj_set_height);
-    lv_anim_set_path_cb(&left_anim_, lv_anim_path_ease_in_out);
+    lv_anim_set_path_cb(&left_anim_, lv_anim_path_linear);  // 使用线性动画路径
     lv_anim_set_repeat_count(&left_anim_, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_playback_time(&left_anim_, 500);
     lv_anim_set_playback_delay(&left_anim_, 0);
@@ -175,7 +175,7 @@ void EyeDisplay::StartThinkingAnimation() {
     lv_anim_set_time(&right_anim_, 500);
     lv_anim_set_delay(&right_anim_, 0);
     lv_anim_set_exec_cb(&right_anim_, (lv_anim_exec_xcb_t)lv_obj_set_height);
-    lv_anim_set_path_cb(&right_anim_, lv_anim_path_ease_in_out);
+    lv_anim_set_path_cb(&right_anim_, lv_anim_path_linear);  // 使用线性动画路径
     lv_anim_set_repeat_count(&right_anim_, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_playback_time(&right_anim_, 500);
     lv_anim_set_playback_delay(&right_anim_, 0);
@@ -190,7 +190,7 @@ void EyeDisplay::StartListeningAnimation() {
     lv_anim_set_time(&left_anim_, 1000);
     lv_anim_set_delay(&left_anim_, 0);
     lv_anim_set_exec_cb(&left_anim_, (lv_anim_exec_xcb_t)lv_obj_set_height);
-    lv_anim_set_path_cb(&left_anim_, lv_anim_path_ease_in_out);
+    lv_anim_set_path_cb(&left_anim_, lv_anim_path_linear);  // 使用线性动画路径
     lv_anim_set_repeat_count(&left_anim_, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_playback_time(&left_anim_, 1000);
     lv_anim_set_playback_delay(&left_anim_, 0);
@@ -202,7 +202,7 @@ void EyeDisplay::StartListeningAnimation() {
     lv_anim_set_time(&right_anim_, 1000);
     lv_anim_set_delay(&right_anim_, 0);
     lv_anim_set_exec_cb(&right_anim_, (lv_anim_exec_xcb_t)lv_obj_set_height);
-    lv_anim_set_path_cb(&right_anim_, lv_anim_path_ease_in_out);
+    lv_anim_set_path_cb(&right_anim_, lv_anim_path_linear);  // 使用线性动画路径
     lv_anim_set_repeat_count(&right_anim_, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_playback_time(&right_anim_, 1000);
     lv_anim_set_playback_delay(&right_anim_, 0);
@@ -213,6 +213,12 @@ void EyeDisplay::StartSleepingAnimation() {
     // 休息状态：眼睛变成水平长条
     lv_obj_set_size(left_eye_, 80, 20);  // 宽80，高20
     lv_obj_set_size(right_eye_, 80, 20); // 宽80，高20
+    lv_obj_set_style_radius(left_eye_, LV_RADIUS_CIRCLE, 0);  // 保持圆角
+    lv_obj_set_style_radius(right_eye_, LV_RADIUS_CIRCLE, 0); // 保持圆角
+    lv_obj_set_style_shadow_width(left_eye_, 0, 0);
+    lv_obj_set_style_shadow_width(right_eye_, 0, 0);
+    lv_obj_set_style_outline_width(left_eye_, 0, 0);
+    lv_obj_set_style_outline_width(right_eye_, 0, 0);
 
     // 停止动画，保持静态
     lv_anim_del(left_eye_, nullptr);
@@ -241,6 +247,9 @@ void EyeDisplay::SetupUI() {
     lv_obj_set_style_bg_color(left_eye_, lv_color_make(0, 255, 255), 0);  // BGR: 黄色
     lv_obj_set_style_border_width(left_eye_, 0, 0);
     lv_obj_set_style_border_side(left_eye_, LV_BORDER_SIDE_NONE, 0);
+    lv_obj_set_style_pad_all(left_eye_, 0, 0);
+    lv_obj_set_style_shadow_width(left_eye_, 0, 0);
+    lv_obj_set_style_outline_width(left_eye_, 0, 0);
 
     // Create right eye
     right_eye_ = lv_obj_create(container);
@@ -249,6 +258,9 @@ void EyeDisplay::SetupUI() {
     lv_obj_set_style_bg_color(right_eye_, lv_color_make(0, 255, 255), 0);  // BGR: 黄色
     lv_obj_set_style_border_width(right_eye_, 0, 0);
     lv_obj_set_style_border_side(right_eye_, LV_BORDER_SIDE_NONE, 0);
+    lv_obj_set_style_pad_all(right_eye_, 0, 0);
+    lv_obj_set_style_shadow_width(right_eye_, 0, 0);
+    lv_obj_set_style_outline_width(right_eye_, 0, 0);
 
     // 启动默认的待机动画
     StartIdleAnimation();
