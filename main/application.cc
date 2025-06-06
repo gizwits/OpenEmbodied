@@ -946,7 +946,7 @@ void Application::SetDeviceState(DeviceState state) {
         case kDeviceStateUnknown:
         case kDeviceStateIdle:
             display->SetStatus(Lang::Strings::STANDBY);
-            display->SetEmotion("neutral");
+            display->SetEmotion("sleepy");
             audio_processor_->Stop();
             
 #if CONFIG_USE_WAKE_WORD_DETECT
@@ -962,7 +962,7 @@ void Application::SetDeviceState(DeviceState state) {
             break;
         case kDeviceStateListening:
             display->SetStatus(Lang::Strings::LISTENING);
-            display->SetEmotion("neutral");
+            display->SetEmotion("relaxed");
             // Update the IoT states before sending the start listening command
 #if CONFIG_IOT_PROTOCOL_XIAOZHI
             UpdateIotStates();
@@ -985,6 +985,8 @@ void Application::SetDeviceState(DeviceState state) {
             break;
         case kDeviceStateSpeaking:
             display->SetStatus(Lang::Strings::SPEAKING);
+            display->SetEmotion("thinking");
+
 
             if (listening_mode_ != kListeningModeRealtime) {
                 audio_processor_->Stop();

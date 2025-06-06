@@ -1,4 +1,4 @@
-# Gizwits + Coze + 小智
+# Gizwits + Coze
 
 まず、蝦哥のオープンソースプロジェクトに感謝いたします：https://github.com/78/xiaozhi-esp32
 
@@ -20,15 +20,6 @@
 
 ### Web設定
 [クリックして移動](http://aicube.jzyjzy.club/)
-
-
-## ビデオ紹介
-
-👉 [ESP32+SenseVoice+Qwen72BでAIチャットパートナーを作ろう！【bilibili】](https://www.bilibili.com/video/BV11msTenEH3/)
-
-👉 [小智にDeepSeekの賢い脳を搭載【bilibili】](https://www.bilibili.com/video/BV1GQP6eNEFG/)
-
-👉 [手作りAIガールフレンド、初心者向けチュートリアル【bilibili】](https://www.bilibili.com/video/BV1XnmFYLEJN/)
 
 ## 実装済み機能
 

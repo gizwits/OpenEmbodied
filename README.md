@@ -1,4 +1,4 @@
-# Gizwits + Coze + 小智
+# Gizwits + Coze
 
 首先致谢虾哥的开源项目：https://github.com/78/xiaozhi-esp32
 
@@ -21,14 +21,6 @@
 ### web配网
 [点击跳转](http://aicube.jzyjzy.club/)
 
-
-## 视频介绍
-
-👉 [ESP32+SenseVoice+Qwen72B打造你的AI聊天伴侣！【bilibili】](https://www.bilibili.com/video/BV11msTenEH3/)
-
-👉 [给小智装上 DeepSeek 的聪明大脑【bilibili】](https://www.bilibili.com/video/BV1GQP6eNEFG/)
-
-👉 [手工打造你的 AI 女友，新手入门教程【bilibili】](https://www.bilibili.com/video/BV1XnmFYLEJN/)
 
 ## 已实现功能
 
@@ -120,7 +112,7 @@
 
 ### 开发者文档
 
-- [开发板定制指南](main/boards/README.md) - 学习如何为小智创建自定义开发板适配
+- [开发板定制指南](main/boards/README.md) - 学习如何创建自定义开发板适配
 - [物联网控制模块](main/iot/README.md) - 了解如何通过AI语音控制物联网设备
 
 

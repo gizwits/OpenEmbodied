@@ -1,4 +1,4 @@
-# Gizwits + Coze + Xiaozhi
+# Gizwits + Coze
 
 First, thanks to Brother Xia's open source project: https://github.com/78/xiaozhi-esp32
 
@@ -20,14 +20,6 @@ You can also orchestrate more professional agents on the [Coze](https://www.coze
 
 ### Web Configuration
 [Click to Jump](http://aicube.jzyjzy.club/)
-
-## Video Introduction
-
-👉 [ESP32+SenseVoice+Qwen72B: Create Your AI Chat Companion! 【bilibili】](https://www.bilibili.com/video/BV11msTenEH3/)
-
-👉 [Equipping Xiaozhi with DeepSeek's Smart Brain 【bilibili】](https://www.bilibili.com/video/BV1GQP6eNEFG/)
-
-👉 [Handcraft Your AI Girlfriend: Beginner's Tutorial 【bilibili】](https://www.bilibili.com/video/BV1XnmFYLEJN/)
 
 ## Implemented Features
 
@@ -83,7 +75,7 @@ You can also orchestrate more professional agents on the [Coze](https://www.coze
 
 ### Developer Documentation
 
-- [Development Board Customization Guide](main/boards/README.md) - Learn how to create custom development board adaptations for Xiaozhi
+- [Development Board Customization Guide](main/boards/README.md) - Learn how to create custom development board adaptations
 - [IoT Control Module](main/iot/README.md) - Learn how to control IoT devices through AI voice
 
 ## Agent Configuration
