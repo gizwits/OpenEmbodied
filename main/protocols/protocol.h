@@ -53,7 +53,6 @@ enum ListeningMode {
 
 class Protocol {
 public:
-    WebSocket *websocket_ = nullptr;
     virtual ~Protocol() = default;
 
     inline int server_sample_rate() const {
