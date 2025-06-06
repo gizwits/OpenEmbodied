@@ -21,37 +21,37 @@
 
 static TaskHandle_t button_task_handle = nullptr;
 static TaskHandle_t camera_task_handle = nullptr;
-void button_task(void *arg)
-{
-    while (true)
-    {
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+// void button_task_voide(void *arg)
+// {
+//     while (true)
+//     {
+//         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
-        auto &application = Application::GetInstance();
-        application.camera_status = !(application.camera_status);
-        application.OnLongPressCamera(1);
-        vTaskDelay(pdMS_TO_TICKS(100));
-    }
-}
+//         auto &application = Application::GetInstance();
+//         application.camera_status = !(application.camera_status);
+//         application.OnLongPressCamera(1);
+//         vTaskDelay(pdMS_TO_TICKS(100));
+//     }
+// }
 
-void camera_task(void *arg)
-{
-    while (true)
-    {
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        auto &board = Board::GetInstance();
-        auto camera = board.GetCamera();
-        ESP_LOGI(TAG, "camera_task_start");
+// void camera_task(void *arg)
+// {
+//     while (true)
+//     {
+//         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+//         auto &board = Board::GetInstance();
+//         auto camera = board.GetCamera();
+//         ESP_LOGI(TAG, "camera_task_start");
 
-        if (!camera->Capture())
-        {
-            ESP_LOGW(TAG, "Capture_dow");
-        }
+//         if (!camera->Capture())
+//         {
+//             ESP_LOGW(TAG, "Capture_dow");
+//         }
 
-        camera->Explain_kouzi("speak");
-    }
-    vTaskDelete(NULL);
-}
+//         camera->Explain_kouzi("speak");
+//     }
+//     vTaskDelete(NULL);
+// }
 
 LV_FONT_DECLARE(font_puhui_20_4);
 LV_FONT_DECLARE(font_awesome_20_4);
@@ -172,11 +172,15 @@ private:
 
         boot_button_.OnLongPress([this]()
                                  {
-                                     BaseType_t camera_task_woken = pdFALSE;
-                                     ESP_LOGI(TAG, "Capture_dow_start");
-                                     vTaskNotifyGiveFromISR(camera_task_handle, &camera_task_woken);
-                                     portYIELD_FROM_ISR(camera_task_woken); });
-        xTaskCreate(camera_task, "camera_task", 4096, nullptr, 4, &camera_task_handle);
+                                    auto &app = Application::GetInstance();
+                                    ESP_LOGI(TAG, "Capture_dow_start");
+                                    BaseType_t camera_task_woken = pdFALSE;
+                                    app.TakeImage(camera_task_woken);
+                                    // BaseType_t camera_task_woken = pdFALSE;
+                                    // vTaskNotifyGiveFromISR(camera_task_handle, &camera_task_woken);
+                                    portYIELD_FROM_ISR(camera_task_woken);
+                                 });
+        // xTaskCreate(camera_task, "camera_task", 4096, nullptr, 4, &camera_task_handle);
     }
 
     void InitializeSt7789Display()

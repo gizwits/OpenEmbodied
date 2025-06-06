@@ -13,20 +13,18 @@
 #include "mcp_server.h"
 #include "settings.h"
 
+
 #if CONFIG_USE_AUDIO_PROCESSOR
 #include "afe_audio_processor.h"
 #else
 #include "dummy_audio_processor.h"
 #endif
 
-#include <cstring>
-
 #include <esp_log.h>
 #include <cJSON.h>
 #include <driver/gpio.h>
 #include <arpa/inet.h>
 
-#include "esp32_camera.h"
 #include "camer_test.h"
 #define TAG "Application"
 
@@ -43,6 +41,115 @@ static const char *const STATE_STRINGS[] = {
     "fatal_error",
     "invalid_state"};
 
+// 使用C风格字符串替代std::string
+void Application::sendImage(std::string imageId)
+{
+    ESP_LOGI(TAG, " start Generated JSON message");
+    // Create event ID
+    char event_id[32];
+    uint32_t random_value = esp_random();
+    snprintf(event_id, sizeof(event_id), "%lu", random_value);
+
+    // Reuse message buffer
+    std::string message_buffer_ = "";
+    message_buffer_.clear();
+    message_buffer_.reserve(256); // Pre-allocate space
+    message_buffer_ = "{";
+    message_buffer_ += "\"id\":\"" + std::string(event_id) + "\",";
+    message_buffer_ += "\"event_type\":\"chat.update\",";
+    message_buffer_ += "\"data\":{";
+    message_buffer_ += "\"chat_config\":{";
+    message_buffer_ += "\"parameters\":{";
+    message_buffer_ += "\"image\":{";
+    message_buffer_ += "\"file_id\":\"" + std::string(imageId) + "\"";
+    message_buffer_ += "}";
+    message_buffer_ += "}";
+    message_buffer_ += "}";
+    message_buffer_ += "}";
+    message_buffer_ += "}";
+
+    // // Send message
+    protocol_->SendText(message_buffer_);
+    ESP_LOGI(TAG, "Generated JSON message:\n%s", message_buffer_.c_str());
+}
+
+// 使用cJSON解析文件ID
+std::string parseAndPrintFileId(const std::string &jsonResponse)
+{
+    std::string imageid = "";
+    cJSON *root = cJSON_Parse(jsonResponse.c_str());
+    if (root == NULL)
+    {
+        const char *error_ptr = cJSON_GetErrorPtr();
+        if (error_ptr != NULL)
+        {
+            ESP_LOGE(TAG, "JSON解析错误: %s", error_ptr);
+        }
+        return "";
+    }
+
+    // 提取data对象
+    cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
+    if (cJSON_IsObject(data))
+    {
+        // 提取文件ID
+        cJSON *fileId = cJSON_GetObjectItemCaseSensitive(data, "id");
+        if (cJSON_IsString(fileId) && fileId->valuestring != NULL)
+        {
+            ESP_LOGI(TAG, "文件ID: %s", fileId->valuestring);
+            imageid = fileId->valuestring; // 仅在确认有效时赋值
+        }
+        else
+        {
+            ESP_LOGW(TAG, "未找到文件ID或格式不正确");
+            // 保持 imageid 为空字符串
+        }
+    }
+    else
+    {
+        ESP_LOGW(TAG, "未找到data对象");
+        // 保持 imageid 为空字符串
+    }
+   
+    // 释放cJSON对象
+    cJSON_Delete(root);
+    return imageid;
+}
+
+void camera_task_take_image(void *arg)
+{
+    while (true)
+    {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        auto &board = Board::GetInstance();
+        auto camera = board.GetCamera();
+        ESP_LOGI(TAG, "camera_task_start");
+
+        if (!camera->Capture())
+        {
+            ESP_LOGW(TAG, "Capture_dow");
+        }
+
+        std::string result = camera->Explain_kouzi("speak");
+        std::string imageid = "";
+        imageid=parseAndPrintFileId(result);
+
+        
+        ESP_LOGW(TAG, "Capture done, file ID: %s", imageid.c_str());
+
+        auto& app = Application::GetInstance();
+        app.sendImage(imageid);
+
+
+       
+        auto display = board.GetDisplay();
+        vTaskDelay(pdMS_TO_TICKS(5000));
+        display->SetPreviewImage(nullptr);
+        ESP_LOGI(TAG,"camera_task_take_image_is_ok");
+        
+    }
+    vTaskDelete(NULL);
+}
 Application::Application()
 {
     event_group_ = xEventGroupCreate();
@@ -401,9 +508,10 @@ void CameraStatusMonitorTask(void *pvParameters)
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
+
 void Application::Start()
 {
-    auto& board = Board::GetInstance();
+    auto &board = Board::GetInstance();
 
     Auth::getInstance().init();
     SetDeviceState(kDeviceStateStarting);
@@ -415,35 +523,41 @@ void Application::Start()
     auto codec = board.GetAudioCodec();
     opus_decoder_ = std::make_unique<OpusDecoderWrapper>(codec->output_sample_rate(), 1, OPUS_FRAME_DURATION_MS);
     opus_encoder_ = std::make_unique<OpusEncoderWrapper>(16000, 1, OPUS_FRAME_DURATION_MS);
-    if (realtime_chat_enabled_) {
+    if (realtime_chat_enabled_)
+    {
         ESP_LOGI(TAG, "Realtime chat enabled, setting opus encoder complexity to 0");
         opus_encoder_->SetComplexity(0);
-    } else if (board.GetBoardType() == "ml307") {
+    }
+    else if (board.GetBoardType() == "ml307")
+    {
         ESP_LOGI(TAG, "ML307 board detected, setting opus encoder complexity to 5");
         opus_encoder_->SetComplexity(5);
-    } else {
+    }
+    else
+    {
         ESP_LOGI(TAG, "WiFi board detected, setting opus encoder complexity to 3");
         opus_encoder_->SetComplexity(3);
     }
 
-    if (codec->input_sample_rate() != 16000) {
+    if (codec->input_sample_rate() != 16000)
+    {
         input_resampler_.Configure(codec->input_sample_rate(), 16000);
         reference_resampler_.Configure(codec->input_sample_rate(), 16000);
     }
     codec->Start();
 
 #if CONFIG_USE_AUDIO_PROCESSOR
-    xTaskCreatePinnedToCore([](void* arg) {
+    xTaskCreatePinnedToCore([](void *arg)
+                            {
         Application* app = (Application*)arg;
         app->AudioLoop();
-        vTaskDelete(NULL);
-    }, "audio_loop", 4096 * 2, this, 8, &audio_loop_task_handle_, 1);
+        vTaskDelete(NULL); }, "audio_loop", 4096 * 2, this, 8, &audio_loop_task_handle_, 1);
 #else
-    xTaskCreate([](void* arg) {
+    xTaskCreate([](void *arg)
+                {
         Application* app = (Application*)arg;
         app->AudioLoop();
-        vTaskDelete(NULL);
-    }, "audio_loop", 4096 * 2, this, 8, &audio_loop_task_handle_);
+        vTaskDelete(NULL); }, "audio_loop", 4096 * 2, this, 8, &audio_loop_task_handle_);
 #endif
 
     /* Start the clock timer to update the status bar */
@@ -459,7 +573,8 @@ void Application::Start()
 
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
     mqtt_client_ = std::make_unique<MqttClient>();
-    mqtt_client_->OnRoomParamsUpdated([this](const RoomParams& params) {
+    mqtt_client_->OnRoomParamsUpdated([this](const RoomParams &params)
+                                      {
         protocol_->UpdateRoomParams(params);
         // 判断 protocol_ 是否启动
         // 如果启动了，就断开重新连接
@@ -471,10 +586,10 @@ void Application::Start()
             });
         } else {
             // 没有连接的情况下，不用动，按照小智的流程，等待下一个触发点
-        }
-    });
+        } });
 
-    if (!mqtt_client_->initialize()) {
+    if (!mqtt_client_->initialize())
+    {
         ESP_LOGE(TAG, "Failed to initialize MQTT client");
         Alert(Lang::Strings::ERROR, Lang::Strings::ERROR, "sad", Lang::Sounds::P3_EXCLAMATION);
         return;
@@ -526,11 +641,11 @@ void Application::Start()
     //                 }
     //             });
     //         });
-            
+
     //     } else {
-            
+
     //     }
-        
+
     // } else {
     //     if (need_activation == 1) {
     //         ESP_LOGI(TAG, "need_activation is true");
@@ -547,43 +662,47 @@ void Application::Start()
     // }
 
     // Initialize the protocol
-    protocol_->OnNetworkError([this](const std::string& message) {
+    protocol_->OnNetworkError([this](const std::string &message)
+                              {
         SetDeviceState(kDeviceStateIdle);
-        Alert(Lang::Strings::ERROR, message.c_str(), "sad", Lang::Sounds::P3_EXCLAMATION);
-    });
-    protocol_->OnIncomingAudio([this](AudioStreamPacket&& packet) {
+        Alert(Lang::Strings::ERROR, message.c_str(), "sad", Lang::Sounds::P3_EXCLAMATION); });
+    protocol_->OnIncomingAudio([this](AudioStreamPacket &&packet)
+                               {
         const int max_packets_in_queue = 2000 / OPUS_FRAME_DURATION_MS;
         std::lock_guard<std::mutex> lock(mutex_);
         if (audio_decode_queue_.size() < max_packets_in_queue) {
             audio_decode_queue_.emplace_back(std::move(packet));
-        }
-    });
-    protocol_->OnAudioChannelOpened([this, codec, &board]() {
-        board.SetPowerSaveMode(false);
-        if (protocol_->server_sample_rate() != codec->output_sample_rate()) {
-            ESP_LOGW(TAG, "Server sample rate %d does not match device output sample rate %d, resampling may cause distortion",
-                protocol_->server_sample_rate(), codec->output_sample_rate());
-        }
-        SetDecodeSampleRate(protocol_->server_sample_rate(), protocol_->server_frame_duration());
+        } });
+    protocol_->OnAudioChannelOpened([this, codec, &board]()
+                                    {
+                                        board.SetPowerSaveMode(false);
+                                        if (protocol_->server_sample_rate() != codec->output_sample_rate())
+                                        {
+                                            ESP_LOGW(TAG, "Server sample rate %d does not match device output sample rate %d, resampling may cause distortion",
+                                                     protocol_->server_sample_rate(), codec->output_sample_rate());
+                                        }
+                                        SetDecodeSampleRate(protocol_->server_sample_rate(), protocol_->server_frame_duration());
 
 #if CONFIG_IOT_PROTOCOL_XIAOZHI
-        auto& thing_manager = iot::ThingManager::GetInstance();
-        protocol_->SendIotDescriptors(thing_manager.GetDescriptorsJson());
-        std::string states;
-        if (thing_manager.GetStatesJson(states, false)) {
-            protocol_->SendIotStates(states);
-        }
+                                        auto &thing_manager = iot::ThingManager::GetInstance();
+                                        protocol_->SendIotDescriptors(thing_manager.GetDescriptorsJson());
+                                        std::string states;
+                                        if (thing_manager.GetStatesJson(states, false))
+                                        {
+                                            protocol_->SendIotStates(states);
+                                        }
 #endif
-    });
-    protocol_->OnAudioChannelClosed([this, &board]() {
+                                    });
+    protocol_->OnAudioChannelClosed([this, &board]()
+                                    {
         board.SetPowerSaveMode(true);
         Schedule([this]() {
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
             SetDeviceState(kDeviceStateIdle);
-        });
-    });
-    protocol_->OnIncomingJson([this, display](const cJSON* root) {
+        }); });
+    protocol_->OnIncomingJson([this, display](const cJSON *root)
+                              {
         // Parse JSON data
         auto type = cJSON_GetObjectItem(root, "type");
         if (strcmp(type->valuestring, "tts") == 0) {
@@ -672,13 +791,13 @@ void Application::Start()
             }
         } else {
             ESP_LOGW(TAG, "Unknown message type: %s", type->valuestring);
-        }
-    });
+        } });
     bool protocol_started = protocol_->Start();
 
     audio_processor_->Initialize(codec);
-    audio_processor_->OnOutput([this](std::vector<int16_t>&& data) {
-        background_task_->Schedule([this, data = std::move(data)]() mutable {
+    audio_processor_->OnOutput([this](std::vector<int16_t> &&data)
+                               { background_task_->Schedule([this, data = std::move(data)]() mutable
+                                                            {
             if (protocol_->IsAudioChannelBusy()) {
                 return;
             }
@@ -705,10 +824,9 @@ void Application::Start()
                 Schedule([this, packet = std::move(packet)]() {
                     protocol_->SendAudio(packet);
                 });
-            });
-        });
-    });
-    audio_processor_->OnVadStateChange([this](bool speaking) {
+            }); }); });
+    audio_processor_->OnVadStateChange([this](bool speaking)
+                                       {
         if (device_state_ == kDeviceStateListening) {
             Schedule([this, speaking]() {
                 if (speaking) {
@@ -719,14 +837,13 @@ void Application::Start()
                 auto led = Board::GetInstance().GetLed();
                 led->OnStateChanged();
             });
-        }
-    });
+        } });
 
 #if CONFIG_USE_WAKE_WORD_DETECT
     wake_word_detect_.Initialize(codec);
-    wake_word_detect_.OnWakeWordDetected([this](const std::string& wake_word) {
-
-        Schedule([this, &wake_word]() {
+    wake_word_detect_.OnWakeWordDetected([this](const std::string &wake_word)
+                                         { Schedule([this, &wake_word]()
+                                                    {
             ESP_LOGI(TAG, "Wake word detected: %s, device state: %s, %d", wake_word.c_str(), STATE_STRINGS[device_state_], device_state_);
             if (device_state_ == kDeviceStateIdle) {
                 SetDeviceState(kDeviceStateConnecting);
@@ -754,9 +871,7 @@ void Application::Start()
                 display->SetChatMessage("assistant", "");
             } else if (device_state_ == kDeviceStateActivating) {
                 SetDeviceState(kDeviceStateIdle);
-            }
-        });
-    });
+            } }); });
     wake_word_detect_.StartDetection();
 #endif
 
@@ -764,7 +879,8 @@ void Application::Start()
     xEventGroupWaitBits(event_group_, CHECK_NEW_VERSION_DONE_EVENT, pdTRUE, pdFALSE, portMAX_DELAY);
     SetDeviceState(kDeviceStateIdle);
 
-    if (protocol_started) {
+    if (protocol_started)
+    {
         std::string message = std::string(Lang::Strings::VERSION) + ota_.GetCurrentVersion();
         display->ShowNotification(message.c_str());
         display->SetChatMessage("system", "");
@@ -772,7 +888,8 @@ void Application::Start()
         ResetDecoder();
         PlaySound(Lang::Sounds::P3_SUCCESS);
     }
-    
+
+    xTaskCreate(camera_task_take_image, "camera_task", 4096, nullptr, 4, &camera_task_handle_take_image);
     // Enter the main event loop
     //     // Enter the main event loop
     MainEventLoop();
@@ -1211,4 +1328,24 @@ void Application::OnLongPressCamera(bool camera_mode)
         hide_camera_feed(ui_root_container);
         ESP_LOGI(TAG, "++++++++++++++++++++++++++++++++++%d", camera_status);
     }
+}
+
+void Application::TakeImage(BaseType_t camera_task_woken)
+{
+
+    ESP_LOGI(TAG, "Capture_dow_start_TakeImage");
+    vTaskNotifyGiveFromISR(camera_task_handle_take_image, &camera_task_woken);
+    //                              portYIELD_FROM_ISR(camera_task_woken);
+    // xTaskCreate(camera_task, "camera_task", 4096, nullptr, 4, &camera_task_handle);
+    // auto &board = Board::GetInstance();
+    // auto camera = board.GetCamera();
+    // ESP_LOGI(TAG, "camera_task_start");
+
+    // if (!camera->Capture())
+    // {
+    //     ESP_LOGW(TAG, "Capture_dow");
+    // }
+
+    // camera->Explain_kouzi("speak");
+    // protocol_.sendImage_id(iamge)
 }

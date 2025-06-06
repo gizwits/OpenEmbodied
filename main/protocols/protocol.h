@@ -7,6 +7,8 @@
 #include <chrono>
 #include <vector>
 
+
+
 struct AudioStreamPacket {
     uint32_t timestamp = 0;
     std::vector<uint8_t> payload;
@@ -51,6 +53,7 @@ enum ListeningMode {
 
 class Protocol {
 public:
+    WebSocket *websocket_ = nullptr;
     virtual ~Protocol() = default;
 
     inline int server_sample_rate() const {
@@ -82,6 +85,7 @@ public:
     virtual void SendIotDescriptors(const std::string& descriptors);
     virtual void SendIotStates(const std::string& states);
     virtual void UpdateRoomParams(const RoomParams& params);
+     virtual bool SendText(const std::string& text) = 0;
     // virtual void SendMcpMessage(const std::string& message);
 
 protected:
@@ -100,7 +104,7 @@ protected:
     std::string session_id_;
     std::chrono::time_point<std::chrono::steady_clock> last_incoming_time_;
 
-    virtual bool SendText(const std::string& text) = 0;
+   
     virtual void SetError(const std::string& message);
     virtual bool IsTimeout() const;
 };

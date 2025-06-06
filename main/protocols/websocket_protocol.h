@@ -9,8 +9,10 @@
 
 #define WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT (1 << 0)
 
-class WebsocketProtocol : public Protocol {
+class WebsocketProtocol : public Protocol
+{
 public:
+    WebSocket *websocket_ = nullptr;
     WebsocketProtocol();
 
     virtual ~WebsocketProtocol();
@@ -20,20 +22,19 @@ public:
     virtual void SendStopListening() override;
     virtual void CloseAudioChannel() override;
     virtual bool IsAudioChannelOpened() const override;
-    virtual void SendAudio(const AudioStreamPacket& packet) override;
+    virtual void SendAudio(const AudioStreamPacket &packet) override;
+     bool SendText(const std::string &text) override;
 
 private:
-    WebSocket* websocket_ = nullptr;
     EventGroupHandle_t event_group_handle_;
     std::string message_cache_;
-    std::vector<uint8_t> audio_data_buffer_;  // Reuse buffer for Ogg data
+    std::vector<uint8_t> audio_data_buffer_; // Reuse buffer for Ogg data
     std::unique_ptr<char[]> base64_buffer_;  // Reuse buffer for base64 encoding
-    size_t base64_buffer_size_ = 0;  // Current size of base64 buffer
-    std::string message_buffer_;  // Reuse buffer for message construction
-   
+    size_t base64_buffer_size_ = 0;          // Current size of base64 buffer
+    std::string message_buffer_;             // Reuse buffer for message construction
 
-    void ParseServerHello(const cJSON* root);
-    bool SendText(const std::string& text) override;
+    void ParseServerHello(const cJSON *root);
+   
     std::string GetHelloMessage();
 };
 

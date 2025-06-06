@@ -92,8 +92,8 @@ bool Esp32Camera::Capture() {
             dst[i] = __builtin_bswap16(src[i]);
         }
         display->SetPreviewImage(&preview_image_);
-        vTaskDelay(pdMS_TO_TICKS(5000));
-        display->SetPreviewImage(nullptr);
+        
+       
     }
     return true;
 }
@@ -237,7 +237,7 @@ std::string Esp32Camera::Explain(const std::string& question) {
     return result;
 }
 
-
+  
 
 std::string Esp32Camera::Explain_kouzi(const std::string& question) {
     ESP_LOGI(TAG, "Explain_kouz_______________1");
@@ -354,6 +354,9 @@ std::string Esp32Camera::Explain_kouzi(const std::string& question) {
 
     std::string result = http->ReadAll();
     http->Close();
+
+     // 解析并打印文件ID
+  
 
     ESP_LOGI(TAG, "Explain image size=%dx%d, compressed size=%d, question=%s\n%s", fb_->width, fb_->height, total_sent, question.c_str(), result.c_str());
     return result;
