@@ -82,6 +82,7 @@ public:
     void SendMcpMessage(const std::string &payload);
     void TakeImage(BaseType_t camera_task_woken);
     void sendImage(std::string imageId);
+    void sendImageWithText(std::string imageId, std::string text);
 
     void OnLongPressCamera(bool camera_status); // 录像
     bool camera_status = false;

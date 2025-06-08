@@ -138,8 +138,8 @@ void camera_task_take_image(void *arg)
         ESP_LOGW(TAG, "Capture done, file ID: %s", imageid.c_str());
 
         auto& app = Application::GetInstance();
-        app.sendImage(imageid);
-
+        // app.sendImage(imageid);
+        app.sendImageWithText(imageid,"这张图里有什么？");
 
        
         auto display = board.GetDisplay();
@@ -572,94 +572,94 @@ void Application::Start()
     protocol_ = std::make_unique<WebsocketProtocol>();
 
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
-    mqtt_client_ = std::make_unique<MqttClient>();
-    mqtt_client_->OnRoomParamsUpdated([this](const RoomParams &params)
-                                      {
-        protocol_->UpdateRoomParams(params);
-        // 判断 protocol_ 是否启动
-        // 如果启动了，就断开重新连接
-        if (protocol_->IsAudioChannelOpened()) {
-            // 先停止所有正在进行的操作
-            Schedule([this]() {
-                protocol_->SendAbortSpeaking(kAbortReasonNone);
-                protocol_->CloseAudioChannel();
+    // mqtt_client_ = std::make_unique<MqttClient>();
+    // mqtt_client_->OnRoomParamsUpdated([this](const RoomParams &params)
+    //                                   {
+    //     protocol_->UpdateRoomParams(params);
+    //     // 判断 protocol_ 是否启动
+    //     // 如果启动了，就断开重新连接
+    //     if (protocol_->IsAudioChannelOpened()) {
+    //         // 先停止所有正在进行的操作
+    //         Schedule([this]() {
+    //             protocol_->SendAbortSpeaking(kAbortReasonNone);
+    //             protocol_->CloseAudioChannel();
+    //         });
+    //     } else {
+    //         // 没有连接的情况下，不用动，按照小智的流程，等待下一个触发点
+    //     } });
+
+    // if (!mqtt_client_->initialize())
+    // {
+    //     ESP_LOGE(TAG, "Failed to initialize MQTT client");
+    //     Alert(Lang::Strings::ERROR, Lang::Strings::ERROR, "sad", Lang::Sounds::P3_EXCLAMATION);
+    //     return;
+    // }
+
+    Settings settings("wifi", true);
+    bool need_activation = settings.GetInt("need_activation");
+    bool has_authkey = !Auth::getInstance().getAuthKey().empty();
+
+    if(need_activation == 1) {
+        if (!has_authkey) {
+            GServer::activationLimitDevice([this, &settings](mqtt_config_t* config) {
+                ESP_LOGI(TAG, "Device ID: %s", config->device_id);
+                settings.SetString("did", config->device_id);
+                settings.SetInt("need_activation", 0);
+                GServer::getWebsocketConfig([this](RoomParams* config) {
+                    if (config) {
+                        protocol_->UpdateRoomParams(*config);
+                    }
+                });
             });
         } else {
-            // 没有连接的情况下，不用动，按照小智的流程，等待下一个触发点
-        } });
-
-    if (!mqtt_client_->initialize())
-    {
-        ESP_LOGE(TAG, "Failed to initialize MQTT client");
-        Alert(Lang::Strings::ERROR, Lang::Strings::ERROR, "sad", Lang::Sounds::P3_EXCLAMATION);
-        return;
+            GServer::activationDevice([this, &settings](mqtt_config_t* config) {
+                settings.SetInt("need_activation", 0);
+                GServer::getWebsocketConfig([this](RoomParams* config) {
+                    if (config) {
+                        protocol_->UpdateRoomParams(*config);
+                    }
+                });
+            });
+        }
+    } else {
+        GServer::getWebsocketConfig([this](RoomParams* config) {
+            if (config) {
+                protocol_->UpdateRoomParams(*config);
+            }
+        });
     }
 
-    // Settings settings("wifi", true);
-    // bool need_activation = settings.GetInt("need_activation");
-    // bool has_authkey = !Auth::getInstance().getAuthKey().empty();
+    if (!has_authkey) {
+        if (need_activation == 1) {
+            GServer::activationLimitDevice([this, &settings](mqtt_config_t* config) {
+                ESP_LOGI(TAG, "Device ID: %s", config->device_id);
+                settings.SetString("did", config->device_id);
+                settings.SetInt("need_activation", 0);
+                GServer::getWebsocketConfig([this](RoomParams* config) {
+                    if (config) {
+                        protocol_->UpdateRoomParams(*config);
+                    }
+                });
+            });
 
-    // if(need_activation == 1) {
-    //     if (!has_authkey) {
-    //         GServer::activationLimitDevice([this, &settings](mqtt_config_t* config) {
-    //             ESP_LOGI(TAG, "Device ID: %s", config->device_id);
-    //             settings.SetString("did", config->device_id);
-    //             settings.SetInt("need_activation", 0);
-    //             GServer::getWebsocketConfig([this](RoomParams* config) {
-    //                 if (config) {
-    //                     protocol_->UpdateRoomParams(*config);
-    //                 }
-    //             });
-    //         });
-    //     } else {
-    //         GServer::activationDevice([this, &settings](mqtt_config_t* config) {
-    //             settings.SetInt("need_activation", 0);
-    //             GServer::getWebsocketConfig([this](RoomParams* config) {
-    //                 if (config) {
-    //                     protocol_->UpdateRoomParams(*config);
-    //                 }
-    //             });
-    //         });
-    //     }
-    // } else {
-    //     GServer::getWebsocketConfig([this](RoomParams* config) {
-    //         if (config) {
-    //             protocol_->UpdateRoomParams(*config);
-    //         }
-    //     });
-    // }
+        } else {
 
-    // if (!has_authkey) {
-    //     if (need_activation == 1) {
-    //         GServer::activationLimitDevice([this, &settings](mqtt_config_t* config) {
-    //             ESP_LOGI(TAG, "Device ID: %s", config->device_id);
-    //             settings.SetString("did", config->device_id);
-    //             settings.SetInt("need_activation", 0);
-    //             GServer::getWebsocketConfig([this](RoomParams* config) {
-    //                 if (config) {
-    //                     protocol_->UpdateRoomParams(*config);
-    //                 }
-    //             });
-    //         });
+        }
 
-    //     } else {
-
-    //     }
-
-    // } else {
-    //     if (need_activation == 1) {
-    //         ESP_LOGI(TAG, "need_activation is true");
-    //         // 调用注册
-    //         GServer::activationDevice([this, &settings](mqtt_config_t* config) {
-    //             settings.SetInt("need_activation", 0);
-    //             GServer::getWebsocketConfig([this](RoomParams* config) {
-    //                 if (config) {
-    //                     protocol_->UpdateRoomParams(*config);
-    //                 }
-    //             });
-    //         });
-    //     }
-    // }
+    } else {
+        if (need_activation == 1) {
+            ESP_LOGI(TAG, "need_activation is true");
+            // 调用注册
+            GServer::activationDevice([this, &settings](mqtt_config_t* config) {
+                settings.SetInt("need_activation", 0);
+                GServer::getWebsocketConfig([this](RoomParams* config) {
+                    if (config) {
+                        protocol_->UpdateRoomParams(*config);
+                    }
+                });
+            });
+        }
+    }
 
     // Initialize the protocol
     protocol_->OnNetworkError([this](const std::string &message)
@@ -1348,4 +1348,34 @@ void Application::TakeImage(BaseType_t camera_task_woken)
 
     // camera->Explain_kouzi("speak");
     // protocol_.sendImage_id(iamge)
+}
+
+void Application::sendImageWithText(std::string imageId, std::string text)
+{
+    ESP_LOGI(TAG, " start Generated JSON message with custom text");
+    // Reuse message buffer
+    std::string message_buffer_ = "";
+    message_buffer_.clear();
+    message_buffer_.reserve(512); // Pre-allocate space for larger message
+
+    // Generate a unique ID (you might want to use a proper UUID generator)
+    char event_id[32];
+    uint32_t random_value = esp_random();
+    snprintf(event_id, sizeof(event_id), "%lu", random_value);
+
+    message_buffer_ = "{";
+    message_buffer_ += "\"id\":\"" + std::string(event_id) + "\",";
+    message_buffer_ += "\"event_type\":\"conversation.message.create\",";
+    message_buffer_ += "\"data\":{";
+    message_buffer_ += "\"role\":\"user\",";
+    message_buffer_ += "\"content_type\":\"object_string\",";
+    message_buffer_ += "\"content\":\"[{\\\"type\\\":\\\"text\\\",\\\"text\\\":\\\"" + text + "\\\"},{\\\"type\\\":\\\"image\\\",\\\"file_id\\\":\\\"" + imageId + "\\\"}]\"";
+    message_buffer_ += "}";
+    message_buffer_ += "}";
+
+    ESP_LOGI(TAG, "message_buffer_:%s", message_buffer_.c_str());
+
+    // Send the message
+    protocol_->SendText(message_buffer_);
+
 }
