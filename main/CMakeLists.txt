@@ -11,6 +11,7 @@ set(SOURCES "audio_codecs/audio_codec.cc"
             "display/lcd_display.cc"
             "display/oled_display.cc"
             "display/eye_display.cc"
+            "display/eye_toy_display.cc"
             "protocols/protocol.cc"
             "protocols/websocket_protocol.cc"
             "iot/thing.cc"
@@ -50,6 +51,8 @@ elseif(CONFIG_BOARD_TYPE_BREAD_COMPACT_ESP32_LCD)
     set(BOARD_TYPE "bread-compact-esp32-lcd")
 elseif(CONFIG_BOARD_TYPE_DF_K10)
     set(BOARD_TYPE "df-k10")
+elseif(CONFIG_BOARD_TYPE_DOIT_ESP32S3_EYE)
+    set(BOARD_TYPE "doit-esp32s3-eye")
 elseif(CONFIG_BOARD_TYPE_ESP_BOX_3)
     set(BOARD_TYPE "esp-box-3")
 elseif(CONFIG_BOARD_TYPE_ESP_BOX)
