@@ -136,8 +136,8 @@ void camera_task_take_image(void *arg)
         ESP_LOGW(TAG, "Capture done, file ID: %s", imageid.c_str());
 
         auto &app = Application::GetInstance();
-        // app.sendImage(imageid);
-        app.sendImageWithText(imageid, "这张图里有什么？");
+        app.sendImage(imageid);
+        // app.sendImageWithText(imageid, "这张图里有什么？");
 
         auto display = board.GetDisplay();
         vTaskDelay(pdMS_TO_TICKS(5000));
@@ -568,94 +568,94 @@ void Application::Start()
     protocol_ = std::make_unique<WebsocketProtocol>();
 
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
-    mqtt_client_ = std::make_unique<MqttClient>();
-    mqtt_client_->OnRoomParamsUpdated([this](const RoomParams &params)
-                                      {
-        protocol_->UpdateRoomParams(params);
-        // 判断 protocol_ 是否启动
-        // 如果启动了，就断开重新连接
-        if (protocol_->IsAudioChannelOpened()) {
-            // 先停止所有正在进行的操作
-            Schedule([this]() {
-                protocol_->SendAbortSpeaking(kAbortReasonNone);
-                protocol_->CloseAudioChannel();
+    // mqtt_client_ = std::make_unique<MqttClient>();
+    // mqtt_client_->OnRoomParamsUpdated([this](const RoomParams &params)
+    //                                   {
+    //     protocol_->UpdateRoomParams(params);
+    //     // 判断 protocol_ 是否启动
+    //     // 如果启动了，就断开重新连接
+    //     if (protocol_->IsAudioChannelOpened()) {
+    //         // 先停止所有正在进行的操作
+    //         Schedule([this]() {
+    //             protocol_->SendAbortSpeaking(kAbortReasonNone);
+    //             protocol_->CloseAudioChannel();
+    //         });
+    //     } else {
+    //         // 没有连接的情况下，不用动，按照小智的流程，等待下一个触发点
+    //     } });
+
+    // if (!mqtt_client_->initialize())
+    // {
+    //     ESP_LOGE(TAG, "Failed to initialize MQTT client");
+    //     Alert(Lang::Strings::ERROR, Lang::Strings::ERROR, "sad", Lang::Sounds::P3_EXCLAMATION);
+    //     return;
+    // }
+
+    Settings settings("wifi", true);
+    bool need_activation = settings.GetInt("need_activation");
+    bool has_authkey = !Auth::getInstance().getAuthKey().empty();
+
+    if(need_activation == 1) {
+        if (!has_authkey) {
+            GServer::activationLimitDevice([this, &settings](mqtt_config_t* config) {
+                ESP_LOGI(TAG, "Device ID: %s", config->device_id);
+                settings.SetString("did", config->device_id);
+                settings.SetInt("need_activation", 0);
+                GServer::getWebsocketConfig([this](RoomParams* config) {
+                    if (config) {
+                        protocol_->UpdateRoomParams(*config);
+                    }
+                });
             });
         } else {
-            // 没有连接的情况下，不用动，按照小智的流程，等待下一个触发点
-        } });
-
-    if (!mqtt_client_->initialize())
-    {
-        ESP_LOGE(TAG, "Failed to initialize MQTT client");
-        Alert(Lang::Strings::ERROR, Lang::Strings::ERROR, "sad", Lang::Sounds::P3_EXCLAMATION);
-        return;
+            GServer::activationDevice([this, &settings](mqtt_config_t* config) {
+                settings.SetInt("need_activation", 0);
+                GServer::getWebsocketConfig([this](RoomParams* config) {
+                    if (config) {
+                        protocol_->UpdateRoomParams(*config);
+                    }
+                });
+            });
+        }
+    } else {
+        GServer::getWebsocketConfig([this](RoomParams* config) {
+            if (config) {
+                protocol_->UpdateRoomParams(*config);
+            }
+        });
     }
 
-    // Settings settings("wifi", true);
-    // bool need_activation = settings.GetInt("need_activation");
-    // bool has_authkey = !Auth::getInstance().getAuthKey().empty();
+    if (!has_authkey) {
+        if (need_activation == 1) {
+            GServer::activationLimitDevice([this, &settings](mqtt_config_t* config) {
+                ESP_LOGI(TAG, "Device ID: %s", config->device_id);
+                settings.SetString("did", config->device_id);
+                settings.SetInt("need_activation", 0);
+                GServer::getWebsocketConfig([this](RoomParams* config) {
+                    if (config) {
+                        protocol_->UpdateRoomParams(*config);
+                    }
+                });
+            });
 
-    // if(need_activation == 1) {
-    //     if (!has_authkey) {
-    //         GServer::activationLimitDevice([this, &settings](mqtt_config_t* config) {
-    //             ESP_LOGI(TAG, "Device ID: %s", config->device_id);
-    //             settings.SetString("did", config->device_id);
-    //             settings.SetInt("need_activation", 0);
-    //             GServer::getWebsocketConfig([this](RoomParams* config) {
-    //                 if (config) {
-    //                     protocol_->UpdateRoomParams(*config);
-    //                 }
-    //             });
-    //         });
-    //     } else {
-    //         GServer::activationDevice([this, &settings](mqtt_config_t* config) {
-    //             settings.SetInt("need_activation", 0);
-    //             GServer::getWebsocketConfig([this](RoomParams* config) {
-    //                 if (config) {
-    //                     protocol_->UpdateRoomParams(*config);
-    //                 }
-    //             });
-    //         });
-    //     }
-    // } else {
-    //     GServer::getWebsocketConfig([this](RoomParams* config) {
-    //         if (config) {
-    //             protocol_->UpdateRoomParams(*config);
-    //         }
-    //     });
-    // }
+        } else {
 
-    // if (!has_authkey) {
-    //     if (need_activation == 1) {
-    //         GServer::activationLimitDevice([this, &settings](mqtt_config_t* config) {
-    //             ESP_LOGI(TAG, "Device ID: %s", config->device_id);
-    //             settings.SetString("did", config->device_id);
-    //             settings.SetInt("need_activation", 0);
-    //             GServer::getWebsocketConfig([this](RoomParams* config) {
-    //                 if (config) {
-    //                     protocol_->UpdateRoomParams(*config);
-    //                 }
-    //             });
-    //         });
+        }
 
-    //     } else {
-
-    //     }
-
-    // } else {
-    //     if (need_activation == 1) {
-    //         ESP_LOGI(TAG, "need_activation is true");
-    //         // 调用注册
-    //         GServer::activationDevice([this, &settings](mqtt_config_t* config) {
-    //             settings.SetInt("need_activation", 0);
-    //             GServer::getWebsocketConfig([this](RoomParams* config) {
-    //                 if (config) {
-    //                     protocol_->UpdateRoomParams(*config);
-    //                 }
-    //             });
-    //         });
-    //     }
-    // }
+    } else {
+        if (need_activation == 1) {
+            ESP_LOGI(TAG, "need_activation is true");
+            // 调用注册
+            GServer::activationDevice([this, &settings](mqtt_config_t* config) {
+                settings.SetInt("need_activation", 0);
+                GServer::getWebsocketConfig([this](RoomParams* config) {
+                    if (config) {
+                        protocol_->UpdateRoomParams(*config);
+                    }
+                });
+            });
+        }
+    }
 
     // Initialize the protocol
     protocol_->OnNetworkError([this](const std::string &message)
