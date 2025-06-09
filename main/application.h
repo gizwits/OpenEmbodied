@@ -54,6 +54,7 @@ class Application
 {
 public:
     TaskHandle_t camera_task_handle_take_image = nullptr;
+    const std::string url="https://api.coze.cn/v1/files/upload";
     static Application &GetInstance()
     {
         static Application instance;

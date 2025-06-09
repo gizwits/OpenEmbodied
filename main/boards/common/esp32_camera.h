@@ -20,8 +20,8 @@ class Esp32Camera : public Camera {
 private:
     camera_fb_t* fb_ = nullptr;
     lv_img_dsc_t preview_image_;
-    std::string explain_url_="https://api.coze.cn/v1/files/upload";
-    std::string explain_token_="pat_qhYD0r6M87zqCNLUOvImYB6vC7cVPTQn6rmVO1FIVzjpppHmoOEeam4nlxr9ykAO";
+    std::string explain_url_;
+    std::string explain_token_;
     std::thread encoder_thread_;
 
 public:

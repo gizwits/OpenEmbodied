@@ -24,7 +24,10 @@ public:
     virtual bool IsAudioChannelOpened() const override;
     virtual void SendAudio(const AudioStreamPacket &packet) override;
     bool SendText(const std::string &text) override;
-    virtual const RoomParams& GetRoomParams() const { return room_params_; }
+    // virtual const RoomParams& GetRoomParams() const { return room_params_; }
+    const RoomParams& GetRoomParams() const override {
+        return room_params_;  
+    }
 
 
 private:

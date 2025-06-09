@@ -84,17 +84,20 @@ public:
     virtual void SendIotDescriptors(const std::string& descriptors);
     virtual void SendIotStates(const std::string& states);
     virtual void UpdateRoomParams(const RoomParams& params);
+    virtual const RoomParams& GetRoomParams() const = 0;
+
      virtual bool SendText(const std::string& text) = 0;
     // virtual void SendMcpMessage(const std::string& message);
-
+      
 protected:
     std::function<void(const cJSON* root)> on_incoming_json_;
     std::function<void(AudioStreamPacket&& packet)> on_incoming_audio_;
     std::function<void()> on_audio_channel_opened_;
     std::function<void()> on_audio_channel_closed_;
     std::function<void(const std::string& message)> on_network_error_;
-
     RoomParams room_params_;
+
+  
 
     int server_sample_rate_ = 24000;
     int server_frame_duration_ = 60;

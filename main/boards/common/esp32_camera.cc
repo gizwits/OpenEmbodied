@@ -59,6 +59,7 @@ Esp32Camera::~Esp32Camera() {
 }
 
 void Esp32Camera::SetExplainUrl(const std::string& url, const std::string& token) {
+   
     explain_url_ = url;
     explain_token_ = token;
 }
@@ -238,33 +239,60 @@ std::string Esp32Camera::Explain(const std::string& question) {
 }
 
   
-
+// 辅助函数：清理编码器资源
+void cleanupEncoderResources(QueueHandle_t jpeg_queue, std::thread& encoder_thread) {
+    // 通知编码器线程停止（如果可能）
+    // 这里需要根据 frame2jpg_cb 的实现添加适当的停止机制
+    
+    // 等待线程完成
+    if (encoder_thread.joinable()) {
+        encoder_thread.join();
+    }
+    
+    // 清空队列并释放内存
+    JpegChunk chunk;
+    while (xQueueReceive(jpeg_queue, &chunk, 0) == pdPASS) {
+        if (chunk.data != nullptr) {
+            heap_caps_free(chunk.data);
+        }
+    }
+    
+    // 删除队列
+    vQueueDelete(jpeg_queue);
+}
 std::string Esp32Camera::Explain_kouzi(const std::string& question) {
     ESP_LOGI(TAG, "Explain_kouz_______________1");
     if (explain_url_.empty()) {
         return "{\"success\": false, \"message\": \"Image explain URL or token is not set\"}";
     }
 
-    // 创建局部的 JPEG 队列, 40 entries is about to store 512 * 40 = 20480 bytes of JPEG data
+    // 创建局部的 JPEG 队列
     QueueHandle_t jpeg_queue = xQueueCreate(40, sizeof(JpegChunk));
     if (jpeg_queue == nullptr) {
         ESP_LOGE(TAG, "Failed to create JPEG queue");
         return "{\"success\": false, \"message\": \"Failed to create JPEG queue\"}";
     }
 
-    // We spawn a thread to encode the image to JPEG
-    encoder_thread_ = std::thread([this, jpeg_queue]() {
-        frame2jpg_cb(fb_, 80, [](void* arg, size_t index, const void* data, size_t len) -> unsigned int {
-            auto jpeg_queue = (QueueHandle_t)arg;
-            JpegChunk chunk = {
-                .data = (uint8_t*)heap_caps_malloc(len, MALLOC_CAP_SPIRAM),
-                .len = len
-            };
-            memcpy(chunk.data, data, len);
-            xQueueSend(jpeg_queue, &chunk, portMAX_DELAY);
-            return len;
-        }, jpeg_queue);
-    });
+    // 使用智能指针管理线程，确保异常时也能释放资源
+    std::unique_ptr<std::thread> encoder_thread;
+    try {
+        encoder_thread = std::make_unique<std::thread>([this, jpeg_queue]() {
+            frame2jpg_cb(fb_, 80, [](void* arg, size_t index, const void* data, size_t len) -> unsigned int {
+                auto jpeg_queue = (QueueHandle_t)arg;
+                JpegChunk chunk = {
+                    .data = (uint8_t*)heap_caps_malloc(len, MALLOC_CAP_SPIRAM),
+                    .len = len
+                };
+                memcpy(chunk.data, data, len);
+                xQueueSend(jpeg_queue, &chunk, portMAX_DELAY);
+                return len;
+            }, jpeg_queue);
+        });
+    } catch (const std::exception& e) {
+        ESP_LOGE(TAG, "Failed to create encoder thread: %s", e.what());
+        vQueueDelete(jpeg_queue);
+        return "{\"success\": false, \"message\": \"Failed to create encoder thread\"}";
+    }
 
     auto http = Board::GetInstance().CreateHttp();
     // 构造multipart/form-data请求体
@@ -288,9 +316,7 @@ std::string Esp32Camera::Explain_kouzi(const std::string& question) {
     std::string multipart_footer;
     multipart_footer += "\r\n--" + boundary + "--\r\n";
 
-   
-
-    // 配置HTTP客户端，使用分块传输编码
+    // 配置HTTP客户端
     http->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
     ESP_LOGI(TAG,"head%s",SystemInfo::GetMacAddress().c_str());
     http->SetHeader("Client-Id", Board::GetInstance().GetUuid().c_str());
@@ -299,65 +325,84 @@ std::string Esp32Camera::Explain_kouzi(const std::string& question) {
     }
     http->SetHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
     http->SetHeader("Transfer-Encoding", "chunked");
-    if (!http->Open("POST", explain_url_)) {
+    
+    bool http_opened = http->Open("POST", explain_url_);
+    if (!http_opened) {
         ESP_LOGE(TAG, "Failed to connect to explain URL");
-        // Clear the queue
-        encoder_thread_.join();
-        JpegChunk chunk;
-        while (xQueueReceive(jpeg_queue, &chunk, portMAX_DELAY) == pdPASS) {
-            if (chunk.data != nullptr) {
-                heap_caps_free(chunk.data);
-            } else {
-                break;
-            }
-        }
-        vQueueDelete(jpeg_queue);
+        cleanupEncoderResources(jpeg_queue, *encoder_thread);
         return "{\"success\": false, \"message\": \"Failed to connect to explain URL\"}";
     }
     
+    // 发送请求体
+    bool send_success = true;
+    
     // 第一块：question字段
-    http->Write(question_field.c_str(), question_field.size());
+    if (!http->Write(question_field.c_str(), question_field.size())) {
+        send_success = false;
+    }
     
     // 第二块：文件字段头部
-    http->Write(file_header.c_str(), file_header.size());
+    if (send_success && !http->Write(file_header.c_str(), file_header.size())) {
+        send_success = false;
+    }
     
     // 第三块：JPEG数据
     size_t total_sent = 0;
-    while (true) {
-        JpegChunk chunk;
-        if (xQueueReceive(jpeg_queue, &chunk, portMAX_DELAY) != pdPASS) {
-            ESP_LOGE(TAG, "Failed to receive JPEG chunk");
-            break;
+    if (send_success) {
+        while (true) {
+            JpegChunk chunk;
+            if (xQueueReceive(jpeg_queue, &chunk, portMAX_DELAY) != pdPASS) {
+                ESP_LOGE(TAG, "Failed to receive JPEG chunk");
+                send_success = false;
+                break;
+            }
+            if (chunk.data == nullptr) {
+                break; // 最后一个块
+            }
+            if (!http->Write((const char*)chunk.data, chunk.len)) {
+                send_success = false;
+                heap_caps_free(chunk.data); // 释放当前块
+                break;
+            }
+            total_sent += chunk.len;
+            heap_caps_free(chunk.data);
         }
-        if (chunk.data == nullptr) {
-            break; // The last chunk
-        }
-        http->Write((const char*)chunk.data, chunk.len);
-        total_sent += chunk.len;
-        heap_caps_free(chunk.data);
     }
-    // Wait for the encoder thread to finish
-    encoder_thread_.join();
+    
+    // 等待编码器线程完成
+    encoder_thread->join();
     // 清理队列
     vQueueDelete(jpeg_queue);
-
+    
+    // 如果发送失败，关闭连接并返回错误
+    if (!send_success) {
+        http->Close();
+        return "{\"success\": false, \"message\": \"Failed to send data\"}";
+    }
+    
     // 第四块：multipart尾部
-    http->Write(multipart_footer.c_str(), multipart_footer.size());
+    if (!http->Write(multipart_footer.c_str(), multipart_footer.size())) {
+        http->Close();
+        return "{\"success\": false, \"message\": \"Failed to send request footer\"}";
+    }
     
     // 结束块
     http->Write("", 0);
 
     if (http->GetStatusCode() != 200) {
         ESP_LOGE(TAG, "Failed to upload photo, status code: %d", http->GetStatusCode());
+        http->Close();
         return "{\"success\": false, \"message\": \"Failed to upload photo\"}";
     }
 
     std::string result = http->ReadAll();
     http->Close();
 
-     // 解析并打印文件ID
-  
-
-    ESP_LOGI(TAG, "Explain image size=%dx%d, compressed size=%d, question=%s\n%s", fb_->width, fb_->height, total_sent, question.c_str(), result.c_str());
+    ESP_LOGI(TAG, "Explain image size=%dx%d, compressed size=%d, question=%s\n%s", 
+             fb_->width, fb_->height, total_sent, question.c_str(), result.c_str());
+             
+   
+    
     return result;
 }
+
