@@ -23,7 +23,9 @@ public:
     virtual void CloseAudioChannel() override;
     virtual bool IsAudioChannelOpened() const override;
     virtual void SendAudio(const AudioStreamPacket &packet) override;
-     bool SendText(const std::string &text) override;
+    bool SendText(const std::string &text) override;
+    virtual const RoomParams& GetRoomParams() const { return room_params_; }
+
 
 private:
     EventGroupHandle_t event_group_handle_;
