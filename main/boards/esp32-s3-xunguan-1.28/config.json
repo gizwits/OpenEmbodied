@@ -4,6 +4,8 @@
         {
             "name": "esp32-s3-xunguan-1.28",
             "sdkconfig_append": [
+                "CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y",
+                "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions_8M.csv\""
             ]
         }
     ]
