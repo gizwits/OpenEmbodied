@@ -127,8 +127,8 @@ EyeToyDisplay::EyeToyDisplay(esp_lcd_panel_io_handle_t panel_io1, esp_lcd_panel_
 
     ESP_LOGI(TAG, "Initialize LVGL");
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
-    port_cfg.task_priority = 7;  // 提高LVGL任务优先级
-    port_cfg.timer_period_ms = 60;  // 减少刷新周期
+    port_cfg.task_priority = 5;  // 提高LVGL任务优先级
+    port_cfg.timer_period_ms = 100;  // 减少刷新周期
     lvgl_port_init(&port_cfg);
 
     // 初始化第一块屏幕
@@ -415,20 +415,30 @@ void EyeToyDisplay::StartThinkingAnimation() {
     // 创建大星星和小星星
     if (!star_big_1) {
         star_big_1 = lv_img_create(lv_obj_get_parent(left_highlight1_));
-        lv_img_set_src(star_big_1, &star_img_32);
-        lv_obj_set_size(star_big_1, 64, 64);
-        lv_obj_set_pos(star_big_1, lv_obj_get_x(left_highlight1_), lv_obj_get_y(left_highlight1_));
-        lv_obj_set_style_img_recolor(star_big_1, lv_color_white(), 0);
-        lv_obj_set_style_img_recolor_opa(star_big_1, LV_OPA_COVER, 0);
+        if (star_big_1) {
+            lv_img_set_src(star_big_1, &star_img_32);
+            // 使用缩放而不是固定尺寸
+            lv_img_set_zoom(star_big_1, 256);  // 256 = 100% zoom
+            lv_obj_set_pos(star_big_1, lv_obj_get_x(left_highlight1_), lv_obj_get_y(left_highlight1_));
+            lv_obj_set_style_img_recolor(star_big_1, lv_color_white(), 0);
+            lv_obj_set_style_img_recolor_opa(star_big_1, LV_OPA_COVER, 0);
+            // 使用叠加混合模式
+            lv_obj_set_style_blend_mode(star_big_1, LV_BLEND_MODE_ADDITIVE, 0);
+        }
     }
 
     if (!star_small_1) {
         star_small_1 = lv_img_create(lv_obj_get_parent(right_highlight1_));
-        lv_img_set_src(star_small_1, &star_img_16);
-        lv_obj_set_size(star_small_1, 32, 32);
-        lv_obj_set_pos(star_small_1, lv_obj_get_x(right_highlight1_), lv_obj_get_y(right_highlight1_));
-        lv_obj_set_style_img_recolor(star_small_1, lv_color_white(), 0);
-        lv_obj_set_style_img_recolor_opa(star_small_1, LV_OPA_COVER, 0);
+        if (star_small_1) {
+            lv_img_set_src(star_small_1, &star_img_16);
+            // 使用缩放而不是固定尺寸
+            lv_img_set_zoom(star_small_1, 256);  // 256 = 100% zoom
+            lv_obj_set_pos(star_small_1, lv_obj_get_x(right_highlight1_), lv_obj_get_y(right_highlight1_));
+            lv_obj_set_style_img_recolor(star_small_1, lv_color_white(), 0);
+            lv_obj_set_style_img_recolor_opa(star_small_1, LV_OPA_COVER, 0);
+            // 使用叠加混合模式
+            lv_obj_set_style_blend_mode(star_small_1, LV_BLEND_MODE_ADDITIVE, 0);
+        }
     }
 
     // 给系统一些时间处理第一个屏幕的操作
@@ -450,20 +460,30 @@ void EyeToyDisplay::StartThinkingAnimation() {
     // 创建大星星和小星星
     if (!star_big_2) {
         star_big_2 = lv_img_create(lv_obj_get_parent(left_highlight2_));
-        lv_img_set_src(star_big_2, &star_img_32);
-        lv_obj_set_size(star_big_2, 64, 64);
-        lv_obj_set_pos(star_big_2, lv_obj_get_x(left_highlight2_), lv_obj_get_y(left_highlight2_));
-        lv_obj_set_style_img_recolor(star_big_2, lv_color_white(), 0);
-        lv_obj_set_style_img_recolor_opa(star_big_2, LV_OPA_COVER, 0);
+        if (star_big_2) {
+            lv_img_set_src(star_big_2, &star_img_32);
+            // 使用缩放而不是固定尺寸
+            lv_img_set_zoom(star_big_2, 256);  // 256 = 100% zoom
+            lv_obj_set_pos(star_big_2, lv_obj_get_x(left_highlight2_), lv_obj_get_y(left_highlight2_));
+            lv_obj_set_style_img_recolor(star_big_2, lv_color_white(), 0);
+            lv_obj_set_style_img_recolor_opa(star_big_2, LV_OPA_COVER, 0);
+            // 使用叠加混合模式
+            lv_obj_set_style_blend_mode(star_big_2, LV_BLEND_MODE_ADDITIVE, 0);
+        }
     }
 
     if (!star_small_2) {
         star_small_2 = lv_img_create(lv_obj_get_parent(right_highlight2_));
-        lv_img_set_src(star_small_2, &star_img_16);
-        lv_obj_set_size(star_small_2, 32, 32);
-        lv_obj_set_pos(star_small_2, lv_obj_get_x(right_highlight2_), lv_obj_get_y(right_highlight2_));
-        lv_obj_set_style_img_recolor(star_small_2, lv_color_white(), 0);
-        lv_obj_set_style_img_recolor_opa(star_small_2, LV_OPA_COVER, 0);
+        if (star_small_2) {
+            lv_img_set_src(star_small_2, &star_img_16);
+            // 使用缩放而不是固定尺寸
+            lv_img_set_zoom(star_small_2, 256);  // 256 = 100% zoom
+            lv_obj_set_pos(star_small_2, lv_obj_get_x(right_highlight2_), lv_obj_get_y(right_highlight2_));
+            lv_obj_set_style_img_recolor(star_small_2, lv_color_white(), 0);
+            lv_obj_set_style_img_recolor_opa(star_small_2, LV_OPA_COVER, 0);
+            // 使用叠加混合模式
+            lv_obj_set_style_blend_mode(star_small_2, LV_BLEND_MODE_ADDITIVE, 0);
+        }
     }
 
     // 给系统一些时间处理第二个屏幕的操作
@@ -471,51 +491,56 @@ void EyeToyDisplay::StartThinkingAnimation() {
 
     // 处理第一个屏幕的动画
     lv_display_set_default(display1_);
-    lv_anim_t anim1;
-    lv_anim_init(&anim1);
-    lv_anim_set_var(&anim1, star_big_1);
-    lv_anim_set_values(&anim1, 0, 3600);
-    lv_anim_set_time(&anim1, 5000);
-    lv_anim_set_delay(&anim1, 0);
-    lv_anim_set_exec_cb(&anim1, (lv_anim_exec_xcb_t)lv_img_set_angle);
-    lv_anim_set_path_cb(&anim1, lv_anim_path_linear);
-    lv_anim_set_repeat_count(&anim1, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_start(&anim1);
+    if (star_big_1 && star_small_1) {
+        lv_anim_t anim1;
+        lv_anim_init(&anim1);
+        lv_anim_set_var(&anim1, star_big_1);
+        lv_anim_set_values(&anim1, 0, 3600);
+        lv_anim_set_time(&anim1, 5000);
+        lv_anim_set_delay(&anim1, 0);
+        lv_anim_set_exec_cb(&anim1, (lv_anim_exec_xcb_t)lv_img_set_angle);
+        lv_anim_set_path_cb(&anim1, lv_anim_path_linear);
+        lv_anim_set_repeat_count(&anim1, LV_ANIM_REPEAT_INFINITE);
+        lv_anim_start(&anim1);
 
-    lv_anim_init(&anim1);
-    lv_anim_set_var(&anim1, star_small_1);
-    lv_anim_set_values(&anim1, 0, 3600);
-    lv_anim_set_time(&anim1, 5000);
-    lv_anim_set_delay(&anim1, 0);
-    lv_anim_set_exec_cb(&anim1, (lv_anim_exec_xcb_t)lv_img_set_angle);
-    lv_anim_set_path_cb(&anim1, lv_anim_path_linear);
-    lv_anim_set_repeat_count(&anim1, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_start(&anim1);
+        lv_anim_init(&anim1);
+        lv_anim_set_var(&anim1, star_small_1);
+        lv_anim_set_values(&anim1, 0, 3600);
+        lv_anim_set_time(&anim1, 5000);
+        lv_anim_set_delay(&anim1, 0);
+        lv_anim_set_exec_cb(&anim1, (lv_anim_exec_xcb_t)lv_img_set_angle);
+        lv_anim_set_path_cb(&anim1, lv_anim_path_linear);
+        lv_anim_set_repeat_count(&anim1, LV_ANIM_REPEAT_INFINITE);
+        lv_anim_start(&anim1);
+    }
 
     // 给系统一些时间处理第一个屏幕的动画
     vTaskDelay(pdMS_TO_TICKS(10));
 
     // 处理第二个屏幕的动画
     lv_display_set_default(display2_);
-    lv_anim_init(&anim1);
-    lv_anim_set_var(&anim1, star_big_2);
-    lv_anim_set_values(&anim1, 0, 3600);
-    lv_anim_set_time(&anim1, 5000);
-    lv_anim_set_delay(&anim1, 0);
-    lv_anim_set_exec_cb(&anim1, (lv_anim_exec_xcb_t)lv_img_set_angle);
-    lv_anim_set_path_cb(&anim1, lv_anim_path_linear);
-    lv_anim_set_repeat_count(&anim1, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_start(&anim1);
+    if (star_big_2 && star_small_2) {
+        lv_anim_t anim1;
+        lv_anim_init(&anim1);
+        lv_anim_set_var(&anim1, star_big_2);
+        lv_anim_set_values(&anim1, 0, 3600);
+        lv_anim_set_time(&anim1, 5000);
+        lv_anim_set_delay(&anim1, 0);
+        lv_anim_set_exec_cb(&anim1, (lv_anim_exec_xcb_t)lv_img_set_angle);
+        lv_anim_set_path_cb(&anim1, lv_anim_path_linear);
+        lv_anim_set_repeat_count(&anim1, LV_ANIM_REPEAT_INFINITE);
+        lv_anim_start(&anim1);
 
-    lv_anim_init(&anim1);
-    lv_anim_set_var(&anim1, star_small_2);
-    lv_anim_set_values(&anim1, 0, 3600);
-    lv_anim_set_time(&anim1, 5000);
-    lv_anim_set_delay(&anim1, 0);
-    lv_anim_set_exec_cb(&anim1, (lv_anim_exec_xcb_t)lv_img_set_angle);
-    lv_anim_set_path_cb(&anim1, lv_anim_path_linear);
-    lv_anim_set_repeat_count(&anim1, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_start(&anim1);
+        lv_anim_init(&anim1);
+        lv_anim_set_var(&anim1, star_small_2);
+        lv_anim_set_values(&anim1, 0, 3600);
+        lv_anim_set_time(&anim1, 5000);
+        lv_anim_set_delay(&anim1, 0);
+        lv_anim_set_exec_cb(&anim1, (lv_anim_exec_xcb_t)lv_img_set_angle);
+        lv_anim_set_path_cb(&anim1, lv_anim_path_linear);
+        lv_anim_set_repeat_count(&anim1, LV_ANIM_REPEAT_INFINITE);
+        lv_anim_start(&anim1);
+    }
 
     // 恢复第一个屏幕为默认显示器
     lv_display_set_default(display1_);
@@ -551,7 +576,18 @@ void EyeToyDisplay::SetupUI() {
 
 // 创建眼睛的辅助函数
 void EyeToyDisplay::CreateEye(lv_obj_t* parent) {
-    // 1. 外圈（棕色），填满屏幕
+    // 1. 外圈（棕色），填满屏幕，但留出边距
+    int horizontal_padding = width_ * 0.2;   // 水平方向留出 20% 的边距
+    int vertical_padding = height_ * 0.17;    // 垂直方向留出 17% 的边距
+
+    // 根据当前显示器调整水平内边距
+    lv_display_t* current_display = lv_display_get_default();
+    if (current_display == display1_) {
+        horizontal_padding = width_ * 0.25;  // SPI1 右边增加内边距
+    } else if (current_display == display2_) {
+        horizontal_padding = width_ * 0.25;  // SPI2 左边增加内边距
+    }
+
     lv_obj_t* eye_outer = lv_obj_create(parent);
     lv_obj_set_size(eye_outer, width_, height_);
     lv_obj_set_style_radius(eye_outer, LV_RADIUS_CIRCLE, 0);
@@ -560,12 +596,12 @@ void EyeToyDisplay::CreateEye(lv_obj_t* parent) {
     lv_obj_set_style_pad_all(eye_outer, 0, 0);
     lv_obj_center(eye_outer);
 
-    // 2. 眼球（纯黑色），比外圈小一些
-    int ball_w = width_ * 0.75;
-    int ball_h = height_ * 0.75;
+    // 2. 眼球（纯黑色），比外圈小一些，保持椭圆形
+    int ball_w = (width_ - 2 * horizontal_padding) * 0.6;
+    int ball_h = (height_ - 2 * vertical_padding) * 0.68;  // 高度稍微小一些，使眼睛更椭圆
     lv_obj_t* eye_ball = lv_obj_create(eye_outer);
     lv_obj_set_size(eye_ball, ball_w, ball_h);
-    lv_obj_set_style_radius(eye_ball, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_radius(eye_ball, LV_RADIUS_CIRCLE, 0);  // 使用最大圆角
     lv_obj_set_style_bg_color(eye_ball, lv_color_black(), 0); // 纯黑色
     lv_obj_set_style_border_width(eye_ball, 0, 0);
     lv_obj_set_style_pad_all(eye_ball, 0, 0);
@@ -573,8 +609,8 @@ void EyeToyDisplay::CreateEye(lv_obj_t* parent) {
 
     // 3. 高光1（大白点）
     lv_obj_t* highlight1 = lv_obj_create(eye_ball);
-    lv_obj_set_size(highlight1, ball_w * 0.25, ball_h * 0.25);
-    lv_obj_set_style_radius(highlight1, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_size(highlight1, ball_w * 0.24, ball_h * 0.25);
+    lv_obj_set_style_radius(highlight1, ball_w * 0.125, 0);  // 使用高度的一半作为圆角
     lv_obj_set_style_bg_color(highlight1, lv_color_white(), 0);
     lv_obj_set_style_border_width(highlight1, 0, 0);
     lv_obj_set_style_pad_all(highlight1, 0, 0);
@@ -583,8 +619,8 @@ void EyeToyDisplay::CreateEye(lv_obj_t* parent) {
 
     // 4. 高光2（小白点）
     lv_obj_t* highlight2 = lv_obj_create(eye_ball);
-    lv_obj_set_size(highlight2, ball_w * 0.13, ball_h * 0.13);
-    lv_obj_set_style_radius(highlight2, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_size(highlight2, ball_w * 0.12, ball_h * 0.13);
+    lv_obj_set_style_radius(highlight2, ball_w * 0.065, 0);  // 使用高度的一半作为圆角
     lv_obj_set_style_bg_color(highlight2, lv_color_white(), 0);
     lv_obj_set_style_border_width(highlight2, 0, 0);
     lv_obj_set_style_pad_all(highlight2, 0, 0);

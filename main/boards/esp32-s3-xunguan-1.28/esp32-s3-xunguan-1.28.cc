@@ -1,10 +1,11 @@
 #include "wifi_board.h"
-#include "audio_codecs/es8311_audio_codec.h"
 #include "display/lcd_display.h"
 #include "application.h"
 #include "button.h"
 #include "config.h"
 #include "iot/thing_manager.h"
+
+#include "audio_codecs/no_audio_codec.h"
 #include "led/single_led.h"
 
 #include <wifi_station.h>
@@ -55,23 +56,6 @@ private:
     i2c_master_bus_handle_t codec_i2c_bus_;
     Button boot_button_;
     Display* display_;
-
-    void InitializeCodecI2c() {
-        // Initialize I2C peripheral
-        i2c_master_bus_config_t i2c_bus_cfg = {
-            .i2c_port = I2C_NUM_0,
-            .sda_io_num = AUDIO_CODEC_I2C_SDA_PIN,
-            .scl_io_num = AUDIO_CODEC_I2C_SCL_PIN,
-            .clk_source = I2C_CLK_SRC_DEFAULT,
-            .glitch_ignore_cnt = 7,
-            .intr_priority = 0,
-            .trans_queue_depth = 0,
-            .flags = {
-                .enable_internal_pullup = 1,
-            },
-        };
-        ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &codec_i2c_bus_));
-    }
 
     // SPI初始化
     void InitializeSpi() {
@@ -130,10 +114,21 @@ private:
         thing_manager.AddThing(iot::CreateThing("Speaker")); 
         thing_manager.AddThing(iot::CreateThing("Screen"));   
     }
+    void InitializeGpio(gpio_num_t gpio_num_) {
+        gpio_config_t config = {
+            .pin_bit_mask = (1ULL << gpio_num_),
+            .mode = GPIO_MODE_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_ENABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        ESP_ERROR_CHECK(gpio_config(&config));
+        gpio_set_level(gpio_num_, 1);
+    }
 
 public:
     MovecallMojiESP32S3() : boot_button_(BOOT_BUTTON_GPIO) {  
-        InitializeCodecI2c();
+        InitializeGpio(AUDIO_CODEC_PA_PIN);
         InitializeSpi();
         InitializeGc9a01Display();
         InitializeButtons();
@@ -156,9 +151,8 @@ public:
     }
 
     virtual AudioCodec* GetAudioCodec() override {
-        static Es8311AudioCodec audio_codec(codec_i2c_bus_, I2C_NUM_0, AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
-            AUDIO_I2S_GPIO_MCLK, AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN,
-            AUDIO_CODEC_PA_PIN, AUDIO_CODEC_ES8311_ADDR);
+        static NoAudioCodecSimplexPdm audio_codec(AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
+            AUDIO_I2S_SPK_GPIO_BCLK, AUDIO_I2S_SPK_GPIO_LRCK, AUDIO_I2S_SPK_GPIO_DOUT, AUDIO_I2S_MIC_GPIO_WS, AUDIO_I2S_MIC_GPIO_DIN);
         return &audio_codec;
     }
 };
