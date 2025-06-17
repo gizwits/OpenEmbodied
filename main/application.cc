@@ -293,6 +293,7 @@ void Application::ToggleChatState() {
     } else if (device_state_ == kDeviceStateSpeaking) {
         Schedule([this]() {
             AbortSpeaking(kAbortReasonNone);
+            SetDeviceState(kDeviceStateListening);
         });
     } else if (device_state_ == kDeviceStateListening) {
         Schedule([this]() {
@@ -406,28 +407,29 @@ void Application::Start() {
     protocol_ = std::make_unique<WebsocketProtocol>();
 
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
-    // mqtt_client_ = std::make_unique<MqttClient>();
-    // mqtt_client_->OnRoomParamsUpdated([this](const RoomParams& params) {
-    //     protocol_->UpdateRoomParams(params);
-    //     // 判断 protocol_ 是否启动
-    //     // 如果启动了，就断开重新连接
-    //     if (protocol_->IsAudioChannelOpened()) {
-    //         // 先停止所有正在进行的操作
-    //         Schedule([this]() {
-    //             protocol_->SendAbortSpeaking(kAbortReasonNone);
-    //             protocol_->CloseAudioChannel();
-    //         });
-    //     } else {
-    //         // 没有连接的情况下，不用动，按照小智的流程，等待下一个触发点
-    //     }
-    // });
+#if CONFIG_USE_GIZWITS_MQTT
+    mqtt_client_ = std::make_unique<MqttClient>();
+    mqtt_client_->OnRoomParamsUpdated([this](const RoomParams& params) {
+        protocol_->UpdateRoomParams(params);
+        // 判断 protocol_ 是否启动
+        // 如果启动了，就断开重新连接
+        if (protocol_->IsAudioChannelOpened()) {
+            // 先停止所有正在进行的操作
+            Schedule([this]() {
+                protocol_->SendAbortSpeaking(kAbortReasonNone);
+                protocol_->CloseAudioChannel();
+            });
+        } else {
+            // 没有连接的情况下，不用动，按照小智的流程，等待下一个触发点
+        }
+    });
 
-    // if (!mqtt_client_->initialize()) {
-    //     ESP_LOGE(TAG, "Failed to initialize MQTT client");
-    //     Alert(Lang::Strings::ERROR, Lang::Strings::ERROR, "sad", Lang::Sounds::P3_EXCLAMATION);
-    //     return;
-    // }
-
+    if (!mqtt_client_->initialize()) {
+        ESP_LOGE(TAG, "Failed to initialize MQTT client");
+        Alert(Lang::Strings::ERROR, Lang::Strings::ERROR, "sad", Lang::Sounds::P3_EXCLAMATION);
+        return;
+    }
+#else
     Settings settings("wifi", true);
     bool need_activation = settings.GetInt("need_activation");
     bool has_authkey = !Auth::getInstance().getAuthKey().empty();
@@ -493,7 +495,7 @@ void Application::Start() {
             });
         }
     }
-
+#endif
     // Initialize the protocol
     protocol_->OnNetworkError([this](const std::string& message) {
         SetDeviceState(kDeviceStateIdle);

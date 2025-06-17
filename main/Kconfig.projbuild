@@ -298,6 +298,13 @@ choice CONNECTION_TYPE
             Connect to WiFi using Access Point mode
 endchoice
 
+config USE_GIZWITS_MQTT
+    bool "Enable Gizwits MQTT"
+    default y
+    help
+        使用 Gizwits MQTT 协议
+
+
 config USE_WECHAT_MESSAGE_STYLE
     bool "Enable WeChat Message Style"
     default n
