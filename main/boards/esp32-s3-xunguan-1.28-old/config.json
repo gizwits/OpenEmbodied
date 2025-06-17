@@ -1,0 +1,9 @@
+{
+    "target": "esp32s3",
+    "builds": [
+        {
+            "name": "esp32-s3-xunguan-1.28-old",
+            "sdkconfig_append": []
+        }
+    ]
+}

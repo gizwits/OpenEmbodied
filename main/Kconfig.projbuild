@@ -125,6 +125,8 @@ choice BOARD_TYPE
         bool "Waveshare ESP32-S3-Touch-AMOLED-1.8"
     config BOARD_TYPE_ESP32S3_XUNGUAN_AMOLED_1_28
         bool "讯管"
+    config BOARD_TYPE_ESP32S3_XUNGUAN_AMOLED_1_28_OLD
+        bool "讯管old"
     config BOARD_TYPE_ESP32S3_Touch_AMOLED_1_75
         bool "Waveshare ESP32-S3-Touch-AMOLED-1.75"
     config BOARD_TYPE_ESP32S3_Touch_LCD_1_85C

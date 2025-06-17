@@ -985,7 +985,7 @@ void Application::SetDeviceState(DeviceState state) {
             break;
         case kDeviceStateSpeaking:
             display->SetStatus(Lang::Strings::SPEAKING);
-            display->SetEmotion("thinking");
+            display->SetEmotion("happy");
 
 
             if (listening_mode_ != kListeningModeRealtime) {
