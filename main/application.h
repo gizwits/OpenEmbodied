@@ -5,6 +5,8 @@
 #include <freertos/event_groups.h>
 #include <freertos/task.h>
 #include <esp_timer.h>
+#include "player/player.h"
+
 
 #include <string>
 #include <mutex>
@@ -53,10 +55,12 @@ public:
         static Application instance;
         return instance;
     }
+    Player player_;
+
     // 删除拷贝构造函数和赋值运算符
     Application(const Application&) = delete;
     Application& operator=(const Application&) = delete;
-
+    void QuitTalking();
     void Start();
     DeviceState GetDeviceState() const { return device_state_; }
     bool IsVoiceDetected() const { return voice_detected_; }
@@ -65,6 +69,8 @@ public:
     void Alert(const char* status, const char* message, const char* emotion = "", const std::string_view& sound = "");
     void DismissAlert();
     void AbortSpeaking(AbortReason reason);
+    void PlayMusic(const char* url);
+    void CancelPlayMusic();
     void ToggleChatState();
     void StartListening();
     void StopListening();

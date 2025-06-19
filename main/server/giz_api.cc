@@ -541,8 +541,8 @@ int32_t GServer::getFirmwareUpdate(const char* hw_version, const char* sw_versio
 
 
     // 将字节数组转换为字符串
-    // std::string content((char*)sFirmwareData, len);
-    // http->SetContent(std::move(content));
+    std::string content((char*)sFirmwareData, len);
+    http->SetContent(std::move(content));
 
     // 发送PUT请求
     if (!http->Open("PUT", url)) {
@@ -550,7 +550,6 @@ int32_t GServer::getFirmwareUpdate(const char* hw_version, const char* sw_versio
         delete http;
         return -1;
     }
-    http->Write((const char*)sFirmwareData, len);
 
     auto status_code = http->GetStatusCode();
 

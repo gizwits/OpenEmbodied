@@ -9,6 +9,8 @@
 #define _BOARD_CONFIG_H_
 
 #include <driver/gpio.h>
+#include "driver/touch_pad.h"
+
 
 //音频输入和输出的采样率
 #define AUDIO_INPUT_SAMPLE_RATE  24000
@@ -30,7 +32,7 @@
 #define AUDIO_CODEC_ES8311_ADDR  ES8311_CODEC_DEFAULT_ADDR
 #define AUDIO_CODEC_ES7210_ADDR  0x82
 
-#define BOOT_BUTTON_GPIO        GPIO_NUM_9
+#define BOOT_BUTTON_GPIO        GPIO_NUM_4
                                                               
 //分辨率
 #define DISPLAY_WIDTH   240

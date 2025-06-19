@@ -38,21 +38,16 @@ private:
 
     SemaphoreHandle_t lcd_mutex = NULL;
     
+    // 三击相关变量
+    int boot_button_click_count_ = 0;
+    TimerHandle_t boot_button_timer_ = nullptr;
+    static constexpr int kTripleClickWindowMs = 1000; // 1秒内三击
 
-    // 魔眼的初始化互斥锁
-    // void lcd_mutex_init(void) {
-    //     if (lcd_mutex == NULL) {
-    //         lcd_mutex = xSemaphoreCreateMutex();
-    //         if (lcd_mutex == NULL) {
-    //             ESP_LOGE("LCD", "Failed to create LCD mutex");
-    //             abort();    //abort()函数用于在程序遇到严重错误时终止程序的执行。
-    //         }
-    //     }
-    // }
-
-
-// /* =================================*/
-
+    // 三击定时器回调
+    static void BootButtonTimerCallback(TimerHandle_t xTimer) {
+        auto self = static_cast<XiaoZhiEyeBoard*>(pvTimerGetTimerID(xTimer));
+        self->boot_button_click_count_ = 0;
+    }
 
     void InitializeI2c() {
         // Initialize I2C peripheral
@@ -79,7 +74,29 @@ private:
     }
 
     void InitializeButtons() {
+        // 创建三击定时器
+        if (!boot_button_timer_) {
+            boot_button_timer_ = xTimerCreate("boot_btn_timer", pdMS_TO_TICKS(kTripleClickWindowMs), pdFALSE, this, BootButtonTimerCallback);
+        }
+        boot_button_.OnLongPress([this]() {
+            esp_restart();
+        });
         boot_button_.OnClick([this]() {
+            boot_button_click_count_++;
+            ESP_LOGI(TAG, "Boot button clicked %d times", boot_button_click_count_);
+            if (boot_button_click_count_ == 1) {
+                // 启动定时器
+                xTimerStart(boot_button_timer_, 0);
+            }
+            if (boot_button_click_count_ == 3) {
+                // 三击事件触发
+                ESP_LOGI(TAG, "Boot button triple clicked!");
+                // TODO: 在这里添加三击要执行的功能
+                boot_button_click_count_ = 0;
+                xTimerStop(boot_button_timer_, 0);
+                ResetWifiConfiguration();
+            }
+            // 原有单击逻辑
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
                 ResetWifiConfiguration();

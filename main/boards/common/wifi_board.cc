@@ -45,10 +45,11 @@ void WifiBoard::EnterWifiConfigMode() {
 
     // 初始化 WiFi模块
 
-    WifiConfiguration::GetInstance().Initialize(Auth::getInstance().getProductKey(), "XPG-GAgent");
     std::string hint = Lang::Strings::OPEN_MINI_APP;
     hint += "\n\n";
     application.Alert(Lang::Strings::WIFI_CONFIG_MODE, hint.c_str(), "", Lang::Sounds::P3_WIFICONFIG);
+
+    WifiConfiguration::GetInstance().Initialize(Auth::getInstance().getProductKey(), "XPG-GAgent");
     
     // Wait forever until reset after configuration
     while (true) {

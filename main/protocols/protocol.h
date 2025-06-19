@@ -82,6 +82,7 @@ public:
     virtual void SendIotDescriptors(const std::string& descriptors);
     virtual void SendIotStates(const std::string& states);
     virtual void UpdateRoomParams(const RoomParams& params);
+    virtual const RoomParams& GetRoomParams() const { return room_params_; }
     // virtual void SendMcpMessage(const std::string& message);
 
 protected:

@@ -403,6 +403,8 @@ void Application::Start() {
 
     CheckNewVersion();
 
+    PlaySound(Lang::Sounds::P3_CONNECT_SUCCESS);
+
     // Initialize MQTT client
     protocol_ = std::make_unique<WebsocketProtocol>();
 
@@ -416,11 +418,13 @@ void Application::Start() {
         if (protocol_->IsAudioChannelOpened()) {
             // 先停止所有正在进行的操作
             Schedule([this]() {
-                protocol_->SendAbortSpeaking(kAbortReasonNone);
-                protocol_->CloseAudioChannel();
+                QuitTalking();
+                PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
             });
         } else {
-            // 没有连接的情况下，不用动，按照小智的流程，等待下一个触发点
+            if (!protocol_->GetRoomParams().access_token.empty()) {
+                PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
+            }
         }
     });
 
@@ -727,6 +731,57 @@ void Application::Start() {
     MainEventLoop();
 }
 
+void Application::QuitTalking() {
+    Schedule([this]() {
+        protocol_->SendAbortSpeaking(kAbortReasonNone);
+        SetDeviceState(kDeviceStateIdle);
+        vTaskDelay(pdMS_TO_TICKS(500));
+        protocol_->CloseAudioChannel();
+    });
+}
+
+void Application::PlayMusic(const char* url) {
+    std::string url_str(url);
+    if (url_str.substr(0, 6) == "https:") {
+        url_str = "http:" + url_str.substr(6);
+    }
+    // 新增：如果以 .mp3 结尾，替换为 .p3
+    if (url_str.size() >= 4 && url_str.substr(url_str.size() - 4) == ".mp3") {
+        url_str.replace(url_str.size() - 4, 4, ".p3");
+    }
+    
+    Schedule([this, url_str]() {
+
+        QuitTalking();
+
+        auto display = Board::GetInstance().GetDisplay();
+        display->SetEmotion("happy");
+
+        player_.setPacketCallback([this](const std::vector<uint8_t>& data) {
+            const int max_packets_in_queue = 2000 / OPUS_FRAME_DURATION_MS;
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (audio_decode_queue_.size() < max_packets_in_queue) {
+                AudioStreamPacket packet;
+                packet.payload = data;
+                audio_decode_queue_.emplace_back(std::move(packet));
+            } else {
+                ESP_LOGW("AUDIO", "Audio decode queue is full! Current size: %d, Max size: %d", 
+                        audio_decode_queue_.size(), max_packets_in_queue);
+            }
+        });
+
+        ESP_LOGI(TAG, "Processing MP3 stream from URL: %s", url_str.c_str());
+        player_.processMP3Stream(url_str.c_str());
+        
+    });
+}
+
+void Application::CancelPlayMusic() {
+    if (player_.IsDownloading()) {
+        player_.stop();
+    }
+}
+
 void Application::OnClockTimer() {
     clock_ticks_++;
 
@@ -993,6 +1048,7 @@ void Application::SetDeviceState(DeviceState state) {
             if (listening_mode_ != kListeningModeRealtime) {
                 audio_processor_->Stop();
 #if CONFIG_USE_WAKE_WORD_DETECT
+                ESP_LOGI(TAG, "Start wake word detection");
                 wake_word_detect_.StartDetection();
 #endif
             }
@@ -1046,6 +1102,7 @@ void Application::Reboot() {
 
 void Application::WakeWordInvoke(const std::string& wake_word) {
     if (device_state_ == kDeviceStateIdle) {
+        CancelPlayMusic();
         ToggleChatState();
         Schedule([this, wake_word]() {
             if (protocol_) {

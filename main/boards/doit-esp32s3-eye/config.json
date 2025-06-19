@@ -1,0 +1,16 @@
+{
+    "target": "esp32s3",
+    "builds": [
+        {
+            "name": "doit-esp32s3-eye",
+            "sdkconfig_append": [
+                "CONFIG_ESP_SYSTEM_EVENT_QUEUE_SIZE=8",
+                "CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=24",
+                "CONFIG_BT_ENABLED=n",
+                "CONFIG_BT_NIMBLE_ENABLED=n",
+                "CONFIG_BT_CONTROLLER_ENABLED=n",
+                "CONFIG_ESP_WIFI_SOFTAP_SUPPORT=y"
+            ]
+        }
+    ]
+}

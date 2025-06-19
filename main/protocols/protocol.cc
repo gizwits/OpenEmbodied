@@ -43,11 +43,19 @@ void Protocol::SendAbortSpeaking(AbortReason reason) {
     SendText(message);
 }
 
+
 void Protocol::SendWakeWordDetected(const std::string& wake_word) {
-    // std::string json = "{\"session_id\":\"" + session_id_ + 
-    //                   "\",\"type\":\"listen\",\"state\":\"detect\",\"text\":\"" + wake_word + "\"}";
-    // SendText(json);
+    const char *init_message = "{"
+        "\"event_type\":\"conversation.message.create\","
+        "\"data\":{"
+            "\"role\":\"user\","
+            "\"content_type\":\"text\","
+            "\"content\":\"你好\""
+        "}"
+    "}";
+    SendText(init_message);
 }
+
 
 void Protocol::SendStartListening(ListeningMode mode) {
     // std::string message = "{\"session_id\":\"" + session_id_ + "\"";
