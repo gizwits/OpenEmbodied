@@ -683,6 +683,8 @@ void Application::Start() {
         Schedule([this, &wake_word]() {
             ESP_LOGI(TAG, "Wake word detected: %s, device state: %s, %d", wake_word.c_str(), STATE_STRINGS[device_state_], device_state_);
             if (device_state_ == kDeviceStateIdle) {
+                PlaySound(Lang::Sounds::P3_SUCCESS);
+                vTaskDelay(pdMS_TO_TICKS(300));
                 SetDeviceState(kDeviceStateConnecting);
                 wake_word_detect_.EncodeWakeWordData();
 
@@ -702,7 +704,10 @@ void Application::Start() {
                 SetListeningMode(realtime_chat_enabled_ ? kListeningModeRealtime : kListeningModeAutoStop);
             } else if (device_state_ == kDeviceStateSpeaking) {
                 // 关键词打断，继续监听
-                AbortSpeaking(kAbortReasonWakeWordDetected);
+                protocol_->SendAbortSpeaking(kAbortReasonNone);
+                ResetDecoder();
+                PlaySound(Lang::Sounds::P3_SUCCESS);
+                vTaskDelay(pdMS_TO_TICKS(300));
                 SetListeningMode(realtime_chat_enabled_ ? kListeningModeRealtime : kListeningModeAutoStop);
                 auto display = Board::GetInstance().GetDisplay();
                 display->SetChatMessage("assistant", "");
@@ -1102,7 +1107,9 @@ void Application::Reboot() {
 
 void Application::WakeWordInvoke(const std::string& wake_word) {
     if (device_state_ == kDeviceStateIdle) {
+        PlaySound(Lang::Sounds::P3_SUCCESS);
         CancelPlayMusic();
+        vTaskDelay(pdMS_TO_TICKS(300));
         ToggleChatState();
         Schedule([this, wake_word]() {
             if (protocol_) {
@@ -1113,11 +1120,14 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
         Schedule([this]() {
             AbortSpeaking(kAbortReasonNone);
         });
-    } else if (device_state_ == kDeviceStateListening) {   
+    } else if (device_state_ == kDeviceStateSpeaking) {
         Schedule([this]() {
-            if (protocol_) {
-                protocol_->CloseAudioChannel();
-            }
+            // 打断AI
+            protocol_->SendAbortSpeaking(kAbortReasonNone);
+            ResetDecoder();
+            PlaySound(Lang::Sounds::P3_SUCCESS);
+            vTaskDelay(pdMS_TO_TICKS(300));
+            SetDeviceState(kDeviceStateListening);
         });
     }
 }
