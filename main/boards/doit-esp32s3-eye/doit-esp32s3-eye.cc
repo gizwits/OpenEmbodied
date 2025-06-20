@@ -78,9 +78,9 @@ private:
         if (!boot_button_timer_) {
             boot_button_timer_ = xTimerCreate("boot_btn_timer", pdMS_TO_TICKS(kTripleClickWindowMs), pdFALSE, this, BootButtonTimerCallback);
         }
-        boot_button_.OnLongPress([this]() {
-            esp_restart();
-        });
+        // boot_button_.OnLongPress([this]() {
+        //     esp_restart();
+        // });
         boot_button_.OnClick([this]() {
             boot_button_click_count_++;
             ESP_LOGI(TAG, "Boot button clicked %d times", boot_button_click_count_);
@@ -101,7 +101,19 @@ private:
             if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
                 ResetWifiConfiguration();
             }
-            app.ToggleChatState();
+            // app.ToggleChatState();
+        });
+
+        boot_button_.OnPressUp([this]() {
+            ESP_LOGI(TAG, "Boot button press up");
+            
+             auto& app = Application::GetInstance();
+            app.StopListening();
+        });
+        boot_button_.OnPressDown([this]() {
+            ESP_LOGI(TAG, "Boot button press down");
+           auto& app = Application::GetInstance();
+            app.StartListening();
         });
     }
 
@@ -238,6 +250,8 @@ public:
 
   //没有按键
   XiaoZhiEyeBoard() : boot_button_(BOOT_BUTTON_GPIO) {
+    // 按钮模式
+    device_mode_ = DeviceMode::BUTTON_MODE;
     gpio_set_direction(AUDIO_CODEC_PA_PIN, GPIO_MODE_OUTPUT);
     gpio_set_pull_mode(AUDIO_CODEC_PA_PIN, GPIO_PULLDOWN_ONLY);
     gpio_set_level(AUDIO_CODEC_PA_PIN, 0); //初始化

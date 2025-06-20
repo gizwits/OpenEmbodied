@@ -28,7 +28,6 @@
 
 #define TAG "Application"
 
-
 static const char* const STATE_STRINGS[] = {
     "unknown",
     "starting",
@@ -362,7 +361,13 @@ void Application::Start() {
 
     /* Setup the audio codec */
     auto codec = board.GetAudioCodec();
+#ifdef CONFIG_USE_AUDIO_CODEC_DECODE_OPUS
+#else
     opus_decoder_ = std::make_unique<OpusDecoderWrapper>(codec->output_sample_rate(), 1, OPUS_FRAME_DURATION_MS);
+#endif
+
+#ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+#else
     opus_encoder_ = std::make_unique<OpusEncoderWrapper>(16000, 1, OPUS_FRAME_DURATION_MS);
     if (realtime_chat_enabled_) {
         ESP_LOGI(TAG, "Realtime chat enabled, setting opus encoder complexity to 0");
@@ -374,6 +379,7 @@ void Application::Start() {
         ESP_LOGI(TAG, "WiFi board detected, setting opus encoder complexity to 3");
         opus_encoder_->SetComplexity(3);
     }
+#endif
 
     if (codec->input_sample_rate() != 16000) {
         input_resampler_.Configure(codec->input_sample_rate(), 16000);
@@ -412,9 +418,10 @@ void Application::Start() {
 #if CONFIG_USE_GIZWITS_MQTT
     mqtt_client_ = std::make_unique<MqttClient>();
     mqtt_client_->OnRoomParamsUpdated([this](const RoomParams& params) {
-        protocol_->UpdateRoomParams(params);
         // 判断 protocol_ 是否启动
         // 如果启动了，就断开重新连接
+        protocol_->UpdateRoomParams(params);
+
         if (protocol_->IsAudioChannelOpened()) {
             // 先停止所有正在进行的操作
             Schedule([this]() {
@@ -424,6 +431,10 @@ void Application::Start() {
         } else {
             if (!protocol_->GetRoomParams().access_token.empty()) {
                 PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
+                // 首次
+                Schedule([this]() {
+                    vTaskDelay(pdMS_TO_TICKS(300));
+                });
             }
         }
     });
@@ -631,37 +642,24 @@ void Application::Start() {
     bool protocol_started = protocol_->Start();
 
     audio_processor_->Initialize(codec);
+#ifndef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
     audio_processor_->OnOutput([this](std::vector<int16_t>&& data) {
         background_task_->Schedule([this, data = std::move(data)]() mutable {
             if (protocol_->IsAudioChannelBusy()) {
                 return;
             }
-            // protocol_->SendAudio(data);
             opus_encoder_->Encode(std::move(data), [this](std::vector<uint8_t>&& opus) {
                 AudioStreamPacket packet;
                 packet.payload = std::move(opus);
-#ifdef CONFIG_USE_SERVER_AEC
-                {
-                    std::lock_guard<std::mutex> lock(timestamp_mutex_);
-                    if (!timestamp_queue_.empty()) {
-                        packet.timestamp = timestamp_queue_.front();
-                        timestamp_queue_.pop_front();
-                    } else {
-                        packet.timestamp = 0;
-                    }
-
-                    if (timestamp_queue_.size() > 3) { // 限制队列长度3
-                        timestamp_queue_.pop_front(); // 该包发送前先出队保持队列长度
-                        return;
-                    }
-                }
-#endif
+                packet.timestamp = last_output_timestamp_;
+                last_output_timestamp_ = 0;
                 Schedule([this, packet = std::move(packet)]() {
                     protocol_->SendAudio(packet);
                 });
             });
         });
     });
+#endif
     audio_processor_->OnVadStateChange([this](bool speaking) {
         if (device_state_ == kDeviceStateListening) {
             Schedule([this, speaking]() {
@@ -917,6 +915,7 @@ void Application::OnAudioOutput() {
     });
 }
 
+
 void Application::OnAudioInput() {
 #if CONFIG_USE_WAKE_WORD_DETECT
     if (wake_word_detect_.IsDetectionRunning()) {
@@ -930,6 +929,23 @@ void Application::OnAudioInput() {
     }
 #endif
     if (audio_processor_->IsRunning()) {
+#ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+        int free_sram = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+        if(free_sram < 10000){
+            return;
+        }
+        std::vector<uint8_t> opus;
+        if (!protocol_->IsAudioChannelBusy()) {
+            ReadAudio(opus, 16000, 30 * 16000 / 1000);
+            AudioStreamPacket packet;
+            packet.payload = std::move(opus);
+            packet.timestamp = last_output_timestamp_;
+            last_output_timestamp_ = 0;
+            Schedule([this, packet = std::move(packet)]() {
+                protocol_->SendAudio(packet);
+            });
+        }
+#else
         std::vector<int16_t> data;
         int samples = audio_processor_->GetFeedSize();
         if (samples > 0) {
@@ -937,8 +953,12 @@ void Application::OnAudioInput() {
             audio_processor_->Feed(data);
             return;
         }
+#endif
     }
+       
+#if CONFIG_FREERTOS_HZ != 1000
     vTaskDelay(pdMS_TO_TICKS(30));
+#endif
 }
 
 void Application::ReadAudio(std::vector<int16_t>& data, int sample_rate, int samples) {
@@ -976,6 +996,36 @@ void Application::ReadAudio(std::vector<int16_t>& data, int sample_rate, int sam
         }
     }
 }
+
+
+#ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+void Application::ReadAudio(std::vector<uint8_t>& opus, int sample_rate, int samples) {
+    auto codec = Board::GetInstance().GetAudioCodec();
+    opus.resize(samples);
+    if (!codec->InputData(opus)) {
+        return;
+    }
+}
+#endif
+
+void Application::WriteAudio(std::vector<int16_t>& data, int sample_rate) {
+    auto codec = Board::GetInstance().GetAudioCodec();
+    // Resample if the sample rate is different
+    if (sample_rate != codec->output_sample_rate()) {
+        int target_size = output_resampler_.GetOutputSamples(data.size());
+        std::vector<int16_t> resampled(target_size);
+        output_resampler_.Process(data.data(), data.size(), resampled.data());
+        data = std::move(resampled);
+    }
+    codec->OutputData(data);
+}
+
+#ifdef CONFIG_USE_AUDIO_CODEC_DECODE_OPUS
+void Application::WriteAudio(std::vector<uint8_t>& opus) {
+    auto codec = Board::GetInstance().GetAudioCodec();
+    codec->OutputData(opus);
+}
+#endif
 
 void Application::AbortSpeaking(AbortReason reason) {
     ESP_LOGI(TAG, "Abort speaking");
@@ -1038,7 +1088,10 @@ void Application::SetDeviceState(DeviceState state) {
                     // FIXME: Wait for the speaker to empty the buffer
                     vTaskDelay(pdMS_TO_TICKS(120));
                 }
+#ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+#else
                 opus_encoder_->ResetState();
+#endif
 #if CONFIG_USE_WAKE_WORD_DETECT
                 wake_word_detect_.StopDetection();
 #endif

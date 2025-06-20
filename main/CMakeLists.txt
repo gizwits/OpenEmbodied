@@ -4,6 +4,7 @@ set(SOURCES "audio_codecs/audio_codec.cc"
             "audio_codecs/es8311_audio_codec.cc"
             "audio_codecs/es8374_audio_codec.cc"
             "audio_codecs/es8388_audio_codec.cc"
+            "audio_codecs/vb6824_audio_codec.cc"
             "led/single_led.cc"
             "led/circular_strip.cc"
             "led/gpio_led.cc"
@@ -11,6 +12,7 @@ set(SOURCES "audio_codecs/audio_codec.cc"
             "display/lcd_display.cc"
             "display/oled_display.cc"
             "display/eye_display.cc"
+            "display/eye_toy_single_display.cc"
             "display/eye_toy_display.cc"
             "protocols/protocol.cc"
             "protocols/websocket_protocol.cc"
@@ -54,6 +56,8 @@ elseif(CONFIG_BOARD_TYPE_DF_K10)
     set(BOARD_TYPE "df-k10")
 elseif(CONFIG_BOARD_TYPE_DOIT_ESP32S3_EYE)
     set(BOARD_TYPE "doit-esp32s3-eye")
+elseif(CONFIG_BOARD_TYPE_DOIT_ESP32S3_EYE_6824)
+    set(BOARD_TYPE "doit-esp32s3-eye-6824")
 elseif(CONFIG_BOARD_TYPE_ESP_BOX_3)
     set(BOARD_TYPE "esp-box-3")
 elseif(CONFIG_BOARD_TYPE_ESP_BOX)
@@ -225,6 +229,15 @@ if(CONFIG_IDF_TARGET_ESP32)
                              "audio_codecs/es8388_audio_codec.cc"
                              "led/gpio_led.cc"
                              )
+endif()
+
+if(CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS OR CONFIG_USE_AUDIO_CODEC_DECODE_OPUS)
+    list(APPEND SOURCES "audio_codecs/vb6824_audio_codec.cc")
+    list(REMOVE_ITEM SOURCES "audio_codecs/box_audio_codec.cc"
+                            "audio_codecs/no_audio_codec.cc"
+                            "audio_codecs/es8311_audio_codec.cc"
+                            "audio_codecs/es8374_audio_codec.cc"
+                            "audio_codecs/es8388_audio_codec.cc")
 endif()
 
 idf_component_register(SRCS ${SOURCES}

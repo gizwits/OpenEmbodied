@@ -133,6 +133,13 @@ private:
     void OnAudioInput();
     void OnAudioOutput();
     void ReadAudio(std::vector<int16_t>& data, int sample_rate, int samples);
+#ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+    void ReadAudio(std::vector<uint8_t>& opus, int sample_rate, int samples);
+#endif
+    void WriteAudio(std::vector<int16_t>& data, int sample_rate);
+#ifdef CONFIG_USE_AUDIO_CODEC_DECODE_OPUS
+    void WriteAudio(std::vector<uint8_t>& opus, int sample_rate);
+#endif
     void ResetDecoder();
     void SetDecodeSampleRate(int sample_rate, int frame_duration);
     void CheckNewVersion();
