@@ -31,7 +31,7 @@ bool WebsocketProtocol::Start() {
 }
 
 void WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
-    if (websocket_ == nullptr || !websocket_->IsConnected() || packet.payload.empty()) {
+    if (websocket_ == nullptr || !websocket_->IsConnected() || packet.payload.empty() || busy_sending_audio_) {
         return;
     }
     const std::vector<uint8_t>& data = packet.payload;
@@ -109,11 +109,69 @@ bool WebsocketProtocol::IsAudioChannelOpened() const {
     return websocket_ != nullptr && websocket_->IsConnected() && !error_occurred_ && !IsTimeout();
 }
 
+
 void WebsocketProtocol::CloseAudioChannel() {
-    if (websocket_ != nullptr) {
-        delete websocket_;
-        websocket_ = nullptr;
+    if (websocket_ == nullptr) {
+        return;
     }
+
+    // 如果已经有关闭任务在运行，直接返回
+    if (close_task_handle_ != nullptr) {
+        return;
+    }
+
+    ESP_LOGI(TAG, "Starting audio channel close task...");
+    
+    // 启动关闭任务
+    BaseType_t ret = xTaskCreate(
+        CloseAudioChannelTask,
+        "ws_close_task",
+        4096,
+        this,
+        5,
+        &close_task_handle_
+    );
+    
+    if (ret != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create close task");
+        // 如果创建任务失败，直接执行关闭逻辑
+        CloseAudioChannelTask(this);
+    }
+}
+
+void WebsocketProtocol::CloseAudioChannelTask(void* param) {
+    WebsocketProtocol* self = static_cast<WebsocketProtocol*>(param);
+    
+    ESP_LOGI(TAG, "Closing audio channel...");
+    
+    // 1. 先停止音频上传 - 设置标志位防止新的音频数据发送
+    self->busy_sending_audio_ = true;
+    
+    // 2. 等待当前正在传输的音频数据完成
+    // 给一些时间让正在传输的数据完成
+    vTaskDelay(pdMS_TO_TICKS(800));
+    
+    // 3. 发送关闭帧给服务器
+    if (self->websocket_ != nullptr) {
+        self->websocket_->Close();
+    }
+    
+    // 4. 等待连接完全关闭
+    vTaskDelay(pdMS_TO_TICKS(200));
+    
+    // 5. 清理资源
+    if (self->websocket_ != nullptr) {
+        delete self->websocket_;
+        self->websocket_ = nullptr;
+    }
+    
+    ESP_LOGI(TAG, "Audio channel closed successfully");
+    
+    // 6. 清理任务句柄
+    self->close_task_handle_ = nullptr;
+    
+    // 7. 删除任务
+    vTaskDelete(nullptr);
 }
 
 bool WebsocketProtocol::OpenAudioChannel() {
@@ -126,6 +184,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     }
 
     error_occurred_ = false;
+    busy_sending_audio_ = false;  // 重置音频发送标志
     std::string url = std::string("ws://") + room_params_.api_domain + std::string("/v1/chat") + std::string("?bot_id=") + std::string(room_params_.bot_id);
     std::string token = "Bearer " + std::string(room_params_.access_token);
 

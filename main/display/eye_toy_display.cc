@@ -127,8 +127,8 @@ EyeToyDisplay::EyeToyDisplay(esp_lcd_panel_io_handle_t panel_io1, esp_lcd_panel_
 
     ESP_LOGI(TAG, "Initialize LVGL");
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
-    port_cfg.task_priority = 5;  // 提高LVGL任务优先级
-    port_cfg.timer_period_ms = 100;  // 减少刷新周期
+    port_cfg.task_priority = 1; 
+    port_cfg.timer_period_ms = 80;  // 减少刷新周期
     lvgl_port_init(&port_cfg);
 
     // 初始化第一块屏幕

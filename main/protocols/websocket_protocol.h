@@ -25,6 +25,7 @@ public:
 private:
     WebSocket* websocket_ = nullptr;
     EventGroupHandle_t event_group_handle_;
+    TaskHandle_t close_task_handle_ = nullptr;
     std::string message_cache_;
     std::vector<uint8_t> audio_data_buffer_;  // Reuse buffer for Ogg data
     std::unique_ptr<char[]> base64_buffer_;  // Reuse buffer for base64 encoding
@@ -35,6 +36,7 @@ private:
     void ParseServerHello(const cJSON* root);
     bool SendText(const std::string& text) override;
     std::string GetHelloMessage();
+    static void CloseAudioChannelTask(void* param);
 };
 
 #endif

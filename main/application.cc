@@ -7,6 +7,7 @@
 #include "websocket_protocol.h"
 #include "font_awesome_symbols.h"
 #include "iot/thing_manager.h"
+#include "watchdog.h"
 #include "assets/lang_config.h"
 #include "server/giz_mqtt.h"
 #include "auth.h"
@@ -25,6 +26,7 @@
 #include <cJSON.h>
 #include <driver/gpio.h>
 #include <arpa/inet.h>
+#include <utility>
 
 #define TAG "Application"
 
@@ -45,6 +47,11 @@ static const char* const STATE_STRINGS[] = {
 
 Application::Application() {
     event_group_ = xEventGroupCreate();
+
+    // 初始化看门狗
+    auto& watchdog = Watchdog::GetInstance();
+    watchdog.Initialize(10, true);  // 10秒超时，超时后触发系统复位
+
     background_task_ = new BackgroundTask(4096 * 7);
 
 #if CONFIG_USE_AUDIO_PROCESSOR
@@ -271,7 +278,15 @@ void Application::PlaySound(const std::string_view& sound) {
 }
 
 void Application::ToggleChatState() {
+
+    if (player_.IsDownloading()) {
+        CancelPlayMusic();
+        return;
+    }
+
+    ESP_LOGI(TAG, "ToggleChatState, device_state_: %d", device_state_);
     if (device_state_ == kDeviceStateActivating) {
+        ESP_LOGI(TAG, "ToggleChatState(kDeviceStateActivating)");
         SetDeviceState(kDeviceStateIdle);
         return;
     }
@@ -283,6 +298,7 @@ void Application::ToggleChatState() {
 
     if (device_state_ == kDeviceStateIdle) {
         Schedule([this]() {
+            ESP_LOGI(TAG, "ToggleChatState(kDeviceStateIdle)");
             SetDeviceState(kDeviceStateConnecting);
             if (!protocol_->OpenAudioChannel()) {
                 return;
@@ -293,6 +309,7 @@ void Application::ToggleChatState() {
     } else if (device_state_ == kDeviceStateSpeaking) {
         Schedule([this]() {
             AbortSpeaking(kAbortReasonNone);
+            ESP_LOGI(TAG, "ToggleChatState(kDeviceStateSpeaking)");
             SetDeviceState(kDeviceStateListening);
         });
     } else if (device_state_ == kDeviceStateListening) {
@@ -304,6 +321,7 @@ void Application::ToggleChatState() {
 
 void Application::StartListening() {
     if (device_state_ == kDeviceStateActivating) {
+        ESP_LOGI(TAG, "StartListening(kDeviceStateActivating)");
         SetDeviceState(kDeviceStateIdle);
         return;
     }
@@ -316,6 +334,7 @@ void Application::StartListening() {
     if (device_state_ == kDeviceStateIdle) {
         Schedule([this]() {
             if (!protocol_->IsAudioChannelOpened()) {
+                ESP_LOGI(TAG, "StartListening(kDeviceStateIdle)");
                 SetDeviceState(kDeviceStateConnecting);
                 if (!protocol_->OpenAudioChannel()) {
                     return;
@@ -346,12 +365,15 @@ void Application::StopListening() {
     Schedule([this]() {
         if (device_state_ == kDeviceStateListening) {
             protocol_->SendStopListening();
+            ESP_LOGI(TAG, "StopListening(kDeviceStateListening)");
             SetDeviceState(kDeviceStateIdle);
         }
     });
 }
 
 void Application::Start() {
+    auto& watchdog = Watchdog::GetInstance();
+
     auto& board = Board::GetInstance();
 
     Auth::getInstance().init();
@@ -384,6 +406,8 @@ void Application::Start() {
 #if CONFIG_USE_AUDIO_PROCESSOR
     xTaskCreatePinnedToCore([](void* arg) {
         Application* app = (Application*)arg;
+        auto& watchdog = Watchdog::GetInstance();
+        watchdog.SubscribeTask(xTaskGetCurrentTaskHandle());
         app->AudioLoop();
         vTaskDelete(NULL);
     }, "audio_loop", 4096 * 2, this, 8, &audio_loop_task_handle_, 1);
@@ -412,7 +436,6 @@ void Application::Start() {
 #if CONFIG_USE_GIZWITS_MQTT
     mqtt_client_ = std::make_unique<MqttClient>();
     mqtt_client_->OnRoomParamsUpdated([this](const RoomParams& params) {
-        protocol_->UpdateRoomParams(params);
         // 判断 protocol_ 是否启动
         // 如果启动了，就断开重新连接
         if (protocol_->IsAudioChannelOpened()) {
@@ -420,12 +443,15 @@ void Application::Start() {
             Schedule([this]() {
                 QuitTalking();
                 PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
+                vTaskDelay(pdMS_TO_TICKS(2000));
+                ToggleChatState();
             });
         } else {
             if (!protocol_->GetRoomParams().access_token.empty()) {
                 PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
             }
         }
+        protocol_->UpdateRoomParams(params);
     });
 
     if (!mqtt_client_->initialize()) {
@@ -681,6 +707,7 @@ void Application::Start() {
     wake_word_detect_.OnWakeWordDetected([this](const std::string& wake_word) {
 
         Schedule([this, &wake_word]() {
+            CancelPlayMusic();
             ESP_LOGI(TAG, "Wake word detected: %s, device state: %s, %d", wake_word.c_str(), STATE_STRINGS[device_state_], device_state_);
             if (device_state_ == kDeviceStateIdle) {
                 PlaySound(Lang::Sounds::P3_SUCCESS);
@@ -733,16 +760,15 @@ void Application::Start() {
     }
     
     // Enter the main event loop
+    watchdog.SubscribeTask(xTaskGetCurrentTaskHandle());
+
     MainEventLoop();
 }
 
 void Application::QuitTalking() {
-    Schedule([this]() {
-        protocol_->SendAbortSpeaking(kAbortReasonNone);
-        SetDeviceState(kDeviceStateIdle);
-        vTaskDelay(pdMS_TO_TICKS(500));
-        protocol_->CloseAudioChannel();
-    });
+    protocol_->SendAbortSpeaking(kAbortReasonNone);
+    SetDeviceState(kDeviceStateIdle);
+    protocol_->CloseAudioChannel();
 }
 
 void Application::PlayMusic(const char* url) {
@@ -756,12 +782,7 @@ void Application::PlayMusic(const char* url) {
     }
     
     Schedule([this, url_str]() {
-
         QuitTalking();
-
-        auto display = Board::GetInstance().GetDisplay();
-        display->SetEmotion("happy");
-
         player_.setPacketCallback([this](const std::vector<uint8_t>& data) {
             const int max_packets_in_queue = 2000 / OPUS_FRAME_DURATION_MS;
             std::lock_guard<std::mutex> lock(mutex_);
@@ -774,15 +795,30 @@ void Application::PlayMusic(const char* url) {
                         audio_decode_queue_.size(), max_packets_in_queue);
             }
         });
+        // 创建独立任务来处理音频流，避免阻塞 Schedule 回调
+        xTaskCreate([](void* param) {
+            auto* context = static_cast<std::pair<Application*, std::string>*>(param);
+            Application* app = context->first;
+            std::string url = context->second;
+            delete context;
+            
+            ESP_LOGI(TAG, "Processing MP3 stream from URL: %s", url.c_str());
+            app->player_.processMP3Stream(url.c_str());
+            
+            vTaskDelete(NULL);
+        }, "music_player", 4096 * 2, new std::pair<Application*, std::string>(this, url_str), 5, nullptr);
 
-        ESP_LOGI(TAG, "Processing MP3 stream from URL: %s", url_str.c_str());
-        player_.processMP3Stream(url_str.c_str());
-        
+        auto display = Board::GetInstance().GetDisplay();
+        display->SetStatus(Lang::Strings::SPEAKING);
+        display->SetEmotion("happy");
+
     });
 }
 
 void Application::CancelPlayMusic() {
+    ESP_LOGI(TAG, "CancelPlayMusic, device_state_: %d", player_.IsDownloading());
     if (player_.IsDownloading()) {
+        ESP_LOGI(TAG, "Stopping player");
         player_.stop();
     }
 }
@@ -832,14 +868,19 @@ void Application::Schedule(std::function<void()> callback) {
 // If other tasks need to access the websocket or chat state,
 // they should use Schedule to call this function
 void Application::MainEventLoop() {
+     auto& watchdog = Watchdog::GetInstance();
+    const TickType_t timeout = pdMS_TO_TICKS(3000);
     while (true) {
-        auto bits = xEventGroupWaitBits(event_group_, SCHEDULE_EVENT, pdTRUE, pdFALSE, portMAX_DELAY);
+        watchdog.Reset();
+
+        auto bits = xEventGroupWaitBits(event_group_, SCHEDULE_EVENT, pdTRUE, pdFALSE, timeout);
 
         if (bits & SCHEDULE_EVENT) {
             std::unique_lock<std::mutex> lock(mutex_);
             std::list<std::function<void()>> tasks = std::move(main_tasks_);
             lock.unlock();
             for (auto& task : tasks) {
+                watchdog.Reset();
                 task();
             }
         }
@@ -849,7 +890,10 @@ void Application::MainEventLoop() {
 // The Audio Loop is used to input and output audio data
 void Application::AudioLoop() {
     auto codec = Board::GetInstance().GetAudioCodec();
+    auto& watchdog = Watchdog::GetInstance();
+
     while (true) {
+        watchdog.Reset();
         OnAudioInput();
         if (codec->output_enabled()) {
             OnAudioOutput();
@@ -1127,6 +1171,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
             ResetDecoder();
             PlaySound(Lang::Sounds::P3_SUCCESS);
             vTaskDelay(pdMS_TO_TICKS(300));
+            ESP_LOGI(TAG, "WakeWordInvoke(kDeviceStateListening)");
             SetDeviceState(kDeviceStateListening);
         });
     }

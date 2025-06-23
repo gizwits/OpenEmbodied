@@ -13,6 +13,7 @@
 #include <functional>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+// #include "watchdog.h"
 
 #define TAG "Player"
 #define BUFFER_SIZE 4096
@@ -99,6 +100,7 @@ struct Player::Impl {
     }
 
     void stop() {
+        ESP_LOGI(TAG, "Player stop called, cleaning up...");
         is_downloading_ = false;
     }
 
@@ -136,7 +138,14 @@ struct Player::Impl {
             if (!read_chunk(http)) {
                 break;
             }
+            // Watchdog::GetInstance().Reset();
         }
+
+
+        // 清理缓冲区
+        buffer_pos = 0;
+        buffer_size = 0;
+        packets_processed = 0;
 
         delete http;
         return true;
@@ -145,6 +154,10 @@ struct Player::Impl {
 
 Player::Player() : impl_(std::make_unique<Impl>()) {}
 Player::~Player() = default;
+
+bool Player::IsDownloading() const {
+    return impl_->is_downloading_;
+}
 
 void Player::setPacketCallback(std::function<void(const std::vector<uint8_t>&)> callback) {
     impl_->setPacketCallback(callback);

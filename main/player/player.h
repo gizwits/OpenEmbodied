@@ -10,8 +10,7 @@ public:
     Player();
     ~Player();
 
-    bool is_downloading_;
-    bool IsDownloading() const { return is_downloading_; }
+    bool IsDownloading() const;
     // 设置数据包回调函数
     void setPacketCallback(std::function<void(const std::vector<uint8_t>&)> callback);
 
