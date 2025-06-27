@@ -306,7 +306,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
                     on_incoming_json_(message_json);
                     cJSON_Delete(message_json);
                 }
-            } else if (event_type == "conversation.audio.completed") {
+            } else if (event_type == "conversation.chat.completed") {
                 message_buffer_.clear();
                 message_buffer_ = "{";
                 message_buffer_ += "\"type\":\"tts\",";
@@ -320,7 +320,9 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 }
             } else if (event_type == "input_audio_buffer.speech_started") {
                 auto& app = Application::GetInstance();
+                ESP_LOGI(TAG, "input_audio_buffer.speech_started");
                 app.AbortSpeaking(kAbortReasonNone);
+                app.SetDeviceState(kDeviceStateListening);
             } else if (event_type == "input_audio_buffer.speech_stopped") {
                 
             } else if (event_type == "conversation.message.delta") {

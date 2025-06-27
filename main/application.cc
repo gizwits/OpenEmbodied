@@ -313,9 +313,9 @@ void Application::ToggleChatState() {
             SetDeviceState(kDeviceStateListening);
         });
     } else if (device_state_ == kDeviceStateListening) {
-        Schedule([this]() {
-            protocol_->CloseAudioChannel();
-        });
+        // Schedule([this]() {
+        //     protocol_->CloseAudioChannel();
+        // });
     }
 }
 
@@ -348,6 +348,12 @@ void Application::StartListening() {
             AbortSpeaking(kAbortReasonNone);
             SetListeningMode(kListeningModeManualStop);
         });
+    }
+}
+
+void Application::SendMessage(const std::string& message) {
+    if (protocol_ && protocol_->IsAudioChannelOpened()) {
+        protocol_->SendMessage(message);
     }
 }
 
@@ -720,11 +726,11 @@ void Application::Start() {
                     return;
                 }
                 
-                AudioStreamPacket packet;
+                // AudioStreamPacket packet;
                 // Encode and send the wake word data to the server
-                while (wake_word_detect_.GetWakeWordOpus(packet.payload)) {
-                    protocol_->SendAudio(packet);
-                }
+                // while (wake_word_detect_.GetWakeWordOpus(packet.payload)) {
+                //     protocol_->SendAudio(packet);
+                // }
                 // Set the chat state to wake word detected
                 // protocol_->SendWakeWordDetected(wake_word);
                 ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
@@ -1159,7 +1165,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
             if (protocol_) {
                 protocol_->SendWakeWordDetected(wake_word); 
             }
-        }); 
+        });
     } else if (device_state_ == kDeviceStateSpeaking) {
         Schedule([this]() {
             AbortSpeaking(kAbortReasonNone);

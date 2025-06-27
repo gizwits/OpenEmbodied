@@ -4,8 +4,8 @@
 #include "button.h"
 #include "config.h"
 #include "iot/thing_manager.h"
+#include "audio_codecs/box_audio_codec.h"
 
-#include "audio_codecs/no_audio_codec.h"
 #include "led/single_led.h"
 
 #include <wifi_station.h>
@@ -19,16 +19,77 @@
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
+#include "esp_timer.h"
+
+#include <math.h>
 
 #define TAG "MovecallMojiESP32S3"
 
 LV_FONT_DECLARE(font_puhui_20_4);
 LV_FONT_DECLARE(font_awesome_20_4);
 
+#define LIS2HH12_I2C_ADDR 0x1D  // SDO接GND为0x1D，接VDD为0x1E
+#define LIS2HH12_INT1_PIN GPIO_NUM_42
+
+
 class MovecallMojiESP32S3 : public WifiBoard {
 private:
     Button boot_button_;
     EyeDisplay* display_;
+    i2c_master_bus_handle_t i2c_bus_;
+    // LIS2HH12专用I2C
+    i2c_master_bus_handle_t lis2hh12_i2c_bus_;
+    i2c_master_dev_handle_t lis2hh12_dev_;
+    int64_t power_on_timestamp_; // 上电时间戳
+
+    static void lis2hh12_task(void* arg) {
+        MovecallMojiESP32S3* board = static_cast<MovecallMojiESP32S3*>(arg);
+        float last_ax = 0, last_ay = 0, last_az = 0;
+        const float threshold = 0.5; // g-force
+        int shake_count = 0;
+        const int shake_count_threshold = 10; // 连续3次才算shake
+        const int shake_count_decay = 1;     // 每次没检测到就-1
+        while (1) {
+            // 读取X/Y/Z
+            int16_t x = (int16_t)((board->lis2hh12_read_reg_pub(0x29) << 8) | board->lis2hh12_read_reg_pub(0x28));
+            int16_t y = (int16_t)((board->lis2hh12_read_reg_pub(0x2B) << 8) | board->lis2hh12_read_reg_pub(0x2A));
+            int16_t z = (int16_t)((board->lis2hh12_read_reg_pub(0x2D) << 8) | board->lis2hh12_read_reg_pub(0x2C));
+            float ax = x * 0.061f / 1000.0f;
+            float ay = y * 0.061f / 1000.0f;
+            float az = z * 0.061f / 1000.0f;
+            if (fabs(ax - last_ax) > threshold || fabs(ay - last_ay) > threshold || fabs(az - last_az) > threshold) {
+                shake_count++;
+                if (shake_count >= shake_count_threshold) {
+                    ESP_LOGI("LIS2HH12", "Shake detected! ax=%.2f ay=%.2f az=%.2f", ax, ay, az);
+                    shake_count = 0; // 触发后清零
+                    // 这里可以触发你的摇晃事件
+                    board->display_->SetEmotion("vertigo");
+                    Application::GetInstance().SendMessage("用户正在摇晃你");
+                }
+            } else {
+                if (shake_count > 0) shake_count -= shake_count_decay;
+            }
+            last_ax = ax; last_ay = ay; last_az = az;
+            vTaskDelay(pdMS_TO_TICKS(50));
+        }
+    }
+
+    void InitializeI2c() {
+        // Initialize I2C peripheral
+        i2c_master_bus_config_t i2c_bus_cfg = {
+            .i2c_port = (i2c_port_t)1,
+            .sda_io_num = AUDIO_CODEC_I2C_SDA_PIN,
+            .scl_io_num = AUDIO_CODEC_I2C_SCL_PIN,
+            .clk_source = I2C_CLK_SRC_DEFAULT,
+            .glitch_ignore_cnt = 7,
+            .intr_priority = 0,
+            .trans_queue_depth = 0,
+            .flags = {
+                .enable_internal_pullup = 1,
+            },
+        };
+        ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
+    }
 
     // SPI初始化
     void InitializeSpi() {
@@ -73,20 +134,27 @@ private:
     }
 
     void InitializeButtons() {
+        static int first_level = gpio_get_level(BOOT_BUTTON_GPIO);
+
         boot_button_.OnClick([this]() {
-            // auto& app = Application::GetInstance();
+            auto& app = Application::GetInstance();
             // if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
             //     ResetWifiConfiguration();
             // }
-            // app.ToggleChatState();
-            display_->TestNextEmotion();
+            app.ToggleChatState();
+            // display_->TestNextEmotion();
+        });
+        boot_button_.OnLongPress([this]() {
+            if (first_level ==0) {
+                first_level = 1;
+            } else {
+                gpio_set_level(POWER_GPIO, 0);
+            }
         });
 
-        // boot_button_.OnPressRepeat([this](uint16_t count) {
-        //     if(count >= 3){
-        //         ResetWifiConfiguration();
-        //     }
-        // });
+        boot_button_.OnMultipleClick([this]() {
+            ResetWifiConfiguration();
+        }, 3);
     }
 
     // 物联网初始化，添加对 AI 可见设备
@@ -95,7 +163,7 @@ private:
         thing_manager.AddThing(iot::CreateThing("Speaker")); 
         thing_manager.AddThing(iot::CreateThing("Screen"));   
     }
-    void InitializeGpio(gpio_num_t gpio_num_) {
+    void InitializeGpio(gpio_num_t gpio_num_, bool output = false) {
         gpio_config_t config = {
             .pin_bit_mask = (1ULL << gpio_num_),
             .mode = GPIO_MODE_OUTPUT,
@@ -104,39 +172,115 @@ private:
             .intr_type = GPIO_INTR_DISABLE,
         };
         ESP_ERROR_CHECK(gpio_config(&config));
-        gpio_set_level(gpio_num_, 1);
+        if (output) {
+            gpio_set_level(gpio_num_, 1);
+        } else {
+            gpio_set_level(gpio_num_, 0);
+        }
+    }
+
+    // LIS2HH12专用I2C初始化
+    void InitializeLis2hh12I2c() {
+        i2c_master_bus_config_t i2c_bus_cfg = {
+            .i2c_port = I2C_NUM_0, // 用另一个I2C控制器
+            .sda_io_num = GPIO_NUM_38,      // LIS2HH12的SDA
+            .scl_io_num = GPIO_NUM_41,      // LIS2HH12的SCL
+            .clk_source = I2C_CLK_SRC_DEFAULT,
+            .glitch_ignore_cnt = 7,
+            .intr_priority = 0,
+            .trans_queue_depth = 0,
+            .flags = {
+                .enable_internal_pullup = 1,
+            },
+        };
+        ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &lis2hh12_i2c_bus_));
+        i2c_device_config_t dev_cfg = {
+            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+            .device_address = LIS2HH12_I2C_ADDR,
+            .scl_speed_hz = 400000,
+        };
+        ESP_ERROR_CHECK(i2c_master_bus_add_device(lis2hh12_i2c_bus_, &dev_cfg, &lis2hh12_dev_));
+    }
+
+    void InitializeLis2hh12() {
+        // 0x20: CTRL1, 0x57 = 100Hz, all axes enable, normal mode
+        this->lis2hh12_write_reg(0x20, 0x57);
+        // 0x23: CTRL4, 0x00 = continuous update, LSB at lower address
+        this->lis2hh12_write_reg(0x23, 0x00);
+    }
+
+    // LIS2HH12 I2C读写成员函数
+    uint8_t lis2hh12_read_reg(uint8_t reg) {
+        uint8_t data = 0;
+        i2c_master_transmit_receive(lis2hh12_dev_, &reg, 1, &data, 1, 100 / portTICK_PERIOD_MS);
+        return data;
+    }
+    void lis2hh12_write_reg(uint8_t reg, uint8_t value) {
+        uint8_t buf[2] = {reg, value};
+        i2c_master_transmit(lis2hh12_dev_, buf, 2, 100 / portTICK_PERIOD_MS);
     }
 
 public:
-    MovecallMojiESP32S3() : boot_button_(BOOT_BUTTON_GPIO) {  
-        InitializeGpio(AUDIO_CODEC_PA_PIN);
-        InitializeGpio(AUDIO_I2S_MIC_GPIO_WS);
+    MovecallMojiESP32S3() : boot_button_(BOOT_BUTTON_GPIO) { 
+        // 记录上电时间戳
+        power_on_timestamp_ = esp_timer_get_time();
+        
+        // gpio_config_t io_conf = {
+        //     .pin_bit_mask = (1ULL << CHARGING_PIN) | (1ULL << STANDBY_PIN),
+        //     .mode = GPIO_MODE_INPUT,
+        //     .pull_up_en = GPIO_PULLUP_ENABLE,  // 需要上拉，因为这些引脚是开漏输出
+        //     .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        //     .intr_type = GPIO_INTR_DISABLE
+        // };
+        // ESP_ERROR_CHECK(gpio_config(&io_conf));
+
+        // int chrg = gpio_get_level(CHARGING_PIN);
+    
+        InitializeI2c();
+        InitializeGpio(AUDIO_CODEC_PA_PIN, true);
+        InitializeGpio(DISPLAY_BACKLIGHT_PIN, true);
+      
+        InitializeGpio(POWER_GPIO, true);
+
         InitializeSpi();
         InitializeGc9a01Display();
+        InitializeLis2hh12I2c(); // 新增LIS2HH12专用I2C
+        InitializeLis2hh12();    // 初始化LIS2HH12
         InitializeButtons();
         InitializeIot();
-        GetBacklight()->RestoreBrightness();
+        // GetBacklight()->RestoreBrightness();
+        xTaskCreate(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 4096, this, 5, NULL); // 启动检测任务
     }
 
-    virtual Led* GetLed() override {
-        static SingleLed led_strip(BUILTIN_LED_GPIO);
-        return &led_strip;
-    }
 
     virtual Display* GetDisplay() override {
         return display_;
     }
     
-    virtual Backlight* GetBacklight() override {
-        static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
-        return &backlight;
-    }
+    // virtual Backlight* GetBacklight() override {
+    //     static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
+    //     return &backlight;
+    // }
 
     virtual AudioCodec* GetAudioCodec() override {
-        static NoAudioCodecSimplexPdm audio_codec(AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
-            AUDIO_I2S_SPK_GPIO_BCLK, AUDIO_I2S_SPK_GPIO_LRCK, AUDIO_I2S_SPK_GPIO_DOUT, AUDIO_I2S_MIC_GPIO_SCK, AUDIO_I2S_MIC_GPIO_DIN);
+        static BoxAudioCodec audio_codec(
+            i2c_bus_, 
+            AUDIO_INPUT_SAMPLE_RATE, 
+            AUDIO_OUTPUT_SAMPLE_RATE,
+            AUDIO_I2S_GPIO_MCLK, 
+            AUDIO_I2S_GPIO_BCLK, 
+            AUDIO_I2S_GPIO_WS, 
+            AUDIO_I2S_GPIO_DOUT, 
+            AUDIO_I2S_GPIO_DIN,
+            AUDIO_CODEC_PA_PIN, 
+            AUDIO_CODEC_ES8311_ADDR, 
+            AUDIO_CODEC_ES7210_ADDR, 
+            AUDIO_INPUT_REFERENCE);
         return &audio_codec;
     }
+
+    // 公开I2C读寄存器方法供任务调用
+    uint8_t lis2hh12_read_reg_pub(uint8_t reg) { return this->lis2hh12_read_reg(reg); }
 };
 
 DECLARE_BOARD(MovecallMojiESP32S3);
