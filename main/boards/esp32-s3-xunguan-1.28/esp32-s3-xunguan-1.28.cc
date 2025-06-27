@@ -28,7 +28,7 @@ LV_FONT_DECLARE(font_awesome_20_4);
 class MovecallMojiESP32S3 : public WifiBoard {
 private:
     Button boot_button_;
-    Display* display_;
+    EyeDisplay* display_;
 
     // SPI初始化
     void InitializeSpi() {
@@ -74,11 +74,12 @@ private:
 
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
-            auto& app = Application::GetInstance();
-            if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
-                ResetWifiConfiguration();
-            }
-            app.ToggleChatState();
+            // auto& app = Application::GetInstance();
+            // if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
+            //     ResetWifiConfiguration();
+            // }
+            // app.ToggleChatState();
+            display_->TestNextEmotion();
         });
 
         // boot_button_.OnPressRepeat([this](uint16_t count) {

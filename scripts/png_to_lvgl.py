@@ -10,7 +10,7 @@ def convert_png_to_lvgl_array(png_path, output_path):
     img = img.convert('RGBA')
     
     # 调整大小为16x16（使用 BICUBIC 替代 LANCZOS）
-    img = img.resize((16, 16), Image.BICUBIC)
+    img = img.resize((64, 64), Image.BICUBIC)
     
     # 获取像素数据
     pixels = np.array(img)
