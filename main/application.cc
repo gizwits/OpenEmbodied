@@ -49,8 +49,8 @@ Application::Application() {
     event_group_ = xEventGroupCreate();
 
     // 初始化看门狗
-    auto& watchdog = Watchdog::GetInstance();
-    watchdog.Initialize(10, true);  // 10秒超时，超时后触发系统复位
+    // auto& watchdog = Watchdog::GetInstance();
+    // watchdog.Initialize(20, true);  // 10秒超时，超时后触发系统复位
 
     background_task_ = new BackgroundTask(4096 * 7);
 
@@ -344,6 +344,7 @@ void Application::StartListening() {
             SetListeningMode(kListeningModeManualStop);
         });
     } else if (device_state_ == kDeviceStateSpeaking) {
+        ESP_LOGI(TAG, "StartListening(kDeviceStateSpeaking)");
         Schedule([this]() {
             AbortSpeaking(kAbortReasonNone);
             SetListeningMode(kListeningModeManualStop);
@@ -412,8 +413,8 @@ void Application::Start() {
 #if CONFIG_USE_AUDIO_PROCESSOR
     xTaskCreatePinnedToCore([](void* arg) {
         Application* app = (Application*)arg;
-        auto& watchdog = Watchdog::GetInstance();
-        watchdog.SubscribeTask(xTaskGetCurrentTaskHandle());
+        // auto& watchdog = Watchdog::GetInstance();
+        // watchdog.SubscribeTask(xTaskGetCurrentTaskHandle());
         app->AudioLoop();
         vTaskDelete(NULL);
     }, "audio_loop", 4096 * 2, this, 8, &audio_loop_task_handle_, 1);
@@ -449,12 +450,10 @@ void Application::Start() {
             Schedule([this]() {
                 QuitTalking();
                 PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
-                vTaskDelay(pdMS_TO_TICKS(2000));
-                ToggleChatState();
             });
         } else {
             if (!protocol_->GetRoomParams().access_token.empty()) {
-                PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
+                // PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
             }
         }
         protocol_->UpdateRoomParams(params);
@@ -538,7 +537,7 @@ void Application::Start() {
         Alert(Lang::Strings::ERROR, message.c_str(), "sad", Lang::Sounds::P3_EXCLAMATION);
     });
     protocol_->OnIncomingAudio([this](AudioStreamPacket&& packet) {
-        const int max_packets_in_queue = 2000 / OPUS_FRAME_DURATION_MS;
+        const int max_packets_in_queue = 10000 / OPUS_FRAME_DURATION_MS;
         std::lock_guard<std::mutex> lock(mutex_);
         if (audio_decode_queue_.size() < max_packets_in_queue) {
             audio_decode_queue_.emplace_back(std::move(packet));
@@ -584,6 +583,7 @@ void Application::Start() {
             } else if (strcmp(state->valuestring, "stop") == 0) {
                 Schedule([this]() {
                     background_task_->WaitForCompletion();
+
                     if (device_state_ == kDeviceStateSpeaking) {
                         if (listening_mode_ == kListeningModeManualStop) {
                             SetDeviceState(kDeviceStateIdle);
@@ -737,6 +737,7 @@ void Application::Start() {
                 SetListeningMode(realtime_chat_enabled_ ? kListeningModeRealtime : kListeningModeAutoStop);
             } else if (device_state_ == kDeviceStateSpeaking) {
                 // 关键词打断，继续监听
+                ESP_LOGI(TAG, "Wake word detected break: %s", wake_word.c_str());
                 protocol_->SendAbortSpeaking(kAbortReasonNone);
                 ResetDecoder();
                 PlaySound(Lang::Sounds::P3_SUCCESS);
@@ -762,19 +763,21 @@ void Application::Start() {
         display->SetChatMessage("system", "");
         // Play the success sound to indicate the device is ready
         ResetDecoder();
-        PlaySound(Lang::Sounds::P3_SUCCESS);
+        // PlaySound(Lang::Sounds::P3_SUCCESS);
     }
     
     // Enter the main event loop
-    watchdog.SubscribeTask(xTaskGetCurrentTaskHandle());
+    // watchdog.SubscribeTask(xTaskGetCurrentTaskHandle());
 
     MainEventLoop();
 }
 
 void Application::QuitTalking() {
+    ESP_LOGI(TAG, "QuitTalking");
     protocol_->SendAbortSpeaking(kAbortReasonNone);
     SetDeviceState(kDeviceStateIdle);
     protocol_->CloseAudioChannel();
+    ResetDecoder();
 }
 
 void Application::PlayMusic(const char* url) {
@@ -877,7 +880,7 @@ void Application::MainEventLoop() {
      auto& watchdog = Watchdog::GetInstance();
     const TickType_t timeout = pdMS_TO_TICKS(3000);
     while (true) {
-        watchdog.Reset();
+        // watchdog.Reset();
 
         auto bits = xEventGroupWaitBits(event_group_, SCHEDULE_EVENT, pdTRUE, pdFALSE, timeout);
 
@@ -886,7 +889,7 @@ void Application::MainEventLoop() {
             std::list<std::function<void()>> tasks = std::move(main_tasks_);
             lock.unlock();
             for (auto& task : tasks) {
-                watchdog.Reset();
+                // watchdog.Reset();
                 task();
             }
         }
@@ -899,7 +902,7 @@ void Application::AudioLoop() {
     auto& watchdog = Watchdog::GetInstance();
 
     while (true) {
-        watchdog.Reset();
+        // watchdog.Reset();
         OnAudioInput();
         if (codec->output_enabled()) {
             OnAudioOutput();
@@ -938,6 +941,9 @@ void Application::OnAudioOutput() {
     audio_decode_queue_.pop_front();
     lock.unlock();
     audio_decode_cv_.notify_all();
+
+    // 打印管道还剩余多少数据
+    // ESP_LOGI(TAG, "Audio decode queue size: %d", audio_decode_queue_.size());
 
     busy_decoding_audio_ = true;
     background_task_->Schedule([this, codec, packet = std::move(packet)]() mutable {
@@ -1168,11 +1174,13 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
         });
     } else if (device_state_ == kDeviceStateSpeaking) {
         Schedule([this]() {
+            ESP_LOGI(TAG, "WakeWordInvoke(kDeviceStateSpeaking)");
             AbortSpeaking(kAbortReasonNone);
         });
     } else if (device_state_ == kDeviceStateSpeaking) {
         Schedule([this]() {
             // 打断AI
+            ESP_LOGI(TAG, "WakeWordInvoke(kDeviceStateSpeaking)");
             protocol_->SendAbortSpeaking(kAbortReasonNone);
             ResetDecoder();
             PlaySound(Lang::Sounds::P3_SUCCESS);

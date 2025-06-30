@@ -23,6 +23,7 @@ public:
             Parameter("volume", "An integer between 0 and 100", kValueTypeNumber, true)
         }), [this](const ParameterList& parameters) {
             auto codec = Board::GetInstance().GetAudioCodec();
+            ESP_LOGI(TAG, "set_volume: %d", static_cast<uint8_t>(parameters["volume"].number()));
             codec->SetOutputVolume(static_cast<uint8_t>(parameters["volume"].number()));
         });
     }

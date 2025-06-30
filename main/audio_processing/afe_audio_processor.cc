@@ -32,7 +32,7 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec) {
 #else
     afe_config->aec_init = false;
 #endif
-    afe_config->ns_init = true;
+    afe_config->ns_init = false;
     afe_config->ns_model_name = ns_model_name;
     afe_config->afe_ns_mode = AFE_NS_MODE_NET;
 #ifdef CONFIG_USE_DEVICE_AEC

@@ -53,6 +53,7 @@ bool ThingManager::GetStatesJson(std::string& json, bool delta) {
 void ThingManager::Invoke(const cJSON* command) {
     auto name = cJSON_GetObjectItem(command, "name");
     for (auto& thing : things_) {
+        ESP_LOGI(TAG, "thing->name(): %s, name->valuestring: %s", thing->name().c_str(), name->valuestring);
         if (thing->name() == name->valuestring) {
             thing->Invoke(command);
             return;

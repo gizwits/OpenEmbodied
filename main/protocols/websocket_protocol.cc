@@ -4,6 +4,7 @@
 #include "application.h"
 #include "mbedtls/base64.h"
 #include "settings.h"
+#include <optional>
 
 #include <cstring>
 #include <cJSON.h>
@@ -182,7 +183,9 @@ bool WebsocketProtocol::OpenAudioChannel() {
         ESP_LOGE(TAG, "Bot ID or access token or voice id is empty");
         return false;
     }
-
+    // 用来标记是否触发 progress
+    // 如果触发了，收到第一包音频再进入说话模式
+    static bool is_first_package = false;
     error_occurred_ = false;
     busy_sending_audio_ = false;  // 重置音频发送标志
     std::string url = std::string("ws://") + room_params_.api_domain + std::string("/v1/chat") + std::string("?bot_id=") + std::string(room_params_.bot_id);
@@ -216,7 +219,6 @@ bool WebsocketProtocol::OpenAudioChannel() {
         if (event_type.empty() || event_type.length() >= 64) {
             return;
         }
-
         if(event_type == "conversation.audio.delta") {
             constexpr std::string_view content_key = "\"content\":\"";
             size_t content_start = str_data.find(content_key);
@@ -263,7 +265,34 @@ bool WebsocketProtocol::OpenAudioChannel() {
                             std::vector<uint8_t> audio_data(audio_data_buffer_.begin(), audio_data_buffer_.begin() + actual_len);
                             AudioStreamPacket packet;
                             packet.payload = std::move(audio_data);
-                            on_incoming_audio_(std::move(packet));
+
+                            if (is_first_package) {
+                                is_first_package = false;
+
+                                message_cache_.clear();
+                                message_buffer_.clear();
+                                message_buffer_ = "{";
+                                message_buffer_ += "\"type\":\"tts\",";
+                                message_buffer_ += "\"state\":\"start\"";
+                                message_buffer_ += "}";
+                                
+                                auto message_json = cJSON_Parse(message_buffer_.c_str());
+                                if (message_json) {
+                                    on_incoming_json_(message_json);
+                                    cJSON_Delete(message_json);
+                                }
+
+                                // 先把当前 packet 缓存起来
+                                packet_cache_ = std::move(packet);
+
+                            } else {
+                                if (packet_cache_.has_value()) {
+                                    on_incoming_audio_(std::move(packet_cache_.value()));
+                                    packet_cache_ = std::nullopt;
+                                    vTaskDelay(pdMS_TO_TICKS(10));
+                                }
+                                on_incoming_audio_(std::move(packet));
+                            }
                         }
                     }
                 }
@@ -294,19 +323,11 @@ bool WebsocketProtocol::OpenAudioChannel() {
                     cJSON_Delete(message_json);
                 }
             } else if (event_type == "conversation.chat.in_progress") {
-                message_cache_.clear();
-                message_buffer_.clear();
-                message_buffer_ = "{";
-                message_buffer_ += "\"type\":\"tts\",";
-                message_buffer_ += "\"state\":\"start\"";
-                message_buffer_ += "}";
+                is_first_package = true;
                 
-                auto message_json = cJSON_Parse(message_buffer_.c_str());
-                if (message_json) {
-                    on_incoming_json_(message_json);
-                    cJSON_Delete(message_json);
-                }
-            } else if (event_type == "conversation.chat.completed") {
+            } else if (event_type == "conversation.chat.completed" || event_type == "conversation.audio.completed") {
+                is_first_package = false;
+
                 message_buffer_.clear();
                 message_buffer_ = "{";
                 message_buffer_ += "\"type\":\"tts\",";
@@ -324,7 +345,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 app.AbortSpeaking(kAbortReasonNone);
                 app.SetDeviceState(kDeviceStateListening);
             } else if (event_type == "input_audio_buffer.speech_stopped") {
-                
+                ESP_LOGI(TAG, "input_audio_buffer.speech_stopped");
             } else if (event_type == "conversation.message.delta") {
                 auto data_json = cJSON_GetObjectItem(root, "data");
                 auto content_json = cJSON_GetObjectItem(data_json, "content");
@@ -436,7 +457,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "\"frame_size_ms\":60,";
     message += "\"limit_config\":{";
     message += "\"period\":1,";
-    message += "\"max_frame_num\":17";
+    message += "\"max_frame_num\":25";
     message += "}";
     message += "},";
     message += "\"speech_rate\":0,";
