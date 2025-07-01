@@ -488,7 +488,7 @@ void EyeDisplay::StartSadAnimation() {
     static lv_anim_t tear_anim;
     lv_anim_init(&tear_anim);
     lv_anim_set_var(&tear_anim, right_tear_);
-    lv_anim_set_values(&tear_anim, height_ / 2 + 30, height_ / 2 + 10);
+    lv_anim_set_values(&tear_anim, height_ / 2 + 40, height_ / 2 + 20);
     lv_anim_set_time(&tear_anim, 1000);
     lv_anim_set_repeat_count(&tear_anim, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_playback_time(&tear_anim, 1000);
@@ -570,27 +570,27 @@ void EyeDisplay::StartLovingAnimation() {
     // 保存爱心对象指针，以便在状态切换时清理
     left_heart_ = left_heart;
     right_heart_ = right_heart;
-    
-    // 为左眼爱心添加循环旋转动画
+
+    // 左眼爱心放大缩小动画
     lv_anim_init(&left_anim_);
     lv_anim_set_var(&left_anim_, left_heart);
-    lv_anim_set_values(&left_anim_, 0, 3600);  // 从0度旋转到3600度（10圈）
-    lv_anim_set_time(&left_anim_, 1500);  // 从3000ms减少到1500ms，转得更快
-    lv_anim_set_delay(&left_anim_, 0);
-    lv_anim_set_exec_cb(&left_anim_, (lv_anim_exec_xcb_t)lv_img_set_angle);
-    lv_anim_set_path_cb(&left_anim_, lv_anim_path_linear);
+    lv_anim_set_values(&left_anim_, 64, 128);  // 从100%放大到200%
+    lv_anim_set_time(&left_anim_, 750);         // 放大时间
+    lv_anim_set_playback_time(&left_anim_, 750);// 缩小时间
     lv_anim_set_repeat_count(&left_anim_, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_exec_cb(&left_anim_, (lv_anim_exec_xcb_t)lv_img_set_zoom);
+    lv_anim_set_path_cb(&left_anim_, lv_anim_path_linear);
     lv_anim_start(&left_anim_);
-    
-    // 为右眼爱心添加循环旋转动画
+
+    // 右眼爱心放大缩小动画
     lv_anim_init(&right_anim_);
     lv_anim_set_var(&right_anim_, right_heart);
-    lv_anim_set_values(&right_anim_, 0, -3600);  // 从0度旋转到-3600度（逆时针10圈）
-    lv_anim_set_time(&right_anim_, 1500);  // 从3000ms减少到1500ms，转得更快
-    lv_anim_set_delay(&right_anim_, 0);
-    lv_anim_set_exec_cb(&right_anim_, (lv_anim_exec_xcb_t)lv_img_set_angle);
-    lv_anim_set_path_cb(&right_anim_, lv_anim_path_linear);
+    lv_anim_set_values(&right_anim_, 64, 128);  // 从100%放大到200%
+    lv_anim_set_time(&right_anim_, 750);
+    lv_anim_set_playback_time(&right_anim_, 750);
     lv_anim_set_repeat_count(&right_anim_, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_exec_cb(&right_anim_, (lv_anim_exec_xcb_t)lv_img_set_zoom);
+    lv_anim_set_path_cb(&right_anim_, lv_anim_path_linear);
     lv_anim_start(&right_anim_);
 }
 

@@ -15,6 +15,35 @@
 
 #define TAG "WS"
 
+struct Emotion {
+    const char* icon;
+    const char* text;
+};
+static const std::vector<Emotion> emotions = {
+    {"😶", "neutral"},
+    {"🙂", "happy"},
+    {"😆", "laughing"},
+    {"😂", "funny"},
+    {"😔", "sad"},
+    {"😠", "angry"},
+    {"😭", "crying"},
+    {"😍", "loving"},
+    {"😳", "embarrassed"},
+    {"😯", "surprised"},
+    {"😱", "shocked"},
+    {"🤔", "thinking"},
+    {"😉", "winking"},
+    {"😎", "cool"},
+    {"😌", "relaxed"},
+    {"🤤", "delicious"},
+    {"😘", "kissy"},
+    {"😏", "confident"},
+    {"😴", "sleepy"},
+    {"😜", "silly"},
+    {"🙄", "confused"},
+    {"🤡", "vertigo"}
+};
+
 
 WebsocketProtocol::WebsocketProtocol() {
     event_group_handle_ = xEventGroupCreate();
@@ -186,6 +215,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     // 用来标记是否触发 progress
     // 如果触发了，收到第一包音频再进入说话模式
     static bool is_first_packet_ = false;
+    static bool is_detect_emotion_ = false;
     error_occurred_ = false;
     busy_sending_audio_ = false;  // 重置音频发送标志
     std::string url = std::string("ws://") + room_params_.api_domain + std::string("/v1/chat") + std::string("?bot_id=") + std::string(room_params_.bot_id);
@@ -310,6 +340,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
                     cJSON_Delete(message_json);
                 }
             } else if (event_type == "conversation.chat.in_progress") {
+                is_detect_emotion_ = false;
                 is_first_packet_ = true;
 
                 message_cache_.clear();
@@ -361,6 +392,32 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 if (message_json) {
                     on_incoming_json_(message_json);
                     cJSON_Delete(message_json);
+                }
+
+
+                if (is_detect_emotion_ == false) {
+                    // 查找 message_cache_ 是否包含 emotions
+                    for (const auto& emotion : emotions) {
+                        if (message_cache_.find(emotion.icon) != std::string::npos) {
+                            is_detect_emotion_ = true;
+                            message_buffer_.clear();
+                            message_buffer_ = "{";
+                            message_buffer_ += "\"type\":\"llm\",";
+                            message_buffer_ += "\"emotion\":\"" + std::string(emotion.text) + "\"";
+                            message_buffer_ += "}";
+                            
+                            auto message_json = cJSON_Parse(message_buffer_.c_str());
+                            if (message_json) {
+                                ESP_LOGI(TAG, "emotion: %s", cJSON_Print(message_json));
+
+                                on_incoming_json_(message_json);
+                                cJSON_Delete(message_json);
+
+                            }
+
+                            break;
+                        }
+                    }
                 }
             } else if (event_type == "conversation.chat.requires_action") {
                 CozeMCPParser::getInstance().handle_mcp(str_data);
@@ -426,6 +483,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "\"conversation.audio_transcript.completed\",";
     message += "\"conversation.chat.requires_action\",";
     message += "\"input_audio_buffer.speech_started\",";
+    message += "\"conversation.message.delta\",";
     message += "\"input_audio_buffer.speech_stopped\"";
     message += "],";
     message += "\"turn_detection\": {";
