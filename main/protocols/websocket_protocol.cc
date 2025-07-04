@@ -340,6 +340,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
                     cJSON_Delete(message_json);
                 }
             } else if (event_type == "conversation.chat.in_progress") {
+                ESP_LOGI(TAG, "conversation.chat.in_progress");
                 is_detect_emotion_ = false;
                 is_first_packet_ = true;
 
@@ -408,7 +409,6 @@ bool WebsocketProtocol::OpenAudioChannel() {
                             
                             auto message_json = cJSON_Parse(message_buffer_.c_str());
                             if (message_json) {
-                                ESP_LOGI(TAG, "emotion: %s", cJSON_Print(message_json));
 
                                 on_incoming_json_(message_json);
                                 cJSON_Delete(message_json);

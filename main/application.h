@@ -98,6 +98,7 @@ private:
 
     EventGroupHandle_t event_group_ = nullptr;
     esp_timer_handle_t clock_timer_handle_ = nullptr;
+    esp_timer_handle_t report_timer_handle_ = nullptr;
     volatile DeviceState device_state_ = kDeviceStateUnknown;
     ListeningMode listening_mode_ = kListeningModeAutoStop;
 #if CONFIG_USE_DEVICE_AEC || CONFIG_USE_SERVER_AEC
@@ -141,6 +142,8 @@ private:
     void OnClockTimer();
     void SetListeningMode(ListeningMode mode);
     void AudioLoop();
+    void OnReportTimer();
+    void StartReportTimer();
 };
 
 #endif // _APPLICATION_H_

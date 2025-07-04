@@ -7,6 +7,7 @@
 #include "websocket_protocol.h"
 #include "font_awesome_symbols.h"
 #include "iot/thing_manager.h"
+#include <esp_wifi.h>
 #include "watchdog.h"
 #include "assets/lang_config.h"
 #include "server/giz_mqtt.h"
@@ -299,6 +300,9 @@ void Application::ToggleChatState() {
     if (device_state_ == kDeviceStateIdle) {
         Schedule([this]() {
             ESP_LOGI(TAG, "ToggleChatState(kDeviceStateIdle)");
+            auto& board = Board::GetInstance();
+            // 还原屏幕亮度
+            board.GetBacklight()->RestoreBrightness();
             SetDeviceState(kDeviceStateConnecting);
             if (!protocol_->OpenAudioChannel()) {
                 return;
@@ -595,7 +599,7 @@ void Application::Start() {
             } else if (strcmp(state->valuestring, "sentence_start") == 0) {
                 auto text = cJSON_GetObjectItem(root, "text");
                 if (cJSON_IsString(text)) {
-                    ESP_LOGI(TAG, "<< %s", text->valuestring);
+                    // ESP_LOGI(TAG, "<< %s", text->valuestring);
                     Schedule([this, display, message = std::string(text->valuestring)]() {
                         display->SetChatMessage("assistant", message.c_str());
                     });
@@ -716,8 +720,13 @@ void Application::Start() {
             CancelPlayMusic();
             ESP_LOGI(TAG, "Wake word detected: %s, device state: %s, %d", wake_word.c_str(), STATE_STRINGS[device_state_], device_state_);
             if (device_state_ == kDeviceStateIdle) {
+                auto& board = Board::GetInstance();
+                // 还原屏幕亮度
+                board.GetBacklight()->RestoreBrightness();
+                ResetDecoder();
                 PlaySound(Lang::Sounds::P3_SUCCESS);
                 vTaskDelay(pdMS_TO_TICKS(300));
+
                 SetDeviceState(kDeviceStateConnecting);
                 wake_word_detect_.EncodeWakeWordData();
 
@@ -769,6 +778,7 @@ void Application::Start() {
     // Enter the main event loop
     // watchdog.SubscribeTask(xTaskGetCurrentTaskHandle());
 
+    StartReportTimer();
     MainEventLoop();
 }
 
@@ -1163,6 +1173,8 @@ void Application::Reboot() {
 
 void Application::WakeWordInvoke(const std::string& wake_word) {
     if (device_state_ == kDeviceStateIdle) {
+        auto& board = Board::GetInstance();
+        board.GetBacklight()->RestoreBrightness();
         PlaySound(Lang::Sounds::P3_SUCCESS);
         CancelPlayMusic();
         vTaskDelay(pdMS_TO_TICKS(300));
@@ -1210,4 +1222,74 @@ void Application::SendMcpMessage(const std::string& payload) {
             // protocol_->SendMcpMessage(payload);
         }
     });
+}
+
+
+void Application::StartReportTimer() {
+    if (report_timer_handle_ != nullptr) {
+        return;
+    }
+    // 先上报一次
+    OnReportTimer();
+    esp_timer_create_args_t report_timer_args = {
+        .callback = [](void* arg) {
+            static_cast<Application*>(arg)->OnReportTimer();
+        },
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "report_timer",
+        .skip_unhandled_events = true
+    };
+    esp_timer_create(&report_timer_args, &report_timer_handle_);
+    esp_timer_start_periodic(report_timer_handle_, 60000000); // 1分钟
+}
+
+void Application::OnReportTimer() {
+    uint8_t binary_data[18] = {
+        0x00, 0x00, 0x00, 0x03,  // 固定头部
+        0x0b, 0x00, 0x00, 0x93,  // 命令标识
+        0x00, 0x00, 0x00, 0x02,  // 数据长度
+        0x14, 0xff,              // 数据类型
+        0x00, // 0b01011011 switch，类型为bool，值为true：字段bit0，字段值为0b1；wakeup_word，类型为bool，值为true：字段bit1，字段值为0b1；charge_status，类型为enum，值为2：字段bit3 ~ bit2，字段值为0b10；alert_tone_language，类型为enum，值为1：字段bit4 ~ bit4，字段值为0b1；chat_mode，类型为enum，值为2：字段bit6 ~ bit5，字段值为0b10；          
+        0x64, // 音量
+        0x0a, // 电量
+        0x00, // rssi
+    };
+
+    // chat_mode 固定填充 1
+    uint8_t status = 0;
+    status |= (1 << 0); // switch
+    status |= (1 << 1); // wakeup_word
+    status |= (1 << 4); // alert_tone_language
+    status |= (1 << 5); // chat_mode
+
+
+    auto& board = Board::GetInstance();
+    int level = 0;
+    bool charging = false;
+    bool discharging = false;
+    if (board.GetBatteryLevel(level, charging, discharging)) {
+        ESP_LOGI(TAG, "Battery level: %d, charging: %d, discharging: %d", level, charging, discharging);
+        binary_data[16] = level;
+        status |= (charging ? 1 : 0) << 2; // charge_status
+        // charging = true 的时候 charge_status = 1
+    }
+    binary_data[14] = status;
+    ESP_LOGI(TAG, "Status: %d", status);
+
+    auto codec = Board::GetInstance().GetAudioCodec();
+    int volume = codec->output_volume();
+    ESP_LOGI(TAG, "Volume: %d", volume);
+    binary_data[15] = volume;
+
+    wifi_ap_record_t ap_info;
+    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+        ESP_LOGI(TAG, "WiFi RSSI: %d dBm", ap_info.rssi);
+        binary_data[17] = 100 - (uint8_t)abs(ap_info.rssi);
+    }
+
+    if (mqtt_client_) {
+        mqtt_client_->uploadP0Data(binary_data, sizeof(binary_data));
+    }
+
 }

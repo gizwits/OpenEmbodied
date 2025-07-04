@@ -139,10 +139,20 @@ void CozeMCPParser::handle_mcp(std::string_view data) {
     }
     else if (strcmp(name->valuestring, "sleep_control") == 0) {
         Application::GetInstance().QuitTalking();
+        // 关闭屏幕
+        cJSON_AddStringToObject(mcp_data, "method", "set_brightness_temporary");
+        cJSON_AddStringToObject(mcp_data, "name", "Screen");
+        cJSON_AddNumberToObject(params_data, "brightness", 0);
+
+         send_tool_output_response(event_id, 
+                                    cJSON_GetStringValue(conv_id), 
+                                    cJSON_GetStringValue(tool_call_id), 
+                                    "{\\\"sleep_control_results\\\": \\\"1\\\"}");
+
     } else if (strcmp(name->valuestring, "brightness") == 0) {
         cJSON *brightness = cJSON_GetObjectItem(args_json, "brightness");
         if (brightness && cJSON_IsNumber(brightness)) {
-            cJSON_AddStringToObject(mcp_data, "method", "SetBrightness");
+            cJSON_AddStringToObject(mcp_data, "method", "set_brightness");
             cJSON_AddStringToObject(mcp_data, "name", "Screen");
             cJSON_AddNumberToObject(params_data, "brightness", brightness->valueint);
         }

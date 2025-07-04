@@ -31,6 +31,58 @@ LV_FONT_DECLARE(font_awesome_20_4);
 #define LIS2HH12_I2C_ADDR 0x1D  // SDO接GND为0x1D，接VDD为0x1E
 #define LIS2HH12_INT1_PIN GPIO_NUM_42
 
+// void ReadADC2_CH1_Oneshot() {
+//     adc_oneshot_unit_handle_t adc2_handle;
+//     adc_oneshot_unit_init_cfg_t init_config = {
+//         .unit_id = ADC_UNIT_2,
+//     };
+//     adc_oneshot_new_unit(&init_config, &adc2_handle);
+
+//     adc_oneshot_chan_cfg_t config = {
+//         .atten = ADC_ATTEN_DB_11,      // 0~3.6V
+//         .bitwidth = ADC_BITWIDTH_12,   // 12位精度
+//     };
+//     adc_oneshot_config_channel(adc2_handle, ADC_CHANNEL_1, &config);
+
+//     int raw = 0;
+//     esp_err_t ret = adc_oneshot_read(adc2_handle, ADC_CHANNEL_1, &raw);
+//     if (ret == ESP_OK) {
+//         ESP_LOGI("ADC2", "ADC2 CH1 raw value: %d", raw);
+//     } else {
+//         ESP_LOGE("ADC2", "ADC2 oneshot read failed: %d", ret);
+//     }
+
+//     adc_oneshot_del_unit(adc2_handle); // 用完记得释放
+// }
+
+
+// 电压-电量查表
+typedef struct {
+    uint16_t voltage; // mV
+    uint8_t soc;      // 百分比
+} VoltageSocPair;
+
+const VoltageSocPair dischargeCurve[] = {
+    {4163, 100}, {4098, 95}, {4039, 90}, {3983, 85}, {3930, 80}, {3878, 75}, {3829, 70}, {3784, 65}, {3745, 60}, {3710, 55},
+    {3668, 50},  {3645, 45}, {3629, 40}, {3615, 35}, {3600, 30}, {3583, 25}, {3554, 20}, {3520, 15}, {3476, 10}, {3439, 5}, {3395, 0}
+};
+
+static uint8_t estimate_soc(uint16_t voltage, const VoltageSocPair *soc_pairs, int voltage_soc_pairs_length)
+{
+    if (soc_pairs == NULL) return 0;
+    uint16_t closest_voltage = soc_pairs[0].voltage;
+    uint8_t closest_soc = soc_pairs[0].soc;
+    uint16_t min_diff = abs((int)voltage - (int)closest_voltage);
+    for (int i = 1; i < voltage_soc_pairs_length; i++) {
+        uint16_t diff = abs((int)voltage - (int)soc_pairs[i].voltage);
+        if (diff < min_diff) {
+            min_diff = diff;
+            closest_voltage = soc_pairs[i].voltage;
+            closest_soc = soc_pairs[i].soc;
+        }
+    }
+    return closest_soc;
+}
 
 class MovecallMojiESP32S3 : public WifiBoard {
 private:
@@ -133,6 +185,17 @@ private:
                                 });
     }
 
+    void InitializeChargingGpio() {
+        gpio_config_t io_conf = {
+            .pin_bit_mask = (1ULL << CHARGING_PIN) | (1ULL << STANDBY_PIN),
+            .mode = GPIO_MODE_INPUT,
+            .pull_up_en = GPIO_PULLUP_ENABLE,  // 需要上拉，因为这些引脚是开漏输出
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE
+        };
+        ESP_ERROR_CHECK(gpio_config(&io_conf));
+    }
+
     void InitializeButtons() {
         static int first_level = gpio_get_level(BOOT_BUTTON_GPIO);
 
@@ -225,22 +288,20 @@ public:
         // 记录上电时间戳
         power_on_timestamp_ = esp_timer_get_time();
         
-        // gpio_config_t io_conf = {
-        //     .pin_bit_mask = (1ULL << CHARGING_PIN) | (1ULL << STANDBY_PIN),
-        //     .mode = GPIO_MODE_INPUT,
-        //     .pull_up_en = GPIO_PULLUP_ENABLE,  // 需要上拉，因为这些引脚是开漏输出
-        //     .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        //     .intr_type = GPIO_INTR_DISABLE
-        // };
-        // ESP_ERROR_CHECK(gpio_config(&io_conf));
+        InitializeChargingGpio();
 
-        // int chrg = gpio_get_level(CHARGING_PIN);
-    
+        int chrg = gpio_get_level(CHARGING_PIN);
+        int standby = gpio_get_level(STANDBY_PIN);
+        ESP_LOGI(TAG, "chrg: %d, standby: %d", chrg, standby);
         InitializeI2c();
         InitializeGpio(AUDIO_CODEC_PA_PIN, true);
         InitializeGpio(DISPLAY_BACKLIGHT_PIN, true);
-      
-        InitializeGpio(POWER_GPIO, true);
+        if (chrg == 0 || standby == 0) {
+            // 充电中
+        } else {
+            // 没有充电
+            InitializeGpio(POWER_GPIO, true);
+        }
 
         InitializeSpi();
         InitializeGc9a01Display();
@@ -248,8 +309,16 @@ public:
         InitializeLis2hh12();    // 初始化LIS2HH12
         InitializeButtons();
         InitializeIot();
-        // GetBacklight()->RestoreBrightness();
+        GetBacklight()->RestoreBrightness();
         xTaskCreate(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 4096, this, 5, NULL); // 启动检测任务
+        // ESP_LOGI(TAG, "ReadADC2_CH1_Oneshot");
+        // ReadADC2_CH1_Oneshot();
+
+        int level = 0;
+        bool charging = false;
+        bool discharging = false;
+        GetBatteryLevel(level, charging, discharging);
+        ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
     }
 
 
@@ -257,10 +326,67 @@ public:
         return display_;
     }
     
-    // virtual Backlight* GetBacklight() override {
-    //     static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
-    //     return &backlight;
-    // }
+    virtual Backlight* GetBacklight() override {
+        static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
+        return &backlight;
+    }
+
+
+    virtual bool GetBatteryLevel(int &level, bool &charging, bool &discharging) override {
+        // 1. 读取ADC原始值
+        int chrg = gpio_get_level(CHARGING_PIN);
+        int standby = gpio_get_level(STANDBY_PIN);
+        adc_oneshot_unit_handle_t adc2_handle;
+        adc_oneshot_unit_init_cfg_t init_config = { .unit_id = ADC_UNIT_2 };
+        adc_oneshot_new_unit(&init_config, &adc2_handle);
+
+        adc_oneshot_chan_cfg_t config = { .atten = ADC_ATTEN_DB_11, .bitwidth = ADC_BITWIDTH_12 };
+        adc_oneshot_config_channel(adc2_handle, ADC_CHANNEL_1, &config);
+
+        int raw = 0;
+        esp_err_t ret = adc_oneshot_read(adc2_handle, ADC_CHANNEL_1, &raw);
+        adc_oneshot_del_unit(adc2_handle);
+
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "ADC2 oneshot read failed: %d", ret);
+            level = 0;
+            charging = false;
+            discharging = false;
+            return false;
+        }
+
+        // 2. 转换为电压（假设3.6V满量程，12位ADC，分压比2:1）
+        // 公式: 电压(mV) = raw / 4095.0 * 3600 * 2
+        float voltage = raw * 3600.0f / 4095.0f * 2.0f;
+        uint16_t voltage_mv = (uint16_t)voltage;
+        ESP_LOGI(TAG, "ADC raw: %d, voltage: %d mV", raw, voltage_mv);
+
+        charging = chrg == 0;
+        discharging = !charging;
+
+        // 4. 估算电量
+        if (charging) {
+            // 线性估算
+            if (voltage_mv >= 4163) {
+                level = 100;
+            } else if (voltage_mv <= 3395) {
+                level = 0;
+            } else {
+                level = ((voltage_mv - 3395) * 100) / (4163 - 3395);
+            }
+        } else {
+            // 查表法
+            level = estimate_soc(voltage_mv, dischargeCurve, sizeof(dischargeCurve)/sizeof(dischargeCurve[0]));
+        }
+
+        // 限制范围
+        if (level > 100) level = 100;
+        if (level < 0) level = 0;
+
+        ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
+
+        return true;
+    }
 
     virtual AudioCodec* GetAudioCodec() override {
         static BoxAudioCodec audio_codec(

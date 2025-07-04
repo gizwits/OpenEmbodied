@@ -56,6 +56,8 @@ public:
     void OnRoomParamsUpdated(std::function<void(const RoomParams&)> callback);
     void deinit();
 
+    bool uploadP0Data(const void* data, size_t data_len);
+
     MqttClient() = default;
     ~MqttClient() = default;
     MqttClient(const MqttClient&) = delete;

@@ -46,6 +46,16 @@ public:
                 backlight->SetBrightness(brightness, true);
             }
         });
+        // 临时设置亮度，不保存到配置文件
+        methods_.AddMethod("set_brightness_temporary", "Set the brightness temporarily", ParameterList({
+            Parameter("brightness", "An integer between 0 and 100", kValueTypeNumber, true)
+        }), [this](const ParameterList& parameters) {
+            uint8_t brightness = static_cast<uint8_t>(parameters["brightness"].number());
+            auto backlight = Board::GetInstance().GetBacklight();
+            if (backlight) {
+                backlight->SetBrightness(brightness, false);
+            }
+        });
     }
 };
 
