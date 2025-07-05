@@ -167,7 +167,7 @@ void EyeToySingleDisplay::SetEmotion(const char* emotion) {
     } else if (strcmp(emotion, "relaxed") == 0) {
         new_state = EyeState::IDLE;
     } else if (strcmp(emotion, "sleepy") == 0) {
-        new_state = EyeState::IDLE;
+        new_state = EyeState::SLEEPING;
     }
 
     if (new_state == current_state_) {
@@ -192,12 +192,12 @@ void EyeToySingleDisplay::SetEmotion(const char* emotion) {
             StartIdleAnimation();
             break;
         case EyeState::SLEEPING:
-            StartIdleAnimation();
+            StartHalfClosedAnimation();
             break;
     }
 
     // 启动眨眼动画
-    if (blink_mask_) {
+    if (blink_mask_ && (current_state_ == EyeState::IDLE || current_state_ == EyeState::THINKING || current_state_ == EyeState::LISTENING)) {
         StartBlinkAnimation(blink_mask_);
     }
 }
@@ -316,6 +316,13 @@ void EyeToySingleDisplay::StartSleepingAnimation() {
     StartIdleAnimation();
 }
 
+void EyeToySingleDisplay::StartHalfClosedAnimation() {
+    ESP_LOGI(TAG, "StartHalfClosedAnimation");
+    if (!blink_mask_) return;
+    lv_anim_del(blink_mask_, nullptr); // 停止任何动画
+    lv_obj_set_y(blink_mask_, -height_ / 2); // 遮住一半
+}
+
 void EyeToySingleDisplay::SetupUI() {
     DisplayLockGuard lock(this);
 
@@ -351,6 +358,7 @@ void EyeToySingleDisplay::CreateEye(lv_obj_t* parent) {
     lv_obj_set_style_border_width(eye_ball, 0, 0);
     lv_obj_set_style_pad_all(eye_ball, 0, 0);
     lv_obj_center(eye_ball);
+    lv_obj_set_y(eye_ball, lv_obj_get_y(eye_ball) - 20); // 整体上移 20 像素
 
     // 3. 高光1（大白点）
     lv_obj_t* highlight1 = lv_obj_create(eye_ball);
@@ -381,9 +389,6 @@ void EyeToySingleDisplay::CreateEye(lv_obj_t* parent) {
     lv_obj_set_style_pad_all(blink_mask, 0, 0);
     lv_obj_set_pos(blink_mask, 0, -height_);  // 初始位置在眼睛上方
     lv_obj_set_style_bg_opa(blink_mask, LV_OPA_COVER, 0);
-
-    // 启动眨眼动画
-    StartBlinkAnimation(blink_mask);
 
     // 保存高光对象供状态切换使用
     left_highlight_ = highlight1;

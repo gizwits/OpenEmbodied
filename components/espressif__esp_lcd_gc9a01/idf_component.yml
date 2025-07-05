@@ -1,0 +1,10 @@
+dependencies:
+  cmake_utilities: 0.*
+  idf: '>=4.4'
+description: ESP LCD GC9A01
+repository: git://github.com/espressif/esp-bsp.git
+repository_info:
+  commit_sha: ac023c814b95f6c2c0e2b82d35932dcfc24b37e4
+  path: components/lcd/esp_lcd_gc9a01
+url: https://github.com/espressif/esp-bsp/tree/master/components/lcd/esp_lcd_gc9a01
+version: 2.0.1

@@ -72,6 +72,7 @@ private:
     void StartListeningAnimation();
     void StartSleepingAnimation();
     void StartBlinkAnimation(lv_obj_t* eye_ball);
+    void StartHalfClosedAnimation();
 
 public:
     // 单屏构造函数
