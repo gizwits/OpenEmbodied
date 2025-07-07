@@ -23,7 +23,9 @@
 #include "server/giz_mqtt.h"
 #include "ota.h"
 #include "background_task.h"
+#if CONFIG_USE_AUDIO_PROCESSOR
 #include "audio_processor.h"
+#endif
 
 #if CONFIG_USE_WAKE_WORD_DETECT
 #include "wake_word_detect.h"
@@ -73,6 +75,8 @@ public:
     void CancelPlayMusic();
     void ToggleChatState();
     void StartListening();
+    void SetChatMode(int mode);
+    bool GetChatMode() const { return chat_mode_; }
     void StopListening();
     void UpdateIotStates();
     void Reboot();
@@ -89,12 +93,18 @@ private:
 #if CONFIG_USE_WAKE_WORD_DETECT
     WakeWordDetect wake_word_detect_;
 #endif
+#if CONFIG_USE_AUDIO_PROCESSOR
     std::unique_ptr<AudioProcessor> audio_processor_;
+#endif
     Ota ota_;
     std::mutex mutex_;
     std::list<std::function<void()>> main_tasks_;
     std::unique_ptr<Protocol> protocol_;
     std::unique_ptr<MqttClient> mqtt_client_;
+
+    int chat_mode_ = 1;
+    bool realtime_chat_is_start_ = false;
+    
 
     EventGroupHandle_t event_group_ = nullptr;
     esp_timer_handle_t clock_timer_handle_ = nullptr;

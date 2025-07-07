@@ -50,9 +50,29 @@ WebsocketProtocol::WebsocketProtocol() {
 }
 
 WebsocketProtocol::~WebsocketProtocol() {
-    if (websocket_ != nullptr) {
+    // 如果有关闭任务正在运行，等待它完成
+    if (close_task_handle_ != nullptr) {
+        ESP_LOGI(TAG, "Waiting for close task to complete...");
+        // 等待任务完成，最多等待 3 秒
+        TickType_t timeout = pdMS_TO_TICKS(3000);
+        while (close_task_handle_ != nullptr && timeout > 0) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            timeout -= pdMS_TO_TICKS(100);
+        }
+        
+        if (close_task_handle_ != nullptr) {
+            ESP_LOGW(TAG, "Close task did not complete in time, force cleanup");
+            // 强制清理 websocket
+            if (websocket_ != nullptr) {
+                delete websocket_;
+                websocket_ = nullptr;
+            }
+        }
+    } else if (websocket_ != nullptr) {
+        // 如果没有关闭任务，直接清理 websocket
         delete websocket_;
     }
+    
     vEventGroupDelete(event_group_handle_);
 }
 
@@ -179,7 +199,7 @@ void WebsocketProtocol::CloseAudioChannelTask(void* param) {
     
     // 2. 等待当前正在传输的音频数据完成
     // 给一些时间让正在传输的数据完成
-    vTaskDelay(pdMS_TO_TICKS(800));
+    vTaskDelay(pdMS_TO_TICKS(500));
     
     // 3. 发送关闭帧给服务器
     if (self->websocket_ != nullptr) {
@@ -187,7 +207,7 @@ void WebsocketProtocol::CloseAudioChannelTask(void* param) {
     }
     
     // 4. 等待连接完全关闭
-    vTaskDelay(pdMS_TO_TICKS(200));
+    vTaskDelay(pdMS_TO_TICKS(500));
     
     // 5. 清理资源
     if (self->websocket_ != nullptr) {
@@ -279,6 +299,11 @@ bool WebsocketProtocol::OpenAudioChannel() {
                     // Reuse buffer for decoded data
                     if (output_len > audio_data_buffer_.capacity()) {
                         audio_data_buffer_.reserve(output_len);
+                    } else if (audio_data_buffer_.capacity() > output_len * 4) {
+                        // If buffer is more than 4x larger than needed, shrink it
+                        std::vector<uint8_t> new_buffer;
+                        new_buffer.reserve(output_len);
+                        audio_data_buffer_.swap(new_buffer);
                     }
                     audio_data_buffer_.resize(output_len);
 
@@ -296,12 +321,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
 
                             if (is_first_packet_) {
                                 is_first_packet_ = false;
-
-                                
-
                                 // 先把当前 packet 缓存起来
                                 packet_cache_ = std::move(packet);
-
                             } else {
                                 if (packet_cache_.has_value()) {
                                     on_incoming_audio_(std::move(packet_cache_.value()));
@@ -460,11 +481,9 @@ bool WebsocketProtocol::OpenAudioChannel() {
     uint32_t random_value = esp_random();
     snprintf(event_id, sizeof(event_id), "%lu", random_value);
 
-    auto& board = Board::GetInstance();
-    auto device_mode = board.GetDeviceMode();
-   
+
+    int chat_mode = Application::GetInstance().GetChatMode();
     
-    std::string user_id = "nd7ec83a";  // You may want to set this appropriately
     std::string codec = "opus";
     std::string message = "{";
     message += "\"id\":\"" + std::string(event_id) + "\",";
@@ -487,14 +506,18 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "\"conversation.audio_transcript.completed\",";
     message += "\"conversation.chat.requires_action\",";
     message += "\"input_audio_buffer.speech_started\",";
+
+#ifndef CONFIG_IDF_TARGET_ESP32C2
+    // C2 处理不过来
     message += "\"conversation.message.delta\",";
+#endif
     message += "\"input_audio_buffer.speech_stopped\"";
     message += "],";
-    if (device_mode != DeviceMode::BUTTON_MODE) {
+    if (chat_mode != 0) {
         message += "\"turn_detection\": {";
         message += "\"type\": \"server_vad\",";  // 判停类型，client_vad/server_vad，默认为 client_vad
         message += "\"prefix_padding_ms\": 300,"; // server_vad模式下，VAD 检测到语音之前要包含的音频量，单位为 ms。默认为 600ms
-        message += "\"silence_duration_ms\": 300"; // server_vad模式下，检测语音停止的静音持续时间，单位为 ms。默认为 800ms
+        message += "\"silence_duration_ms\": 500"; // server_vad模式下，检测语音停止的静音持续时间，单位为 ms。默认为 800ms
         message += "},";
     }
     message += "\"chat_config\":{";
@@ -520,7 +543,11 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "\"frame_size_ms\":60,";
     message += "\"limit_config\":{";
     message += "\"period\":1,";
+#if CONFIG_IDF_TARGET_ESP32C2
+    message += "\"max_frame_num\":17";
+#else
     message += "\"max_frame_num\":25";
+#endif
     message += "}";
     message += "},";
     message += "\"speech_rate\":0,";
@@ -530,37 +557,12 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "}";
     
     websocket_->Send(message);
-
     // ESP_LOGI(TAG, "Send message: %s", message.c_str());
-
     return true;
 }
 
 std::string WebsocketProtocol::GetHelloMessage() {
-    // keys: message type, version, audio_params (format, sample_rate, channels)
-    cJSON* root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root, "type", "hello");
-    cJSON_AddNumberToObject(root, "version", 1);
-    cJSON* features = cJSON_CreateObject();
-#if CONFIG_USE_SERVER_AEC
-    cJSON_AddBoolToObject(features, "aec", true);
-#endif
-#if CONFIG_IOT_PROTOCOL_MCP
-    cJSON_AddBoolToObject(features, "mcp", true);
-#endif
-    cJSON_AddItemToObject(root, "features", features);
-    cJSON_AddStringToObject(root, "transport", "websocket");
-    cJSON* audio_params = cJSON_CreateObject();
-    cJSON_AddStringToObject(audio_params, "format", "opus");
-    cJSON_AddNumberToObject(audio_params, "sample_rate", 16000);
-    cJSON_AddNumberToObject(audio_params, "channels", 1);
-    cJSON_AddNumberToObject(audio_params, "frame_duration", OPUS_FRAME_DURATION_MS);
-    cJSON_AddItemToObject(root, "audio_params", audio_params);
-    auto json_str = cJSON_PrintUnformatted(root);
-    std::string message(json_str);
-    cJSON_free(json_str);
-    cJSON_Delete(root);
-    return message;
+    return "";
 }
 
 void WebsocketProtocol::ParseServerHello(const cJSON* root) {
