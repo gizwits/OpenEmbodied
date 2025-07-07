@@ -78,6 +78,7 @@ typedef enum
     VB6824_CMD_SEND_PCM_EOF = 0x0201,
     VB6824_CMD_SEND_CTL = 0x0202,
     VB6824_CMD_SEND_VOLUM = 0x0203,
+    VB6824_CMD_SEND_SHUTDOWN = 0x0208,
     VB6824_CMD_SEND_OTA = 0x0205,
     VB6824_CMD_SEND_GET_WAKEUP_WORD = 0x0207,
 }vb6824_cmd_t;
@@ -206,8 +207,11 @@ void __frame_send(vb6824_cmd_t cmd, uint8_t *data, uint16_t len){
         frame->head = FRAME_HEAD;
         frame->len = SWAP_16(send_len);
         frame->cmd = SWAP_16(cmd);
+
+         if (data != NULL) {
+            memcpy(frame->data, data + idx, (send_len>(len-idx))?(len-idx):send_len);
+        }
         
-        memcpy(frame->data, data + idx, (send_len>(len-idx))?(len-idx):send_len);
         idx += send_len;
         packet_len = 6 + send_len + 1;
         uint8_t checksum = 0;
@@ -524,6 +528,11 @@ void vb6824_register_event_cb(vb_voice_event_cb_t cb, void *arg){
 void vb6824_audio_set_output_volume(uint8_t volume){
     uint8_t vol = (uint8_t)((int)(volume * 31) / 100);
     __frame_send(VB6824_CMD_SEND_VOLUM, &vol, 1);
+}
+
+
+void vb6824_shutdown(void){
+    __frame_send(VB6824_CMD_SEND_SHUTDOWN, NULL, 1);
 }
 
 void vb6824_audio_write(uint8_t *data, uint16_t len){

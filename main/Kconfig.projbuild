@@ -91,6 +91,8 @@ choice BOARD_TYPE
         bool "立创·实战派ESP32-C3开发板"
     config BOARD_TYPE_DF_K10
         bool "DFRobot 行空板 k10"
+    config BOARD_TYPE_DOIT_AI_01_KIT
+        bool "Doit ai 01 kit"
     config BOARD_TYPE_DOIT_ESP32S3_EYE
         bool "Doit 小智眼"
     config BOARD_TYPE_DOIT_ESP32S3_EYE_6824

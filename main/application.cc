@@ -301,7 +301,10 @@ void Application::ToggleChatState() {
             ESP_LOGI(TAG, "ToggleChatState(kDeviceStateIdle)");
             auto& board = Board::GetInstance();
             // 还原屏幕亮度
-            board.GetBacklight()->RestoreBrightness();
+            auto backlight = board.GetBacklight();
+            if (backlight) {
+                backlight->RestoreBrightness();
+            }
             SetDeviceState(kDeviceStateConnecting);
             if (!protocol_->OpenAudioChannel()) {
                 return;
@@ -382,7 +385,7 @@ void Application::StopListening() {
 }
 
 void Application::Start() {
-    auto& watchdog = Watchdog::GetInstance();
+    // auto& watchdog = Watchdog::GetInstance();
 
     auto& board = Board::GetInstance();
 
@@ -455,7 +458,6 @@ void Application::Start() {
     mqtt_client_->OnRoomParamsUpdated([this](const RoomParams& params) {
         // 判断 protocol_ 是否启动
         // 如果启动了，就断开重新连接
-        protocol_->UpdateRoomParams(params);
 
         if (protocol_->IsAudioChannelOpened()) {
             // 先停止所有正在进行的操作
@@ -717,10 +719,12 @@ void Application::Start() {
             if (device_state_ == kDeviceStateIdle) {
                 auto& board = Board::GetInstance();
                 // 还原屏幕亮度
-                board.GetBacklight()->RestoreBrightness();
+                auto backlight = board.GetBacklight();
+                if (backlight) {
+                    backlight->RestoreBrightness();
+                }
                 ResetDecoder();
                 PlaySound(Lang::Sounds::P3_SUCCESS);
-                vTaskDelay(pdMS_TO_TICKS(300));
 
                 SetDeviceState(kDeviceStateConnecting);
                 wake_word_detect_.EncodeWakeWordData();
@@ -882,7 +886,7 @@ void Application::Schedule(std::function<void()> callback) {
 // If other tasks need to access the websocket or chat state,
 // they should use Schedule to call this function
 void Application::MainEventLoop() {
-     auto& watchdog = Watchdog::GetInstance();
+    //  auto& watchdog = Watchdog::GetInstance();
     const TickType_t timeout = pdMS_TO_TICKS(3000);
     while (true) {
         // watchdog.Reset();
@@ -904,14 +908,16 @@ void Application::MainEventLoop() {
 // The Audio Loop is used to input and output audio data
 void Application::AudioLoop() {
     auto codec = Board::GetInstance().GetAudioCodec();
-    auto& watchdog = Watchdog::GetInstance();
-
+    // auto& watchdog = Watchdog::GetInstance();
     while (true) {
         // watchdog.Reset();
         OnAudioInput();
         if (codec->output_enabled()) {
             OnAudioOutput();
         }
+#if CONFIG_FREERTOS_HZ == 1000
+        vTaskDelay(pdMS_TO_TICKS(10));
+#endif
     }
 }
 
@@ -1224,7 +1230,10 @@ void Application::Reboot() {
 void Application::WakeWordInvoke(const std::string& wake_word) {
     if (device_state_ == kDeviceStateIdle) {
         auto& board = Board::GetInstance();
-        board.GetBacklight()->RestoreBrightness();
+        auto backlight = board.GetBacklight();
+        if (backlight) {
+            backlight->RestoreBrightness();
+        }
         PlaySound(Lang::Sounds::P3_SUCCESS);
         CancelPlayMusic();
         vTaskDelay(pdMS_TO_TICKS(300));
@@ -1236,17 +1245,11 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
         });
     } else if (device_state_ == kDeviceStateSpeaking) {
         Schedule([this]() {
-            ESP_LOGI(TAG, "WakeWordInvoke(kDeviceStateSpeaking)");
-            AbortSpeaking(kAbortReasonNone);
-        });
-    } else if (device_state_ == kDeviceStateSpeaking) {
-        Schedule([this]() {
             // 打断AI
             ESP_LOGI(TAG, "WakeWordInvoke(kDeviceStateSpeaking)");
             protocol_->SendAbortSpeaking(kAbortReasonNone);
             ResetDecoder();
             PlaySound(Lang::Sounds::P3_SUCCESS);
-            vTaskDelay(pdMS_TO_TICKS(300));
             ESP_LOGI(TAG, "WakeWordInvoke(kDeviceStateListening)");
             SetDeviceState(kDeviceStateListening);
         });

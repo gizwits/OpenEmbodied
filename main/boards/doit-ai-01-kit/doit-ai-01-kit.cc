@@ -1,0 +1,122 @@
+#include "wifi_board.h"
+#include "audio_codecs/vb6824_audio_codec.h"
+#include "application.h"
+#include "button.h"
+#include "config.h"
+#include "led/circular_strip.h"
+#include "led/gpio_led.h"
+#include "led/single_led.h"
+#include "iot/thing_manager.h"
+#include <esp_sleep.h>
+#include "power_save_timer.h"
+#include <driver/rtc_io.h>
+#include "driver/gpio.h"
+#include <wifi_station.h>
+#include <esp_log.h>
+#include "assets/lang_config.h"
+#include "vb6824.h"
+
+#include <esp_lcd_panel_vendor.h>
+#include <driver/spi_common.h>
+
+#define TAG "CustomBoard"
+
+class CustomBoard : public WifiBoard {
+private:
+    Button boot_button_;
+    PowerSaveTimer* power_save_timer_;
+    VbAduioCodec audio_codec;
+    bool sleep_flag_ = false;
+
+    void InitializePowerSaveTimer() {
+        power_save_timer_ = new PowerSaveTimer(-1, 60 * 1, 60 * 3);
+        power_save_timer_->OnEnterSleepMode([this]() {
+            ESP_LOGI(TAG, "Enabling sleep mode");
+        });
+        power_save_timer_->OnExitSleepMode([this]() {
+        });
+        power_save_timer_->OnShutdownRequest([this]() {
+            ESP_LOGI(TAG, "Shutting down");
+            run_sleep_mode(true);
+        });
+        power_save_timer_->SetEnabled(true);
+    }
+
+    void run_sleep_mode(bool need_delay = true){
+        auto& application = Application::GetInstance();
+        if (need_delay) {
+            application.Alert("", "", "", Lang::Sounds::P3_SLEEP);
+            vTaskDelay(pdMS_TO_TICKS(1500));
+            ESP_LOGI(TAG, "Sleep mode");
+        }
+        vb6824_shutdown();
+        vTaskDelay(pdMS_TO_TICKS(200));
+        // 配置唤醒源
+        esp_deep_sleep_enable_gpio_wakeup(1ULL << BOOT_BUTTON_GPIO, ESP_GPIO_WAKEUP_GPIO_LOW);
+        
+        esp_deep_sleep_start();
+    }
+
+    void InitializeButtons() {
+        boot_button_.OnClick([this]() {
+            auto &app = Application::GetInstance();
+            app.ToggleChatState();
+        });
+        boot_button_.OnPressUp([this]() {
+            ESP_LOGI(TAG, "Press up");
+            if(sleep_flag_){
+                run_sleep_mode(false);
+            }
+        });
+        boot_button_.OnPressRepeat([this](uint16_t count) {
+            if(count >= 3){
+                ResetWifiConfiguration();
+            }
+        });
+        boot_button_.OnLongPress([this]() {
+            ESP_LOGI(TAG, "Long press");
+            sleep_flag_ = true;
+            gpio_set_level(BUILTIN_LED_GPIO, 1);
+        });
+    }
+
+    // 物联网初始化，添加对 AI 可见设备
+    void InitializeIot() {
+        auto& thing_manager = iot::ThingManager::GetInstance();
+        thing_manager.AddThing(iot::CreateThing("Speaker"));
+    }
+
+public:
+    CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO){      
+        gpio_config_t io_conf = {};
+        io_conf.pin_bit_mask = (1ULL << BUILTIN_LED_GPIO);
+        io_conf.mode = GPIO_MODE_OUTPUT;
+        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        io_conf.intr_type = GPIO_INTR_DISABLE;
+        gpio_config(&io_conf);
+        gpio_set_level(BUILTIN_LED_GPIO, 0);
+
+        InitializePowerSaveTimer();       
+        InitializeButtons();
+        InitializeIot();
+
+        audio_codec.OnWakeUp([this](const std::string& command) {
+            ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());
+            if (command == "你好小智" || command.find("小云") != std::string::npos){
+                ESP_LOGE(TAG, "vb6824 recv cmd: %d", Application::GetInstance().GetDeviceState());
+                // if(Application::GetInstance().GetDeviceState() != kDeviceStateListening){
+                // }
+                Application::GetInstance().WakeWordInvoke("你好小智");
+            } else if (command == "开始配网") {
+                ResetWifiConfiguration();
+            }
+        });
+    }
+
+    virtual AudioCodec* GetAudioCodec() override {
+        return &audio_codec;
+    }
+};
+
+DECLARE_BOARD(CustomBoard);

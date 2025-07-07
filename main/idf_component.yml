@@ -1,11 +1,10 @@
 ## IDF Component Manager Manifest File
 dependencies:
-  waveshare/esp_lcd_sh8601: 1.0.2
-  espressif/esp_lcd_ili9341: ==1.2.0
-  espressif/esp_lcd_gc9a01: ==2.0.1
-  espressif/esp_lcd_st77916: ^1.0.1
-  espressif/esp_lcd_st7796: ==1.3.2
-  espressif/esp_lcd_spd2010: ==1.0.2
+  waveshare/esp_lcd_sh8601: "1.0.2"
+  espressif/esp_lcd_ili9341: "==1.2.0"
+  espressif/esp_lcd_gc9a01: "==2.0.1"
+  espressif/esp_lcd_st77916: "^1.0.1"
+  espressif/esp_lcd_spd2010: "==1.0.2"
   espressif/esp_io_expander_tca9554: ==2.0.0
   espressif/esp_lcd_panel_io_additions: ^1.0.1
   78/esp_lcd_nv3023: ~1.0.0
@@ -16,7 +15,10 @@ dependencies:
   78/xiaozhi-fonts: ~1.3.2
   espressif/led_strip: ^2.5.5
   espressif/esp_codec_dev: ~1.3.2
-  espressif/esp-sr: ~2.1.1
+  espressif/esp-sr: 
+    version: "^2.0.5"
+    rules: # will add "optional_component" only when all if clauses are True
+      - if: "target in [esp32, esp32s3]" # supports boolean operator ==, !=, in, not in.
   espressif/button: ~4.1.3
   espressif/knob: ^1.0.0
   espressif/esp32-camera: ^2.0.15

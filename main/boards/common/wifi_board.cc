@@ -38,6 +38,15 @@ WifiBoard::WifiBoard() {
 std::string WifiBoard::GetBoardType() {
     return "wifi";
 }
+void OnWifiConfigEvent(WifiConfigEvent event, const std::string& message) {
+    switch (event) {
+        case WifiConfigEvent::CONFIG_PACKET_RECEIVED:
+            ESP_LOGI("APP", "收到配置包: %s", message.c_str());
+            auto& application = Application::GetInstance();
+            application.PlaySound(Lang::Sounds::P3_CONNECTING);
+            break;
+    }
+}
 
 void WifiBoard::EnterWifiConfigMode() {
     auto& application = Application::GetInstance();
@@ -49,7 +58,11 @@ void WifiBoard::EnterWifiConfigMode() {
     hint += "\n\n";
     application.Alert(Lang::Strings::WIFI_CONFIG_MODE, hint.c_str(), "", Lang::Sounds::P3_WIFICONFIG);
 
-    WifiConfiguration::GetInstance().Initialize(Auth::getInstance().getProductKey(), "XPG-GAgent");
+    auto& wifi_config = WifiConfiguration::GetInstance();
+    wifi_config.RegisterCallback(OnWifiConfigEvent);
+    wifi_config.Initialize(Auth::getInstance().getProductKey(), "XPG-GAgent");
+
+    
     
     // Wait forever until reset after configuration
     while (true) {

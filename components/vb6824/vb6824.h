@@ -36,10 +36,12 @@ void vb6824_audio_set_output_volume(uint8_t volume);
 
 void vb6824_audio_write(uint8_t *data, uint16_t len);
 uint16_t vb6824_audio_read(uint8_t *data, uint16_t size);
+void vb6824_shutdown(void);
 
 void vb6824_init(gpio_num_t tx, gpio_num_t rx);
 
 char *vb6824_get_wakeup_word();
+
 
 #ifdef __cplusplus
 }
