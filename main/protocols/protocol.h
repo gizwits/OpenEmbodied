@@ -78,6 +78,7 @@ public:
     virtual void SendWakeWordDetected(const std::string& wake_word);
     virtual void SendStartListening(ListeningMode mode);
     virtual void SendStopListening();
+    virtual void SendMessage(const std::string& message);
     virtual void SendAbortSpeaking(AbortReason reason);
     virtual void SendIotDescriptors(const std::string& descriptors);
     virtual void SendIotStates(const std::string& states);

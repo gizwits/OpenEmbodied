@@ -43,7 +43,7 @@ private:
     void InitializeButtons() {
         boot_button_.OnLongPress([this]() {
             ESP_LOGI(TAG, "  ===>>>  boot_button_.OnLongPress ");
-            setPowerHold(0);
+            // setPowerHold(0);
         });
 
         rec_button_.OnPressDown([this]() {
@@ -98,7 +98,7 @@ private:
 public:
     GizwitsDevBoard() : boot_button_(BOOT_BUTTON_GPIO), rec_button_(REC_BUTTON_GPIO),
     volume_up_button_(VOLUME_UP_BUTTON_GPIO), volume_down_button_(VOLUME_DOWN_BUTTON_GPIO) {
-        setPowerHold(1);
+        // setPowerHold(1);
         InitializeI2c();
         InitializeButtons();
         InitializeIot();

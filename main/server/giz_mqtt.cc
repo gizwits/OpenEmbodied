@@ -455,3 +455,20 @@ void MqttClient::handleMqttMessage(mqtt_msg_t* msg) {
         }
     }
 }
+
+
+// Upload binary p0 data to dev2app/<client_id_>
+bool MqttClient::uploadP0Data(const void* data, size_t data_len) {
+    if (!mqtt_) {
+        ESP_LOGE(TAG, "MQTT client not initialized for uploadP0Data");
+        return false;
+    }
+    std::string topic = "dev2app/" + client_id_;
+    // Publish binary data (assume mqtt_->Publish can take std::string with binary data)
+    // If not, this should be adapted to the actual API
+    bool result = mqtt_->Publish(topic, std::string(static_cast<const char*>(data), data_len));
+    if (!result) {
+        ESP_LOGE(TAG, "Failed to publish p0 data to %s", topic.c_str());
+    }
+    return result;
+}

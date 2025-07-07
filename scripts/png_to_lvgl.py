@@ -2,59 +2,36 @@ from PIL import Image
 import numpy as np
 import os
 
-def convert_png_to_lvgl_array(png_path, output_path):
-    # 打开PNG图片
-    img = Image.open(png_path)
-    
-    # 转换为RGBA模式
-    img = img.convert('RGBA')
-    
-    # 调整大小为16x16（使用 BICUBIC 替代 LANCZOS）
-    img = img.resize((16, 16), Image.BICUBIC)
-    
-    # 获取像素数据
+def convert_png_to_lvgl_alpha8(png_path, output_path, var_name="spiral_img_64"):
+    img = Image.open(png_path).convert('RGBA').resize((128, 128), Image.BICUBIC)
     pixels = np.array(img)
-    
-    # 提取alpha通道
+    # 只用alpha通道
     alpha = pixels[:, :, 3]
-    
-    # 生成C数组
     c_array = []
     for row in alpha:
         for pixel in row:
             c_array.append(f"0x{pixel:02x}")
-    
-    # 生成C代码
-    c_code = f"""// 自动生成的图像数据
-static const uint8_t star_map[] = {{
+    c_code = f"""// 自动生成的螺旋图像数据
+#include <lvgl.h>
+static const uint8_t spiral_map64[] = {{
     {', '.join(c_array)}
 }};
 
-static lv_img_dsc_t star_img = {{
+const lv_img_dsc_t {var_name} = {{
     .header = {{
-        .cf = LV_IMG_CF_ALPHA_8BIT,
-        .always_zero = 0,
-        .reserved = 0,
-        .w = 16,
-        .h = 16,
+        .cf = LV_COLOR_FORMAT_A8,
+        .w = 128,
+        .h = 128,
     }},
-    .data_size = {len(c_array)},
-    .data = star_map,
+    .data_size = sizeof(spiral_map64),
+    .data = spiral_map64,
 }};
 """
-    
-    # 写入文件
     with open(output_path, 'w') as f:
         f.write(c_code)
-    
     print(f"转换完成！输出文件：{output_path}")
 
 if __name__ == "__main__":
-    # 使用示例
     png_path = input("请输入PNG图片路径: ")
-    output_path = input("请输入输出文件路径 (例如: star_image.h): ")
-    
-    if not os.path.exists(png_path):
-        print(f"错误：找不到文件 {png_path}")
-    else:
-        convert_png_to_lvgl_array(png_path, output_path)
+    output_path = input("请输入输出文件路径 (例如: spiral_image.h): ")
+    convert_png_to_lvgl_alpha8(png_path, output_path)

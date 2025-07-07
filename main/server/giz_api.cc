@@ -312,6 +312,7 @@ int32_t GServer::getProvision(std::function<void(mqtt_config_t*)> callback) {
     auto status_code = http->GetStatusCode();
 
     std::string response = http->ReadAll();
+    ESP_LOGI(TAG, "response: %s", response.c_str());
     delete http;
 
     return getProvision_prase_cb(response.c_str(), response.length());
@@ -350,6 +351,7 @@ int32_t GServer::getLimitProvision(std::function<void(mqtt_config_t*)> callback)
     auto status_code = http->GetStatusCode();
 
     std::string response = http->ReadAll();
+    ESP_LOGI(TAG, "response: %s", response.c_str());
     delete http;
 
     return getProvision_prase_cb(response.c_str(), response.length());

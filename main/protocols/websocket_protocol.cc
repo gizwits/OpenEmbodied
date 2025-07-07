@@ -4,6 +4,7 @@
 #include "application.h"
 #include "mbedtls/base64.h"
 #include "settings.h"
+#include <optional>
 
 #include <cstring>
 #include <cJSON.h>
@@ -13,6 +14,35 @@
 #include "protocols/mcp.h"
 
 #define TAG "WS"
+
+struct Emotion {
+    const char* icon;
+    const char* text;
+};
+static const std::vector<Emotion> emotions = {
+    {"😶", "neutral"},
+    {"🙂", "happy"},
+    {"😆", "laughing"},
+    {"😂", "funny"},
+    {"😔", "sad"},
+    {"😠", "angry"},
+    {"😭", "crying"},
+    {"😍", "loving"},
+    {"😳", "embarrassed"},
+    {"😯", "surprised"},
+    {"😱", "shocked"},
+    {"🤔", "thinking"},
+    {"😉", "winking"},
+    {"😎", "cool"},
+    {"😌", "relaxed"},
+    {"🤤", "delicious"},
+    {"😘", "kissy"},
+    {"😏", "confident"},
+    {"😴", "sleepy"},
+    {"😜", "silly"},
+    {"🙄", "confused"},
+    {"🤡", "vertigo"}
+};
 
 
 WebsocketProtocol::WebsocketProtocol() {
@@ -31,7 +61,7 @@ bool WebsocketProtocol::Start() {
 }
 
 void WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
-    if (websocket_ == nullptr || !websocket_->IsConnected() || packet.payload.empty()) {
+    if (websocket_ == nullptr || !websocket_->IsConnected() || packet.payload.empty() || busy_sending_audio_) {
         return;
     }
     const std::vector<uint8_t>& data = packet.payload;
@@ -109,11 +139,69 @@ bool WebsocketProtocol::IsAudioChannelOpened() const {
     return websocket_ != nullptr && websocket_->IsConnected() && !error_occurred_ && !IsTimeout();
 }
 
+
 void WebsocketProtocol::CloseAudioChannel() {
-    if (websocket_ != nullptr) {
-        delete websocket_;
-        websocket_ = nullptr;
+    if (websocket_ == nullptr) {
+        return;
     }
+
+    // 如果已经有关闭任务在运行，直接返回
+    if (close_task_handle_ != nullptr) {
+        return;
+    }
+
+    ESP_LOGI(TAG, "Starting audio channel close task...");
+    
+    // 启动关闭任务
+    BaseType_t ret = xTaskCreate(
+        CloseAudioChannelTask,
+        "ws_close_task",
+        4096,
+        this,
+        5,
+        &close_task_handle_
+    );
+    
+    if (ret != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create close task");
+        // 如果创建任务失败，直接执行关闭逻辑
+        CloseAudioChannelTask(this);
+    }
+}
+
+void WebsocketProtocol::CloseAudioChannelTask(void* param) {
+    WebsocketProtocol* self = static_cast<WebsocketProtocol*>(param);
+    
+    ESP_LOGI(TAG, "Closing audio channel...");
+    
+    // 1. 先停止音频上传 - 设置标志位防止新的音频数据发送
+    self->busy_sending_audio_ = true;
+    
+    // 2. 等待当前正在传输的音频数据完成
+    // 给一些时间让正在传输的数据完成
+    vTaskDelay(pdMS_TO_TICKS(800));
+    
+    // 3. 发送关闭帧给服务器
+    if (self->websocket_ != nullptr) {
+        self->websocket_->Close();
+    }
+    
+    // 4. 等待连接完全关闭
+    vTaskDelay(pdMS_TO_TICKS(200));
+    
+    // 5. 清理资源
+    if (self->websocket_ != nullptr) {
+        delete self->websocket_;
+        self->websocket_ = nullptr;
+    }
+    
+    ESP_LOGI(TAG, "Audio channel closed successfully");
+    
+    // 6. 清理任务句柄
+    self->close_task_handle_ = nullptr;
+    
+    // 7. 删除任务
+    vTaskDelete(nullptr);
 }
 
 bool WebsocketProtocol::OpenAudioChannel() {
@@ -124,16 +212,18 @@ bool WebsocketProtocol::OpenAudioChannel() {
         ESP_LOGE(TAG, "Bot ID or access token or voice id is empty");
         return false;
     }
-
+    // 用来标记是否触发 progress
+    // 如果触发了，收到第一包音频再进入说话模式
+    static bool is_first_packet_ = false;
+    static bool is_detect_emotion_ = false;
     error_occurred_ = false;
+    busy_sending_audio_ = false;  // 重置音频发送标志
     std::string url = std::string("ws://") + room_params_.api_domain + std::string("/v1/chat") + std::string("?bot_id=") + std::string(room_params_.bot_id);
     std::string token = "Bearer " + std::string(room_params_.access_token);
 
     message_cache_ = "";
     websocket_ = Board::GetInstance().CreateWebSocket();
     websocket_->SetHeader("Authorization", token.c_str());
-    websocket_->SetHeader("x-tt-env", "ppe_uplink_opus");
-    websocket_->SetHeader("x-use-ppe", "1");
 
     websocket_->OnData([this](const char* data, size_t len, bool binary) {
         if (!data || len == 0) {
@@ -157,7 +247,6 @@ bool WebsocketProtocol::OpenAudioChannel() {
         if (event_type.empty() || event_type.length() >= 64) {
             return;
         }
-
         if(event_type == "conversation.audio.delta") {
             constexpr std::string_view content_key = "\"content\":\"";
             size_t content_start = str_data.find(content_key);
@@ -204,7 +293,23 @@ bool WebsocketProtocol::OpenAudioChannel() {
                             std::vector<uint8_t> audio_data(audio_data_buffer_.begin(), audio_data_buffer_.begin() + actual_len);
                             AudioStreamPacket packet;
                             packet.payload = std::move(audio_data);
-                            on_incoming_audio_(std::move(packet));
+
+                            if (is_first_packet_) {
+                                is_first_packet_ = false;
+
+                                
+
+                                // 先把当前 packet 缓存起来
+                                packet_cache_ = std::move(packet);
+
+                            } else {
+                                if (packet_cache_.has_value()) {
+                                    on_incoming_audio_(std::move(packet_cache_.value()));
+                                    packet_cache_ = std::nullopt;
+                                    vTaskDelay(pdMS_TO_TICKS(10));
+                                }
+                                on_incoming_audio_(std::move(packet));
+                            }
                         }
                     }
                 }
@@ -235,6 +340,10 @@ bool WebsocketProtocol::OpenAudioChannel() {
                     cJSON_Delete(message_json);
                 }
             } else if (event_type == "conversation.chat.in_progress") {
+                ESP_LOGI(TAG, "conversation.chat.in_progress");
+                is_detect_emotion_ = false;
+                is_first_packet_ = true;
+
                 message_cache_.clear();
                 message_buffer_.clear();
                 message_buffer_ = "{";
@@ -247,7 +356,10 @@ bool WebsocketProtocol::OpenAudioChannel() {
                     on_incoming_json_(message_json);
                     cJSON_Delete(message_json);
                 }
-            } else if (event_type == "conversation.audio.completed") {
+                
+            } else if (event_type == "conversation.chat.completed" || event_type == "conversation.audio.completed") {
+                is_first_packet_ = false;
+
                 message_buffer_.clear();
                 message_buffer_ = "{";
                 message_buffer_ += "\"type\":\"tts\",";
@@ -261,9 +373,10 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 }
             } else if (event_type == "input_audio_buffer.speech_started") {
                 auto& app = Application::GetInstance();
+                ESP_LOGI(TAG, "input_audio_buffer.speech_started");
                 app.AbortSpeaking(kAbortReasonNone);
             } else if (event_type == "input_audio_buffer.speech_stopped") {
-                
+                ESP_LOGI(TAG, "input_audio_buffer.speech_stopped");
             } else if (event_type == "conversation.message.delta") {
                 auto data_json = cJSON_GetObjectItem(root, "data");
                 auto content_json = cJSON_GetObjectItem(data_json, "content");
@@ -280,6 +393,31 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 if (message_json) {
                     on_incoming_json_(message_json);
                     cJSON_Delete(message_json);
+                }
+
+
+                if (is_detect_emotion_ == false) {
+                    // 查找 message_cache_ 是否包含 emotions
+                    for (const auto& emotion : emotions) {
+                        if (message_cache_.find(emotion.icon) != std::string::npos) {
+                            is_detect_emotion_ = true;
+                            message_buffer_.clear();
+                            message_buffer_ = "{";
+                            message_buffer_ += "\"type\":\"llm\",";
+                            message_buffer_ += "\"emotion\":\"" + std::string(emotion.text) + "\"";
+                            message_buffer_ += "}";
+                            
+                            auto message_json = cJSON_Parse(message_buffer_.c_str());
+                            if (message_json) {
+
+                                on_incoming_json_(message_json);
+                                cJSON_Delete(message_json);
+
+                            }
+
+                            break;
+                        }
+                    }
                 }
             } else if (event_type == "conversation.chat.requires_action") {
                 CozeMCPParser::getInstance().handle_mcp(str_data);
@@ -349,6 +487,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "\"conversation.audio_transcript.completed\",";
     message += "\"conversation.chat.requires_action\",";
     message += "\"input_audio_buffer.speech_started\",";
+    message += "\"conversation.message.delta\",";
     message += "\"input_audio_buffer.speech_stopped\"";
     message += "],";
     if (device_mode != DeviceMode::BUTTON_MODE) {
@@ -381,7 +520,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "\"frame_size_ms\":60,";
     message += "\"limit_config\":{";
     message += "\"period\":1,";
-    message += "\"max_frame_num\":17";
+    message += "\"max_frame_num\":25";
     message += "}";
     message += "},";
     message += "\"speech_rate\":0,";

@@ -1,6 +1,7 @@
 #include "protocol.h"
 
 #include <esp_log.h>
+#include <string.h>
 
 #define TAG "Protocol"
 #include <esp_random.h>
@@ -41,6 +42,22 @@ void Protocol::SendAbortSpeaking(AbortReason reason) {
     std::string message = "{\"id\":\"" + std::string(event_id) + "\",\"event_type\":\"conversation.chat.cancel\"}";
 
     SendText(message);
+}
+
+void Protocol::SendMessage(const std::string& message) {
+    const char *init_message = "{"
+        "\"event_type\":\"conversation.message.create\","
+        "\"data\":{"
+            "\"role\":\"user\","
+            "\"content_type\":\"text\","
+            "\"content\":\"%s\""
+        "}"
+    "}";
+    
+    char *init_message_str = (char *)malloc(strlen(init_message) + message.length() + 1);
+    snprintf(init_message_str, strlen(init_message) + message.length() + 1, init_message, message.c_str());
+    SendText(init_message_str);
+    free(init_message_str);
 }
 
 

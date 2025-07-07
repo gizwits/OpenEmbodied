@@ -121,8 +121,8 @@ void CozeMCPParser::handle_mcp(std::string_view data) {
         cJSON *volume = cJSON_GetObjectItem(args_json, "volume");
         if (volume && cJSON_IsNumber(volume)) {
             // 创建 json
-            cJSON_AddStringToObject(mcp_data, "method", "SetVolume");
-            cJSON_AddStringToObject(mcp_data, "name", "Speaker");
+            cJSON_AddStringToObject(mcp_data, "method", "set_volume");
+            cJSON_AddStringToObject(mcp_data, "name", "AudioSpeaker");
             cJSON_AddNumberToObject(params_data, "volume", volume->valueint);
         } else {
             ESP_LOGW(TAG, "brightness field not found or not a number");
@@ -139,10 +139,20 @@ void CozeMCPParser::handle_mcp(std::string_view data) {
     }
     else if (strcmp(name->valuestring, "sleep_control") == 0) {
         Application::GetInstance().QuitTalking();
+        // 关闭屏幕
+        cJSON_AddStringToObject(mcp_data, "method", "set_brightness_temporary");
+        cJSON_AddStringToObject(mcp_data, "name", "Screen");
+        cJSON_AddNumberToObject(params_data, "brightness", 0);
+
+         send_tool_output_response(event_id, 
+                                    cJSON_GetStringValue(conv_id), 
+                                    cJSON_GetStringValue(tool_call_id), 
+                                    "{\\\"sleep_control_results\\\": \\\"1\\\"}");
+
     } else if (strcmp(name->valuestring, "brightness") == 0) {
         cJSON *brightness = cJSON_GetObjectItem(args_json, "brightness");
         if (brightness && cJSON_IsNumber(brightness)) {
-            cJSON_AddStringToObject(mcp_data, "method", "SetBrightness");
+            cJSON_AddStringToObject(mcp_data, "method", "set_brightness");
             cJSON_AddStringToObject(mcp_data, "name", "Screen");
             cJSON_AddNumberToObject(params_data, "brightness", brightness->valueint);
         }
@@ -153,6 +163,7 @@ void CozeMCPParser::handle_mcp(std::string_view data) {
     // 判断 mcp_data 是否有 method 字段
     if (cJSON_HasObjectItem(mcp_data, "method")) {
         // 执行 MCP
+        ESP_LOGI(TAG, "Invoke MCP: %s", cJSON_Print(mcp_data));
         auto& thing_manager = iot::ThingManager::GetInstance();
         thing_manager.Invoke(mcp_data);
     }
