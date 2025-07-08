@@ -159,7 +159,6 @@ private:
     void OnClockTimer();
     void SetListeningMode(ListeningMode mode);
     void AudioLoop();
-    void OnReportTimer();
     void StartReportTimer();
 };
 

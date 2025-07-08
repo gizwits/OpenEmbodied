@@ -9,6 +9,8 @@
 #include <arpa/inet.h>
 #include "application.h"
 #include "settings.h"
+#include <esp_wifi.h>
+#include "audio_codecs/audio_codec.h"
 
 #define TAG "GIZ_MQTT"
 
@@ -188,11 +190,13 @@ bool MqttClient::initialize() {
     std::string response_topic = "llm/" + client_id_ + "/config/response";
     std::string push_topic = "llm/" + client_id_ + "/config/push";
     std::string server_notify_topic = "ser2cli_res/" + client_id_;
+    std::string p0_notify_topic = "app2dev/" + client_id_ + "/+";
     
     ESP_LOGI(TAG, "Subscribing to topics:");
     ESP_LOGI(TAG, "  %s (QoS 0)", response_topic.c_str());
     ESP_LOGI(TAG, "  %s (QoS 1)", push_topic.c_str());
     ESP_LOGI(TAG, "  %s (QoS 1)", server_notify_topic.c_str());
+    ESP_LOGI(TAG, "  %s (QoS 0)", p0_notify_topic.c_str());
     
     vTaskDelay(pdMS_TO_TICKS(10));
     if (mqtt_->Subscribe(response_topic, 0) != 0) {
@@ -206,6 +210,11 @@ bool MqttClient::initialize() {
     if (mqtt_->Subscribe(server_notify_topic, 1) != 0) {
         ESP_LOGE(TAG, "Failed to subscribe to server notify topic");
     }
+    if (mqtt_->Subscribe(p0_notify_topic, 0) != 0) {
+        ESP_LOGE(TAG, "Failed to subscribe to p0 notify topic");
+        sendTraceLog("error", "订阅 p0 通知 失败");
+    }
+    
     
     // 获取房间信息
     getRoomInfo();
@@ -471,4 +480,58 @@ bool MqttClient::uploadP0Data(const void* data, size_t data_len) {
         ESP_LOGE(TAG, "Failed to publish p0 data to %s", topic.c_str());
     }
     return result;
+}
+
+
+
+
+void MqttClient::ReportTimer() {
+    uint8_t binary_data[18] = {
+        0x00, 0x00, 0x00, 0x03,  // 固定头部
+        0x0b, 0x00, 0x00, 0x93,  // 命令标识
+        0x00, 0x00, 0x00, 0x02,  // 数据长度
+        0x14, 0xff,              // 数据类型
+        0x00, // 0b01011011 switch，类型为bool，值为true：字段bit0，字段值为0b1；wakeup_word，类型为bool，值为true：字段bit1，字段值为0b1；charge_status，类型为enum，值为2：字段bit3 ~ bit2，字段值为0b10；alert_tone_language，类型为enum，值为1：字段bit4 ~ bit4，字段值为0b1；chat_mode，类型为enum，值为2：字段bit6 ~ bit5，字段值为0b10；          
+        0x64, // 音量
+        0x0a, // 电量
+        0x00, // rssi
+    };
+
+    int chat_mode = Application::GetInstance().GetChatMode();
+    // chat_mode 固定填充 1
+    uint8_t status = 0;
+    status |= (1 << 0); // switch
+    status |= (1 << 1); // wakeup_word
+    status |= (1 << 4); // alert_tone_language
+    status |= (chat_mode << 5); // chat_mode
+
+
+    auto& board = Board::GetInstance();
+    int level = 0;
+    bool charging = false;
+    bool discharging = false;
+    if (board.GetBatteryLevel(level, charging, discharging)) {
+        ESP_LOGI(TAG, "Battery level: %d, charging: %d, discharging: %d", level, charging, discharging);
+        binary_data[16] = level;
+        status |= (charging ? 1 : 0) << 2; // charge_status
+        // charging = true 的时候 charge_status = 1
+    }
+    binary_data[14] = status;
+    ESP_LOGI(TAG, "Status: %d", status);
+
+    auto codec = Board::GetInstance().GetAudioCodec();
+    int volume = codec->output_volume();
+    ESP_LOGI(TAG, "Volume: %d", volume);
+    binary_data[15] = volume;
+
+    wifi_ap_record_t ap_info;
+    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+        ESP_LOGI(TAG, "WiFi RSSI: %d dBm", ap_info.rssi);
+        binary_data[17] = 100 - (uint8_t)abs(ap_info.rssi);
+    }
+
+    if (mqtt_) {
+        uploadP0Data(binary_data, sizeof(binary_data));
+    }
+
 }

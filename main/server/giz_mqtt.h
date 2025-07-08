@@ -62,6 +62,7 @@ public:
     ~MqttClient() = default;
     MqttClient(const MqttClient&) = delete;
     MqttClient& operator=(const MqttClient&) = delete;
+    void ReportTimer();
 
 private:
     Mqtt* mqtt_ = nullptr;
@@ -86,4 +87,5 @@ private:
     bool parseRealtimeAgent(const char* in_str, int in_len, room_params_t* params);
     bool parseM2MCtrlMsg(const char* in_str, int in_len);
     void handleMqttMessage(mqtt_msg_t* msg);
+
 };
