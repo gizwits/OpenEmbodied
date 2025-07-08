@@ -4,6 +4,7 @@
 #include <esp_log.h>
 #include <ml307_mqtt.h>
 #include "protocol/iot_protocol.h"
+#include "protocol/ota_protocol.h"
 #include <cstring>
 #include "auth.h"
 #include <arpa/inet.h>
@@ -11,8 +12,43 @@
 #include "settings.h"
 #include <esp_wifi.h>
 #include "audio_codecs/audio_codec.h"
+#include <esp_app_desc.h>
 
 #define TAG "GIZ_MQTT"
+
+
+static void InitAttrsFromJson() {
+    cJSON* root = cJSON_Parse(MqttClient::kGizwitsProtocolJson);
+    if (!root) return;
+    cJSON* entities = cJSON_GetObjectItem(root, "entities");
+    if (!entities || !cJSON_IsArray(entities)) { cJSON_Delete(root); return; }
+    cJSON* entity0 = cJSON_GetArrayItem(entities, 0);
+    if (!entity0) { cJSON_Delete(root); return; }
+    cJSON* attrs = cJSON_GetObjectItem(entity0, "attrs");
+    if (!attrs || !cJSON_IsArray(attrs)) { cJSON_Delete(root); return; }
+    int attr_count = cJSON_GetArraySize(attrs);
+    for (int i = 0; i < attr_count; ++i) {
+        cJSON* attr = cJSON_GetArrayItem(attrs, i);
+        if (!attr) continue;
+        cJSON* name = cJSON_GetObjectItem(attr, "name");
+        cJSON* position = cJSON_GetObjectItem(attr, "position");
+        if (!name || !position) continue;
+        cJSON* byte_offset = cJSON_GetObjectItem(position, "byte_offset");
+        cJSON* bit_offset = cJSON_GetObjectItem(position, "bit_offset");
+        cJSON* len = cJSON_GetObjectItem(position, "len");
+        cJSON* unit = cJSON_GetObjectItem(position, "unit");
+        if (!byte_offset || !bit_offset || !len || !unit) continue;
+        Attr a;
+        a.name = name->valuestring;
+        a.byte_offset = byte_offset->valueint;
+        a.bit_offset = bit_offset->valueint;
+        a.len = len->valueint;
+        a.unit = unit->valuestring;
+        g_attrs.push_back(a);
+    }
+    attr_size_ = (attr_count + 8 - 1) / 8;
+    cJSON_Delete(root);
+}
 
 // MqttClient implementation
 bool MqttClient::initialize() {
@@ -145,8 +181,10 @@ bool MqttClient::initialize() {
         msg.topic_len = topic.length();
         msg.payload = strdup(payload.c_str());
         msg.payload_len = payload.length();
-        msg.data = msg.payload;
-        msg.data_len = msg.payload_len;
+        msg.data = static_cast<char*>(malloc(payload.size()));
+        
+        memcpy(msg.data, payload.data(), payload.size());
+        msg.data_len = payload.size();
         
         if (message_queue_) {
             xQueueSendToBack(message_queue_, &msg, portMAX_DELAY);
@@ -309,6 +347,25 @@ int MqttClient::getPublishedId() {
     return mqtt_published_id_;
 }
 
+
+void MqttClient::sendTraceLog(const char* level, const char* message) {
+    // ESP_LOGI(TAG, "sendTraceLog: %s", message);
+    
+    // Format the topic
+    char topic[64] = {0};
+    snprintf(topic, sizeof(topic), "sys/%s/log", client_id_.c_str());
+    
+    // Format the payload
+    char payload[512] = {0};
+    snprintf(payload, sizeof(payload), 
+        "{\"message\": \"%s\", \"trace_id\": \"%s\", \"extra\": \"%s\"}", 
+        message, Application::GetInstance().GetTraceId(), level);
+
+    // Publish the message
+    if (!publish(topic, std::string(payload))) {
+        ESP_LOGE(TAG, "Failed to publish log message");
+    }
+}
 
 void MqttClient::sendOtaProgressReport(int progress, const char* status) {
     uint8_t buf[256] = {0};
@@ -615,7 +672,7 @@ void MqttClient::app2devMsgHandler(const uint8_t *data, int32_t len)
                             total_bit_len = 0;
                             for (const auto& a : g_attrs) {
                                 if (a.unit == "bit") {
-                                    total_bit_len += 1; // 如有多bit属性，改为a.len
+                                    total_bit_len += a.len;
                                 }
                             }
                             bit_bytes = (total_bit_len + 7) / 8;
@@ -623,7 +680,7 @@ void MqttClient::app2devMsgHandler(const uint8_t *data, int32_t len)
                         }
                         if (attr.unit == "bit") {
                             int value = 0;
-                            int len = attr.len; // 如有多bit属性，改为attr.len
+                            int len = attr.len;
                             ESP_LOGI(TAG, "len: %d", len);
                             for (int l = 0; l < len; ++l) {
                                 int byte_pos = 1 + MqttClient::attr_size_ + (payload_bit_index + l) / 8;
@@ -636,7 +693,7 @@ void MqttClient::app2devMsgHandler(const uint8_t *data, int32_t len)
                             ESP_LOGI(TAG, "bit attr: %s = %d", attr.name.c_str(), value);
                             processAttrValue(attr.name, value);
                         } else if (attr.unit == "byte") {
-                            int len = attr.len; // 如有多字节属性，改为attr.len
+                            int len = attr.len; 
                             int byte_start = MqttClient::attr_size_ + bit_bytes + payload_byte_index;
                             int value = 0;
                             for (int l = 0; l < len; ++l) {
@@ -731,3 +788,170 @@ void MqttClient::ReportTimer() {
     }
 
 }
+
+
+// const int MqttClient::attr_size_ = (8 + 8 - 1) / 8;
+
+const char* MqttClient::kGizwitsProtocolJson = R"json(
+{
+    "name": "GF381",
+    "packetVersion": "0x00000004",
+    "protocolType": "standard",
+    "product_key": "e1e1c010f6154280b5c01c69e224bdda",
+    "entities": [
+        {
+            "display_name": "机智云开发套件",
+            "attrs": [
+                {
+                    "display_name": "开关",
+                    "name": "switch",
+                    "data_type": "bool",
+                    "position": {
+                        "byte_offset": 0,
+                        "unit": "bit",
+                        "len": 1,
+                        "bit_offset": 0
+                    },
+                    "type": "status_writable",
+                    "id": 0,
+                    "desc": "1"
+                },
+                {
+                    "display_name": "唤醒词",
+                    "name": "wakeup_word",
+                    "data_type": "bool",
+                    "position": {
+                        "byte_offset": 0,
+                        "unit": "bit",
+                        "len": 1,
+                        "bit_offset": 1
+                    },
+                    "type": "status_writable",
+                    "id": 1,
+                    "desc": ""
+                },
+                {
+                    "display_name": "充电状态",
+                    "name": "charge_status",
+                    "data_type": "enum",
+                    "enum": [
+                        "none",
+                        " charging",
+                        "charge_done"
+                    ],
+                    "position": {
+                        "byte_offset": 2,
+                        "unit": "bit",
+                        "len": 2,
+                        "bit_offset": 0
+                    },
+                    "type": "status_readonly",
+                    "id": 5,
+                    "desc": ""
+                },
+                {
+                    "display_name": "提示音语言",
+                    "name": "alert_tone_language",
+                    "data_type": "enum",
+                    "enum": [
+                        "chinese_simplified",
+                        "english"
+                    ],
+                    "position": {
+                        "byte_offset": 0,
+                        "unit": "bit",
+                        "len": 1,
+                        "bit_offset": 2
+                    },
+                    "type": "status_writable",
+                    "id": 2,
+                    "desc": ""
+                },
+                {
+                    "display_name": "chat_mode",
+                    "name": "chat_mode",
+                    "data_type": "enum",
+                    "enum": [
+                        "0",
+                        "1",
+                        "2"
+                    ],
+                    "position": {
+                        "byte_offset": 0,
+                        "unit": "bit",
+                        "len": 2,
+                        "bit_offset": 3
+                    },
+                    "type": "status_writable",
+                    "id": 3,
+                    "desc": "0 按钮\n1 唤醒词\n2 自然对话"
+                },
+                
+                {
+                    "display_name": "电量",
+                    "name": "battery_percentage",
+                    "data_type": "uint8",
+                    "position": {
+                        "byte_offset": 3,
+                        "unit": "byte",
+                        "len": 1,
+                        "bit_offset": 0
+                    },
+                    "uint_spec": {
+                        "addition": 0,
+                        "max": 100,
+                        "ratio": 1,
+                        "min": 0
+                    },
+                    "type": "status_readonly",
+                    "id": 6,
+                    "desc": ""
+                },
+                {
+                    "display_name": "音量",
+                    "name": "volume_set",
+                    "data_type": "uint8",
+                    "position": {
+                        "byte_offset": 1,
+                        "unit": "byte",
+                        "len": 1,
+                        "bit_offset": 0
+                    },
+                    "uint_spec": {
+                        "addition": 0,
+                        "max": 100,
+                        "ratio": 1,
+                        "min": 0
+                    },
+                    "type": "status_writable",
+                    "id": 4,
+                    "desc": ""
+                },
+                {
+                    "display_name": "rssi",
+                    "name": "rssi",
+                    "data_type": "uint8",
+                    "position": {
+                        "byte_offset": 4,
+                        "unit": "byte",
+                        "len": 1,
+                        "bit_offset": 0
+                    },
+                    "uint_spec": {
+                        "addition": -100,
+                        "max": 100,
+                        "ratio": 1,
+                        "min": 0
+                    },
+                    "type": "status_readonly",
+                    "id": 7,
+                    "desc": ""
+                }
+            ],
+            "name": "entity0",
+            "id": 0
+        }
+    ]
+}
+)json";
+

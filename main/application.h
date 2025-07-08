@@ -57,6 +57,8 @@ public:
         static Application instance;
         return instance;
     }
+    char trace_id_[33];  // 32 chars + null terminator
+
     Player player_;
 
     // 删除拷贝构造函数和赋值运算符
@@ -86,6 +88,8 @@ public:
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
 
+    const char* GetTraceId() const { return trace_id_; }
+    void GenerateTraceId();
 private:
     Application();
     ~Application();
@@ -111,11 +115,6 @@ private:
     esp_timer_handle_t report_timer_handle_ = nullptr;
     volatile DeviceState device_state_ = kDeviceStateUnknown;
     ListeningMode listening_mode_ = kListeningModeAutoStop;
-#if CONFIG_USE_DEVICE_AEC || CONFIG_USE_SERVER_AEC
-    bool realtime_chat_enabled_ = true;
-#else
-    bool realtime_chat_enabled_ = false;
-#endif
     bool aborted_ = false;
     bool voice_detected_ = false;
     bool busy_decoding_audio_ = false;

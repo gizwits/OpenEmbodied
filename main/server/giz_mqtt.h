@@ -12,7 +12,35 @@
 #include "cJSON.h"
 #include "protocols/protocol.h"
 
+#define GAGENT_PROTOCOL_VERSION     (0x00000003)
+#define HI_CMD_PAYLOAD93            0x0093
+#define HI_CMD_UPLOADACK94          0x0094
+#define HI_CMD_MQTT_RESET           0x021E
 #define MQTT_REQUEST_FAILURE_COUNT 10
+
+
+struct Attr {
+    std::string name;
+    int byte_offset;
+    int bit_offset;
+    int len;
+    std::string unit; // "bit" or "byte"
+    // 可扩展更多字段
+};
+
+static std::vector<Attr> g_attrs;
+static std::once_flag g_attrs_once;
+
+
+#define hexdump(pName, buf, len) do { \
+    if (pName) { \
+        printf("%s: ", pName); \
+    } \
+    for (size_t i = 0; i < len; i++) { \
+        printf("%02X ", ((const uint8_t *)(buf))[i]); \
+    } \
+    printf("\n"); \
+} while (0)
 
 // MQTT message structure
 typedef struct {
@@ -57,6 +85,7 @@ public:
     void OnRoomParamsUpdated(std::function<void(const RoomParams&)> callback);
     void processAttrValue(std::string attr_name, int value);
     void deinit();
+    void sendTraceLog(const char* level, const char* message);
 
     bool uploadP0Data(const void* data, size_t data_len);
 
@@ -65,6 +94,7 @@ public:
     MqttClient(const MqttClient&) = delete;
     MqttClient& operator=(const MqttClient&) = delete;
     void ReportTimer();
+    static const char* kGizwitsProtocolJson;
 
 private:
     Mqtt* mqtt_ = nullptr;
@@ -82,6 +112,7 @@ private:
     int port_ = 1883;
     std::string client_id_;
     std::string username_;
+    static const int attr_size_;
 
     static void messageReceiveHandler(void* arg);
     static void messageResendHandler(void* arg);
