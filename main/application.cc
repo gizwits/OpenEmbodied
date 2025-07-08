@@ -467,6 +467,10 @@ void Application::Start() {
 
     CheckNewVersion();
 
+    if (board.GetServo()) {
+        board.GetServo()->move(0, 180, 500, 10000);
+    }
+
     PlaySound(Lang::Sounds::P3_CONNECT_SUCCESS);
     vTaskDelay(pdMS_TO_TICKS(500));
 
@@ -617,6 +621,7 @@ void Application::Start() {
                     aborted_ = false;
                     if (device_state_ == kDeviceStateIdle || device_state_ == kDeviceStateListening) {
                         SetDeviceState(kDeviceStateSpeaking);
+                        PlaySound(Lang::Sounds::P3_BO);
                     }
                 });
             } else if (strcmp(state->valuestring, "stop") == 0) {

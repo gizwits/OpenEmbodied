@@ -18,14 +18,17 @@
 
 #include <esp_lcd_panel_vendor.h>
 #include <driver/spi_common.h>
+#include "servo.h"
 
 #define TAG "CustomBoard"
 
 class CustomBoard : public WifiBoard {
 private:
     Button boot_button_;
+    Button* rec_button_ = nullptr;
     PowerSaveTimer* power_save_timer_;
     VbAduioCodec audio_codec;
+    Servo servo_;
     bool sleep_flag_ = false;
 
     void InitializePowerSaveTimer() {
@@ -58,10 +61,27 @@ private:
     }
 
     void InitializeButtons() {
-        boot_button_.OnClick([this]() {
-            auto &app = Application::GetInstance();
-            app.ToggleChatState();
-        });
+
+        const int chat_mode = Application::GetInstance().GetChatMode();
+        if (chat_mode == 0) {
+            rec_button_ = new Button(BUILTIN_REC_BUTTON_GPIO);
+            rec_button_->OnPressUp([this]() {
+                auto &app = Application::GetInstance();
+                app.StopListening();
+            });
+            rec_button_->OnPressDown([this]() {
+                auto &app = Application::GetInstance();
+                app.AbortSpeaking(kAbortReasonNone);
+                app.StartListening();
+            });
+        } else {
+            boot_button_.OnClick([this]() {
+                auto &app = Application::GetInstance();
+                app.ToggleChatState();
+            });
+        }
+
+      
         boot_button_.OnPressUp([this]() {
             ESP_LOGI(TAG, "Press up");
             if(sleep_flag_){
@@ -87,7 +107,7 @@ private:
     }
 
 public:
-    CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO){      
+    CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO), servo_(BUILTIN_SERVO_GPIO, 0){      
         gpio_config_t io_conf = {};
         io_conf.pin_bit_mask = (1ULL << BUILTIN_LED_GPIO);
         io_conf.mode = GPIO_MODE_OUTPUT;
@@ -96,6 +116,8 @@ public:
         io_conf.intr_type = GPIO_INTR_DISABLE;
         gpio_config(&io_conf);
         gpio_set_level(BUILTIN_LED_GPIO, 0);
+
+        servo_.begin();
 
         InitializePowerSaveTimer();       
         InitializeButtons();
@@ -112,6 +134,10 @@ public:
                 ResetWifiConfiguration();
             }
         });
+    }
+
+    virtual Servo* GetServo() override {
+        return &servo_;
     }
 
     virtual AudioCodec* GetAudioCodec() override {

@@ -10,6 +10,7 @@
 #include "led/led.h"
 #include "backlight.h"
 #include "camera.h"
+#include "servo.h"
 
 void* create_board();
 
@@ -52,6 +53,7 @@ public:
     virtual Led* GetLed();
     virtual AudioCodec* GetAudioCodec() = 0;
     virtual bool GetTemperature(float& esp32temp);
+    virtual Servo* GetServo();
     virtual Display* GetDisplay();
     virtual Camera* GetCamera();
     virtual Http* CreateHttp() = 0;

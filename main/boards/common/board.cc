@@ -68,6 +68,12 @@ Camera* Board::GetCamera() {
     return nullptr;
 }
 
+
+Servo* Board::GetServo() {
+    return nullptr;
+}
+
+
 Led* Board::GetLed() {
     static NoLed led;
     return &led;
