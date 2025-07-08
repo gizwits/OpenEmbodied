@@ -74,6 +74,7 @@ public:
     }
 
     bool initialize();
+    static void InitAttrsFromJson();
     bool publish(const std::string& topic, const std::string& payload);
     bool subscribe(const std::string& topic);
     void setMessageCallback(std::function<void(const std::string&, const std::string&)> callback);
@@ -112,7 +113,7 @@ private:
     int port_ = 1883;
     std::string client_id_;
     std::string username_;
-    static const int attr_size_;
+    static int attr_size_;
 
     static void messageReceiveHandler(void* arg);
     static void messageResendHandler(void* arg);

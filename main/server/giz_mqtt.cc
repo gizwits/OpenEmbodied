@@ -16,8 +16,9 @@
 
 #define TAG "GIZ_MQTT"
 
+int MqttClient::attr_size_ = 0;
 
-static void InitAttrsFromJson() {
+void MqttClient::InitAttrsFromJson() {
     cJSON* root = cJSON_Parse(MqttClient::kGizwitsProtocolJson);
     if (!root) return;
     cJSON* entities = cJSON_GetObjectItem(root, "entities");
@@ -652,11 +653,11 @@ void MqttClient::app2devMsgHandler(const uint8_t *data, int32_t len)
             std::call_once(g_attrs_once, InitAttrsFromJson);
             // 拼接属性区所有字节为一个二进制串
             uint16_t bits = 0;
-            for (int i = 0; i < MqttClient::attr_size_; ++i) {
+            for (int i = 0; i < attr_size_; ++i) {
                 bits = (bits << 8) | business_instruction[1 + i];
             }
             int payload_bit_index = 0;
-            for (int bit_index = 0; bit_index < MqttClient::attr_size_ * 8; ++bit_index) {
+            for (int bit_index = 0; bit_index < attr_size_ * 8; ++bit_index) {
                 int bit_val = (bits >> bit_index) & 0x01;
                 ESP_LOGI(TAG, "bit_val: %d, bit_index: %d, attr_size: %d", bit_val, bit_index, (int)g_attrs.size());
                 if (bit_index < (int)g_attrs.size()) {
@@ -683,7 +684,7 @@ void MqttClient::app2devMsgHandler(const uint8_t *data, int32_t len)
                             int len = attr.len;
                             ESP_LOGI(TAG, "len: %d", len);
                             for (int l = 0; l < len; ++l) {
-                                int byte_pos = 1 + MqttClient::attr_size_ + (payload_bit_index + l) / 8;
+                                int byte_pos = 1 + attr_size_ + (payload_bit_index + l) / 8;
                                 int bit_pos = (payload_bit_index + l) % 8;
                                 ESP_LOGI(TAG, "byte_pos: %d", business_instruction[byte_pos]);
                                 int bit = (business_instruction[byte_pos] >> bit_pos) & 0x01;
@@ -694,7 +695,7 @@ void MqttClient::app2devMsgHandler(const uint8_t *data, int32_t len)
                             processAttrValue(attr.name, value);
                         } else if (attr.unit == "byte") {
                             int len = attr.len; 
-                            int byte_start = MqttClient::attr_size_ + bit_bytes + payload_byte_index;
+                            int byte_start = attr_size_ + bit_bytes + payload_byte_index;
                             int value = 0;
                             for (int l = 0; l < len; ++l) {
                                 value |= (business_instruction[byte_start + l] << (8 * l));

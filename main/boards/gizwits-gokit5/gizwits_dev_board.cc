@@ -46,6 +46,10 @@ private:
             // setPowerHold(0);
         });
 
+        boot_button_.OnClick([this]() {
+            Application::GetInstance().ToggleChatState();
+        });
+
         rec_button_.OnPressDown([this]() {
             Application::GetInstance().StartListening();
         });

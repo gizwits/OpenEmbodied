@@ -942,12 +942,9 @@ void Application::AudioLoop() {
 
 
 void Application::OnAudioOutput() {
-    
-
     if (busy_decoding_audio_) {
         return;
     }
-
     auto now = std::chrono::steady_clock::now();
     auto codec = Board::GetInstance().GetAudioCodec();
     const int max_silence_seconds = 10;
@@ -1017,12 +1014,12 @@ void Application::OnAudioInput() {
     }
 #endif
 #if CONFIG_USE_AUDIO_PROCESSOR
-    if (audio_processor_.IsRunning()) {
+    if (audio_processor_ && audio_processor_->IsRunning()) {
         std::vector<int16_t> data;
-        int samples = audio_processor_.GetFeedSize();
+        int samples = audio_processor_->GetFeedSize();
         if (samples > 0) {
             ReadAudio(data, 16000, samples);
-            audio_processor_.Feed(data);
+            audio_processor_->Feed(data);
             return;
         }
     }
@@ -1058,11 +1055,16 @@ void Application::OnAudioInput() {
             if (protocol_->IsAudioChannelBusy()) {
                 return;
             }
-            AudioStreamPacket packet;
-            packet.payload = std::move(data);
-            packet.timestamp = last_output_timestamp_;
-            last_output_timestamp_ = 0;
-            protocol_->SendAudio(packet);
+
+            opus_encoder_->Encode(std::move(data), [this](std::vector<uint8_t>&& opus) {
+                AudioStreamPacket packet;
+                packet.payload = std::move(opus);
+                packet.timestamp = last_output_timestamp_;
+                last_output_timestamp_ = 0;
+                Schedule([this, packet = std::move(packet)]() {
+                    protocol_->SendAudio(packet);
+                });
+            });
 
         });
 #endif
@@ -1200,7 +1202,7 @@ void Application::SetDeviceState(DeviceState state) {
 
 #if CONFIG_USE_AUDIO_PROCESSOR
             // Make sure the audio processor is running
-            if (!audio_processor_->IsRunning()) {
+            if (!audio_processor_) {
 #else
                 if(chat_mode_ == 2 && realtime_chat_is_start_){
                     break;
@@ -1235,7 +1237,7 @@ void Application::SetDeviceState(DeviceState state) {
 
             if (listening_mode_ != kListeningModeRealtime) {
 #if CONFIG_USE_AUDIO_PROCESSOR
-                audio_processor_.Stop();
+                if (audio_processor_) audio_processor_->Stop();
 #endif
 #if CONFIG_USE_WAKE_WORD_DETECT
                 ESP_LOGI(TAG, "Start wake word detection");

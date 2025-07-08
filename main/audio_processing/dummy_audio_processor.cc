@@ -3,7 +3,7 @@
 
 #define TAG "DummyAudioProcessor"
 
-void DummyAudioProcessor::Initialize(AudioCodec* codec) {
+void DummyAudioProcessor::Initialize(AudioCodec* codec, bool realtime_chat) {
     codec_ = codec;
 }
 
