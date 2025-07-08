@@ -165,7 +165,7 @@ private:
         esp_lcd_panel_handle_t panel_handle = NULL;
         esp_lcd_panel_dev_config_t panel_config = {};
         panel_config.reset_gpio_num = DISPLAY_SPI_RESET_PIN;    // Set to -1 if not use
-        panel_config.rgb_endian = LCD_RGB_ENDIAN_BGR;           //LCD_RGB_ENDIAN_RGB;
+        panel_config.rgb_endian = LCD_RGB_ENDIAN_RGB;           //LCD_RGB_ENDIAN_RGB;
         panel_config.bits_per_pixel = 16;                       // Implemented by LCD command `3Ah` (16/18)
 
         ESP_ERROR_CHECK(esp_lcd_new_panel_gc9a01(io_handle, &panel_config, &panel_handle));
@@ -211,7 +211,16 @@ private:
             if (first_level ==0) {
                 first_level = 1;
             } else {
-                gpio_set_level(POWER_GPIO, 0);
+                bool is_charging = isCharging();
+                if (is_charging) {
+                    auto& app = Application::GetInstance();
+                    app.SetDeviceState(kDeviceStateIdle);
+                    GetBacklight()->SetBrightness(0, false);
+                } else {
+                    // 没有充电，关机
+                    gpio_set_level(POWER_GPIO, 0);
+                }
+
             }
         });
 
@@ -283,6 +292,12 @@ private:
         i2c_master_transmit(lis2hh12_dev_, buf, 2, 100 / portTICK_PERIOD_MS);
     }
 
+    bool isCharging() {
+        int chrg = gpio_get_level(CHARGING_PIN);
+        int standby = gpio_get_level(STANDBY_PIN);
+        return chrg == 0 || standby == 0;
+    }
+
 public:
     MovecallMojiESP32S3() : boot_button_(BOOT_BUTTON_GPIO) { 
         // 记录上电时间戳
@@ -290,13 +305,12 @@ public:
         
         InitializeChargingGpio();
 
-        int chrg = gpio_get_level(CHARGING_PIN);
-        int standby = gpio_get_level(STANDBY_PIN);
-        ESP_LOGI(TAG, "chrg: %d, standby: %d", chrg, standby);
+        bool is_charging = isCharging();
+        ESP_LOGI(TAG, "is_charging: %d", is_charging);
         InitializeI2c();
         InitializeGpio(AUDIO_CODEC_PA_PIN, true);
         InitializeGpio(DISPLAY_BACKLIGHT_PIN, true);
-        if (chrg == 0 || standby == 0) {
+        if (is_charging) {
             // 充电中
         } else {
             // 没有充电
@@ -334,8 +348,7 @@ public:
 
     virtual bool GetBatteryLevel(int &level, bool &charging, bool &discharging) override {
         // 1. 读取ADC原始值
-        int chrg = gpio_get_level(CHARGING_PIN);
-        int standby = gpio_get_level(STANDBY_PIN);
+        bool is_charging = isCharging();
         adc_oneshot_unit_handle_t adc2_handle;
         adc_oneshot_unit_init_cfg_t init_config = { .unit_id = ADC_UNIT_2 };
         adc_oneshot_new_unit(&init_config, &adc2_handle);
@@ -361,7 +374,7 @@ public:
         uint16_t voltage_mv = (uint16_t)voltage;
         ESP_LOGI(TAG, "ADC raw: %d, voltage: %d mV", raw, voltage_mv);
 
-        charging = chrg == 0;
+        charging = is_charging;
         discharging = !charging;
 
         // 4. 估算电量

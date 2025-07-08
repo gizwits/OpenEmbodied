@@ -155,10 +155,18 @@ void Application::CheckNewVersion() {
             background_task_ = nullptr;
             vTaskDelay(pdMS_TO_TICKS(1000));
 
-            ota_.StartUpgrade([display](int progress, size_t speed) {
+            ota_.StartUpgrade([this,display](int progress, size_t speed) {
                 char buffer[64];
                 snprintf(buffer, sizeof(buffer), "%d%% %zuKB/s", progress, speed / 1024);
                 display->SetChatMessage("system", buffer);
+
+                if (progress == 100) {
+                    mqtt_client_.sendOtaProgressReport(100, "done");
+                    mqtt_client_.sendTraceLog("info", "固件升级完成");
+
+                } else {
+                    mqtt_client_.sendOtaProgressReport(progress, "downloading");
+                }
             });
 
             // If upgrade success, the device will reboot and never reach here

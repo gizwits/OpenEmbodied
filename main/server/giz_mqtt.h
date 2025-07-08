@@ -53,7 +53,9 @@ public:
     bool getRoomInfo();
     int sendResetToCloud();
     int getPublishedId();
+    void sendOtaProgressReport(int progress, const char* status);
     void OnRoomParamsUpdated(std::function<void(const RoomParams&)> callback);
+    void processAttrValue(std::string attr_name, int value);
     void deinit();
 
     bool uploadP0Data(const void* data, size_t data_len);
@@ -87,5 +89,6 @@ private:
     bool parseRealtimeAgent(const char* in_str, int in_len, room_params_t* params);
     bool parseM2MCtrlMsg(const char* in_str, int in_len);
     void handleMqttMessage(mqtt_msg_t* msg);
-
+    void app2devMsgHandler(const uint8_t *data, int32_t len);
+    uint8_t mqttNumRemLenBytes(const uint8_t *buf);
 };

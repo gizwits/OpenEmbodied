@@ -309,6 +309,45 @@ int MqttClient::getPublishedId() {
     return mqtt_published_id_;
 }
 
+
+void MqttClient::sendOtaProgressReport(int progress, const char* status) {
+    uint8_t buf[256] = {0};
+    
+    // 获取当前版本信息
+    auto app_desc = esp_app_get_description();
+    std::string sw_version = app_desc->version;
+    std::string hw_version = BOARD_NAME;
+    
+    // 使用协议函数打包消息
+    size_t total_len = ota::protocol::pack_mqtt_upgrade_progress(
+        0x0002,  // MCU upgrade flag
+        progress,
+        hw_version.c_str(),
+        sw_version.c_str(),
+        status,
+        buf,
+        sizeof(buf)
+    );
+
+    if (total_len == 0) {
+        ESP_LOGE(TAG, "Failed to pack OTA progress message");
+        return;
+    }
+
+    // Log the hex dump of the message
+    char hex_str[512] = {0};
+    int pos = 0;
+    for (size_t i = 0; i < total_len; i++) {
+        pos += snprintf(hex_str + pos, sizeof(hex_str) - pos, "%02X", buf[i]);
+    }
+    ESP_LOGI(TAG, "OTA Progress Report (hex): %s (len: %zu)", hex_str, total_len);
+
+    // Publish the message
+    if (!publish("cli2ser_req", std::string((char*)buf, total_len))) {
+        ESP_LOGE(TAG, "Failed to publish OTA progress report");
+    }
+}
+
 void MqttClient::deinit() {
     if (timer_) {
         xTimerDelete(timer_, 0);
@@ -462,9 +501,166 @@ void MqttClient::handleMqttMessage(mqtt_msg_t* msg) {
                 // run_start_ota_task(result.version_info.module_sw_ver, result.version_info.download_url);
             }
         }
+    } else if (strstr(msg->topic, "app2dev")) {
+        app2devMsgHandler(reinterpret_cast<const uint8_t*>(msg->data), msg->data_len);
     }
 }
 
+
+
+uint8_t MqttClient::mqttNumRemLenBytes(const uint8_t *buf) {
+    uint8_t num_bytes = 0;
+    uint32_t multiplier = 1;
+    uint32_t value = 0;
+    uint8_t encoded_byte;
+
+    do {
+        if (num_bytes >= 4) {
+            // 超过最大字节数，返回错误
+            return 0;
+        }
+        encoded_byte = buf[num_bytes++];
+        value += (encoded_byte & 0x7F) * multiplier;
+        multiplier *= 128;
+    } while ((encoded_byte & 0x80) != 0);
+
+    // printf("%s Buffer contents[%d]: ",__func__, num_bytes);
+    // for (uint8_t i = 0; i < num_bytes; i++) {
+    //     printf("%02x ", buf[i]);
+    // }
+    // printf("\n");
+    return num_bytes;
+}
+// 参考数据解析函数
+void MqttClient::app2devMsgHandler(const uint8_t *data, int32_t len)
+{
+    hexdump("app2devMsgHandler",data, len);
+    // 打印前4字节
+    if (len >= 4) {
+        ESP_LOGI(TAG, "payload[0-3]: %02X %02X %02X %02X", data[0], data[1], data[2], data[3]);
+    }
+    if (len < 11) { // 确保数据长度至少为固定包头(4) + 可变长度(1) + Flag(1) + 命令字(2) + 包序号(4)
+        ESP_LOGE(TAG, "Data length too short");
+        return;
+    }
+
+    // 解析固定包头
+    uint32_t fixed_header = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
+    if (fixed_header != GAGENT_PROTOCOL_VERSION) {
+        ESP_LOGE(TAG, "Invalid fixed header");
+        return;
+    }
+
+    // 解析可变长度
+    uint8_t var_len = mqttNumRemLenBytes(data + 4);
+    if (var_len == 0 || var_len > len - 4) {
+        ESP_LOGE(TAG, "Invalid variable length");
+        return;
+    }
+    else {
+        ESP_LOGI(TAG, "var_len: %d", var_len);
+    }
+
+    // 解析Flag
+    uint8_t flag = data[4 + var_len];
+
+    // 解析命令字
+    uint16_t command = (data[5 + var_len] << 8) | data[6 + var_len];
+    if (command != HI_CMD_PAYLOAD93) {
+        ESP_LOGE(TAG, "Invalid command");
+        // todo 目前只处理93数据点业务
+        return;
+    }
+
+    // 解析包序号
+    uint32_t sn = (data[7 + var_len] << 24) | (data[8 + var_len] << 16) | (data[9 + var_len] << 8) | data[10 + var_len];
+
+    // 解析业务指令
+    const uint8_t *business_instruction = data + 11 + var_len;
+    int business_instruction_len = len - (11 + var_len);
+    if (business_instruction_len > 65535) {
+        ESP_LOGE(TAG, "Business instruction too long");
+        return;
+    }
+
+    // 只处理93业务指令
+    ESP_LOGI(TAG, "business_instruction: %d", command);
+
+    // 00 00 00 03 0A 00 00 93 00 00 00 00 11 10 01 
+    if (command == 0x0093) {
+        uint8_t action = business_instruction[0];
+        ESP_LOGI(TAG, "action: 0x%02X", action);
+
+        if (action == 0x11) {
+            std::call_once(g_attrs_once, InitAttrsFromJson);
+            // 拼接属性区所有字节为一个二进制串
+            uint16_t bits = 0;
+            for (int i = 0; i < MqttClient::attr_size_; ++i) {
+                bits = (bits << 8) | business_instruction[1 + i];
+            }
+            int payload_bit_index = 0;
+            for (int bit_index = 0; bit_index < MqttClient::attr_size_ * 8; ++bit_index) {
+                int bit_val = (bits >> bit_index) & 0x01;
+                ESP_LOGI(TAG, "bit_val: %d, bit_index: %d, attr_size: %d", bit_val, bit_index, (int)g_attrs.size());
+                if (bit_index < (int)g_attrs.size()) {
+                    const Attr& attr = g_attrs[bit_index];
+                    if (bit_val == 1) {
+                        // 数据有效，提取 attr.len 长度的数据
+                        static int total_bit_len = -1;
+                        static int bit_bytes = -1;
+                        static bool bit_bytes_calculated = false;
+                        static int payload_bit_index = 0;
+                        static int payload_byte_index = 0;
+                        if (!bit_bytes_calculated) {
+                            total_bit_len = 0;
+                            for (const auto& a : g_attrs) {
+                                if (a.unit == "bit") {
+                                    total_bit_len += 1; // 如有多bit属性，改为a.len
+                                }
+                            }
+                            bit_bytes = (total_bit_len + 7) / 8;
+                            bit_bytes_calculated = true;
+                        }
+                        if (attr.unit == "bit") {
+                            int value = 0;
+                            int len = attr.len; // 如有多bit属性，改为attr.len
+                            ESP_LOGI(TAG, "len: %d", len);
+                            for (int l = 0; l < len; ++l) {
+                                int byte_pos = 1 + MqttClient::attr_size_ + (payload_bit_index + l) / 8;
+                                int bit_pos = (payload_bit_index + l) % 8;
+                                ESP_LOGI(TAG, "byte_pos: %d", business_instruction[byte_pos]);
+                                int bit = (business_instruction[byte_pos] >> bit_pos) & 0x01;
+                                value |= (bit << l);
+                            }
+                            payload_bit_index += len;
+                            ESP_LOGI(TAG, "bit attr: %s = %d", attr.name.c_str(), value);
+                            processAttrValue(attr.name, value);
+                        } else if (attr.unit == "byte") {
+                            int len = attr.len; // 如有多字节属性，改为attr.len
+                            int byte_start = MqttClient::attr_size_ + bit_bytes + payload_byte_index;
+                            int value = 0;
+                            for (int l = 0; l < len; ++l) {
+                                value |= (business_instruction[byte_start + l] << (8 * l));
+                            }
+                            payload_byte_index += len;
+                            ESP_LOGI(TAG, "byte attr: %s = %d", attr.name.c_str(), value);
+                            processAttrValue(attr.name, value);
+                        }
+                    }
+                }
+            }
+        }
+        
+    }
+}
+
+
+void MqttClient::processAttrValue(std::string attr_name, int value) {
+    ESP_LOGI(TAG, "processAttrValue: %s = %d", attr_name.c_str(), value);
+    if (attr_name == "chat_mode") {
+        Application::GetInstance().SetChatMode(value);
+    }
+}
 
 // Upload binary p0 data to dev2app/<client_id_>
 bool MqttClient::uploadP0Data(const void* data, size_t data_len) {
