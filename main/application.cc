@@ -615,8 +615,8 @@ void Application::Start() {
             if (strcmp(state->valuestring, "start") == 0) {
                 Schedule([this]() {
 
-                    if (board.GetServo()) {
-                        board.GetServo()->move(0, 180, 500, 10000000);
+                    if (Board::GetInstance().GetServo()) {
+                        Board::GetInstance().GetServo()->move(0, 180, 500, 10000000);
                     }
 
                     aborted_ = false;
@@ -628,11 +628,9 @@ void Application::Start() {
             } else if (strcmp(state->valuestring, "stop") == 0) {
                 Schedule([this]() {
                     background_task_->WaitForCompletion();
-                    if (board.GetServo()) {
-                        board.GetServo()->stop();
+                    if (Board::GetInstance().GetServo()) {
+                        Board::GetInstance().GetServo()->stop();
                     }
-
-
                     if (device_state_ == kDeviceStateSpeaking) {
                         if (listening_mode_ == kListeningModeManualStop) {
                             SetDeviceState(kDeviceStateIdle);
