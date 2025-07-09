@@ -467,10 +467,6 @@ void Application::Start() {
 
     CheckNewVersion();
 
-    if (board.GetServo()) {
-        board.GetServo()->move(0, 180, 500, 10000);
-    }
-
     PlaySound(Lang::Sounds::P3_CONNECT_SUCCESS);
     vTaskDelay(pdMS_TO_TICKS(500));
 
@@ -618,6 +614,11 @@ void Application::Start() {
             auto state = cJSON_GetObjectItem(root, "state");
             if (strcmp(state->valuestring, "start") == 0) {
                 Schedule([this]() {
+
+                    if (board.GetServo()) {
+                        board.GetServo()->move(0, 180, 500, 10000000);
+                    }
+
                     aborted_ = false;
                     if (device_state_ == kDeviceStateIdle || device_state_ == kDeviceStateListening) {
                         SetDeviceState(kDeviceStateSpeaking);
@@ -627,6 +628,10 @@ void Application::Start() {
             } else if (strcmp(state->valuestring, "stop") == 0) {
                 Schedule([this]() {
                     background_task_->WaitForCompletion();
+                    if (board.GetServo()) {
+                        board.GetServo()->stop();
+                    }
+
 
                     if (device_state_ == kDeviceStateSpeaking) {
                         if (listening_mode_ == kListeningModeManualStop) {
