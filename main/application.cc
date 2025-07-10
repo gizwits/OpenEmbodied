@@ -769,17 +769,10 @@ void Application::Start() {
                     return;
                 }
 
-
                 wake_word_detect_.StopDetection();
-
+#if CONFIG_USE_AUDIO_PROCESSOR
                 audio_processor_->Start();
-                // AudioStreamPacket packet;
-                // Encode and send the wake word data to the server
-                // while (wake_word_detect_.GetWakeWordOpus(packet.payload)) {
-                //     protocol_->SendAudio(packet);
-                // }
-                // Set the chat state to wake word detected
-                // protocol_->SendWakeWordDetected(wake_word);
+#endif
                 ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
                 SetListeningMode(chat_mode_ == 2  ? kListeningModeRealtime : kListeningModeAutoStop);
             } else if (device_state_ == kDeviceStateSpeaking) {
@@ -789,6 +782,11 @@ void Application::Start() {
                 ResetDecoder();
                 PlaySound(Lang::Sounds::P3_SUCCESS);
                 vTaskDelay(pdMS_TO_TICKS(300));
+                wake_word_detect_.StopDetection();
+#if CONFIG_USE_AUDIO_PROCESSOR
+                audio_processor_->Start();
+#endif
+                ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
                 SetListeningMode(chat_mode_ == 2  ? kListeningModeRealtime : kListeningModeAutoStop);
                 auto display = Board::GetInstance().GetDisplay();
                 display->SetChatMessage("assistant", "");
@@ -1032,6 +1030,7 @@ void Application::OnAudioInput() {
 #if CONFIG_USE_AUDIO_PROCESSOR
     if (audio_processor_ && audio_processor_->IsRunning()) {
         std::vector<int16_t> data;
+        ESP_LOGI(TAG, "Audio processor is running 1");
         int samples = audio_processor_->GetFeedSize();
         if (samples > 0) {
             ReadAudio(data, 16000, samples);
