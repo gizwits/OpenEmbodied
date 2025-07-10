@@ -768,7 +768,11 @@ void Application::Start() {
                     wake_word_detect_.StartDetection();
                     return;
                 }
-                
+
+
+                wake_word_detect_.StopDetection();
+
+                audio_processor_->Start();
                 // AudioStreamPacket packet;
                 // Encode and send the wake word data to the server
                 // while (wake_word_detect_.GetWakeWordOpus(packet.payload)) {
@@ -1231,10 +1235,12 @@ void Application::SetDeviceState(DeviceState state) {
                 opus_encoder_->ResetState();
 #endif
 #if CONFIG_USE_WAKE_WORD_DETECT
+                ESP_LOGI(TAG, "Stop wake word detection");
                 wake_word_detect_.StopDetection();
 #endif
 
 #if CONFIG_USE_AUDIO_PROCESSOR
+                ESP_LOGI(TAG, "Audio processor is running 2");
                 audio_processor_->Start();
             }
 #endif
