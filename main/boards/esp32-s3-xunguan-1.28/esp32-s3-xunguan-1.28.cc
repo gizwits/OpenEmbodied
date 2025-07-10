@@ -298,6 +298,10 @@ private:
         return chrg == 0 || standby == 0;
     }
 
+    virtual bool NeedPlayProcessVoice() override {
+        return false;
+    }
+
 public:
     MovecallMojiESP32S3() : boot_button_(BOOT_BUTTON_GPIO) { 
         // 记录上电时间戳

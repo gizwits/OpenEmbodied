@@ -53,6 +53,8 @@ public:
     virtual Led* GetLed();
     virtual AudioCodec* GetAudioCodec() = 0;
     virtual bool GetTemperature(float& esp32temp);
+    // 是否要 bo 一下
+    virtual bool NeedPlayProcessVoice() { return true; }
     virtual Servo* GetServo();
     virtual Display* GetDisplay();
     virtual Camera* GetCamera();

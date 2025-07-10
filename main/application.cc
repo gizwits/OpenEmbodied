@@ -621,14 +621,19 @@ void Application::Start() {
             if (strcmp(state->valuestring, "start") == 0) {
                 Schedule([this]() {
 
-                    if (Board::GetInstance().GetServo()) {
-                        Board::GetInstance().GetServo()->move(0, 180, 500, 10000000);
+                    auto& board = Board::GetInstance();
+
+                    if (board.GetServo()) {
+                        board.GetServo()->move(0, 180, 500, 10000000);
                     }
 
                     aborted_ = false;
                     if (device_state_ == kDeviceStateIdle || device_state_ == kDeviceStateListening) {
                         SetDeviceState(kDeviceStateSpeaking);
-                        PlaySound(Lang::Sounds::P3_BO);
+
+                        if (board.NeedPlayProcessVoice()) {
+                            PlaySound(Lang::Sounds::P3_BO);
+                        }
                     }
                 });
             } else if (strcmp(state->valuestring, "stop") == 0) {
