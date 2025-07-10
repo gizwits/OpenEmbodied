@@ -87,6 +87,7 @@ public:
     void PlaySound(const std::string_view& sound);
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
+    void SendTextToAI(const std::string& text);
 
     const char* GetTraceId() const { return trace_id_; }
     void GenerateTraceId();

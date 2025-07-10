@@ -488,7 +488,7 @@ void Application::Start() {
             });
         } else {
             if (!protocol_->GetRoomParams().access_token.empty()) {
-                // PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
+                PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
             }
         }
         protocol_->UpdateRoomParams(params);
@@ -822,6 +822,10 @@ void Application::QuitTalking() {
     SetDeviceState(kDeviceStateIdle);
     protocol_->CloseAudioChannel();
     ResetDecoder();
+#if CONFIG_USE_WAKE_WORD_DETECT
+    wake_word_detect_.StartDetection();
+#endif
+
 }
 
 void Application::PlayMusic(const char* url) {
@@ -1301,6 +1305,12 @@ void Application::UpdateIotStates() {
 void Application::Reboot() {
     ESP_LOGI(TAG, "Rebooting...");
     esp_restart();
+}
+
+void Application::SendTextToAI(const std::string& text) {
+    if (protocol_) {
+        protocol_->SendTextToAI(text);
+    }
 }
 
 void Application::WakeWordInvoke(const std::string& wake_word) {

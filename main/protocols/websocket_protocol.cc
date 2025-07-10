@@ -565,6 +565,20 @@ std::string WebsocketProtocol::GetHelloMessage() {
     return "";
 }
 
+void WebsocketProtocol::SendTextToAI(const std::string& text) {
+    std::string message = "{"
+        "\"event_type\":\"conversation.message.create\","
+        "\"data\":{"
+            "\"role\":\"user\","
+            "\"content_type\":\"text\","
+            "\"content\":\"" + text + "\""
+        "}"
+    "}";
+    // 如果需要 const char* 类型
+    const char* message_cstr = message.c_str();
+    SendText(message_cstr);
+}
+
 void WebsocketProtocol::ParseServerHello(const cJSON* root) {
     // COZE 的音频信息是由设备发起的，因此这里直接返回
     server_sample_rate_ = 16000;
