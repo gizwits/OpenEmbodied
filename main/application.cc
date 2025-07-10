@@ -162,13 +162,16 @@ void Application::CheckNewVersion() {
                 snprintf(buffer, sizeof(buffer), "%d%% %zuKB/s", progress, speed / 1024);
                 display->SetChatMessage("system", buffer);
 
-                if (progress == 100) {
-                    mqtt_client_->sendOtaProgressReport(100, "done");
-                    mqtt_client_->sendTraceLog("info", "固件升级完成");
-
-                } else {
-                    mqtt_client_->sendOtaProgressReport(progress, "downloading");
+                if (mqtt_client_) {
+                    if (progress == 100) {
+                        mqtt_client_->sendOtaProgressReport(100, "done");
+                        mqtt_client_->sendTraceLog("info", "固件升级完成");
+    
+                    } else {
+                        mqtt_client_->sendOtaProgressReport(progress, "downloading");
+                    }
                 }
+                
             });
 
             // If upgrade success, the device will reboot and never reach here
@@ -465,7 +468,6 @@ void Application::Start() {
     /* Wait for the network to be ready */
     board.StartNetwork();
 
-    CheckNewVersion();
 
     PlaySound(Lang::Sounds::P3_CONNECT_SUCCESS);
     vTaskDelay(pdMS_TO_TICKS(500));
@@ -500,6 +502,7 @@ void Application::Start() {
         return;
     }
 #else
+
     Settings settings("wifi", true);
     bool need_activation = settings.GetInt("need_activation");
     bool has_authkey = !Auth::getInstance().getAuthKey().empty();
@@ -566,6 +569,9 @@ void Application::Start() {
         }
     }
 #endif
+
+    CheckNewVersion();
+    
     // Initialize the protocol
     protocol_->OnNetworkError([this](const std::string& message) {
         SetDeviceState(kDeviceStateIdle);
@@ -769,23 +775,14 @@ void Application::Start() {
                     return;
                 }
 
-                wake_word_detect_.StopDetection();
-#if CONFIG_USE_AUDIO_PROCESSOR
-                audio_processor_->Start();
-#endif
                 ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
                 SetListeningMode(chat_mode_ == 2  ? kListeningModeRealtime : kListeningModeAutoStop);
             } else if (device_state_ == kDeviceStateSpeaking) {
                 // 关键词打断，继续监听
-                ESP_LOGI(TAG, "Wake word detected break: %s", wake_word.c_str());
                 protocol_->SendAbortSpeaking(kAbortReasonNone);
                 ResetDecoder();
                 PlaySound(Lang::Sounds::P3_SUCCESS);
                 vTaskDelay(pdMS_TO_TICKS(300));
-                wake_word_detect_.StopDetection();
-#if CONFIG_USE_AUDIO_PROCESSOR
-                audio_processor_->Start();
-#endif
                 ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
                 SetListeningMode(chat_mode_ == 2  ? kListeningModeRealtime : kListeningModeAutoStop);
                 auto display = Board::GetInstance().GetDisplay();
@@ -808,7 +805,6 @@ void Application::Start() {
         display->SetChatMessage("system", "");
         // Play the success sound to indicate the device is ready
         ResetDecoder();
-        // PlaySound(Lang::Sounds::P3_SUCCESS);
     }
     
     // Enter the main event loop
@@ -981,7 +977,7 @@ void Application::OnAudioOutput() {
     //     return;
     // }
 
-    auto opus = std::move(audio_decode_queue_.front()).payload;
+    auto packet = std::move(audio_decode_queue_.front());
     audio_decode_queue_.pop_front();
     lock.unlock();
     audio_decode_cv_.notify_all();
@@ -996,16 +992,16 @@ void Application::OnAudioOutput() {
 
 
     busy_decoding_audio_ = true;
-    background_task_->Schedule([this, codec, opus = std::move(opus)]() mutable {
+    background_task_->Schedule([this, codec, packet = std::move(packet)]() mutable {
         busy_decoding_audio_ = false;
         if (aborted_) {
             return;
         }
 #ifdef CONFIG_USE_AUDIO_CODEC_DECODE_OPUS
-        WriteAudio(opus);
+        WriteAudio(packet.payload);
 #else
         std::vector<int16_t> pcm;
-        if (!opus_decoder_->Decode(std::move(opus), pcm)) {
+        if (!opus_decoder_->Decode(std::move(packet.payload), pcm)) {
             return;
         }
         WriteAudio(pcm, opus_decoder_->sample_rate());
@@ -1015,6 +1011,8 @@ void Application::OnAudioOutput() {
 }
 
 void Application::OnAudioInput() {
+
+    // ESP_LOGI(TAG, "OnAudioInput %d", wake_word_detect_.IsDetectionRunning());
    
 #if CONFIG_USE_WAKE_WORD_DETECT
     if (wake_word_detect_.IsDetectionRunning()) {
@@ -1028,9 +1026,12 @@ void Application::OnAudioInput() {
     }
 #endif
 #if CONFIG_USE_AUDIO_PROCESSOR
+    // if (audio_processor_) {
+    //     ESP_LOGI(TAG, "Audio processor is running 2, %d", audio_processor_->IsRunning());
+    // }
     if (audio_processor_ && audio_processor_->IsRunning()) {
         std::vector<int16_t> data;
-        ESP_LOGI(TAG, "Audio processor is running 1");
+        // ESP_LOGI(TAG, "Audio processor is running 1");
         int samples = audio_processor_->GetFeedSize();
         if (samples > 0) {
             ReadAudio(data, 16000, samples);
@@ -1065,23 +1066,13 @@ void Application::OnAudioInput() {
         }
 #else
         std::vector<int16_t> data;
-        ReadAudio(data, 16000, 30 * 16000 / 1000);
-        background_task_->Schedule([this, data = std::move(data)]() mutable {
-            if (protocol_->IsAudioChannelBusy()) {
+        int samples = audio_processor_->GetFeedSize();
+        if (samples > 0) {
+            if (ReadAudio(data, 16000, samples)) {
+                audio_processor_->Feed(data);
                 return;
             }
-
-            opus_encoder_->Encode(std::move(data), [this](std::vector<uint8_t>&& opus) {
-                AudioStreamPacket packet;
-                packet.payload = std::move(opus);
-                packet.timestamp = last_output_timestamp_;
-                last_output_timestamp_ = 0;
-                Schedule([this, packet = std::move(packet)]() {
-                    protocol_->SendAudio(packet);
-                });
-            });
-
-        });
+        }
 #endif
         return;
     }
@@ -1190,6 +1181,7 @@ void Application::SetDeviceState(DeviceState state) {
             display->SetStatus(Lang::Strings::STANDBY);
             display->SetEmotion("sleepy");
 #if CONFIG_USE_AUDIO_PROCESSOR
+            ESP_LOGI(TAG, "Audio processor audio_processor_->Stop SetDeviceState");
             audio_processor_->Stop();
 #endif
             
@@ -1215,9 +1207,9 @@ void Application::SetDeviceState(DeviceState state) {
             UpdateIotStates();
 #endif
 
-#if CONFIG_USE_AUDIO_PROCESSOR
+#ifdef CONFIG_USE_AUDIO_PROCESSOR
             // Make sure the audio processor is running
-            if (!audio_processor_) {
+            if (audio_processor_) {
 #else
                 if(chat_mode_ == 2 && realtime_chat_is_start_){
                     break;
@@ -1233,13 +1225,14 @@ void Application::SetDeviceState(DeviceState state) {
 #else
                 opus_encoder_->ResetState();
 #endif
-#if CONFIG_USE_WAKE_WORD_DETECT
+
+#ifdef CONFIG_USE_WAKE_WORD_DETECT
                 ESP_LOGI(TAG, "Stop wake word detection");
                 wake_word_detect_.StopDetection();
 #endif
 
-#if CONFIG_USE_AUDIO_PROCESSOR
-                ESP_LOGI(TAG, "Audio processor is running 2");
+#ifdef CONFIG_USE_AUDIO_PROCESSOR
+                ESP_LOGI(TAG, "Audio processor audio_processor_->Start SetDeviceState");
                 audio_processor_->Start();
             }
 #endif
@@ -1254,6 +1247,7 @@ void Application::SetDeviceState(DeviceState state) {
 
             if (listening_mode_ != kListeningModeRealtime) {
 #if CONFIG_USE_AUDIO_PROCESSOR
+                ESP_LOGI(TAG, "Audio processor audio_processor_->Stop SetDeviceState");
                 if (audio_processor_) audio_processor_->Stop();
 #endif
 #if CONFIG_USE_WAKE_WORD_DETECT
@@ -1319,7 +1313,9 @@ void Application::SendTextToAI(const std::string& text) {
 }
 
 void Application::WakeWordInvoke(const std::string& wake_word) {
-    mqtt_client_->sendTraceLog("info", "唤醒词触发");
+    if (mqtt_client_) {
+        mqtt_client_->sendTraceLog("info", "唤醒词触发");
+    }
     ESP_LOGI(TAG, "Wake word invoke: %s", wake_word.c_str());
 
     // 按钮模式
@@ -1404,18 +1400,21 @@ void Application::StartReportTimer() {
         return;
     }
     // 先上报一次
-    mqtt_client_->ReportTimer();
-    esp_timer_create_args_t report_timer_args = {
-        .callback = [](void* arg) {
-            static_cast<Application*>(arg)->mqtt_client_->ReportTimer();
-        },
-        .arg = this,
-        .dispatch_method = ESP_TIMER_TASK,
-        .name = "report_timer",
-        .skip_unhandled_events = true
-    };
-    esp_timer_create(&report_timer_args, &report_timer_handle_);
-    esp_timer_start_periodic(report_timer_handle_, 60000000); // 1分钟
+    if (mqtt_client_) {
+        mqtt_client_->ReportTimer();
+        esp_timer_create_args_t report_timer_args = {
+            .callback = [](void* arg) {
+                static_cast<Application*>(arg)->mqtt_client_->ReportTimer();
+            },
+            .arg = this,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "report_timer",
+            .skip_unhandled_events = true
+        };
+        esp_timer_create(&report_timer_args, &report_timer_handle_);
+        esp_timer_start_periodic(report_timer_handle_, 60000000); // 1分钟
+    }
+    
 }
 
 void Application::SetChatMode(int mode) {
