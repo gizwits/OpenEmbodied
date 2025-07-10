@@ -837,29 +837,39 @@ void Application::PlayMusic(const char* url) {
     }
     QuitTalking();
     
-    Schedule([this, url_str]() {
-        player_.setPacketCallback([this](const std::vector<uint8_t>& data) {
-            #if CONFIG_IDF_TARGET_ESP32C2
-                const int max_packets_in_queue = 3000 / OPUS_FRAME_DURATION_MS;
-            #else
-                const int max_packets_in_queue = 10000 / OPUS_FRAME_DURATION_MS;
-            #endif
-            std::lock_guard<std::mutex> lock(mutex_);
-            if (audio_decode_queue_.size() < max_packets_in_queue) {
-                AudioStreamPacket packet;
-                packet.payload = data;
-                audio_decode_queue_.emplace_back(std::move(packet));
-            } else {
-                ESP_LOGW("AUDIO", "Audio decode queue is full! Current size: %d, Max size: %d", 
-                        audio_decode_queue_.size(), max_packets_in_queue);
-            }
-        });
-        player_.processMP3Stream(url_str.c_str());
-        auto display = Board::GetInstance().GetDisplay();
-        display->SetStatus(Lang::Strings::SPEAKING);
-        display->SetEmotion("happy");
 
+    player_.setPacketCallback([this](const std::vector<uint8_t>& data) {
+        #if CONFIG_IDF_TARGET_ESP32C2
+            const int max_packets_in_queue = 3000 / OPUS_FRAME_DURATION_MS;
+        #else
+            const int max_packets_in_queue = 10000 / OPUS_FRAME_DURATION_MS;
+        #endif
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (audio_decode_queue_.size() < max_packets_in_queue) {
+            AudioStreamPacket packet;
+            packet.payload = data;
+            audio_decode_queue_.emplace_back(std::move(packet));
+        } else {
+            ESP_LOGW("AUDIO", "Audio decode queue is full! Current size: %d, Max size: %d", 
+                    audio_decode_queue_.size(), max_packets_in_queue);
+        }
     });
+    auto display = Board::GetInstance().GetDisplay();
+    display->SetStatus(Lang::Strings::SPEAKING);
+    display->SetEmotion("happy");
+    // 单独起一个 task
+    struct PlayMusicTaskArgs {
+        Application* app;
+        std::string url;
+    };
+    auto* args = new PlayMusicTaskArgs{this, url_str};
+    xTaskCreate([](void* arg) {
+        auto* args = static_cast<PlayMusicTaskArgs*>(arg);
+        args->app->player_.processMP3Stream(args->url.c_str());
+        delete args;
+        vTaskDelete(NULL);
+    }, "process_mp3_stream", 4096, args, 8, nullptr);
+
 }
 
 void Application::CancelPlayMusic() {
