@@ -210,8 +210,6 @@ void Ota::Upgrade(const std::string& firmware_url) {
         return;
     }
 
-    upgrade_callback_(100, 0);
-
     ESP_LOGI(TAG, "Firmware upgrade successful, rebooting in 3 seconds...");
     vTaskDelay(pdMS_TO_TICKS(3000));
     esp_restart();
