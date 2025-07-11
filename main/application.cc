@@ -1264,9 +1264,13 @@ void Application::SetDeviceState(DeviceState state) {
             display->SetStatus(Lang::Strings::SPEAKING);
             display->SetEmotion("happy");
 
-            if (board.GetServo()) {
-                board.GetServo()->move(0, 180, 500, 10000000);
-            }
+            Schedule([this]() {
+                ESP_LOGI(TAG, "GetServo");
+                auto& board = Board::GetInstance();
+                if (board.GetServo()) {
+                    board.GetServo()->move(0, 180, 500, 10000000);
+                }
+            });
 
             if (listening_mode_ != kListeningModeRealtime) {
 #if CONFIG_USE_AUDIO_PROCESSOR
