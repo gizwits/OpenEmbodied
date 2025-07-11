@@ -15,6 +15,8 @@
 
 #define TAG "WS"
 
+#define MAX_AUDIO_PACKET_SIZE 1024
+
 struct Emotion {
     const char* icon;
     const char* text;
@@ -267,6 +269,11 @@ bool WebsocketProtocol::OpenAudioChannel() {
         if (event_type.empty() || event_type.length() >= 64) {
             return;
         }
+        // ESP_LOGI(TAG, "event_type: %.*s", (int)event_type.length(), event_type.data());
+
+        // if(event_type != "chat.created") {
+        //     return;
+        // }
         if(event_type == "conversation.audio.delta") {
             constexpr std::string_view content_key = "\"content\":\"";
             size_t content_start = str_data.find(content_key);
@@ -296,14 +303,14 @@ bool WebsocketProtocol::OpenAudioChannel() {
                         (const unsigned char*)base64_content.data(), 
                         base64_content.length());
 
-                    // Reuse buffer for decoded data
-                    if (output_len > audio_data_buffer_.capacity()) {
-                        audio_data_buffer_.reserve(output_len);
-                    } else if (audio_data_buffer_.capacity() > output_len * 4) {
-                        // If buffer is more than 4x larger than needed, shrink it
-                        std::vector<uint8_t> new_buffer;
-                        new_buffer.reserve(output_len);
-                        audio_data_buffer_.swap(new_buffer);
+                    // 只在初始化时分配最大 buffer
+                    if (audio_data_buffer_.capacity() < MAX_AUDIO_PACKET_SIZE) {
+                        audio_data_buffer_.reserve(MAX_AUDIO_PACKET_SIZE);
+                    }
+                    // 限制最大长度，防止溢出
+                    if (output_len > MAX_AUDIO_PACKET_SIZE) {
+                        ESP_LOGW(TAG, "Audio packet too large: %u, truncated to %u", (unsigned)output_len, MAX_AUDIO_PACKET_SIZE);
+                        output_len = MAX_AUDIO_PACKET_SIZE;
                     }
                     audio_data_buffer_.resize(output_len);
 
@@ -315,22 +322,11 @@ bool WebsocketProtocol::OpenAudioChannel() {
 
                     if (ret == 0 && actual_len > 0) {
                         if (on_incoming_audio_ != nullptr) {
-                            std::vector<uint8_t> audio_data(audio_data_buffer_.begin(), audio_data_buffer_.begin() + actual_len);
+                            // 直接用 audio_data_buffer_ 的数据生成 packet，避免多余拷贝
                             AudioStreamPacket packet;
-                            packet.payload = std::move(audio_data);
-
-                            if (is_first_packet_) {
-                                is_first_packet_ = false;
-                                // 先把当前 packet 缓存起来
-                                packet_cache_ = std::move(packet);
-                            } else {
-                                if (packet_cache_.has_value()) {
-                                    on_incoming_audio_(std::move(packet_cache_.value()));
-                                    packet_cache_ = std::nullopt;
-                                    vTaskDelay(pdMS_TO_TICKS(10));
-                                }
-                                on_incoming_audio_(std::move(packet));
-                            }
+                            packet.payload.assign(audio_data_buffer_.begin(), audio_data_buffer_.begin() + actual_len);
+                            // 队列长度限制逻辑在下游
+                            on_incoming_audio_(std::move(packet));
                         }
                     }
                 }

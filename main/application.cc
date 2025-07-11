@@ -459,7 +459,7 @@ void Application::Start() {
         Application* app = (Application*)arg;
         app->AudioLoop();
         vTaskDelete(NULL);
-    }, "audio_loop", 4096, this, 8, &audio_loop_task_handle_);
+    }, "audio_loop", 3072, this, 8, &audio_loop_task_handle_);
 #endif
 
     /* Start the clock timer to update the status bar */
@@ -1363,6 +1363,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
                 backlight->RestoreBrightness();
             }
             ToggleChatState();
+            vTaskDelay(pdMS_TO_TICKS(100));
             PlaySound(Lang::Sounds::P3_SUCCESS);
         });
     } else if (device_state_ == kDeviceStateSpeaking) {
