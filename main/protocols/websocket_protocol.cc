@@ -546,7 +546,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
 #if CONFIG_IDF_TARGET_ESP32C2
     message += "\"max_frame_num\":17";
 #else
-    message += "\"max_frame_num\":25";
+    message += "\"max_frame_num\":20";
 #endif
     message += "}";
     message += "},";

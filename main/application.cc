@@ -623,9 +623,9 @@ void Application::Start() {
 
                     auto& board = Board::GetInstance();
 
-                    if (board.GetServo()) {
-                        board.GetServo()->move(0, 180, 500, 10000000);
-                    }
+                    // if (board.GetServo()) {
+                    //     board.GetServo()->move(0, 180, 500, 10000000);
+                    // }
 
                     aborted_ = false;
                     if (device_state_ == kDeviceStateIdle || device_state_ == kDeviceStateListening) {
@@ -639,9 +639,11 @@ void Application::Start() {
             } else if (strcmp(state->valuestring, "stop") == 0) {
                 Schedule([this]() {
                     background_task_->WaitForCompletion();
-                    if (Board::GetInstance().GetServo()) {
-                        Board::GetInstance().GetServo()->stop();
-                    }
+                    auto& board = Board::GetInstance();
+
+                    // if (board.GetServo()) {
+                    //     board.GetServo()->stop();
+                    // }
                     if (device_state_ == kDeviceStateSpeaking) {
                         if (listening_mode_ == kListeningModeManualStop) {
                             SetDeviceState(kDeviceStateIdle);
@@ -841,7 +843,6 @@ void Application::PlayMusic(const char* url) {
         url_str.replace(url_str.size() - 4, 4, ".p3");
     }
     QuitTalking();
-    
 
     player_.setPacketCallback([this](const std::vector<uint8_t>& data) {
         #if CONFIG_IDF_TARGET_ESP32C2
@@ -873,7 +874,7 @@ void Application::PlayMusic(const char* url) {
         args->app->player_.processMP3Stream(args->url.c_str());
         delete args;
         vTaskDelete(NULL);
-    }, "process_mp3_stream", 4096, args, 8, nullptr);
+    }, "process_mp3_stream", 4096, args, 4, nullptr);
 
 }
 
@@ -1217,6 +1218,10 @@ void Application::SetDeviceState(DeviceState state) {
         case kDeviceStateListening:
             display->SetStatus(Lang::Strings::LISTENING);
             display->SetEmotion("relaxed");
+
+            if (board.GetServo()) {
+                board.GetServo()->stop();
+            }
             // Update the IoT states before sending the start listening command
 #if CONFIG_IOT_PROTOCOL_XIAOZHI
             UpdateIotStates();
@@ -1259,6 +1264,9 @@ void Application::SetDeviceState(DeviceState state) {
             display->SetStatus(Lang::Strings::SPEAKING);
             display->SetEmotion("happy");
 
+            if (board.GetServo()) {
+                board.GetServo()->move(0, 180, 500, 10000000);
+            }
 
             if (listening_mode_ != kListeningModeRealtime) {
 #if CONFIG_USE_AUDIO_PROCESSOR
@@ -1332,6 +1340,8 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
         mqtt_client_->sendTraceLog("info", "唤醒词触发");
     }
     ESP_LOGI(TAG, "Wake word invoke: %s", wake_word.c_str());
+    // 内部会判断
+    CancelPlayMusic();
 
     // 按钮模式
     if (chat_mode_ == 0) {
@@ -1348,11 +1358,8 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
             if (backlight) {
                 backlight->RestoreBrightness();
             }
-            PlaySound(Lang::Sounds::P3_SUCCESS);
-            // CancelPlayMusic();
-            vTaskDelay(pdMS_TO_TICKS(300));
             ToggleChatState();
-            
+            PlaySound(Lang::Sounds::P3_SUCCESS);
         });
     } else if (device_state_ == kDeviceStateSpeaking) {
         Schedule([this]() {
