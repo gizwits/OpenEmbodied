@@ -8,10 +8,21 @@
 #define TAG "EyeDisplay"
 
 EyeDisplay::EyeDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
+    int width, int height, int offset_x, int offset_y,
+    bool mirror_x, bool mirror_y,
+    const lv_img_dsc_t* qrcode_img,
+    DisplayFonts fonts)
+: EyeDisplay(panel_io, panel, width, height, offset_x, offset_y, mirror_x, mirror_y, fonts) // 委托构造
+{
+    qrcode_img_ = qrcode_img;
+}
+
+
+EyeDisplay::EyeDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
                      int width, int height, int offset_x, int offset_y,
                      bool mirror_x, bool mirror_y,
                      DisplayFonts fonts)
-    : panel_io_(panel_io), panel_(panel), fonts_(fonts) {
+    : panel_io_(panel_io), panel_(panel), qrcode_img_(nullptr), fonts_(fonts) {
     width_ = width;
     height_ = height;
 
@@ -769,4 +780,24 @@ void EyeDisplay::TestNextEmotion() {
     
     // 移动到下一个表情
     current_index = (current_index + 1) % emotion_count;
+} 
+
+void EyeDisplay::EnterWifiConifg() {
+    ESP_LOGI(TAG, "EnterWifiConifg");
+    if (qrcode_img_) {
+        ESP_LOGI(TAG, "EnterWifiConifg qrcode_img_ is not null");
+        DisplayLockGuard lock(this);
+        auto screen = lv_screen_active();
+        // 设置背景为白色
+        lv_obj_set_style_bg_color(screen, lv_color_white(), 0);
+        // 删除所有子对象（清空屏幕）
+        lv_obj_clean(screen);
+        // 显示二维码图片
+        if (qrcode_img_) {
+            lv_obj_t* img = lv_img_create(screen);
+            lv_img_set_src(img, qrcode_img_);
+            lv_obj_set_style_img_recolor(img, lv_color_hex(0xFCCCE6), 0);
+            lv_obj_center(img);
+        }
+    }
 } 

@@ -59,7 +59,6 @@ void BackgroundTask::BackgroundTaskLoop() {
         lock.unlock();
 
         for (auto& task : tasks) {
-            // 每个任务执行前都重置看门狗
             task();
         }
     }

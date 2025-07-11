@@ -81,6 +81,11 @@ public:
               int width, int height, int offset_x, int offset_y,
               bool mirror_x, bool mirror_y,
               DisplayFonts fonts);
+    EyeDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
+                int width, int height, int offset_x, int offset_y,
+                bool mirror_x, bool mirror_y,
+                const lv_img_dsc_t* qrcode_img,
+                DisplayFonts fonts);
     ~EyeDisplay() override;
 
     bool Lock(int timeout_ms) override;
@@ -96,6 +101,7 @@ public:
     virtual void SetPreviewImage(const lv_img_dsc_t* image) override {}
     virtual void SetTheme(const std::string& theme_name) override {}
     virtual void UpdateStatusBar(bool update_all = false) override {}
+    virtual void EnterWifiConifg() override;
 
     // 测试方法：按序号切换表情
     void TestNextEmotion();
@@ -124,6 +130,7 @@ private:
     void StartConfusedAnimation();
     void StartVertigoAnimation();
 
+
     static void EmotionTask(void* arg);
     void ProcessEmotionChange(const char* emotion);
 
@@ -138,6 +145,8 @@ private:
     lv_obj_t* right_tear_ = nullptr;  // 右眼眼泪
     lv_obj_t* left_heart_ = nullptr;  // 左眼爱心
     lv_obj_t* right_heart_ = nullptr;  // 右眼爱心
+
+    const lv_img_dsc_t* qrcode_img_ = nullptr;
 
     int width_;
     int height_;

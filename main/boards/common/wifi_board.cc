@@ -58,6 +58,10 @@ void WifiBoard::EnterWifiConfigMode() {
     application.Alert(Lang::Strings::WIFI_CONFIG_MODE, hint.c_str(), "", Lang::Sounds::P3_WIFICONFIG);
 
     vTaskDelay(pdMS_TO_TICKS(2000));
+
+    // auto display = Board::GetInstance().GetDisplay();
+    // display->EnterWifiConifg();
+
     application.SetDeviceState(kDeviceStateWifiConfiguring);
 
     auto& wifi_config = WifiConfiguration::GetInstance();

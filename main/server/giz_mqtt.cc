@@ -221,7 +221,7 @@ bool MqttClient::initialize() {
     }
 
     // Create tasks
-    xTaskCreate(messageReceiveHandler, "mqtt_rcv", 3072, this, 5, nullptr);
+    xTaskCreate(messageReceiveHandler, "mqtt_rcv", 4096, this, 5, nullptr);
     xTaskCreate(messageResendHandler, "mqtt_resend", 3072, this, 5, nullptr);
 
     ESP_LOGI(TAG, "Connected to endpoint");

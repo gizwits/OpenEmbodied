@@ -49,8 +49,8 @@ Application::Application() {
     chat_mode_ = settings.GetInt("chat_mode", 1); // 0=按键说话, 1=唤醒词, 2=自然对话
 
     // 初始化看门狗
-    // auto& watchdog = Watchdog::GetInstance();
-    // watchdog.Initialize(20, true);  // 10秒超时，超时后触发系统复位
+    auto& watchdog = Watchdog::GetInstance();
+    watchdog.Initialize(20, true);  // 10秒超时，超时后触发系统复位
 
 #if (defined(CONFIG_IDF_TARGET_ESP32C2) || defined(CONFIG_IDF_TARGET_ESP32C3))
 #if (defined(CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS) && defined(CONFIG_USE_AUDIO_CODEC_DECODE_OPUS))
@@ -406,7 +406,7 @@ void Application::StopListening() {
 }
 
 void Application::Start() {
-    // auto& watchdog = Watchdog::GetInstance();
+    auto& watchdog = Watchdog::GetInstance();
 
     auto& board = Board::GetInstance();
     Auth::getInstance().init();
@@ -448,8 +448,8 @@ void Application::Start() {
 #if CONFIG_USE_AUDIO_PROCESSOR
     xTaskCreatePinnedToCore([](void* arg) {
         Application* app = (Application*)arg;
-        // auto& watchdog = Watchdog::GetInstance();
-        // watchdog.SubscribeTask(xTaskGetCurrentTaskHandle());
+        auto& watchdog = Watchdog::GetInstance();
+        watchdog.SubscribeTask(xTaskGetCurrentTaskHandle());
         app->AudioLoop();
         vTaskDelete(NULL);
     }, "audio_loop", 4096 * 2, this, 8, &audio_loop_task_handle_, 1);
@@ -457,6 +457,8 @@ void Application::Start() {
     // 非 AUDIO_PROCESSOR 就是 6824
     xTaskCreate([](void* arg) {
         Application* app = (Application*)arg;
+        auto& watchdog = Watchdog::GetInstance();
+        watchdog.SubscribeTask(xTaskGetCurrentTaskHandle());
         app->AudioLoop();
         vTaskDelete(NULL);
     }, "audio_loop", 3072, this, 8, &audio_loop_task_handle_);
@@ -815,7 +817,7 @@ void Application::Start() {
     }
     
     // Enter the main event loop
-    // watchdog.SubscribeTask(xTaskGetCurrentTaskHandle());
+    watchdog.SubscribeTask(xTaskGetCurrentTaskHandle());
 
     StartReportTimer();
     MainEventLoop();
@@ -931,10 +933,10 @@ void Application::Schedule(std::function<void()> callback) {
 // If other tasks need to access the websocket or chat state,
 // they should use Schedule to call this function
 void Application::MainEventLoop() {
-    //  auto& watchdog = Watchdog::GetInstance();
+    auto& watchdog = Watchdog::GetInstance();
     const TickType_t timeout = pdMS_TO_TICKS(3000);
     while (true) {
-        // watchdog.Reset();
+        watchdog.Reset();
 
         auto bits = xEventGroupWaitBits(event_group_, SCHEDULE_EVENT, pdTRUE, pdFALSE, timeout);
 
@@ -943,7 +945,7 @@ void Application::MainEventLoop() {
             std::list<std::function<void()>> tasks = std::move(main_tasks_);
             lock.unlock();
             for (auto& task : tasks) {
-                // watchdog.Reset();
+                watchdog.Reset();
                 task();
             }
         }
@@ -953,9 +955,9 @@ void Application::MainEventLoop() {
 // The Audio Loop is used to input and output audio data
 void Application::AudioLoop() {
     auto codec = Board::GetInstance().GetAudioCodec();
-    // auto& watchdog = Watchdog::GetInstance();
+    auto& watchdog = Watchdog::GetInstance();
     while (true) {
-        // watchdog.Reset();
+        watchdog.Reset();
         OnAudioInput();
         if (codec->output_enabled()) {
             OnAudioOutput();
