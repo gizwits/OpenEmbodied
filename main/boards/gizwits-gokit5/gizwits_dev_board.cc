@@ -47,7 +47,7 @@ private:
     void InitializeButtons() {
 
         boot_button_.OnPressRepeat([this](uint16_t count) {
-            if(count >= 5){
+            if(count >= 3){
                 ResetWifiConfiguration();
             } else {
                 Application::GetInstance().ToggleChatState();
