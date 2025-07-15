@@ -952,6 +952,34 @@ void Application::MainEventLoop() {
     }
 }
 
+void Application::ChangeBot(const char* id, const char* voice_id) {
+    
+    if (protocol_) {
+        
+        Schedule([this, id = std::string(id), voice_id = std::string(voice_id)]() {
+            QuitTalking();
+            CancelPlayMusic();
+            auto params = protocol_->GetRoomParams();
+            params.bot_id = id;
+            params.voice_id = voice_id;
+            params.need_play_prologue = true;
+            protocol_->UpdateRoomParams(params);
+    
+            if (protocol_->IsAudioChannelOpened()) {
+                Schedule([this]() {
+                    vTaskDelay(pdMS_TO_TICKS(500));
+                    ToggleChatState();
+                });
+            } else {
+                Schedule([this]() {
+                    ToggleChatState();
+                });
+            }
+        });
+    }
+    
+}
+
 // The Audio Loop is used to input and output audio data
 void Application::AudioLoop() {
     auto codec = Board::GetInstance().GetAudioCodec();

@@ -72,6 +72,7 @@ public:
     void SetDeviceState(DeviceState state);
     void Alert(const char* status, const char* message, const char* emotion = "", const std::string_view& sound = "");
     void DismissAlert();
+    void ChangeBot(const char* id, const char* voice_id);
     void AbortSpeaking(AbortReason reason);
     void PlayMusic(const char* url);
     void CancelPlayMusic();

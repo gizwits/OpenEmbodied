@@ -29,6 +29,7 @@ struct RoomParams {
     std::string voice_lang;
     std::string api_domain;
     std::string user_id;
+    bool need_play_prologue = false;
 };
 
 struct BinaryProtocol3 {

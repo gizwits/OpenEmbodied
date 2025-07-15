@@ -180,7 +180,7 @@ void WebsocketProtocol::CloseAudioChannel() {
         "ws_close_task",
         4096,
         this,
-        5,
+        10,
         &close_task_handle_
     );
     
@@ -201,15 +201,12 @@ void WebsocketProtocol::CloseAudioChannelTask(void* param) {
     
     // 2. 等待当前正在传输的音频数据完成
     // 给一些时间让正在传输的数据完成
-    vTaskDelay(pdMS_TO_TICKS(500));
+    vTaskDelay(pdMS_TO_TICKS(300));
     
     // 3. 发送关闭帧给服务器
     if (self->websocket_ != nullptr) {
         self->websocket_->Close();
     }
-    
-    // 4. 等待连接完全关闭
-    vTaskDelay(pdMS_TO_TICKS(500));
     
     // 5. 清理资源
     if (self->websocket_ != nullptr) {
@@ -485,6 +482,9 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "\"id\":\"" + std::string(event_id) + "\",";
     message += "\"event_type\":\"chat.update\",";
     message += "\"data\":{";
+    if (room_params_.need_play_prologue) {
+        message += "\"need_play_prologue\":true,";
+    }
     message += "\"event_subscriptions\": [";
     message += "\"chat.created\",";
     message += "\"chat.updated\",";

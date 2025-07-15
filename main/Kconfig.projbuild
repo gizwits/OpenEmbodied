@@ -93,6 +93,8 @@ choice BOARD_TYPE
         bool "DFRobot 行空板 k10"
     config BOARD_TYPE_DOIT_AI_01_KIT
         bool "Doit ai 01 kit"
+    config BOARD_TYPE_DOIT_AI_01_KIT_NFC
+        bool "Doit ai 01 kit nfc"
     config BOARD_TYPE_DOIT_ESP32S3_EYE
         bool "Doit 小智眼"
     config BOARD_TYPE_DOIT_ESP32S3_EYE_6824
@@ -358,12 +360,12 @@ config USE_SERVER_AEC
         启用服务器端 AEC，需要服务器支持
 
 config USE_AUDIO_CODEC_ENCODE_OPUS
-    depends on BOARD_TYPE_DOIT_AI_01_KIT || BOARD_TYPE_DOIT_AI_01_KIT_LCD || BOARD_TYPE_DOIT_ESP32S3_EYE_6824
+    depends on BOARD_TYPE_DOIT_AI_01_KIT || BOARD_TYPE_DOIT_AI_01_KIT_LCD || BOARD_TYPE_DOIT_AI_01_KIT_NFC || BOARD_TYPE_DOIT_ESP32S3_EYE_6824
     bool "use audio codec encode opus"
     default y
 
 config USE_AUDIO_CODEC_DECODE_OPUS
-    depends on BOARD_TYPE_DOIT_AI_01_KIT || BOARD_TYPE_DOIT_AI_01_KIT_LCD
+    depends on BOARD_TYPE_DOIT_AI_01_KIT || BOARD_TYPE_DOIT_AI_01_KIT_LCD || BOARD_TYPE_DOIT_AI_01_KIT_NFC
     bool "use audio codec decode opus"
     default n
         

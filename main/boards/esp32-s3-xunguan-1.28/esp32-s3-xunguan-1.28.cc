@@ -88,6 +88,7 @@ class MovecallMojiESP32S3 : public WifiBoard {
 private:
     Button boot_button_;
     EyeDisplay* display_;
+    bool need_power_off_ = false;
     i2c_master_bus_handle_t i2c_bus_;
     // LIS2HH12专用I2C
     i2c_master_bus_handle_t lis2hh12_i2c_bus_;
@@ -209,19 +210,28 @@ private:
             // display_->TestNextEmotion();
         });
         boot_button_.OnLongPress([this]() {
+            ESP_LOGI(TAG, "boot_button_.OnLongPress");
+            auto& app = Application::GetInstance();
+            app.SetDeviceState(kDeviceStateIdle);
+            GetBacklight()->SetBrightness(0, false);
+
             if (first_level ==0) {
                 first_level = 1;
             } else {
-                bool is_charging = isCharging();
-                if (is_charging) {
-                    auto& app = Application::GetInstance();
-                    app.SetDeviceState(kDeviceStateIdle);
-                    GetBacklight()->SetBrightness(0, false);
-                } else {
-                    // 没有充电，关机
-                    gpio_set_level(POWER_GPIO, 0);
-                }
+                need_power_off_ = true;
+                // bool is_charging = isCharging();
+                // if (is_charging) {
+                    
+                // } else {
+                //     // 没有充电，关机
+                //     gpio_set_level(POWER_GPIO, 0);
 
+                // }
+            }
+        });
+        boot_button_.OnPressUp([this]() {
+            if (need_power_off_) {
+                gpio_set_level(POWER_GPIO, 0);
             }
         });
 
@@ -296,6 +306,7 @@ private:
     bool isCharging() {
         int chrg = gpio_get_level(CHARGING_PIN);
         int standby = gpio_get_level(STANDBY_PIN);
+        ESP_LOGI(TAG, "chrg: %d, standby: %d", chrg, standby);
         return chrg == 0 || standby == 0;
     }
 
@@ -311,35 +322,58 @@ public:
         InitializeChargingGpio();
 
         bool is_charging = isCharging();
+        // if (is_charging) {
+        //     // 充电中
+        // } else {
+        //     // 没有充电
+        //     InitializeGpio(POWER_GPIO, true);
+        // }
+        InitializeGpio(POWER_GPIO, true);
+
         ESP_LOGI(TAG, "is_charging: %d", is_charging);
         InitializeI2c();
         InitializeGpio(AUDIO_CODEC_PA_PIN, true);
-        InitializeGpio(DISPLAY_BACKLIGHT_PIN, true);
-        if (is_charging) {
-            // 充电中
-        } else {
-            // 没有充电
-            InitializeGpio(POWER_GPIO, true);
-        }
-
+        // InitializeGpio(DISPLAY_BACKLIGHT_PIN, false);
         InitializeSpi();
         InitializeGc9a01Display();
         InitializeLis2hh12I2c(); // 新增LIS2HH12专用I2C
         InitializeLis2hh12();    // 初始化LIS2HH12
         InitializeButtons();
         InitializeIot();
-        GetBacklight()->RestoreBrightness();
         xTaskCreate(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 4096, this, 5, NULL); // 启动检测任务
         // ESP_LOGI(TAG, "ReadADC2_CH1_Oneshot");
         // ReadADC2_CH1_Oneshot();
+        
 
         int level = 0;
         bool charging = false;
         bool discharging = false;
         GetBatteryLevel(level, charging, discharging);
         ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
+
+        // if (is_charging) {
+        //     GetAudioCodec()->EnableOutput(false);
+        //     GetBacklight()->SetBrightness(0, false);
+        // } else {
+        //     GetBacklight()->RestoreBrightness();
+        // }
+        // GetBacklight()->RestoreBrightness();
+        xTaskCreate(
+            RestoreBacklightTask,      // 任务函数
+            "restore_backlight",       // 名字
+            4096,                      // 栈大小
+            this,                      // 参数传递 this 指针
+            5,                         // 优先级
+            NULL                       // 任务句柄
+        );
     }
 
+    static void RestoreBacklightTask(void* arg) {
+        auto* self = static_cast<MovecallMojiESP32S3*>(arg);
+        vTaskDelay(pdMS_TO_TICKS(400));
+        self->GetBacklight()->RestoreBrightness();
+        vTaskDelete(NULL); // 任务结束时删除自己
+    }
 
     virtual Display* GetDisplay() override {
         return display_;
