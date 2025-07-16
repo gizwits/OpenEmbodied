@@ -1392,9 +1392,9 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
             if (backlight) {
                 backlight->RestoreBrightness();
             }
-            ToggleChatState();
-            vTaskDelay(pdMS_TO_TICKS(100));
             PlaySound(Lang::Sounds::P3_SUCCESS);
+            vTaskDelay(pdMS_TO_TICKS(200));
+            ToggleChatState();
         });
     } else if (device_state_ == kDeviceStateSpeaking) {
         Schedule([this]() {
