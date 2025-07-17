@@ -162,15 +162,16 @@ void Application::CheckNewVersion() {
                 snprintf(buffer, sizeof(buffer), "%d%% %zuKB/s", progress, speed / 1024);
                 display->SetChatMessage("system", buffer);
 
-                if (mqtt_client_) {
-                    if (progress == 100) {
-                        mqtt_client_->sendOtaProgressReport(100, "done");
-                        mqtt_client_->sendTraceLog("info", "固件升级完成");
-    
-                    } else {
-                        mqtt_client_->sendOtaProgressReport(progress, "downloading");
-                    }
+#if CONFIG_USE_GIZWITS_MQTT
+                auto& mqtt_client = MqttClient::getInstance();
+                if (progress == 100) {
+                    mqtt_client.sendOtaProgressReport(100, "done");
+                    mqtt_client.sendTraceLog("info", "固件升级完成");
+
+                } else {
+                    mqtt_client.sendOtaProgressReport(progress, "downloading");
                 }
+#endif
                 
             });
 
@@ -479,8 +480,8 @@ void Application::Start() {
 
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
 #if CONFIG_USE_GIZWITS_MQTT
-    mqtt_client_ = std::make_unique<MqttClient>();
-    mqtt_client_->OnRoomParamsUpdated([this](const RoomParams& params) {
+    auto& mqtt_client = MqttClient::getInstance();
+    mqtt_client.OnRoomParamsUpdated([this](const RoomParams& params) {
         // 判断 protocol_ 是否启动
         // 如果启动了，就断开重新连接
 
@@ -498,7 +499,7 @@ void Application::Start() {
         protocol_->UpdateRoomParams(params);
     });
 
-    if (!mqtt_client_->initialize()) {
+    if (!mqtt_client.initialize()) {
         ESP_LOGE(TAG, "Failed to initialize MQTT client");
         Alert(Lang::Strings::ERROR, Lang::Strings::ERROR, "sad", Lang::Sounds::P3_EXCLAMATION);
         return;
@@ -1370,9 +1371,10 @@ void Application::SendTextToAI(const std::string& text) {
 }
 
 void Application::WakeWordInvoke(const std::string& wake_word) {
-    if (mqtt_client_) {
-        mqtt_client_->sendTraceLog("info", "唤醒词触发");
-    }
+#if CONFIG_USE_GIZWITS_MQTT
+    auto& mqtt_client = MqttClient::getInstance();
+    mqtt_client.sendTraceLog("info", "唤醒词触发");
+#endif
     ESP_LOGI(TAG, "Wake word invoke: %s", wake_word.c_str());
     // 内部会判断
     CancelPlayMusic();
@@ -1456,22 +1458,22 @@ void Application::StartReportTimer() {
     if (report_timer_handle_ != nullptr) {
         return;
     }
+#if CONFIG_USE_GIZWITS_MQTT
     // 先上报一次
-    if (mqtt_client_) {
-        mqtt_client_->ReportTimer();
-        esp_timer_create_args_t report_timer_args = {
-            .callback = [](void* arg) {
-                static_cast<Application*>(arg)->mqtt_client_->ReportTimer();
-            },
-            .arg = this,
-            .dispatch_method = ESP_TIMER_TASK,
-            .name = "report_timer",
-            .skip_unhandled_events = true
-        };
-        esp_timer_create(&report_timer_args, &report_timer_handle_);
-        esp_timer_start_periodic(report_timer_handle_, 60000000); // 1分钟
-    }
-    
+    auto& mqtt_client = MqttClient::getInstance();
+    mqtt_client.ReportTimer();
+    esp_timer_create_args_t report_timer_args = {
+        .callback = [](void* arg) {
+            MqttClient::getInstance().ReportTimer();
+        },
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "report_timer",
+        .skip_unhandled_events = true
+    };
+    esp_timer_create(&report_timer_args, &report_timer_handle_);
+    esp_timer_start_periodic(report_timer_handle_, 60000000); // 1分钟
+#endif
 }
 
 void Application::SetChatMode(int mode) {

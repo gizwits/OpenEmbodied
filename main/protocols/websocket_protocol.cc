@@ -437,6 +437,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 CozeMCPParser::getInstance().handle_mcp(str_data);
             } else if (event_type == "error") {
                 ESP_LOGE(TAG, "Error: %s", str_data.data());
+                MqttClient::getInstance().sendTraceLog("error", str_data.data());
             }
             
             cJSON_Delete(root);

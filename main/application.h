@@ -106,7 +106,6 @@ private:
     std::mutex mutex_;
     std::list<std::function<void()>> main_tasks_;
     std::unique_ptr<Protocol> protocol_;
-    std::unique_ptr<MqttClient> mqtt_client_;
 
     int chat_mode_ = 1;
     bool realtime_chat_is_start_ = false;
