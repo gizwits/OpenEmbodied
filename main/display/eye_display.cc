@@ -800,4 +800,72 @@ void EyeDisplay::EnterWifiConifg() {
             lv_obj_center(img);
         }
     }
+}
+
+void EyeDisplay::EnterOTAMode() {
+    ESP_LOGI(TAG, "EnterOTAMode");
+    
+    DisplayLockGuard lock(this);
+    
+    // 清空屏幕
+    auto screen = lv_screen_active();
+    lv_obj_clean(screen);
+    
+    // 设置黑色背景
+    lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
+    
+    // 创建圆环
+    ota_progress_bar_ = lv_arc_create(screen);
+    lv_obj_set_size(ota_progress_bar_, height_ - 4, height_ - 4);  // 设置大小为屏幕高度的3/8
+    lv_obj_align(ota_progress_bar_, LV_ALIGN_CENTER, 0, 0);  // 居中显示
+    lv_arc_set_value(ota_progress_bar_, 0);  // 设置当前值
+    lv_arc_set_bg_angles(ota_progress_bar_, 0, 360);  // 设置背景弧角度
+    lv_arc_set_rotation(ota_progress_bar_, 270);  // 设置旋转角度，从顶部开始
+    lv_obj_remove_style(ota_progress_bar_, NULL, LV_PART_KNOB);  // 去除旋钮
+    lv_obj_clear_flag(ota_progress_bar_, LV_OBJ_FLAG_CLICKABLE);  // 去除可点击属性
+    
+    // 设置背景弧宽度和颜色
+    lv_obj_set_style_arc_width(ota_progress_bar_, 15, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(ota_progress_bar_, lv_color_black(), LV_PART_MAIN);
+    
+    // 设置前景弧宽度和颜色
+    lv_obj_set_style_arc_width(ota_progress_bar_, 15, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(ota_progress_bar_, lv_color_hex(0xFCCCE6), LV_PART_INDICATOR);
+    
+    // 创建百分比标签
+    ota_number_label_ = lv_label_create(screen);
+    lv_obj_align(ota_number_label_, LV_ALIGN_CENTER, 0, 0);  // 居中显示
+    lv_label_set_text(ota_number_label_, "0%");  // 设置文本
+    lv_obj_set_style_text_font(ota_number_label_, fonts_.text_font, LV_STATE_DEFAULT);  // 设置字体
+    lv_obj_set_style_text_color(ota_number_label_, lv_color_hex(0xFCCCE6), 0);  // 设置文字颜色
+    
+    // 重置进度
+    ota_progress_ = 0;
+    
+    ESP_LOGI(TAG, "OTA mode initialized");
+}
+
+void EyeDisplay::SetOTAProgress(int progress) {
+    if (ota_progress_bar_ == nullptr || ota_number_label_ == nullptr) {
+        ESP_LOGW(TAG, "OTA mode not initialized");
+        return;
+    }
+    
+    // 限制进度范围
+    if (progress < 0) progress = 0;
+    if (progress > 100) progress = 100;
+    
+    ota_progress_ = progress;
+    
+    DisplayLockGuard lock(this);
+    
+    // 更新进度条
+    lv_arc_set_value(ota_progress_bar_, progress);
+    
+    // 更新百分比标签
+    char progress_str[8];
+    snprintf(progress_str, sizeof(progress_str), "%d%%", progress);
+    lv_label_set_text(ota_number_label_, progress_str);
+    
+    ESP_LOGI(TAG, "OTA Progress: %d%%", progress);
 } 

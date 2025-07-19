@@ -30,6 +30,8 @@ public:
     virtual std::string GetTheme() { return current_theme_name_; }
     virtual void UpdateStatusBar(bool update_all = false);
     virtual void EnterWifiConifg() {}
+    virtual void EnterOTAMode() {}
+    virtual void SetOTAProgress(int progress) {}
 
     inline int width() const { return width_; }
     inline int height() const { return height_; }

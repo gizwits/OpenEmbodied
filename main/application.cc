@@ -129,9 +129,13 @@ void Application::CheckNewVersion() {
         retry_delay = 10; // 重置重试延迟时间
 
         if (ota_.HasNewVersion()) {
+
+
             Alert(Lang::Strings::OTA_UPGRADE, Lang::Strings::UPGRADING, "happy", Lang::Sounds::P3_UPGRADE);
 
             vTaskDelay(pdMS_TO_TICKS(3000));
+            
+            display->EnterOTAMode();
 
             SetDeviceState(kDeviceStateUpgrading);
             
@@ -161,6 +165,7 @@ void Application::CheckNewVersion() {
                 char buffer[64];
                 snprintf(buffer, sizeof(buffer), "%d%% %zuKB/s", progress, speed / 1024);
                 display->SetChatMessage("system", buffer);
+                display->SetOTAProgress(progress);
 
 #if CONFIG_USE_GIZWITS_MQTT
                 auto& mqtt_client = MqttClient::getInstance();

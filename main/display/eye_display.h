@@ -102,6 +102,9 @@ public:
     virtual void SetTheme(const std::string& theme_name) override {}
     virtual void UpdateStatusBar(bool update_all = false) override {}
     virtual void EnterWifiConifg() override;
+    virtual void EnterOTAMode() override;
+    virtual void SetOTAProgress(int progress) override;
+
 
     // 测试方法：按序号切换表情
     void TestNextEmotion();
@@ -133,6 +136,11 @@ private:
 
     static void EmotionTask(void* arg);
     void ProcessEmotionChange(const char* emotion);
+
+    int ota_progress_ = 0;
+
+    lv_obj_t* ota_progress_bar_ = nullptr;
+    lv_obj_t* ota_number_label_ = nullptr;
 
     esp_lcd_panel_io_handle_t panel_io_;
     esp_lcd_panel_handle_t panel_;
