@@ -31,15 +31,16 @@ private:
     bool sleep_flag_ = false;
 
     void InitializePowerSaveTimer() {
-        power_save_timer_ = new PowerSaveTimer(-1, 60 * 1, 60 * 3);
+        power_save_timer_ = new PowerSaveTimer(-1, 60 * 2, portMAX_DELAY);
         power_save_timer_->OnEnterSleepMode([this]() {
             ESP_LOGI(TAG, "Enabling sleep mode");
         });
         power_save_timer_->OnExitSleepMode([this]() {
-        });
-        power_save_timer_->OnShutdownRequest([this]() {
             ESP_LOGI(TAG, "Shutting down");
             run_sleep_mode(true);
+        });
+        power_save_timer_->OnShutdownRequest([this]() {
+            
         });
         power_save_timer_->SetEnabled(true);
     }
@@ -51,12 +52,7 @@ private:
             vTaskDelay(pdMS_TO_TICKS(1500));
             ESP_LOGI(TAG, "Sleep mode");
         }
-        vb6824_shutdown();
-        vTaskDelay(pdMS_TO_TICKS(200));
-        // 配置唤醒源
-        esp_deep_sleep_enable_gpio_wakeup(1ULL << BOOT_BUTTON_GPIO, ESP_GPIO_WAKEUP_GPIO_LOW);
-        
-        esp_deep_sleep_start();
+        application.QuitTalking();
     }
 
     void InitializeButtons() {
@@ -80,23 +76,11 @@ private:
             });
         }
 
-      
-        // boot_button_.OnPressUp([this]() {
-        //     ESP_LOGI(TAG, "Press up");
-        //     if(sleep_flag_){
-        //         run_sleep_mode(false);
-        //     }
-        // });
         boot_button_.OnPressRepeat([this](uint16_t count) {
             if(count >= 3){
                 ResetWifiConfiguration();
             }
         });
-        // boot_button_.OnLongPress([this]() {
-        //     ESP_LOGI(TAG, "Long press");
-        //     sleep_flag_ = true;
-        //     gpio_set_level(BUILTIN_LED_GPIO, 1);
-        // });
     }
 
     // 物联网初始化，添加对 AI 可见设备
