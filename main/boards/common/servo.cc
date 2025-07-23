@@ -84,7 +84,7 @@ void Servo::move(int min_angle, int max_angle, int speed_dps, int duration_ms) {
     speed_dps_ = speed_dps;
     duration_ms_ = duration_ms;
     running_ = true;
-    xTaskCreate(servo_task, "servo_task", 2048, this, 5, (TaskHandle_t*)&task_handle_);
+    xTaskCreate(servo_task, "servo_task", 1024, this, 5, (TaskHandle_t*)&task_handle_);
 }
 
 void Servo::stop() {

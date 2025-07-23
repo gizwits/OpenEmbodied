@@ -85,7 +85,7 @@ protected:
 #endif
 
 #ifdef CONFIG_USE_AUDIO_CODEC_DECODE_OPUS
-    virtual int Write(const uint8_t* opus, int samples) = 0
+    virtual int Write(const uint8_t* opus, int samples) = 0;
 #endif
 };
 

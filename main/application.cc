@@ -45,9 +45,7 @@ static const char* const STATE_STRINGS[] = {
 
 Application::Application() {
     event_group_ = xEventGroupCreate();
-    Settings settings("wifi", false);
-    chat_mode_ = settings.GetInt("chat_mode", 1); // 0=按键说话, 1=唤醒词, 2=自然对话
-
+    
     // 初始化看门狗
     auto& watchdog = Watchdog::GetInstance();
     watchdog.Initialize(20, true);  // 10秒超时，超时后触发系统复位
@@ -484,6 +482,9 @@ void Application::Start() {
     protocol_ = std::make_unique<WebsocketProtocol>();
 
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
+
+    Settings settings("wifi", true);
+
 #if CONFIG_USE_GIZWITS_MQTT
     auto& mqtt_client = MqttClient::getInstance();
     mqtt_client.OnRoomParamsUpdated([this](const RoomParams& params) {
@@ -511,7 +512,7 @@ void Application::Start() {
     }
 #else
 
-    Settings settings("wifi", true);
+
     bool need_activation = settings.GetInt("need_activation");
     bool has_authkey = !Auth::getInstance().getAuthKey().empty();
 
@@ -579,6 +580,11 @@ void Application::Start() {
 #endif
 
     CheckNewVersion();
+
+    // 获取当前对话模式
+    chat_mode_ = settings.GetInt("chat_mode", 1); // 0=按键说话, 1=唤醒词, 2=自然对话
+    ESP_LOGI(TAG, "chat_mode_: %d", chat_mode_);
+
     
     // Initialize the protocol
     protocol_->OnNetworkError([this](const std::string& message) {
@@ -1394,13 +1400,14 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
             if (protocol_) {
                 protocol_->SendWakeWordDetected(wake_word); 
             }
+            ResetDecoder();
+            PlaySound(Lang::Sounds::P3_SUCCESS);
+            vTaskDelay(pdMS_TO_TICKS(200));
             auto& board = Board::GetInstance();
             auto backlight = board.GetBacklight();
             if (backlight) {
                 backlight->RestoreBrightness();
             }
-            PlaySound(Lang::Sounds::P3_SUCCESS);
-            vTaskDelay(pdMS_TO_TICKS(200));
             ToggleChatState();
         });
     } else if (device_state_ == kDeviceStateSpeaking) {

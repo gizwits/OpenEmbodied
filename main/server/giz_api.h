@@ -77,7 +77,7 @@ public:
     static int32_t activationDevice(std::function<void(mqtt_config_t*)> callback);
 
     // 获取固件更新信息
-    static int32_t getFirmwareUpdate(const char* hw_version, const char* sw_version, std::function<void(const char*, const char*, const char*)> callback);
+    static int32_t getFirmwareUpdate(const char* hw_version, const char* sw_version, std::function<void(const char*, const char*, const char*, const char*)> callback);
 
     // 创建限流token
     static const char* gatCreateLimitToken(uint8_t *szNonce);

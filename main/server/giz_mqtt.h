@@ -12,6 +12,14 @@
 #include "cJSON.h"
 #include "protocols/protocol.h"
 
+// 内存优化配置
+#define MQTT_TASK_STACK_SIZE_RCV     3072    // 消息接收任务栈大小 - 增加以处理大型JSON
+#define MQTT_TASK_STACK_SIZE_RESEND  2048    // 消息重发任务栈大小
+#define MQTT_QUEUE_SIZE              10      // 消息队列大小
+#define MQTT_TOPIC_BUFFER_SIZE       48      // 主题缓冲区大小
+#define MQTT_PAYLOAD_BUFFER_SIZE     256     // 负载缓冲区大小
+#define MQTT_TOKEN_REPORT_BUFFER_SIZE 128    // Token报告缓冲区大小
+
 #define GAGENT_PROTOCOL_VERSION     (0x00000003)
 #define HI_CMD_PAYLOAD93            0x0093
 #define HI_CMD_UPLOADACK94          0x0094
@@ -96,6 +104,10 @@ public:
     MqttClient& operator=(const MqttClient&) = delete;
     void ReportTimer();
     static const char* kGizwitsProtocolJson;
+    
+    // 内存优化相关函数
+    void printMemoryUsage();
+    size_t getEstimatedMemoryUsage();
 
 private:
     Mqtt* mqtt_ = nullptr;

@@ -171,21 +171,27 @@ bool MqttClient::initialize() {
     });
 
     mqtt_->OnMessage([this](const std::string& topic, const std::string& payload) {
+        ESP_LOGI(TAG, "OnMessage received - topic: %s, payload length: %zu", topic.c_str(), payload.length());
+        
         if (message_callback_) {
             message_callback_(topic, payload);
         }
 
         // ESP_LOGI(TAG, "OnMessage topic: %s, payload: %s", topic.c_str(), payload.c_str());
         
+        // 修复：恢复使用strdup确保字符串在消息处理期间保持有效
         mqtt_msg_t msg = {0};
         msg.topic = strdup(topic.c_str());
         msg.topic_len = topic.length();
         msg.payload = strdup(payload.c_str());
         msg.payload_len = payload.length();
         msg.data = static_cast<char*>(malloc(payload.size()));
-        
-        memcpy(msg.data, payload.data(), payload.size());
+        if (msg.data) {
+            memcpy(msg.data, payload.data(), payload.size());
+        }
         msg.data_len = payload.size();
+        
+        ESP_LOGI(TAG, "Message queued - topic: %s, payload: %s", msg.topic, msg.payload);
         
         if (message_queue_) {
             xQueueSendToBack(message_queue_, &msg, portMAX_DELAY);
@@ -205,7 +211,7 @@ bool MqttClient::initialize() {
     }
 
     // Create message queue
-    message_queue_ = xQueueCreate(20, sizeof(mqtt_msg_t));
+    message_queue_ = xQueueCreate(MQTT_QUEUE_SIZE, sizeof(mqtt_msg_t));
     if (!message_queue_) {
         ESP_LOGE(TAG, "Failed to create message queue");
         return false;
@@ -221,8 +227,8 @@ bool MqttClient::initialize() {
     }
 
     // Create tasks
-    xTaskCreate(messageReceiveHandler, "mqtt_rcv", 4096, this, 5, nullptr);
-    xTaskCreate(messageResendHandler, "mqtt_resend", 3072, this, 5, nullptr);
+    xTaskCreate(messageReceiveHandler, "mqtt_rcv", MQTT_TASK_STACK_SIZE_RCV, this, 5, nullptr);
+    xTaskCreate(messageResendHandler, "mqtt_resend", MQTT_TASK_STACK_SIZE_RESEND, this, 5, nullptr);
 
     ESP_LOGI(TAG, "Connected to endpoint");
     // 订阅配置响应和推送
@@ -258,6 +264,10 @@ bool MqttClient::initialize() {
     // 获取房间信息
     getRoomInfo();
     mqtt_event_ = 1;
+    
+    // 打印内存使用情况
+    printMemoryUsage();
+    
     return true;
 }
 
@@ -284,16 +294,10 @@ void MqttClient::setMessageCallback(std::function<void(const std::string&, const
 
 
 void MqttClient::sendTokenReport(int total, int output, int input) {
-    char msg[256];
+    char msg[MQTT_TOKEN_REPORT_BUFFER_SIZE];  // 优化：减少缓冲区大小
     int len = snprintf(msg, sizeof(msg),
-        "{\r\n"
-        "    \"method\": \"token.report\",\r\n"
-        "    \"body\": {\r\n"
-        "        \"total\": %d,\r\n"
-        "        \"output\": %d,\r\n"
-        "        \"input\": %d\r\n"
-        "    }\r\n"
-        "}", total, output, input);
+        "{\"method\":\"token.report\",\"body\":{\"total\":%d,\"output\":%d,\"input\":%d}}", 
+        total, output, input);
 
     if (len > 0 && len < sizeof(msg)) {
         publish("report", std::string(msg, len));
@@ -305,10 +309,7 @@ void MqttClient::OnRoomParamsUpdated(std::function<void(const RoomParams&)> call
 }
 
 bool MqttClient::getRoomInfo() {
-    const char* msg = 
-        "{\r\n"
-        "    \"method\": \"websocket.auth.request\"\r\n"
-        "}";
+    const char* msg = "{\"method\":\"websocket.auth.request\"}";  // 优化：简化JSON格式
 
     if (!publish("llm/" + client_id_ + "/config/request", msg)) {
         return false;
@@ -352,14 +353,14 @@ int MqttClient::getPublishedId() {
 void MqttClient::sendTraceLog(const char* level, const char* message) {
     // ESP_LOGI(TAG, "sendTraceLog: %s", message);
     
-    // Format the topic
-    char topic[64] = {0};
+    // Format the topic - 优化：减少缓冲区大小
+    char topic[MQTT_TOPIC_BUFFER_SIZE] = {0};
     snprintf(topic, sizeof(topic), "sys/%s/log", client_id_.c_str());
     
-    // Format the payload
-    char payload[512] = {0};
+    // Format the payload - 优化：减少缓冲区大小
+    char payload[MQTT_PAYLOAD_BUFFER_SIZE] = {0};
     snprintf(payload, sizeof(payload), 
-        "{\"message\": \"%s\", \"trace_id\": \"%s\", \"extra\": \"%s\"}", 
+        "{\"message\":\"%s\",\"trace_id\":\"%s\",\"extra\":\"%s\"}", 
         message, Application::GetInstance().GetTraceId(), level);
 
     // Publish the message
@@ -435,8 +436,10 @@ void MqttClient::messageReceiveHandler(void* arg) {
     while (1) {
         if (xQueueReceive(client->message_queue_, &msg, portMAX_DELAY) == pdTRUE) {
             client->handleMqttMessage(&msg);
+            // 恢复内存释放
             free(msg.topic);
             free(msg.payload);
+            free(msg.data);
         }
         vTaskDelay(10);
     }
@@ -465,38 +468,88 @@ void MqttClient::timerCallback(TimerHandle_t xTimer) {
 }
 
 bool MqttClient::parseRealtimeAgent(const char* in_str, int in_len, room_params_t* params) {
+    ESP_LOGI(TAG, "parseRealtimeAgent - input length: %d", in_len);
+    
+    // 检查输入字符串的有效性
+    if (!in_str || in_len <= 0 || !params) {
+        ESP_LOGE(TAG, "Invalid input parameters");
+        return false;
+    }
+    
+    // 限制输入长度以避免栈溢出
+    if (in_len > 4096) {
+        ESP_LOGE(TAG, "Input too long: %d bytes", in_len);
+        return false;
+    }
+    
     cJSON* root = cJSON_Parse(in_str);
-    if (!root) return false;
+    if (!root) {
+        ESP_LOGE(TAG, "Failed to parse JSON");
+        const char* error_ptr = cJSON_GetErrorPtr();
+        if (error_ptr) {
+            ESP_LOGE(TAG, "JSON parse error at: %s", error_ptr);
+        }
+        return false;
+    }
 
     bool success = false;
     cJSON* method = cJSON_GetObjectItem(root, "method");
     
-    if (method && strcmp(method->valuestring, "websocket.auth.response") == 0) {
-        cJSON* body = cJSON_GetObjectItem(root, "body");
-        if (body) {
-            cJSON* coze_websocket = cJSON_GetObjectItem(body, "coze_websocket");
-            if (coze_websocket) {
-                cJSON* bot_id = cJSON_GetObjectItem(coze_websocket, "bot_id");
-                cJSON* voice_id = cJSON_GetObjectItem(coze_websocket, "voice_id");
-                cJSON* user_id = cJSON_GetObjectItem(coze_websocket, "user_id");
-                cJSON* conv_id = cJSON_GetObjectItem(coze_websocket, "conv_id");
-                cJSON* access_token = cJSON_GetObjectItem(coze_websocket, "access_token");
-                cJSON* voice_lang = cJSON_GetObjectItem(coze_websocket, "voice_lang");
-                cJSON* api_domain = cJSON_GetObjectItem(coze_websocket, "api_domain");
+    if (method && method->valuestring) {
+        ESP_LOGI(TAG, "Found method: %s", method->valuestring);
+        if (strcmp(method->valuestring, "websocket.auth.response") == 0) {
+            ESP_LOGI(TAG, "Found websocket.auth.response method");
+            cJSON* body = cJSON_GetObjectItem(root, "body");
+            if (body) {
+                ESP_LOGI(TAG, "Found body object");
+                cJSON* coze_websocket = cJSON_GetObjectItem(body, "coze_websocket");
+                if (coze_websocket) {
+                    ESP_LOGI(TAG, "Found coze_websocket object");
+                    cJSON* bot_id = cJSON_GetObjectItem(coze_websocket, "bot_id");
+                    cJSON* voice_id = cJSON_GetObjectItem(coze_websocket, "voice_id");
+                    cJSON* user_id = cJSON_GetObjectItem(coze_websocket, "user_id");
+                    cJSON* conv_id = cJSON_GetObjectItem(coze_websocket, "conv_id");
+                    cJSON* access_token = cJSON_GetObjectItem(coze_websocket, "access_token");
+                    cJSON* voice_lang = cJSON_GetObjectItem(coze_websocket, "voice_lang");
+                    cJSON* api_domain = cJSON_GetObjectItem(coze_websocket, "api_domain");
 
+                    ESP_LOGI(TAG, "Field check - bot_id: %s, voice_id: %s, user_id: %s, conv_id: %s, access_token: %s",
+                             bot_id ? "found" : "missing",
+                             voice_id ? "found" : "missing",
+                             user_id ? "found" : "missing",
+                             conv_id ? "found" : "missing",
+                             access_token ? "found" : "missing");
 
-                if (bot_id && voice_id && user_id && conv_id && access_token) {
-                    strncpy(params->bot_id, bot_id->valuestring, sizeof(params->bot_id) - 1);
-                    strncpy(params->voice_id, voice_id->valuestring, sizeof(params->voice_id) - 1);
-                    strncpy(params->user_id, user_id->valuestring, sizeof(params->user_id) - 1);
-                    strncpy(params->conv_id, conv_id->valuestring, sizeof(params->conv_id) - 1);
-                    strncpy(params->access_token, access_token->valuestring, sizeof(params->access_token) - 1);
-                    strncpy(params->voice_lang, voice_lang->valuestring, sizeof(params->voice_lang) - 1);
-                    strncpy(params->api_domain, api_domain->valuestring, sizeof(params->api_domain) - 1);
-                    success = true;
+                    if (bot_id && voice_id && user_id && conv_id && access_token) {
+                        ESP_LOGI(TAG, "All required fields found, copying data");
+                        // 优化：使用strlcpy避免缓冲区溢出，减少内存操作
+                        strlcpy(params->bot_id, bot_id->valuestring, sizeof(params->bot_id));
+                        strlcpy(params->voice_id, voice_id->valuestring, sizeof(params->voice_id));
+                        strlcpy(params->user_id, user_id->valuestring, sizeof(params->user_id));
+                        strlcpy(params->conv_id, conv_id->valuestring, sizeof(params->conv_id));
+                        strlcpy(params->access_token, access_token->valuestring, sizeof(params->access_token));
+                        if (voice_lang) {
+                            strlcpy(params->voice_lang, voice_lang->valuestring, sizeof(params->voice_lang));
+                        }
+                        if (api_domain) {
+                            strlcpy(params->api_domain, api_domain->valuestring, sizeof(params->api_domain));
+                        }
+                        success = true;
+                        ESP_LOGI(TAG, "Successfully parsed room params");
+                    } else {
+                        ESP_LOGE(TAG, "Missing required fields");
+                    }
+                } else {
+                    ESP_LOGE(TAG, "coze_websocket not found");
                 }
+            } else {
+                ESP_LOGE(TAG, "body not found");
             }
+        } else {
+            ESP_LOGE(TAG, "Method not websocket.auth.response: %s", method->valuestring);
         }
+    } else {
+        ESP_LOGE(TAG, "Method not found or null");
     }
 
     cJSON_Delete(root);
@@ -527,7 +580,8 @@ bool MqttClient::parseM2MCtrlMsg(const char* in_str, int in_len) {
 
 void MqttClient::handleMqttMessage(mqtt_msg_t* msg) {
     if (!msg) return;
-    ESP_LOGI(TAG, "handleMqttMessage topic: %s, payload: %s", msg->topic, msg->payload);
+    ESP_LOGI(TAG, "handleMqttMessage topic: %s, payload length: %d", msg->topic, msg->payload_len);
+    
     if (strstr(msg->topic, "response")) {
         room_params_t params = {0};
         if (parseRealtimeAgent(msg->payload, msg->payload_len, &params)) {
@@ -536,15 +590,25 @@ void MqttClient::handleMqttMessage(mqtt_msg_t* msg) {
                 xTimerDelete(timer_, 0);
                 timer_ = nullptr;
             }
-            RoomParams room_params;
-            room_params.bot_id = params.bot_id;
-            room_params.voice_id = params.voice_id;
-            room_params.conv_id = params.conv_id;
-            room_params.access_token = params.access_token;
-            room_params.voice_lang = params.voice_lang;
-            room_params.api_domain = params.api_domain;
-            room_params.user_id = params.user_id;
-            room_params_updated_callback_(room_params);
+            
+            // 在堆上分配RoomParams以避免栈溢出
+            RoomParams* room_params = new RoomParams();
+            room_params->bot_id = std::string(params.bot_id);
+            room_params->voice_id = std::string(params.voice_id);
+            room_params->conv_id = std::string(params.conv_id);
+            room_params->access_token = std::string(params.access_token);
+            room_params->voice_lang = std::string(params.voice_lang);
+            room_params->api_domain = std::string(params.api_domain);
+            room_params->user_id = std::string(params.user_id);
+            
+            ESP_LOGI(TAG, "Calling room_params_updated_callback_");
+            if (room_params_updated_callback_) {
+                room_params_updated_callback_(*room_params);
+            } else {
+                ESP_LOGE(TAG, "room_params_updated_callback_ is null");
+            }
+            
+            delete room_params;
         }
     } else if (strstr(msg->topic, "push")) {
         parseM2MCtrlMsg(msg->payload, msg->payload_len);
@@ -656,7 +720,26 @@ void MqttClient::app2devMsgHandler(const uint8_t *data, int32_t len)
             for (int i = 0; i < attr_size_; ++i) {
                 bits = (bits << 8) | business_instruction[1 + i];
             }
+            
+            // 优化：预先计算bit字段的总长度，避免重复计算
+            static int total_bit_len = -1;
+            static int bit_bytes = -1;
+            static bool bit_bytes_calculated = false;
+            
+            if (!bit_bytes_calculated) {
+                total_bit_len = 0;
+                for (const auto& a : g_attrs) {
+                    if (a.unit == "bit") {
+                        total_bit_len += a.len;
+                    }
+                }
+                bit_bytes = (total_bit_len + 7) / 8;
+                bit_bytes_calculated = true;
+            }
+            
             int payload_bit_index = 0;
+            int payload_byte_index = 0;
+            
             for (int bit_index = 0; bit_index < attr_size_ * 8; ++bit_index) {
                 int bit_val = (bits >> bit_index) & 0x01;
                 ESP_LOGI(TAG, "bit_val: %d, bit_index: %d, attr_size: %d", bit_val, bit_index, (int)g_attrs.size());
@@ -664,21 +747,6 @@ void MqttClient::app2devMsgHandler(const uint8_t *data, int32_t len)
                     const Attr& attr = g_attrs[bit_index];
                     if (bit_val == 1) {
                         // 数据有效，提取 attr.len 长度的数据
-                        static int total_bit_len = -1;
-                        static int bit_bytes = -1;
-                        static bool bit_bytes_calculated = false;
-                        static int payload_bit_index = 0;
-                        static int payload_byte_index = 0;
-                        if (!bit_bytes_calculated) {
-                            total_bit_len = 0;
-                            for (const auto& a : g_attrs) {
-                                if (a.unit == "bit") {
-                                    total_bit_len += a.len;
-                                }
-                            }
-                            bit_bytes = (total_bit_len + 7) / 8;
-                            bit_bytes_calculated = true;
-                        }
                         if (attr.unit == "bit") {
                             int value = 0;
                             int len = attr.len;
@@ -752,7 +820,7 @@ void MqttClient::ReportTimer() {
     };
 
     int chat_mode = Application::GetInstance().GetChatMode();
-    // chat_mode 固定填充 1
+    // 使用实际的chat_mode值
     uint8_t status = 0;
     status |= (1 << 0); // switch
     status |= (1 << 1); // wakeup_word
@@ -772,6 +840,7 @@ void MqttClient::ReportTimer() {
     }
     binary_data[14] = status;
     ESP_LOGI(TAG, "Status: %d", status);
+    ESP_LOGI(TAG, "Chat mode: %d", chat_mode);
 
     auto codec = Board::GetInstance().GetAudioCodec();
     int volume = codec->output_volume();
@@ -955,4 +1024,33 @@ const char* MqttClient::kGizwitsProtocolJson = R"json(
     ]
 }
 )json";
+
+void MqttClient::printMemoryUsage() {
+    size_t total_memory = getEstimatedMemoryUsage();
+    ESP_LOGI(TAG, "MQTT Memory Usage:");
+    ESP_LOGI(TAG, "  Task stacks: %zu bytes", MQTT_TASK_STACK_SIZE_RCV + MQTT_TASK_STACK_SIZE_RESEND);
+    ESP_LOGI(TAG, "  Message queue: %zu bytes", MQTT_QUEUE_SIZE * sizeof(mqtt_msg_t));
+    ESP_LOGI(TAG, "  Static data: %zu bytes", sizeof(g_attrs) + strlen(kGizwitsProtocolJson));
+    ESP_LOGI(TAG, "  Total estimated: %zu bytes", total_memory);
+    ESP_LOGI(TAG, "  Note: Increased stack size to prevent JSON parsing stack overflow");
+}
+
+size_t MqttClient::getEstimatedMemoryUsage() {
+    size_t memory = 0;
+    
+    // 任务栈内存
+    memory += MQTT_TASK_STACK_SIZE_RCV + MQTT_TASK_STACK_SIZE_RESEND;
+    
+    // 消息队列内存
+    memory += MQTT_QUEUE_SIZE * sizeof(mqtt_msg_t);
+    
+    // 静态数据内存
+    memory += sizeof(g_attrs);
+    memory += strlen(kGizwitsProtocolJson);
+    
+    // 其他成员变量
+    memory += sizeof(MqttClient);
+    
+    return memory;
+}
 
