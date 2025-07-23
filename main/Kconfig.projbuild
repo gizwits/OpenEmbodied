@@ -71,28 +71,16 @@ choice BOARD_TYPE
         bool "ESP BOX"
     config BOARD_TYPE_ESP_BOX_LITE
         bool "ESP BOX Lite"
-    config BOARD_TYPE_KEVIN_BOX_1
-        bool "Kevin Box 1"
-    config BOARD_TYPE_KEVIN_BOX_2
-        bool "Kevin Box 2"
-    config BOARD_TYPE_KEVIN_C3
-        bool "Kevin C3"
-    config BOARD_TYPE_KEVIN_SP_V3_DEV
-        bool "Kevin SP V3开发板"
-    config BOARD_TYPE_KEVIN_SP_V4_DEV
-        bool "Kevin SP V4开发板"
-    config BOARD_TYPE_KEVIN_YUYING_313LCD
-        bool "鱼鹰科技3.13LCD开发板"
     config BOARD_TYPE_GIZWITS_GOKIT5
         bool "机智云ESP32-S3 Gokit5"
     config BOARD_TYPE_GIZWITS_C2_6824
         bool "机智云ESP32-C2 6824"
+    config BOARD_TYPE_GIZWITS_C2_6824_TOY
+        bool "机智云ESP32-C2 6824 玩具"
     config BOARD_TYPE_LICHUANG_DEV
         bool "立创·实战派ESP32-S3开发板"
     config BOARD_TYPE_LICHUANG_C3_DEV
         bool "立创·实战派ESP32-C3开发板"
-    config BOARD_TYPE_DF_K10
-        bool "DFRobot 行空板 k10"
     config BOARD_TYPE_DOIT_AI_01_KIT
         bool "Doit ai 01 kit"
     config BOARD_TYPE_DOIT_AI_01_KIT_NFC
@@ -161,16 +149,6 @@ choice BOARD_TYPE
          bool "Movecall Moji 小智AI衍生版"
     config BOARD_TYPE_MOVECALL_CUICAN_ESP32S3
          bool "Movecall CuiCan 璀璨·AI吊坠"
-    config BOARD_TYPE_ATK_DNESP32S3
-        bool "正点原子DNESP32S3开发板"
-    config BOARD_TYPE_ATK_DNESP32S3_BOX
-        bool "正点原子DNESP32S3-BOX"
-    config BOARD_TYPE_ATK_DNESP32S3_BOX0
-        bool "正点原子DNESP32S3-BOX0"
-    config BOARD_TYPE_ATK_DNESP32S3M_WIFI
-        bool "正点原子DNESP32S3M-WIFI"
-    config BOARD_TYPE_ATK_DNESP32S3M_4G
-        bool "正点原子DNESP32S3M-4G"
     config BOARD_TYPE_DU_CHATX
         bool "嘟嘟开发板CHATX(wifi)"
     config BOARD_TYPE_ESP32S3_Taiji_Pi
@@ -362,12 +340,12 @@ config USE_SERVER_AEC
         启用服务器端 AEC，需要服务器支持
 
 config USE_AUDIO_CODEC_ENCODE_OPUS
-    depends on BOARD_TYPE_GIZWITS_C2_6824 || BOARD_TYPE_DOIT_AI_01_KIT || BOARD_TYPE_DOIT_AI_01_KIT_LCD || BOARD_TYPE_DOIT_AI_01_KIT_NFC || BOARD_TYPE_DOIT_ESP32S3_EYE_6824
+    depends on BOARD_TYPE_GIZWITS_C2_6824_TOY || BOARD_TYPE_GIZWITS_C2_6824 || BOARD_TYPE_DOIT_AI_01_KIT || BOARD_TYPE_DOIT_AI_01_KIT_LCD || BOARD_TYPE_DOIT_AI_01_KIT_NFC || BOARD_TYPE_DOIT_ESP32S3_EYE_6824
     bool "use audio codec encode opus"
     default y
 
 config USE_AUDIO_CODEC_DECODE_OPUS
-    depends on BOARD_TYPE_GIZWITS_C2_6824 || BOARD_TYPE_DOIT_AI_01_KIT || BOARD_TYPE_DOIT_AI_01_KIT_LCD || BOARD_TYPE_DOIT_AI_01_KIT_NFC || BOARD_TYPE_DOIT_ESP32S3_EYE_6824
+    depends on BOARD_TYPE_GIZWITS_C2_6824_TOY || BOARD_TYPE_GIZWITS_C2_6824 || BOARD_TYPE_DOIT_AI_01_KIT || BOARD_TYPE_DOIT_AI_01_KIT_LCD || BOARD_TYPE_DOIT_AI_01_KIT_NFC || BOARD_TYPE_DOIT_ESP32S3_EYE_6824
     bool "use audio codec decode opus"
     default n
         
