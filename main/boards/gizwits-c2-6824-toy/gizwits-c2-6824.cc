@@ -26,6 +26,15 @@ class CustomBoard : public WifiBoard {
 private:
     Button boot_button_;
     VbAduioCodec audio_codec;
+    Button volume_up_button_;
+    Button volume_down_button_;
+    Button prev_button_;
+    Button next_button_;
+
+
+    int64_t prev_last_click_time_ = 0;
+    int64_t next_last_click_time_ = 0;
+
 
     void InitializeButtons() {
 
