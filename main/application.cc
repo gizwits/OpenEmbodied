@@ -497,12 +497,17 @@ void Application::Start() {
             Schedule([this]() {
                 QuitTalking();
                 PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
+
             });
         } else {
             if (!protocol_->GetRoomParams().access_token.empty()) {
                 PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
             }
         }
+
+        Schedule([this]() {
+            MqttClient::getInstance().sendTraceLog("info", "获取配置智能体成功");
+        });
         protocol_->UpdateRoomParams(params);
     });
 
@@ -591,6 +596,11 @@ void Application::Start() {
     protocol_->OnNetworkError([this](const std::string& message) {
         SetDeviceState(kDeviceStateIdle);
         Alert(Lang::Strings::ERROR, message.c_str(), "sad", Lang::Sounds::P3_EXCLAMATION);
+
+        Schedule([this, message]() {
+            std::string messageData = "socket 通道错误: " + message;
+            MqttClient::getInstance().sendTraceLog("info", messageData.c_str());
+        });
     });
     protocol_->OnIncomingAudio([this](AudioStreamPacket&& packet) {
 #if CONFIG_IDF_TARGET_ESP32C2
@@ -611,6 +621,10 @@ void Application::Start() {
         }
         SetDecodeSampleRate(protocol_->server_sample_rate(), protocol_->server_frame_duration());
 
+        Schedule([this]() {
+            MqttClient::getInstance().sendTraceLog("info", "socket 通道打开");
+        });
+
 // #if CONFIG_IOT_PROTOCOL_XIAOZHI
 //         auto& thing_manager = iot::ThingManager::GetInstance();
 //         protocol_->SendIotDescriptors(thing_manager.GetDescriptorsJson());
@@ -621,11 +635,14 @@ void Application::Start() {
 // #endif
     });
     protocol_->OnAudioChannelClosed([this, &board]() {
+
         board.SetPowerSaveMode(true);
         Schedule([this]() {
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
             SetDeviceState(kDeviceStateIdle);
+
+            MqttClient::getInstance().sendTraceLog("info", "socket 通道关闭");
         });
     });
     protocol_->OnIncomingJson([this, display](const cJSON* root) {
@@ -1222,6 +1239,11 @@ void Application::SetDeviceState(DeviceState state) {
     if (device_state_ == state) {
         return;
     }
+
+    Schedule([this, state]() {
+        std::string message = "SetDeviceState: " + std::string(STATE_STRINGS[state]);
+        MqttClient::getInstance().sendTraceLog("info", message.c_str());
+    });
     
     clock_ticks_ = 0;
     auto previous_state = device_state_;

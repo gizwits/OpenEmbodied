@@ -345,6 +345,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
             } else if (event_type == "conversation.chat.created") {
                 auto id = cJSON_GetObjectItem(root, "id");
                 ESP_LOGI(TAG, "conversation.chat.created: %s", id->valuestring);
+                std::string message = "conversation.chat.created: " + std::string(id->valuestring);
+                MqttClient::getInstance().sendTraceLog("info", message.c_str());
                 
             } else if (event_type == "conversation.audio_transcript.update") {
                 auto data_json = cJSON_GetObjectItem(root, "data");
@@ -364,6 +366,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 }
             } else if (event_type == "conversation.chat.in_progress") {
                 ESP_LOGI(TAG, "conversation.chat.in_progress");
+                MqttClient::getInstance().sendTraceLog("info", "conversation.chat.in_progress");
+
                 is_detect_emotion_ = false;
                 is_first_packet_ = true;
 
@@ -383,6 +387,9 @@ bool WebsocketProtocol::OpenAudioChannel() {
             } else if (event_type == "conversation.chat.completed" || event_type == "conversation.audio.completed") {
                 is_first_packet_ = false;
 
+                std::string messageData = "conversation.chat.completed or conversation.audio.completed";
+                MqttClient::getInstance().sendTraceLog("info", messageData.c_str());
+
                 message_buffer_.clear();
                 message_buffer_ = "{";
                 message_buffer_ += "\"type\":\"tts\",";
@@ -395,10 +402,14 @@ bool WebsocketProtocol::OpenAudioChannel() {
                     cJSON_Delete(message_json);
                 }
             } else if (event_type == "input_audio_buffer.speech_started") {
+
+                MqttClient::getInstance().sendTraceLog("info", "input_audio_buffer.speech_started");
+
                 auto& app = Application::GetInstance();
                 ESP_LOGI(TAG, "input_audio_buffer.speech_started");
                 app.AbortSpeaking(kAbortReasonNone);
             } else if (event_type == "input_audio_buffer.speech_stopped") {
+                MqttClient::getInstance().sendTraceLog("info", "input_audio_buffer.speech_stopped");
                 ESP_LOGI(TAG, "input_audio_buffer.speech_stopped");
             } else if (event_type == "conversation.message.delta") {
                 auto data_json = cJSON_GetObjectItem(root, "data");
