@@ -351,33 +351,17 @@ int MqttClient::getPublishedId() {
 
 
 void MqttClient::sendTraceLog(const char* level, const char* message) {
-    if (mqtt_ == nullptr || mqtt_event_ == 0) {
-        return;
-    }
+    // ESP_LOGI(TAG, "sendTraceLog: %s", message);
     
     // Format the topic - 优化：减少缓冲区大小
     char topic[MQTT_TOPIC_BUFFER_SIZE] = {0};
     snprintf(topic, sizeof(topic), "sys/%s/log", client_id_.c_str());
     
-    // 截断过长的消息
-    std::string truncated_message = message;
-    if (truncated_message.length() > MQTT_LOG_MESSAGE_MAX_LENGTH) {
-        truncated_message = truncated_message.substr(0, MQTT_LOG_MESSAGE_MAX_LENGTH - 3) + "...";
-        ESP_LOGW(TAG, "Message truncated from %zu to %d characters", strlen(message), MQTT_LOG_MESSAGE_MAX_LENGTH);
-    }
-    
-    // 获取当前时间并格式化为时分秒
-    time_t now = time(nullptr);
-    struct tm* timeinfo = localtime(&now);
-    char time_str[16] = {0};
-    snprintf(time_str, sizeof(time_str), "%02d:%02d:%02d", 
-             timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
-    
     // Format the payload - 优化：减少缓冲区大小
     char payload[MQTT_PAYLOAD_BUFFER_SIZE] = {0};
     snprintf(payload, sizeof(payload), 
-        "{\"message\":\"%s\",\"trace_id\":\"%s\",\"extra\":\"%s\",\"time\":\"%s\"}", 
-        truncated_message.c_str(), Application::GetInstance().GetTraceId(), level, time_str);
+        "{\"message\":\"%s\",\"trace_id\":\"%s\",\"extra\":\"%s\"}", 
+        message, Application::GetInstance().GetTraceId(), level);
 
     // Publish the message
     if (!publish(topic, std::string(payload))) {

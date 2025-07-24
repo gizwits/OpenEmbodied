@@ -28,7 +28,7 @@ private:
     Button* rec_button_ = nullptr;
     PowerSaveTimer* power_save_timer_;
     VbAduioCodec audio_codec;
-    // Servo servo_;
+    Servo servo_;
     bool sleep_flag_ = false;
 
     void InitializePowerSaveTimer() {
@@ -75,37 +75,28 @@ private:
                 app.StartListening();
             });
         } else {
-            // boot_button_.OnClick([this]() {
-            //     auto &app = Application::GetInstance();
-            //     app.ToggleChatState();
-            // });
+            boot_button_.OnClick([this]() {
+                auto &app = Application::GetInstance();
+                app.ToggleChatState();
+            });
         }
 
       
-        // boot_button_.OnPressUp([this]() {
-        //     ESP_LOGI(TAG, "Press up");
-        //     if(sleep_flag_){
-        //         run_sleep_mode(false);
-        //     }
-        // });
-        // boot_button_.OnPressRepeat([this](uint16_t count) {
-        //     if(count >= 3){
-        //         ResetWifiConfiguration();
-        //     }
-        // });
-        // boot_button_.OnLongPress([this]() {
-        //     ESP_LOGI(TAG, "Long press");
-        //     sleep_flag_ = true;
-        //     gpio_set_level(BUILTIN_LED_GPIO, 1);
-        // });
         boot_button_.OnPressUp([this]() {
-            auto &app = Application::GetInstance();
-            app.StopListening();
+            ESP_LOGI(TAG, "Press up");
+            if(sleep_flag_){
+                run_sleep_mode(false);
+            }
         });
-        boot_button_.OnPressDown([this]() {
-            auto &app = Application::GetInstance();
-            app.AbortSpeaking(kAbortReasonNone);
-            app.StartListening();
+        boot_button_.OnPressRepeat([this](uint16_t count) {
+            if(count >= 3){
+                ResetWifiConfiguration();
+            }
+        });
+        boot_button_.OnLongPress([this]() {
+            ESP_LOGI(TAG, "Long press");
+            sleep_flag_ = true;
+            gpio_set_level(BUILTIN_LED_GPIO, 1);
         });
     }
 
@@ -116,7 +107,7 @@ private:
     }
 
 public:
-    CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO){      
+    CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO), servo_(BUILTIN_SERVO_GPIO, 0){      
         gpio_config_t io_conf = {};
         io_conf.pin_bit_mask = (1ULL << BUILTIN_LED_GPIO);
         io_conf.mode = GPIO_MODE_OUTPUT;
@@ -126,7 +117,7 @@ public:
         gpio_config(&io_conf);
         gpio_set_level(BUILTIN_LED_GPIO, 0);
 
-        // servo_.begin();
+        servo_.begin();
 
         InitializePowerSaveTimer();       
         InitializeButtons();
@@ -145,9 +136,9 @@ public:
         });
     }
 
-    // virtual Servo* GetServo() override {
-    //     return &servo_;
-    // }
+    virtual Servo* GetServo() override {
+        return &servo_;
+    }
 
     virtual AudioCodec* GetAudioCodec() override {
         return &audio_codec;

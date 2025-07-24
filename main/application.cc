@@ -496,13 +496,9 @@ void Application::Start() {
             Schedule([this]() {
                 QuitTalking();
                 PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
-                auto& mqtt_client = MqttClient::getInstance();
-                mqtt_client.sendTraceLog("info", "更新智能体参数");
             });
         } else {
             if (!protocol_->GetRoomParams().access_token.empty()) {
-                auto& mqtt_client = MqttClient::getInstance();
-                mqtt_client.sendTraceLog("info", "首次获取智能体参数");
                 PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
             }
         }
@@ -593,9 +589,6 @@ void Application::Start() {
     // Initialize the protocol
     protocol_->OnNetworkError([this](const std::string& message) {
         SetDeviceState(kDeviceStateIdle);
-        auto& mqtt_client = MqttClient::getInstance();
-        mqtt_client.sendTraceLog("error", "socket 断开连接");
-
         Alert(Lang::Strings::ERROR, message.c_str(), "sad", Lang::Sounds::P3_EXCLAMATION);
     });
     protocol_->OnIncomingAudio([this](AudioStreamPacket&& packet) {
@@ -843,10 +836,7 @@ void Application::Start() {
 }
 
 void Application::QuitTalking() {
-    
-    auto& mqtt_client = MqttClient::getInstance();
-    mqtt_client.sendTraceLog("info", "主动退出聊天");
-
+    ESP_LOGI(TAG, "QuitTalking");
     protocol_->SendAbortSpeaking(kAbortReasonNone);
     SetDeviceState(kDeviceStateIdle);
     protocol_->CloseAudioChannel();
@@ -1217,10 +1207,7 @@ void Application::WriteAudio(std::vector<uint8_t>& opus) {
 #endif
 
 void Application::AbortSpeaking(AbortReason reason) {
-    Schedule([this, reason]() {
-        auto& mqtt_client = MqttClient::getInstance();
-        mqtt_client.sendTraceLog("info", "打断说话");
-    });
+    ESP_LOGI(TAG, "Abort speaking");
     aborted_ = true;
     protocol_->SendAbortSpeaking(reason);
 }
@@ -1234,9 +1221,6 @@ void Application::SetDeviceState(DeviceState state) {
     if (device_state_ == state) {
         return;
     }
-    auto& mqtt_client = MqttClient::getInstance();
-    std::string message = "SetDeviceState: " + std::string(STATE_STRINGS[state]);
-    mqtt_client.sendTraceLog("info", message.c_str());
     
     clock_ticks_ = 0;
     auto previous_state = device_state_;
