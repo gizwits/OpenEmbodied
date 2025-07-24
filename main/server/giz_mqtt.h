@@ -19,6 +19,7 @@
 #define MQTT_TOPIC_BUFFER_SIZE       48      // 主题缓冲区大小
 #define MQTT_PAYLOAD_BUFFER_SIZE     256     // 负载缓冲区大小
 #define MQTT_TOKEN_REPORT_BUFFER_SIZE 128    // Token报告缓冲区大小
+#define MQTT_LOG_MESSAGE_MAX_LENGTH  100     // 日志消息最大长度
 
 #define GAGENT_PROTOCOL_VERSION     (0x00000003)
 #define HI_CMD_PAYLOAD93            0x0093

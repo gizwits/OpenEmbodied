@@ -88,6 +88,7 @@ void WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
     }
     const std::vector<uint8_t>& data = packet.payload;
     // Calculate required base64 buffer size
+    ESP_LOGI(TAG, "SendAudio: %d", data.size());
     size_t out_len = 4 * ((data.size() + 2) / 3);
     
     // Resize base64 buffer if needed
@@ -355,6 +356,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 }
             } else if (event_type == "conversation.chat.in_progress") {
                 ESP_LOGI(TAG, "conversation.chat.in_progress");
+                auto& mqtt_client = MqttClient::getInstance();
+                mqtt_client.sendTraceLog("info", "coze 返回 conversation.chat.in_progress");
                 is_detect_emotion_ = false;
                 is_first_packet_ = true;
 
@@ -371,8 +374,18 @@ bool WebsocketProtocol::OpenAudioChannel() {
                     cJSON_Delete(message_json);
                 }
                 
+            } else if (event_type == "conversation.chat.created") {
+                auto& mqtt_client = MqttClient::getInstance();
+                auto id = cJSON_GetObjectItem(root, "id");
+                if (id) {
+                    std::string id_str = id->valuestring;
+                    std::string message = "coze 返回 conversation.chat.created, id: " + id_str;
+                    mqtt_client.sendTraceLog("info", message.c_str());
+                }
             } else if (event_type == "conversation.chat.completed" || event_type == "conversation.audio.completed") {
                 is_first_packet_ = false;
+                auto& mqtt_client = MqttClient::getInstance();
+                mqtt_client.sendTraceLog("info", "coze 返回 conversation.chat.completed");
 
                 message_buffer_.clear();
                 message_buffer_ = "{";
@@ -386,10 +399,15 @@ bool WebsocketProtocol::OpenAudioChannel() {
                     cJSON_Delete(message_json);
                 }
             } else if (event_type == "input_audio_buffer.speech_started") {
+                auto& mqtt_client = MqttClient::getInstance();
+                mqtt_client.sendTraceLog("info", "coze 返回用户开始说话");
+
                 auto& app = Application::GetInstance();
                 ESP_LOGI(TAG, "input_audio_buffer.speech_started");
                 app.AbortSpeaking(kAbortReasonNone);
             } else if (event_type == "input_audio_buffer.speech_stopped") {
+                auto& mqtt_client = MqttClient::getInstance();
+                mqtt_client.sendTraceLog("info", "coze 返回用户停止说话");
                 ESP_LOGI(TAG, "input_audio_buffer.speech_stopped");
             } else if (event_type == "conversation.message.delta") {
                 auto data_json = cJSON_GetObjectItem(root, "data");
@@ -436,6 +454,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
             } else if (event_type == "conversation.chat.requires_action") {
                 CozeMCPParser::getInstance().handle_mcp(str_data);
             } else if (event_type == "error") {
+                auto& mqtt_client = MqttClient::getInstance();
+                mqtt_client.sendTraceLog("error", "coze 返回 error");
                 ESP_LOGE(TAG, "Error: %s", str_data.data());
                 MqttClient::getInstance().sendTraceLog("error", str_data.data());
             }
