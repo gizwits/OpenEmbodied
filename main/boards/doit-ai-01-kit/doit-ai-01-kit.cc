@@ -28,7 +28,7 @@ private:
     Button* rec_button_ = nullptr;
     PowerSaveTimer* power_save_timer_;
     VbAduioCodec audio_codec;
-    Servo servo_;
+    // Servo servo_;
     bool sleep_flag_ = false;
 
     void InitializePowerSaveTimer() {
@@ -107,7 +107,7 @@ private:
     }
 
 public:
-    CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO), servo_(BUILTIN_SERVO_GPIO, 0){      
+    CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO){      
         gpio_config_t io_conf = {};
         io_conf.pin_bit_mask = (1ULL << BUILTIN_LED_GPIO);
         io_conf.mode = GPIO_MODE_OUTPUT;
@@ -117,7 +117,7 @@ public:
         gpio_config(&io_conf);
         gpio_set_level(BUILTIN_LED_GPIO, 0);
 
-        servo_.begin();
+        // servo_.begin();
 
         InitializePowerSaveTimer();       
         InitializeButtons();
@@ -136,9 +136,9 @@ public:
         });
     }
 
-    virtual Servo* GetServo() override {
-        return &servo_;
-    }
+    // virtual Servo* GetServo() override {
+    //     return &servo_;
+    // }
 
     virtual AudioCodec* GetAudioCodec() override {
         return &audio_codec;
