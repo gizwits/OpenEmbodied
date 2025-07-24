@@ -402,9 +402,10 @@ void Application::StopListening() {
 
     Schedule([this]() {
         if (device_state_ == kDeviceStateListening) {
+            SetDeviceState(kDeviceStateIdle);
+            vTaskDelay(pdMS_TO_TICKS(100));
             protocol_->SendStopListening();
             ESP_LOGI(TAG, "StopListening(kDeviceStateListening)");
-            SetDeviceState(kDeviceStateIdle);
         }
     });
 }

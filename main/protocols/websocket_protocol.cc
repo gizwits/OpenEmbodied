@@ -155,9 +155,13 @@ void WebsocketProtocol::SendStopListening() {
 
     // 发送消息
     websocket_->Send(message);
+    ESP_LOGI(TAG, "SendStopListening: %s", message);
 }
 
 bool WebsocketProtocol::IsAudioChannelOpened() const {
+    if (Application::GetInstance().GetChatMode() == 0) {
+        return websocket_ != nullptr && websocket_->IsConnected() && !error_occurred_;
+    }
     return websocket_ != nullptr && websocket_->IsConnected() && !error_occurred_ && !IsTimeout();
 }
 
@@ -337,6 +341,11 @@ bool WebsocketProtocol::OpenAudioChannel() {
 
             if (event_type == "chat.created") {
                 ParseServerHello(root);
+
+            } else if (event_type == "conversation.chat.created") {
+                auto id = cJSON_GetObjectItem(root, "id");
+                ESP_LOGI(TAG, "conversation.chat.created: %s", id->valuestring);
+                
             } else if (event_type == "conversation.audio_transcript.update") {
                 auto data_json = cJSON_GetObjectItem(root, "data");
                 auto content_json = cJSON_GetObjectItem(data_json, "content");
