@@ -49,6 +49,9 @@
 #define AUDIO_I2S_GPIO_DOUT GPIO_NUM_8
 #define AUDIO_I2S_GPIO_DIN GPIO_NUM_10
 
+#define TOUCH_BUTTON_GPIO GPIO_NUM_46
+
+
 #define CHARGING_PIN     GPIO_NUM_11   // CHRG pin
 #define STANDBY_PIN      GPIO_NUM_3    // STDBY pin
 

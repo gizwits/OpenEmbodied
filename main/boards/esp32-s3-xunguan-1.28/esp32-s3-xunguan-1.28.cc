@@ -87,6 +87,7 @@ static uint8_t estimate_soc(uint16_t voltage, const VoltageSocPair *soc_pairs, i
 class MovecallMojiESP32S3 : public WifiBoard {
 private:
     Button boot_button_;
+    Button touch_button_;
     EyeDisplay* display_;
     bool need_power_off_ = false;
     i2c_master_bus_handle_t i2c_bus_;
@@ -201,6 +202,15 @@ private:
     void InitializeButtons() {
         static int first_level = gpio_get_level(BOOT_BUTTON_GPIO);
 
+        touch_button_.OnPressDown([this]() {
+            //切换表情
+            ESP_LOGI(TAG, "touch_button_.OnPressDown");
+
+            display_->SetEmotion("loving");
+            // Application::GetInstance().SendMessage("用户正在抚摸你");
+
+        });
+
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
             // if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
@@ -311,11 +321,11 @@ private:
     }
 
     virtual bool NeedPlayProcessVoice() override {
-        return false;
+        return true;
     }
 
 public:
-    MovecallMojiESP32S3() : boot_button_(BOOT_BUTTON_GPIO) { 
+    MovecallMojiESP32S3() : boot_button_(BOOT_BUTTON_GPIO), touch_button_(TOUCH_BUTTON_GPIO) { 
         // 记录上电时间戳
         power_on_timestamp_ = esp_timer_get_time();
         

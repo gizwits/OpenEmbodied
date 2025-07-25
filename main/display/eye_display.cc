@@ -338,7 +338,7 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
     }
 
     // VERTIGO状态，启动锁定和定时器
-    if (current_state_ == EyeState::VERTIGO) {
+    if (current_state_ == EyeState::VERTIGO || current_state_ == EyeState::LOVING) {
         vertigo_locked_ = true;
         vertigo_unlock_time_ = esp_timer_get_time() + 5000000LL; // 5秒后解锁
         if (vertigo_timer_ == nullptr) {
