@@ -413,6 +413,12 @@ void Application::StopListening() {
 void Application::Start() {
     auto& watchdog = Watchdog::GetInstance();
 
+
+    Settings settings("wifi", true);
+    // 获取当前对话模式
+    chat_mode_ = settings.GetInt("chat_mode", 1); // 0=按键说话, 1=唤醒词, 2=自然对话
+    ESP_LOGI(TAG, "chat_mode_: %d", chat_mode_);
+
     auto& board = Board::GetInstance();
     Auth::getInstance().init();
     
@@ -420,6 +426,8 @@ void Application::Start() {
 
     /* Setup the display */
     auto display = board.GetDisplay();
+
+
 
     /* Setup the audio codec */
     auto codec = board.GetAudioCodec();
@@ -484,7 +492,6 @@ void Application::Start() {
 
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
 
-    Settings settings("wifi", true);
 
 #if CONFIG_USE_GIZWITS_MQTT
     auto& mqtt_client = MqttClient::getInstance();
@@ -586,11 +593,6 @@ void Application::Start() {
 #endif
 
     CheckNewVersion();
-
-    // 获取当前对话模式
-    chat_mode_ = settings.GetInt("chat_mode", 1); // 0=按键说话, 1=唤醒词, 2=自然对话
-    ESP_LOGI(TAG, "chat_mode_: %d", chat_mode_);
-
     
     // Initialize the protocol
     protocol_->OnNetworkError([this](const std::string& message) {

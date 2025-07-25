@@ -63,6 +63,7 @@ private:
     void InitializeButtons() {
 
         const int chat_mode = Application::GetInstance().GetChatMode();
+        ESP_LOGI(TAG, "chat_modechat_modechat_mode: %d", chat_mode);
         if (chat_mode == 0) {
             rec_button_ = new Button(BUILTIN_REC_BUTTON_GPIO);
             rec_button_->OnPressUp([this]() {
