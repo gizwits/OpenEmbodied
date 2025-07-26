@@ -12,3 +12,4 @@ main/assets/lang_config.h
 .DS_Store
 .cache
 scripts/auth.py
+scripts/.env
