@@ -149,8 +149,7 @@ def upload_to_cos(file_path, object_name=None):
             print(f"Error: 文件已存在于 COS 中: {object_name}")
             return False
         except ClientError as e:
-            
-            raise
+            print(f"Error: {e}")
         
         # 上传文件
         print(f"正在上传 {file_path} 到 COS...")
