@@ -352,9 +352,12 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
             break;
     }
 
-    // VERTIGO状态，启动锁定和定时器
-    if (current_state_ == EyeState::VERTIGO || current_state_ == EyeState::LOVING || current_state_ == EyeState::THINKING) {
+    if (current_state_ == EyeState::VERTIGO) {
+        // 眩晕动画需要锁定
         vertigo_locked_ = true;
+    }
+    // VERTIGO LOVING THINKING 需要自动取消
+    if (current_state_ == EyeState::VERTIGO || current_state_ == EyeState::LOVING || current_state_ == EyeState::THINKING) {
         if (current_state_ == EyeState::THINKING) {
             vertigo_unlock_time_ = esp_timer_get_time() + 2000000LL; // 2秒后解锁
         } else {
