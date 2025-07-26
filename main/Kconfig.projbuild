@@ -71,28 +71,24 @@ choice BOARD_TYPE
         bool "ESP BOX"
     config BOARD_TYPE_ESP_BOX_LITE
         bool "ESP BOX Lite"
-    config BOARD_TYPE_KEVIN_BOX_1
-        bool "Kevin Box 1"
-    config BOARD_TYPE_KEVIN_BOX_2
-        bool "Kevin Box 2"
-    config BOARD_TYPE_KEVIN_C3
-        bool "Kevin C3"
-    config BOARD_TYPE_KEVIN_SP_V3_DEV
-        bool "Kevin SP V3开发板"
-    config BOARD_TYPE_KEVIN_SP_V4_DEV
-        bool "Kevin SP V4开发板"
-    config BOARD_TYPE_KEVIN_YUYING_313LCD
-        bool "鱼鹰科技3.13LCD开发板"
     config BOARD_TYPE_GIZWITS_GOKIT5
         bool "机智云ESP32-S3 Gokit5"
+    config BOARD_TYPE_GIZWITS_C2_6824
+        bool "机智云ESP32-C2 6824"
+    config BOARD_TYPE_GIZWITS_C2_6824_TOY
+        bool "机智云ESP32-C2 6824 玩具"
     config BOARD_TYPE_LICHUANG_DEV
         bool "立创·实战派ESP32-S3开发板"
     config BOARD_TYPE_LICHUANG_C3_DEV
         bool "立创·实战派ESP32-C3开发板"
-    config BOARD_TYPE_DF_K10
-        bool "DFRobot 行空板 k10"
+    config BOARD_TYPE_DOIT_AI_01_KIT
+        bool "Doit ai 01 kit"
+    config BOARD_TYPE_DOIT_AI_01_KIT_NFC
+        bool "Doit ai 01 kit nfc"
     config BOARD_TYPE_DOIT_ESP32S3_EYE
         bool "Doit 小智眼"
+    config BOARD_TYPE_DOIT_ESP32S3_EYE_6824
+        bool "Doit 小智眼 6824"
     config BOARD_TYPE_MAGICLICK_2P4
         bool "神奇按钮 Magiclick_2.4"
     config BOARD_TYPE_MAGICLICK_2P5
@@ -153,16 +149,6 @@ choice BOARD_TYPE
          bool "Movecall Moji 小智AI衍生版"
     config BOARD_TYPE_MOVECALL_CUICAN_ESP32S3
          bool "Movecall CuiCan 璀璨·AI吊坠"
-    config BOARD_TYPE_ATK_DNESP32S3
-        bool "正点原子DNESP32S3开发板"
-    config BOARD_TYPE_ATK_DNESP32S3_BOX
-        bool "正点原子DNESP32S3-BOX"
-    config BOARD_TYPE_ATK_DNESP32S3_BOX0
-        bool "正点原子DNESP32S3-BOX0"
-    config BOARD_TYPE_ATK_DNESP32S3M_WIFI
-        bool "正点原子DNESP32S3M-WIFI"
-    config BOARD_TYPE_ATK_DNESP32S3M_4G
-        bool "正点原子DNESP32S3M-4G"
     config BOARD_TYPE_DU_CHATX
         bool "嘟嘟开发板CHATX(wifi)"
     config BOARD_TYPE_ESP32S3_Taiji_Pi
@@ -226,7 +212,7 @@ choice DISPLAY_OLED_TYPE
 endchoice
 
 choice DISPLAY_LCD_TYPE
-    depends on BOARD_TYPE_BREAD_COMPACT_WIFI_LCD || BOARD_TYPE_BREAD_COMPACT_ESP32_LCD || BOARD_TYPE_ESP32_CGC || BOARD_TYPE_ESP32P4_NANO
+    depends on BOARD_TYPE_BREAD_COMPACT_WIFI_LCD || BOARD_TYPE_BREAD_COMPACT_ESP32_LCD || BOARD_TYPE_ESP32_CGC || BOARD_TYPE_DOIT_ESP32S3_EYE_6824 || BOARD_TYPE_DOIT_ESP32S3_EYE_8311
     prompt "LCD Type"
     default LCD_ST7789_240X320
     help
@@ -259,12 +245,14 @@ choice DISPLAY_LCD_TYPE
         bool "ILI9341, 分辨率240*320"
     config LCD_ILI9341_240X320_NO_IPS
         bool "ILI9341, 分辨率240*320, 非IPS"
-    config LCD_GC9A01_240X240
-        bool "GC9A01, 分辨率240*240, 圆屏"
     config LCD_TYPE_800_1280_10_1_INCH
         bool "Waveshare 101M-8001280-IPS-CT-K Display"
     config LCD_TYPE_800_1280_10_1_INCH_A
         bool "Waveshare 10.1-DSI-TOUCH-A Display"
+    config LCD_GC9A01_240X240
+        bool "GC9A01, 分辨率240*240, 圆屏"
+    config LCD_GC9A01_160X160
+        bool "GC9A01, 分辨率160*160, 0.71寸"
     config LCD_CUSTOM
         bool "自定义屏幕参数"
 endchoice
@@ -280,6 +268,19 @@ choice DISPLAY_ESP32S3_KORVO2_V3
     config LCD_ILI9341
         bool "ILI9341, 分辨率240*320"
 endchoice
+
+
+config USE_EYE_STYLE_ES8311
+    bool "ES8311"
+    default n
+    help
+        ES8311
+
+config USE_EYE_STYLE_VB6824
+    bool "VB6824"
+    default n
+    help
+        VB6824
 
 choice CONNECTION_TYPE
     prompt "WiFi Connection Type"
@@ -337,6 +338,17 @@ config USE_SERVER_AEC
     depends on USE_AUDIO_PROCESSOR
     help
         启用服务器端 AEC，需要服务器支持
+
+config USE_AUDIO_CODEC_ENCODE_OPUS
+    depends on BOARD_TYPE_GIZWITS_C2_6824_TOY || BOARD_TYPE_GIZWITS_C2_6824 || BOARD_TYPE_DOIT_AI_01_KIT || BOARD_TYPE_DOIT_AI_01_KIT_LCD || BOARD_TYPE_DOIT_AI_01_KIT_NFC || BOARD_TYPE_DOIT_ESP32S3_EYE_6824
+    bool "use audio codec encode opus"
+    default y
+
+config USE_AUDIO_CODEC_DECODE_OPUS
+    depends on BOARD_TYPE_GIZWITS_C2_6824_TOY || BOARD_TYPE_GIZWITS_C2_6824 || BOARD_TYPE_DOIT_AI_01_KIT || BOARD_TYPE_DOIT_AI_01_KIT_LCD || BOARD_TYPE_DOIT_AI_01_KIT_NFC || BOARD_TYPE_DOIT_ESP32S3_EYE_6824
+    bool "use audio codec decode opus"
+    default n
+        
 
 choice IOT_PROTOCOL
     prompt "IoT Protocol"

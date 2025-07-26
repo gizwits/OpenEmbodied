@@ -29,6 +29,7 @@ struct RoomParams {
     std::string voice_lang;
     std::string api_domain;
     std::string user_id;
+    bool need_play_prologue = false;
 };
 
 struct BinaryProtocol3 {
@@ -76,6 +77,7 @@ public:
     virtual bool IsAudioChannelBusy() const;
     virtual void SendAudio(const AudioStreamPacket& packet) = 0;
     virtual void SendWakeWordDetected(const std::string& wake_word);
+    virtual void SendTextToAI(const std::string& text);
     virtual void SendStartListening(ListeningMode mode);
     virtual void SendStopListening();
     virtual void SendMessage(const std::string& message);

@@ -1,0 +1,10 @@
+dependencies:
+  espressif/mdns: ^1.8.2
+  idf: ^5.3
+description: MDNS
+files:
+  exclude:
+  - .git
+license: MIT
+version: 2.3.0
+repository: https://github.com/78/vb6824

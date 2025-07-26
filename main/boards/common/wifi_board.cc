@@ -38,10 +38,18 @@ WifiBoard::WifiBoard() {
 std::string WifiBoard::GetBoardType() {
     return "wifi";
 }
+void OnWifiConfigEvent(WifiConfigEvent event, const std::string& message) {
+    switch (event) {
+        case WifiConfigEvent::CONFIG_PACKET_RECEIVED:
+            ESP_LOGI("APP", "收到配置包: %s", message.c_str());
+            auto& application = Application::GetInstance();
+            application.PlaySound(Lang::Sounds::P3_CONNECTING);
+            break;
+    }
+}
 
 void WifiBoard::EnterWifiConfigMode() {
     auto& application = Application::GetInstance();
-    application.SetDeviceState(kDeviceStateWifiConfiguring);
 
     // 初始化 WiFi模块
 
@@ -49,8 +57,18 @@ void WifiBoard::EnterWifiConfigMode() {
     hint += "\n\n";
     application.Alert(Lang::Strings::WIFI_CONFIG_MODE, hint.c_str(), "", Lang::Sounds::P3_WIFICONFIG);
 
-    WifiConfiguration::GetInstance().Initialize(Auth::getInstance().getProductKey(), "XPG-GAgent");
-    
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
+    // auto display = Board::GetInstance().GetDisplay();
+    // display->EnterWifiConifg();
+
+    application.SetDeviceState(kDeviceStateWifiConfiguring);
+
+    auto& wifi_config = WifiConfiguration::GetInstance();
+    wifi_config.RegisterCallback(OnWifiConfigEvent);
+
+    wifi_config.Initialize(Auth::getInstance().getProductKey(), "XPG-GAgent");
+
     // Wait forever until reset after configuration
     while (true) {
         int free_sram = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
@@ -59,45 +77,6 @@ void WifiBoard::EnterWifiConfigMode() {
         vTaskDelay(pdMS_TO_TICKS(10000));
     }
 }
-// void WifiBoard::EnterWifiConfigMode() {
-//     auto& application = Application::GetInstance();
-//     application.SetDeviceState(kDeviceStateWifiConfiguring);
-
-//     // 初始化 WiFi模块
-//     WifiConnectionManager::GetInstance().InitializeWiFi();
-// #ifdef CONFIG_CONNECTION_TYPE_AP
-//     auto& wifi_ap = WifiConfigurationAp::GetInstance();
-//     wifi_ap.SetLanguage(Lang::CODE);
-//     wifi_ap.SetSsidPrefix("XPG-GAgent");
-//     wifi_ap.Start();
-//     wifi_ap.StartWebServer();
-//     std::string hint = Lang::Strings::CONNECT_TO_HOTSPOT;
-//     hint += wifi_ap.GetSsid();
-//     hint += Lang::Strings::ACCESS_VIA_BROWSER;
-//     hint += wifi_ap.GetWebServerUrl();
-//     hint += "\n\n";
-//     // 播报配置 WiFi 的提示
-//     application.Alert(Lang::Strings::WIFI_CONFIG_MODE, hint.c_str(), "", Lang::Sounds::P3_WIFICONFIG);
-// #endif
-
-// #ifdef CONFIG_CONNECTION_TYPE_BLE 
-//     auto& ble_config = WifiConfigurationBle::getInstance();
-//     ble_config.init(CONFIG_PRODUCT_KEY);  // 传入产品密钥
-
-//     std::string hint = Lang::Strings::OPEN_MINI_APP;
-//     hint += "\n\n";
-//     application.Alert(Lang::Strings::WIFI_CONFIG_MODE, hint.c_str(), "", Lang::Sounds::P3_WIFICONFIG);
-// #endif
-    
-    
-//     // Wait forever until reset after configuration
-//     while (true) {
-//         int free_sram = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-//         int min_free_sram = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
-//         ESP_LOGI(TAG, "Free internal: %u minimal internal: %u", free_sram, min_free_sram);
-//         vTaskDelay(pdMS_TO_TICKS(10000));
-//     }
-// }
 
 bool WifiBoard::IsWifiConfigMode() {
     return wifi_config_mode_;
@@ -153,12 +132,8 @@ Http* WifiBoard::CreateHttp() {
 }
 
 WebSocket* WifiBoard::CreateWebSocket() {
-    std::string url = CONFIG_COZE_WEBSOCKET_URL;
-    if (url.find("wss://") == 0) {
-        return new WebSocket(new TlsTransport());
-    } else {
-        return new WebSocket(new TcpTransport());
-    }
+    auto transport = new TcpTransport();
+    return new WebSocket(transport);
 }
 
 Mqtt* WifiBoard::CreateMqtt() {
@@ -220,81 +195,5 @@ void WifiBoard::ResetWifiConfiguration() {
 }
 
 std::string WifiBoard::GetDeviceStatusJson() {
-    /*
-     * 返回设备状态JSON
-     * 
-     * 返回的JSON结构如下：
-     * {
-     *     "audio_speaker": {
-     *         "volume": 70
-     *     },
-     *     "screen": {
-     *         "brightness": 100,
-     *         "theme": "light"
-     *     },
-     *     "battery": {
-     *         "level": 50,
-     *         "charging": true
-     *     },
-     *     "network": {
-     *         "type": "wifi",
-     *         "ssid": "Xiaozhi",
-     *         "rssi": -60
-     *     }
-     * }
-     */
-    auto& board = Board::GetInstance();
-    auto root = cJSON_CreateObject();
-
-    // Audio speaker
-    auto audio_speaker = cJSON_CreateObject();
-    auto audio_codec = board.GetAudioCodec();
-    if (audio_codec) {
-        cJSON_AddNumberToObject(audio_speaker, "volume", audio_codec->output_volume());
-    }
-    cJSON_AddItemToObject(root, "audio_speaker", audio_speaker);
-
-    // Screen brightness
-    auto backlight = board.GetBacklight();
-    auto screen = cJSON_CreateObject();
-    if (backlight) {
-        cJSON_AddNumberToObject(screen, "brightness", backlight->brightness());
-    }
-    auto display = board.GetDisplay();
-    if (display && display->height() > 64) { // For LCD display only
-        cJSON_AddStringToObject(screen, "theme", display->GetTheme().c_str());
-    }
-    cJSON_AddItemToObject(root, "screen", screen);
-
-    // Battery
-    int battery_level = 0;
-    bool charging = false;
-    bool discharging = false;
-    if (board.GetBatteryLevel(battery_level, charging, discharging)) {
-        cJSON* battery = cJSON_CreateObject();
-        cJSON_AddNumberToObject(battery, "level", battery_level);
-        cJSON_AddBoolToObject(battery, "charging", charging);
-        cJSON_AddItemToObject(root, "battery", battery);
-    }
-
-    // Network
-    auto network = cJSON_CreateObject();
-    auto& wifi_station = WifiStation::GetInstance();
-    cJSON_AddStringToObject(network, "type", "wifi");
-    cJSON_AddStringToObject(network, "ssid", wifi_station.GetSsid().c_str());
-    int rssi = wifi_station.GetRssi();
-    if (rssi >= -60) {
-        cJSON_AddStringToObject(network, "signal", "strong");
-    } else if (rssi >= -70) {
-        cJSON_AddStringToObject(network, "signal", "medium");
-    } else {
-        cJSON_AddStringToObject(network, "signal", "weak");
-    }
-    cJSON_AddItemToObject(root, "network", network);
-
-    auto json_str = cJSON_PrintUnformatted(root);
-    std::string json(json_str);
-    cJSON_free(json_str);
-    cJSON_Delete(root);
-    return json;
+    return "{}";
 }

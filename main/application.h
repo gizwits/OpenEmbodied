@@ -23,7 +23,9 @@
 #include "server/giz_mqtt.h"
 #include "ota.h"
 #include "background_task.h"
+#if CONFIG_USE_AUDIO_PROCESSOR
 #include "audio_processor.h"
+#endif
 
 #if CONFIG_USE_WAKE_WORD_DETECT
 #include "wake_word_detect.h"
@@ -55,6 +57,8 @@ public:
         static Application instance;
         return instance;
     }
+    char trace_id_[33];  // 32 chars + null terminator
+
     Player player_;
 
     // 删除拷贝构造函数和赋值运算符
@@ -68,11 +72,14 @@ public:
     void SetDeviceState(DeviceState state);
     void Alert(const char* status, const char* message, const char* emotion = "", const std::string_view& sound = "");
     void DismissAlert();
+    void ChangeBot(const char* id, const char* voice_id);
     void AbortSpeaking(AbortReason reason);
     void PlayMusic(const char* url);
     void CancelPlayMusic();
     void ToggleChatState();
     void StartListening();
+    void SetChatMode(int mode);
+    int GetChatMode() const { return chat_mode_; }
     void StopListening();
     void UpdateIotStates();
     void Reboot();
@@ -81,7 +88,10 @@ public:
     void PlaySound(const std::string_view& sound);
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
+    void SendTextToAI(const std::string& text);
 
+    const char* GetTraceId() const { return trace_id_; }
+    void GenerateTraceId();
 private:
     Application();
     ~Application();
@@ -89,23 +99,23 @@ private:
 #if CONFIG_USE_WAKE_WORD_DETECT
     WakeWordDetect wake_word_detect_;
 #endif
+#if CONFIG_USE_AUDIO_PROCESSOR
     std::unique_ptr<AudioProcessor> audio_processor_;
+#endif
     Ota ota_;
     std::mutex mutex_;
     std::list<std::function<void()>> main_tasks_;
     std::unique_ptr<Protocol> protocol_;
-    std::unique_ptr<MqttClient> mqtt_client_;
+
+    int chat_mode_ = 1;
+    bool realtime_chat_is_start_ = false;
+    
 
     EventGroupHandle_t event_group_ = nullptr;
     esp_timer_handle_t clock_timer_handle_ = nullptr;
     esp_timer_handle_t report_timer_handle_ = nullptr;
     volatile DeviceState device_state_ = kDeviceStateUnknown;
     ListeningMode listening_mode_ = kListeningModeAutoStop;
-#if CONFIG_USE_DEVICE_AEC || CONFIG_USE_SERVER_AEC
-    bool realtime_chat_enabled_ = true;
-#else
-    bool realtime_chat_enabled_ = false;
-#endif
     bool aborted_ = false;
     bool voice_detected_ = false;
     bool busy_decoding_audio_ = false;
@@ -135,6 +145,14 @@ private:
     void OnAudioInput();
     void OnAudioOutput();
     void ReadAudio(std::vector<int16_t>& data, int sample_rate, int samples);
+#ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+    void ReadAudio(std::vector<uint8_t>& opus, int sample_rate, int samples);
+#endif
+
+    void WriteAudio(std::vector<int16_t>& data, int sample_rate);
+#ifdef CONFIG_USE_AUDIO_CODEC_DECODE_OPUS
+    void WriteAudio(std::vector<uint8_t>& opus);
+#endif
     void ResetDecoder();
     void SetDecodeSampleRate(int sample_rate, int frame_duration);
     void CheckNewVersion();
@@ -142,7 +160,6 @@ private:
     void OnClockTimer();
     void SetListeningMode(ListeningMode mode);
     void AudioLoop();
-    void OnReportTimer();
     void StartReportTimer();
 };
 

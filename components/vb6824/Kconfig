@@ -1,0 +1,36 @@
+menu "VB6824"
+	choice VB6824_TYPE
+    prompt "VB6924"
+    default VB6824_TYPE_OPUS_16K_20MS_PCM_16K
+    help
+        VB6824支持的类型
+    config VB6824_TYPE_PCM_16K
+        depends on !IDF_TARGET_ESP32C2
+        bool "PCM 16K"
+    config VB6824_TYPE_OPUS_16K_20MS_PCM_16K
+        bool "OPUS 16K 20ms(input) + PCM 16K(output)"
+	endchoice
+    config VB6824_OTA_SUPPORT
+        bool "6824支持升级"
+        default n
+        select HTTPD_WS_SUPPORT
+    
+    config VB6824_UART_PORT
+        int "uart port"
+        default 1
+
+    config VB6824_UART_TASK_STACK_SIZE
+        int "uart task stack size"
+        default 3072 if IDF_TARGET_ESP32C2
+        default 4096
+
+    config VB6824_SEND_USE_TASK
+        bool "send use task"
+        default y
+
+    config VB6824_SEND_TASK_STACK_SIZE
+        int "send task stack size"
+        depends on VB6824_SEND_USE_TASK
+        default 2048
+
+endmenu

@@ -123,3 +123,29 @@ void Button::OnMultipleClick(std::function<void()> callback, uint8_t click_count
         }
     }, this);
 }
+
+void Button::OnPressRepeat(std::function<void(uint16_t)> callback) {
+    if (button_handle_ == nullptr) {
+        return;
+    }
+    on_press_repeat_ = callback;
+    iot_button_register_cb(button_handle_, BUTTON_PRESS_REPEAT, NULL, [](void* handle, void* usr_data) {
+        Button* button = static_cast<Button*>(usr_data);
+        if (button->on_press_repeat_) {
+            button->on_press_repeat_(iot_button_get_repeat(button->button_handle_));
+        }
+    }, this);
+}
+
+void Button::OnPressRepeaDone(std::function<void(uint16_t)> callback) {
+    if (button_handle_ == nullptr) {
+        return;
+    }
+    on_press_repeat_done_ = callback;
+    iot_button_register_cb(button_handle_, BUTTON_PRESS_REPEAT_DONE, NULL, [](void* handle, void* usr_data) {
+        Button* button = static_cast<Button*>(usr_data);
+        if (button->on_press_repeat_done_) {
+            button->on_press_repeat_done_(iot_button_get_repeat(button->button_handle_));
+        }
+    }, this);
+}

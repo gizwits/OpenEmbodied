@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VB6824升级</title>
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background: linear-gradient(135deg, #6c63ff, #3f3d56);
+            color: #fff;
+        }
+        
+        h1 {
+            margin-bottom: 30px;
+            font-size: 32px;
+            text-align: center;
+        }
+
+        .container {
+            background: #fff;
+            color: #333;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+            text-align: center;
+            width: 320px;
+            box-sizing: border-box;
+            position: relative;
+        }
+
+        .input-field {
+            margin: 15px 0;
+            position: relative;
+            width: 100%;
+        }
+
+        input {
+            padding: 12px 10px;
+            font-size: 16px;
+            width: calc(100% - 1px);
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            outline: none;
+            transition: border-color 0.3s ease;
+            box-sizing: border-box;
+        }
+
+        input:focus {
+            border-color: #6c63ff;
+            box-shadow: 0 0 5px rgba(108, 99, 255, 0.5);
+        }
+
+        label {
+            position: absolute;
+            left: 10px;
+            top: 10px;
+            font-size: 12px;
+            color: #999;
+            transition: 0.2s;
+            pointer-events: none;
+        }
+
+        input:focus + label,
+        input:not(:placeholder-shown) + label {
+            top: -10px;
+            left: 10px;
+            font-size: 10px;
+            color: #6c63ff;
+        }
+
+        button {
+            padding: 12px;
+            margin-top: 10px; /* 调整按钮间距 */
+            font-size: 18px;
+            font-weight: bold;
+            color: #fff;
+            background: #6c63ff;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            width: 100%;
+        }
+
+        #restoreButton {
+            background: #f75a5a; /* 恢复按钮使用不同的颜色 */
+        }
+
+        button:hover {
+            background: #3f3d56;
+            transform: scale(1.05);
+        }
+
+        #restoreButton:hover {
+            background: #9e3a3a;
+        }
+
+        button:active {
+            transform: scale(0.95);
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .progress {
+            display: none;
+            width: 100%;
+            background-color: #f3f3f3;
+            margin-top: 10px;
+            position: relative;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .progress-bar {
+            width: 0;
+            height: 30px;
+            color: #333;
+            white-space: nowrap;
+            text-align: center;
+            background-color: #4CAF50;
+            transition: width 0.3s;
+            line-height: 30px;
+        }
+        #progress-info {
+            display: none;
+            width: 100%;
+            color: #333;
+            position: absolute;
+            z-index: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #333;
+            height: 100%;
+            top: 0px;
+        }
+
+        .footer {
+            margin-top: 20px;
+            font-size: 14px;
+            color: #ccc;
+        }
+
+        /* 加载动画样式 */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            color: white;
+            display: none;
+        }
+
+        .loading-spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 4px solid #ffffff;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            margin-top: 10px;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <h1>VB6824升级</h1>
+    <div class="container">
+        <div class="input-field">
+            <input type="text" id="authCode" placeholder=" " required>
+            <label for="authCode">授权码</label>
+        </div>
+        
+        <!-- 新增的恢复按钮 -->
+        <button id="restoreButton">恢复你好小智</button>
+        
+        <button id="upgradeButton">升级</button>
+
+        <div class="progress" id="progress-container">
+            <div class="progress-bar" id="progress-bar"></div>
+            <div id="progress-info"></div>
+        </div>
+    </div>
+
+    <div class="footer">
+        © 2026 四博智联
+    </div>
+
+    <!-- 加载动画元素 -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner"></div>
+        <div class="loading-text" id="loadingText">链接设备中...</div>
+    </div>
+
+    <script>
+        // 新增的恢复按钮点击事件
+        document.getElementById('restoreButton').onclick = function() {
+            document.getElementById('authCode').value = '123456';
+            document.getElementById('authCode').focus(); // 聚焦到授权码输入框
+        };
+
+        document.getElementById('upgradeButton').onclick = function() {
+            const authCode = document.getElementById('authCode').value;
+            
+            if (!authCode) {
+                alert('请填写授权码');
+                return;
+            }
+
+            // 禁用按钮防止重复点击
+            const upgradeButton = document.getElementById('upgradeButton');
+            upgradeButton.disabled = true;
+            
+            // 显示加载动画
+            const loadingOverlay = document.getElementById('loadingOverlay');
+            const loadingText = document.getElementById('loadingText');
+            loadingOverlay.style.display = 'flex';
+            loadingText.textContent = '正在验证授权码...';
+
+            // 发送请求到 /check
+            fetch('check?id='+encodeURIComponent(authCode), {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.valid) {
+                    loadingText.textContent = '授权码验证成功，准备升级...';
+                    setTimeout(() => {
+                        loadingOverlay.style.display = 'none';
+                        startDownload();
+                    }, 1000);
+                } else {
+                    loadingOverlay.style.display = 'none';
+                    upgradeButton.disabled = false;
+                    alert('授权码无效，请重试！');
+                }
+            })
+            .catch((error) => {
+                console.error('错误:', error);
+                loadingOverlay.style.display = 'none';
+                upgradeButton.disabled = false;
+                alert('无法连接设备，请检查是否与设备在同一局域网或设备是否进入升级模式');
+            });
+        };
+
+        function startDownload() {
+            const authCode = document.getElementById('authCode').value;
+            const upgradeButton = document.getElementById('upgradeButton');
+            
+            const userConfirmed = confirm("请注意，升级开始后授权码将失效");
+            if (!userConfirmed) {
+                upgradeButton.disabled = false;
+                return;
+            }
+
+            // 显示加载动画
+            const loadingOverlay = document.getElementById('loadingOverlay');
+            const loadingText = document.getElementById('loadingText');
+            loadingOverlay.style.display = 'flex';
+            loadingText.textContent = '正在连接设备...';
+
+            // 先发送授权码失效请求
+            fetch('code?id='+encodeURIComponent(authCode), { method: 'GET' })
+                .then(() => {
+                    // 建立WebSocket连接
+                    const wsUrl = `ws://${window.location.hostname}/ws`;
+                    const ws = new WebSocket(wsUrl);
+                    const progressBar = document.getElementById('progress-bar');
+                    const progressInfo = document.getElementById('progress-info');
+                    progressInfo.innerText = '连接中';
+                    progressBar.style.width = '0%';
+                    ws.onopen = function() {
+                        console.log('WebSocket连接成功');
+                        loadingOverlay.style.display = 'none';
+                        progressInfo.innerText = '正在升级,请稍等...';
+                        document.getElementById('progress-container').style.display = 'block';
+                        ws.send(JSON.stringify({ command: 'startDownload' }));
+                    };
+
+                    ws.onmessage = function(event) {
+                        const data = JSON.parse(event.data);
+                        const progress = data.progress;
+                        const status = data.status;
+                        const word = data.word
+                        const reason = data.reason;
+                        const progressContainer = document.getElementById('progress-container');
+                        console.log(data)
+                        if (status === "done") {
+                            progressInfo.innerText = '升级成功:' + word;
+                            progressBar.style.width = '100%';
+                            progressBar.style.backgroundColor = '#4CAF50';
+                            upgradeButton.disabled = false;
+                        } else if (status === 'downloading') {
+                            progressInfo.innerText = '下载中 (' + progress + '%)';
+                            progressBar.style.width = progress + '%';
+                        } else if (status === 'fail') {
+                            progressBar.style.width = '100%';
+                            progressBar.style.backgroundColor = '#f44336';
+                            progressInfo.style.color = 'red';
+                            progressInfo.innerText = reason || '升级失败';
+                            upgradeButton.disabled = false;
+                        }
+                    };
+
+                    ws.onclose = function() {
+                        console.log('WebSocket连接关闭');
+                        upgradeButton.disabled = false;
+                    };
+
+                    ws.onerror = function(error) {
+                        console.error('WebSocket错误:', error);
+                        loadingOverlay.style.display = 'none';
+                        alert('连接设备失败，请检查设备码是否正确');
+                        upgradeButton.disabled = false;
+                    };
+                })
+                .catch(error => {
+                    console.error('升级失败:', error);
+                    loadingOverlay.style.display = 'none';
+                    alert('升级失败，请重试');
+                    upgradeButton.disabled = false;
+                });
+        }
+    </script>
+</body>
+</html>

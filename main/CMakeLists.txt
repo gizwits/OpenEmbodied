@@ -4,6 +4,7 @@ set(SOURCES "audio_codecs/audio_codec.cc"
             "audio_codecs/es8311_audio_codec.cc"
             "audio_codecs/es8374_audio_codec.cc"
             "audio_codecs/es8388_audio_codec.cc"
+            "audio_codecs/vb6824_audio_codec.cc"
             "led/single_led.cc"
             "led/circular_strip.cc"
             "led/gpio_led.cc"
@@ -11,6 +12,7 @@ set(SOURCES "audio_codecs/audio_codec.cc"
             "display/lcd_display.cc"
             "display/oled_display.cc"
             "display/eye_display.cc"
+            "display/eye_toy_single_display.cc"
             "display/eye_toy_display.cc"
             "protocols/protocol.cc"
             "watchdog.cc"
@@ -21,6 +23,7 @@ set(SOURCES "audio_codecs/audio_codec.cc"
             "player/player.cc"
             "server/giz_api.cc"
             "server/protocol/iot_protocol.cc"
+            "server/protocol/ota_protocol.cc"
             "protocols/mcp.cc"
             "auth.cc"
             "system_info.cc"
@@ -51,28 +54,20 @@ elseif(CONFIG_BOARD_TYPE_BREAD_COMPACT_ESP32)
     set(BOARD_TYPE "bread-compact-esp32")
 elseif(CONFIG_BOARD_TYPE_BREAD_COMPACT_ESP32_LCD)
     set(BOARD_TYPE "bread-compact-esp32-lcd")
-elseif(CONFIG_BOARD_TYPE_DF_K10)
-    set(BOARD_TYPE "df-k10")
+elseif(CONFIG_BOARD_TYPE_DOIT_AI_01_KIT)
+    set(BOARD_TYPE "doit-ai-01-kit")
+elseif(CONFIG_BOARD_TYPE_DOIT_AI_01_KIT_NFC)
+    set(BOARD_TYPE "doit-ai-01-kit-nfc")
 elseif(CONFIG_BOARD_TYPE_DOIT_ESP32S3_EYE)
     set(BOARD_TYPE "doit-esp32s3-eye")
+elseif(CONFIG_BOARD_TYPE_DOIT_ESP32S3_EYE_6824)
+    set(BOARD_TYPE "doit-esp32s3-eye-6824")
 elseif(CONFIG_BOARD_TYPE_ESP_BOX_3)
     set(BOARD_TYPE "esp-box-3")
 elseif(CONFIG_BOARD_TYPE_ESP_BOX)
     set(BOARD_TYPE "esp-box")
 elseif(CONFIG_BOARD_TYPE_ESP_BOX_LITE)
     set(BOARD_TYPE "esp-box-lite")
-elseif(CONFIG_BOARD_TYPE_KEVIN_BOX_1)
-    set(BOARD_TYPE "kevin-box-1")
-elseif(CONFIG_BOARD_TYPE_KEVIN_BOX_2)
-    set(BOARD_TYPE "kevin-box-2")
-elseif(CONFIG_BOARD_TYPE_KEVIN_C3)
-    set(BOARD_TYPE "kevin-c3")
-elseif(CONFIG_BOARD_TYPE_KEVIN_SP_V3_DEV)
-    set(BOARD_TYPE "kevin-sp-v3-dev")
-elseif(CONFIG_BOARD_TYPE_KEVIN_SP_V4_DEV)
-    set(BOARD_TYPE "kevin-sp-v4-dev")
-elseif(CONFIG_BOARD_TYPE_KEVIN_YUYING_313LCD)
-    set(BOARD_TYPE "kevin-yuying-313lcd")
 elseif(CONFIG_BOARD_TYPE_GIZWITS_GOKIT5)
     set(BOARD_TYPE "gizwits-gokit5")
 elseif(CONFIG_BOARD_TYPE_LICHUANG_DEV)
@@ -109,6 +104,10 @@ elseif(CONFIG_BOARD_TYPE_ESP_SPOT_S3)
     set(BOARD_TYPE "esp-spot-s3")
 elseif(CONFIG_BOARD_TYPE_ESP32S3_Touch_AMOLED_1_8)
     set(BOARD_TYPE "esp32-s3-touch-amoled-1.8")
+elseif(CONFIG_BOARD_TYPE_GIZWITS_C2_6824)
+    set(BOARD_TYPE "gizwits-c2-6824")
+elseif(CONFIG_BOARD_TYPE_GIZWITS_C2_6824_TOY)
+    set(BOARD_TYPE "gizwits-c2-6824-toy")
 elseif(CONFIG_BOARD_TYPE_ESP32S3_XUNGUAN_AMOLED_1_28)
     set(BOARD_TYPE "esp32-s3-xunguan-1.28")
 elseif(CONFIG_BOARD_TYPE_ESP32S3_XUNGUAN_AMOLED_1_28_OLD)
@@ -141,16 +140,6 @@ elseif(CONFIG_BOARD_TYPE_MOVECALL_MOJI_ESP32S3)
     set(BOARD_TYPE "movecall-moji-esp32s3")
     elseif(CONFIG_BOARD_TYPE_MOVECALL_CUICAN_ESP32S3)
     set(BOARD_TYPE "movecall-cuican-esp32s3")
-elseif(CONFIG_BOARD_TYPE_ATK_DNESP32S3)
-    set(BOARD_TYPE "atk-dnesp32s3")
-elseif(CONFIG_BOARD_TYPE_ATK_DNESP32S3_BOX)
-    set(BOARD_TYPE "atk-dnesp32s3-box")
-elseif(CONFIG_BOARD_TYPE_ATK_DNESP32S3_BOX0)
-    set(BOARD_TYPE "atk-dnesp32s3-box0")
-elseif(CONFIG_BOARD_TYPE_ATK_DNESP32S3M_WIFI)
-    set(BOARD_TYPE "atk-dnesp32s3m-wifi")
-elseif(CONFIG_BOARD_TYPE_ATK_DNESP32S3M_4G)
-    set(BOARD_TYPE "atk-dnesp32s3m-4g")
 elseif(CONFIG_BOARD_TYPE_DU_CHATX)
     set(BOARD_TYPE "du-chatx")
 elseif(CONFIG_BOARD_TYPE_ESP32S3_Taiji_Pi)
@@ -226,6 +215,15 @@ if(CONFIG_IDF_TARGET_ESP32)
                              "audio_codecs/es8388_audio_codec.cc"
                              "led/gpio_led.cc"
                              )
+endif()
+
+if(CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS OR CONFIG_USE_AUDIO_CODEC_DECODE_OPUS)
+    list(APPEND SOURCES "audio_codecs/vb6824_audio_codec.cc")
+    list(REMOVE_ITEM SOURCES "audio_codecs/box_audio_codec.cc"
+                            "audio_codecs/no_audio_codec.cc"
+                            "audio_codecs/es8311_audio_codec.cc"
+                            "audio_codecs/es8374_audio_codec.cc"
+                            "audio_codecs/es8388_audio_codec.cc")
 endif()
 
 idf_component_register(SRCS ${SOURCES}

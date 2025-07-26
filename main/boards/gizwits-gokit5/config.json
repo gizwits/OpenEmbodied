@@ -3,7 +3,10 @@
     "builds": [
         {
             "name": "gizwits-gokit5",
-            "sdkconfig_append": []
+            "sdkconfig_append": [
+                "CONFIG_CODEC_ES8311_SUPPORT=y",
+                "CONFIG_USE_AUDIO_PROCESSOR=y"
+            ]
         }
     ]
 }

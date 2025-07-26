@@ -20,6 +20,8 @@ public:
     void OnClick(std::function<void()> callback);
     void OnDoubleClick(std::function<void()> callback);
     void OnMultipleClick(std::function<void()> callback, uint8_t click_count = 3);
+    void OnPressRepeat(std::function<void(uint16_t)> callback);
+    void OnPressRepeaDone(std::function<void(uint16_t)> callback);
 
 protected:
     gpio_num_t gpio_num_;
@@ -31,6 +33,8 @@ protected:
     std::function<void()> on_click_;
     std::function<void()> on_double_click_;
     std::function<void()> on_multiple_click_;
+    std::function<void(uint16_t)> on_press_repeat_;
+    std::function<void(uint16_t)> on_press_repeat_done_;
 };
 
 #if CONFIG_SOC_ADC_SUPPORTED

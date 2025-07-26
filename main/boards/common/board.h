@@ -10,8 +10,17 @@
 #include "led/led.h"
 #include "backlight.h"
 #include "camera.h"
+#include "servo.h"
 
 void* create_board();
+
+// 设备工作模式枚举
+enum class DeviceMode {
+    BUTTON_MODE = 0,      // 按键模式
+    WAKE_WORD_MODE = 1,   // 唤醒词模式
+    NATURAL_CHAT_MODE = 2 // 自然对话模式
+};
+
 class AudioCodec;
 class Display;
 class BoardCamera;
@@ -27,6 +36,9 @@ protected:
 
     // 软件生成的设备唯一标识
     std::string uuid_;
+    
+    // 设备工作模式
+    DeviceMode device_mode_ = DeviceMode::BUTTON_MODE;
 
 public:
     static Board& GetInstance() {
@@ -41,6 +53,9 @@ public:
     virtual Led* GetLed();
     virtual AudioCodec* GetAudioCodec() = 0;
     virtual bool GetTemperature(float& esp32temp);
+    // 是否要 bo 一下
+    virtual bool NeedPlayProcessVoice() { return true; }
+    virtual Servo* GetServo();
     virtual Display* GetDisplay();
     virtual Camera* GetCamera();
     virtual Http* CreateHttp() = 0;
@@ -55,6 +70,22 @@ public:
     virtual bool IsWifiConfigMode();
     virtual std::string GetBoardJson() = 0;
     virtual std::string GetDeviceStatusJson() = 0;
+    
+    // 设备模式相关方法
+    virtual DeviceMode GetDeviceMode() const { return device_mode_; }
+    virtual void SetDeviceMode(DeviceMode mode) { device_mode_ = mode; }
+    virtual std::string GetDeviceModeString() const {
+        switch (device_mode_) {
+            case DeviceMode::BUTTON_MODE:
+                return "button_mode";
+            case DeviceMode::WAKE_WORD_MODE:
+                return "wake_word_mode";
+            case DeviceMode::NATURAL_CHAT_MODE:
+                return "natural_chat_mode";
+            default:
+                return "unknown_mode";
+        }
+    }
 };
 
 #define DECLARE_BOARD(BOARD_CLASS_NAME) \

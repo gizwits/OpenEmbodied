@@ -71,11 +71,18 @@ bool Ota::CheckVersion() {
         gserver.getFirmwareUpdate(
             hw_version.c_str(),
             current_version_.c_str(),
-            [this, &has_update](const char* package_type, const char* package_md5, const char* package_url) {
-                firmware_version_ = package_type;
+            [this, &has_update](const char* package_type, const char* package_md5, const char* package_url, const char* sw_version) {
+                firmware_version_ = sw_version;
                 firmware_url_ = package_url;
-                has_update = true;
-                ESP_LOGI(TAG, "New firmware available: type=%s, url=%s", package_type, package_url);
+                
+                // Compare versions before setting has_update
+                if (IsNewVersionAvailable(current_version_, firmware_version_)) {
+                    has_update = true;
+                    ESP_LOGI(TAG, "New firmware available: type=%s, url=%s", package_type, package_url);
+                } else {
+                    ESP_LOGI(TAG, "No newer firmware available. Current: %s, Server: %s", 
+                        current_version_.c_str(), firmware_version_.c_str());
+                }
             }
         );
 

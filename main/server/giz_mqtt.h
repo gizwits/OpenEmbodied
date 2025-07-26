@@ -12,7 +12,49 @@
 #include "cJSON.h"
 #include "protocols/protocol.h"
 
+// 内存优化配置
+// S3 用更大的内存
+#if CONFIG_IDF_TARGET_ESP32S3
+#define MQTT_TASK_STACK_SIZE_RCV     4096    // 消息接收任务栈大小 - 增加以处理大型JSON
+#define MQTT_TASK_STACK_SIZE_RESEND  4096    // 消息重发任务栈大小
+#else
+#define MQTT_TASK_STACK_SIZE_RCV     3072    // 消息接收任务栈大小 - 增加以处理大型JSON
+#define MQTT_TASK_STACK_SIZE_RESEND  2048    // 消息重发任务栈大小
+#endif
+#define MQTT_QUEUE_SIZE              10      // 消息队列大小
+#define MQTT_TOPIC_BUFFER_SIZE       48      // 主题缓冲区大小
+#define MQTT_PAYLOAD_BUFFER_SIZE     256     // 负载缓冲区大小
+#define MQTT_TOKEN_REPORT_BUFFER_SIZE 128    // Token报告缓冲区大小
+
+#define GAGENT_PROTOCOL_VERSION     (0x00000003)
+#define HI_CMD_PAYLOAD93            0x0093
+#define HI_CMD_UPLOADACK94          0x0094
+#define HI_CMD_MQTT_RESET           0x021E
 #define MQTT_REQUEST_FAILURE_COUNT 10
+
+
+struct Attr {
+    std::string name;
+    int byte_offset;
+    int bit_offset;
+    int len;
+    std::string unit; // "bit" or "byte"
+    // 可扩展更多字段
+};
+
+static std::vector<Attr> g_attrs;
+static std::once_flag g_attrs_once;
+
+
+#define hexdump(pName, buf, len) do { \
+    if (pName) { \
+        printf("%s: ", pName); \
+    } \
+    for (size_t i = 0; i < len; i++) { \
+        printf("%02X ", ((const uint8_t *)(buf))[i]); \
+    } \
+    printf("\n"); \
+} while (0)
 
 // MQTT message structure
 typedef struct {
@@ -46,6 +88,7 @@ public:
     }
 
     bool initialize();
+    static void InitAttrsFromJson();
     bool publish(const std::string& topic, const std::string& payload);
     bool subscribe(const std::string& topic);
     void setMessageCallback(std::function<void(const std::string&, const std::string&)> callback);
@@ -55,6 +98,7 @@ public:
     int getPublishedId();
     void OnRoomParamsUpdated(std::function<void(const RoomParams&)> callback);
     void deinit();
+    void sendTraceLog(const char* level, const char* message);
 
     bool uploadP0Data(const void* data, size_t data_len);
 
@@ -62,6 +106,12 @@ public:
     ~MqttClient() = default;
     MqttClient(const MqttClient&) = delete;
     MqttClient& operator=(const MqttClient&) = delete;
+    void ReportTimer();
+    static const char* kGizwitsProtocolJson;
+    
+    // 内存优化相关函数
+    void printMemoryUsage();
+    size_t getEstimatedMemoryUsage();
 
 private:
     Mqtt* mqtt_ = nullptr;
@@ -79,6 +129,7 @@ private:
     int port_ = 1883;
     std::string client_id_;
     std::string username_;
+    static int attr_size_;
 
     static void messageReceiveHandler(void* arg);
     static void messageResendHandler(void* arg);

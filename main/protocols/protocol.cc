@@ -174,3 +174,7 @@ void Protocol::UpdateRoomParams(const RoomParams& params) {
     // 保存
     room_params_ = params;
 }
+
+void Protocol::SendTextToAI(const std::string& text) {
+    // 
+}

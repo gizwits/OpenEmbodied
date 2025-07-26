@@ -19,9 +19,13 @@ private:
     i2c_master_bus_handle_t i2c_bus_;
 
     Button boot_button_;
-    Button rec_button_;
     Button volume_up_button_;
     Button volume_down_button_;
+    Button prev_button_;
+    Button next_button_;
+
+    int64_t prev_last_click_time_ = 0;
+    int64_t next_last_click_time_ = 0;
 
     void InitializeI2c() {
         // Initialize I2C peripheral
@@ -41,18 +45,45 @@ private:
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
     }
     void InitializeButtons() {
-        boot_button_.OnLongPress([this]() {
-            ESP_LOGI(TAG, "  ===>>>  boot_button_.OnLongPress ");
-            // setPowerHold(0);
+
+        boot_button_.OnPressRepeat([this](uint16_t count) {
+            if(count >= 3){
+                ResetWifiConfiguration();
+            } else {
+                Application::GetInstance().ToggleChatState();
+            }
         });
 
-        rec_button_.OnPressDown([this]() {
-            Application::GetInstance().StartListening();
-        });
-        rec_button_.OnPressUp([this]() {
-            Application::GetInstance().StopListening();
+        prev_button_.OnClick([this]() {
+            int64_t now = esp_timer_get_time();
+            if (Application::GetInstance().GetDeviceState() == DeviceState::kDeviceStateIdle) {
+                Application::GetInstance().CancelPlayMusic();
+                Application::GetInstance().ToggleChatState();
+                vTaskDelay(pdMS_TO_TICKS(2000));
+                Application::GetInstance().SendTextToAI("给我播放一首歌");
+            } else {
+                if (now - prev_last_click_time_ > 10* 1000000) { // 5秒
+                    prev_last_click_time_ = now;
+                    Application::GetInstance().SendTextToAI("给我播放一首歌");
+                }
+            }
+            
         });
 
+        next_button_.OnClick([this]() {
+            int64_t now = esp_timer_get_time();
+            if (Application::GetInstance().GetDeviceState() == DeviceState::kDeviceStateIdle) {
+                Application::GetInstance().CancelPlayMusic();
+                Application::GetInstance().ToggleChatState();
+                vTaskDelay(pdMS_TO_TICKS(2000));
+                Application::GetInstance().SendTextToAI("给我播放一首歌");
+            } else {
+                if (now - prev_last_click_time_ > 10* 1000000) { // 5秒
+                    prev_last_click_time_ = now;
+                    Application::GetInstance().SendTextToAI("给我播放一首歌");
+                }
+            }
+        });
         volume_up_button_.OnClick([this]() {
             auto codec = GetAudioCodec();
             auto volume = codec->output_volume() + 10;
@@ -61,7 +92,6 @@ private:
             }
             codec->SetOutputVolume(volume);
         });
-
         volume_up_button_.OnLongPress([this]() {
             GetAudioCodec()->SetOutputVolume(100);
         });
@@ -77,18 +107,6 @@ private:
 
     }
 
-    void setPowerHold(int level) {
-        gpio_config_t gpioConfig = {
-            .pin_bit_mask = 1ULL << POWER_HOLD_GPIO,  // 设置需要配置的 GPIO 引脚
-            .mode = GPIO_MODE_OUTPUT,           // 设置为输出模式
-            .pull_up_en = GPIO_PULLUP_DISABLE,  // 禁用上拉
-            .pull_down_en = GPIO_PULLDOWN_DISABLE,  // 禁用下拉
-            .intr_type = GPIO_INTR_DISABLE      // 禁用中断
-        };
-        gpio_config(&gpioConfig);
-        gpio_set_level(POWER_HOLD_GPIO, level);
-    }
-
     // 物联网初始化，添加对 AI 可见设备
     void InitializeIot() {
         auto& thing_manager = iot::ThingManager::GetInstance();
@@ -96,9 +114,9 @@ private:
     }
 
 public:
-    GizwitsDevBoard() : boot_button_(BOOT_BUTTON_GPIO), rec_button_(REC_BUTTON_GPIO),
-    volume_up_button_(VOLUME_UP_BUTTON_GPIO), volume_down_button_(VOLUME_DOWN_BUTTON_GPIO) {
-        // setPowerHold(1);
+    GizwitsDevBoard() : boot_button_(BOOT_BUTTON_GPIO),
+    volume_up_button_(VOLUME_UP_BUTTON_GPIO), volume_down_button_(VOLUME_DOWN_BUTTON_GPIO),
+    prev_button_(PREV_BUTTON_GPIO), next_button_(NEXT_BUTTON_GPIO) {
         InitializeI2c();
         InitializeButtons();
         InitializeIot();

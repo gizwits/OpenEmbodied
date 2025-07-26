@@ -26,6 +26,40 @@ bool AudioCodec::InputData(std::vector<int16_t>& data) {
     return false;
 }
 
+#ifdef CONFIG_USE_AUDIO_CODEC_DECODE_OPUS
+void AudioCodec::OutputData(std::vector<uint8_t>& opus) {
+    Write(opus.data(), opus.size());
+}
+#endif
+
+#ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+bool AudioCodec::InputData(std::vector<uint8_t>& opus) {
+    int samples = Read(opus.data(), opus.size());
+    if (samples > 0) {
+        return true;
+    }
+    return false;
+}
+#endif
+
+#ifdef CONFIG_USE_AUDIO_CODEC_DECODE_OPUS
+bool AudioCodec::ConfigDecode(int sample_rate, int channels, int duration_ms){
+    output_sample_rate_ = sample_rate;
+    output_channels_ = channels;
+    output_duration_ms_ = duration_ms;
+    return true;
+}
+#endif
+
+#ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+bool AudioCodec::ConfigEncode(int sample_rate, int channels, int duration_ms){
+    input_sample_rate_ = sample_rate;
+    input_channels_ = channels;
+    input_duration_ms_ = duration_ms;
+    return true;
+}
+#endif
+
 void AudioCodec::Start() {
     Settings settings("audio", false);
     output_volume_ = settings.GetInt("output_volume", output_volume_);
@@ -33,9 +67,26 @@ void AudioCodec::Start() {
         ESP_LOGW(TAG, "Output volume value (%d) is too small, setting to default (10)", output_volume_);
         output_volume_ = 10;
     }
+    
+#ifdef CONFIG_USE_AUDIO_CODEC_DECODE_OPUS
+#else
+#ifdef CONFIG_IDF_TARGET_ESP32C2
+#else
+    if(tx_handle_){
+        ESP_ERROR_CHECK(i2s_channel_enable(tx_handle_));
+    }
+#endif
+#endif
 
-    ESP_ERROR_CHECK(i2s_channel_enable(tx_handle_));
-    ESP_ERROR_CHECK(i2s_channel_enable(rx_handle_));
+#ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+#else
+#ifdef CONFIG_IDF_TARGET_ESP32C2
+#else
+    if(rx_handle_){
+        ESP_ERROR_CHECK(i2s_channel_enable(rx_handle_));
+    }
+#endif
+#endif
 
     EnableInput(true);
     EnableOutput(true);

@@ -504,7 +504,7 @@ static char* url_decode(const char* src) {
     return decoded;
 }
 
-int32_t GServer::getFirmwareUpdate(const char* hw_version, const char* sw_version, std::function<void(const char*, const char*, const char*)> callback) {
+int32_t GServer::getFirmwareUpdate(const char* hw_version, const char* sw_version, std::function<void(const char*, const char*, const char*, const char*)> callback) {
     std::string did = Auth::getInstance().getDeviceId();
     std::string url = "http://agent.gizwitsapi.com/v2/devices/" + did + "/firmwares";
     ESP_LOGI(TAG, "Firmware Update URL: %s", url.c_str());
@@ -565,6 +565,7 @@ int32_t GServer::getFirmwareUpdate(const char* hw_version, const char* sw_versio
     char* param_token = strtok_r(params, "&", &saveptr);
     const char* package_type = nullptr;
     const char* package_md5 = nullptr;
+    const char* package_version = nullptr;
     const char* package_url = nullptr;
     char* decoded_url = nullptr;  // Add this to track decoded URL
 
@@ -593,12 +594,15 @@ int32_t GServer::getFirmwareUpdate(const char* hw_version, const char* sw_versio
                 package_url = url_start;
                 ESP_LOGI(TAG, "Package URL (raw): %s", package_url);
             }
+        } else if (strncmp(param_token, "sw_version=", 11) == 0) {
+            package_version = param_token + 11;
+            ESP_LOGI(TAG, "Package Version: %s", package_version);
         }
         param_token = strtok_r(nullptr, "&", &saveptr);
     }
 
     if (callback && package_type && package_md5 && package_url) {
-        callback(package_type, package_md5, package_url);
+        callback(package_type, package_md5, package_url, package_version);
     }
 
     if (decoded_url) {  // Free the decoded URL if we allocated it
