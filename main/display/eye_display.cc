@@ -353,9 +353,13 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
     }
 
     // VERTIGO状态，启动锁定和定时器
-    if (current_state_ == EyeState::VERTIGO || current_state_ == EyeState::LOVING) {
+    if (current_state_ == EyeState::VERTIGO || current_state_ == EyeState::LOVING || current_state_ == EyeState::THINKING) {
         vertigo_locked_ = true;
-        vertigo_unlock_time_ = esp_timer_get_time() + 5000000LL; // 5秒后解锁
+        if (current_state_ == EyeState::THINKING) {
+            vertigo_unlock_time_ = esp_timer_get_time() + 2000000LL; // 2秒后解锁
+        } else {
+            vertigo_unlock_time_ = esp_timer_get_time() + 5000000LL; // 5秒后解锁
+        }
         if (vertigo_timer_ == nullptr) {
             esp_timer_create_args_t timer_args = {
                 .callback = [](void* arg) {
@@ -376,7 +380,12 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
             esp_timer_create(&timer_args, &vertigo_timer_);
         }
         esp_timer_stop(vertigo_timer_);
-        esp_timer_start_once(vertigo_timer_, 5000000); // 5秒
+
+        if (current_state_ == EyeState::THINKING) {
+            esp_timer_start_once(vertigo_timer_, 2000000); // 2秒
+        } else {
+            esp_timer_start_once(vertigo_timer_, 5000000); // 5秒
+        }
     } else {
         // 非VERTIGO状态，确保锁定解除
         vertigo_locked_ = false;
