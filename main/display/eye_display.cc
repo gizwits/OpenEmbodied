@@ -4,6 +4,7 @@
 #include <esp_lvgl_port.h>
 #include <cstring>
 #include <esp_timer.h>
+#include "application.h"
 
 #define TAG "EyeDisplay"
 
@@ -208,7 +209,7 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
     } else if (strcmp(emotion, "shocked") == 0) {
         new_state = EyeState::SHOCKED;
     } else if (strcmp(emotion, "thinking") == 0) {
-        new_state = EyeState::SHOCKED;
+        new_state = EyeState::THINKING;
     } else if (strcmp(emotion, "winking") == 0) {
         new_state = EyeState::HAPPY;
     } else if (strcmp(emotion, "cool") == 0) {
@@ -278,6 +279,18 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
         right_tear_ = nullptr;
     }
 
+    // 清理可能存在的手部对象（无论从什么状态切换）
+    if (left_hand_) {
+        lv_anim_del(left_hand_, nullptr);  // 停止左手动画
+        lv_obj_del(left_hand_);
+        left_hand_ = nullptr;
+    }
+    if (right_hand_) {
+        lv_anim_del(right_hand_, nullptr);  // 停止右手动画
+        lv_obj_del(right_hand_);
+        right_hand_ = nullptr;
+    }
+
     // 确保眼睛对象可见并重置为默认状态
     lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
@@ -323,6 +336,8 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
         case EyeState::DELICIOUS:
         case EyeState::EMBARRASSED:
         case EyeState::THINKING:
+             StartThinkingAnimation();
+             break;
         case EyeState::SHOCKED:
             StartShockedAnimation();
             break;
@@ -348,6 +363,11 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
                     self->vertigo_locked_ = false;
                     ESP_LOGI(TAG, "VERTIGO unlock, auto switch to idle");
                     self->SetEmotion("neutral");
+                    if (Application::GetInstance().GetDeviceState() == DeviceState::kDeviceStateIdle) {
+                        self->SetEmotion("sleepy");
+                    } else {
+                        self->SetEmotion("neutral");
+                    }
                 },
                 .arg = this,
                 .dispatch_method = ESP_TIMER_TASK,
@@ -426,14 +446,14 @@ void EyeDisplay::StartHappyAnimation() {
     // 创建嘴巴图片对象
     mouth_ = lv_img_create(lv_scr_act());
     lv_img_set_src(mouth_, &down_image);
-    lv_obj_set_pos(mouth_, (width_ - 32) / 2, height_ - 52);  // 居中，距离底部52像素
+    lv_obj_set_pos(mouth_, (width_ - 32) / 2, height_ - 52 - DISPLAY_VERTICAL_OFFSET);  // 居中，距离底部52像素
     lv_obj_set_style_img_recolor(mouth_, lv_color_hex(0xFCCCE6), 0);  // 设置青色
     lv_obj_set_style_img_recolor_opa(mouth_, LV_OPA_COVER, 0);  // 设置不透明度
 
     // 创建嘴巴动画
     lv_anim_init(&mouth_anim_);
     lv_anim_set_var(&mouth_anim_, mouth_);
-    lv_anim_set_values(&mouth_anim_, height_ - 52, height_ - 62);  // 在-52到-62像素之间移动
+    lv_anim_set_values(&mouth_anim_, height_ - 52 - DISPLAY_VERTICAL_OFFSET, height_ - 62 - DISPLAY_VERTICAL_OFFSET);  // 在-52到-62像素之间移动
     lv_anim_set_time(&mouth_anim_, 1500);
     lv_anim_set_delay(&mouth_anim_, 0);
     lv_anim_set_exec_cb(&mouth_anim_, (lv_anim_exec_xcb_t)lv_obj_set_y);
@@ -459,7 +479,7 @@ void EyeDisplay::StartSadAnimation() {
     // 创建嘴巴图片对象
     mouth_ = lv_img_create(lv_scr_act());
     lv_img_set_src(mouth_, &down_image);
-    lv_obj_set_pos(mouth_, (width_ - 32) / 2, height_ - 52);  // 居中，距离底部52像素
+    lv_obj_set_pos(mouth_, (width_ - 32) / 2, height_ - 52 - DISPLAY_VERTICAL_OFFSET);  // 居中，距离底部52像素
     lv_obj_set_style_img_recolor(mouth_, lv_color_hex(0xFCCCE6), 0);  // 设置青色
     lv_obj_set_style_img_recolor_opa(mouth_, LV_OPA_COVER, 0);  // 设置不透明度
     
@@ -467,12 +487,12 @@ void EyeDisplay::StartSadAnimation() {
     lv_obj_set_style_transform_angle(mouth_, 1800, 0);  // 180度 = 1800 * 0.1度
     
     // 重新调整位置，确保旋转后仍然居中
-    lv_obj_set_pos(mouth_, (width_ + 32) / 2, height_ - 32);
+    lv_obj_set_pos(mouth_, (width_ + 32) / 2, height_ - 32 - DISPLAY_VERTICAL_OFFSET);
 
     // 创建嘴巴动画
     lv_anim_init(&mouth_anim_);
     lv_anim_set_var(&mouth_anim_, mouth_);
-    lv_anim_set_values(&mouth_anim_, height_ - 32, height_ - 42); 
+    lv_anim_set_values(&mouth_anim_, height_ - 32 - DISPLAY_VERTICAL_OFFSET, height_ - 42 - DISPLAY_VERTICAL_OFFSET); 
     lv_anim_set_time(&mouth_anim_, 1500);
     lv_anim_set_delay(&mouth_anim_, 0);
     lv_anim_set_exec_cb(&mouth_anim_, (lv_anim_exec_xcb_t)lv_obj_set_y);
@@ -494,12 +514,12 @@ void EyeDisplay::StartSadAnimation() {
     lv_obj_set_style_outline_width(right_tear_, 0, 0);
 
     // 位置在屏幕右侧，眼睛下方
-    lv_obj_set_pos(right_tear_, width_ - 60, height_ / 2 + 20);
+    lv_obj_set_pos(right_tear_, width_ - 60, height_ / 2 + 20 - DISPLAY_VERTICAL_OFFSET);
     // 添加下落动画
     static lv_anim_t tear_anim;
     lv_anim_init(&tear_anim);
     lv_anim_set_var(&tear_anim, right_tear_);
-    lv_anim_set_values(&tear_anim, height_ / 2 + 40, height_ / 2 + 20);
+    lv_anim_set_values(&tear_anim, height_ / 2 + 40 - DISPLAY_VERTICAL_OFFSET, height_ / 2 + 20 - DISPLAY_VERTICAL_OFFSET);
     lv_anim_set_time(&tear_anim, 1000);
     lv_anim_set_repeat_count(&tear_anim, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_playback_time(&tear_anim, 1000);
@@ -518,14 +538,14 @@ void EyeDisplay::StartVertigoAnimation() {
     lv_img_set_src(left_heart, &spiral_img_64);
     lv_obj_set_style_img_recolor(left_heart, lv_color_hex(0xFCCCE6), 0);  // 设置为白色
     lv_obj_set_style_img_recolor_opa(left_heart, LV_OPA_COVER, 0);  // 完全不透明
-    lv_obj_align(left_heart, LV_ALIGN_LEFT_MID, 0, 0);  // 左眼位置，距离左边缘40像素
+    lv_obj_align(left_heart, LV_ALIGN_LEFT_MID, 0, -DISPLAY_VERTICAL_OFFSET);  // 左眼位置，距离左边缘40像素
     
     // 创建右眼爱心图片
     lv_obj_t* right_heart = lv_img_create(lv_screen_active());
     lv_img_set_src(right_heart, &spiral_img_64);
     lv_obj_set_style_img_recolor(right_heart, lv_color_hex(0xFCCCE6), 0);  // 设置为白色
     lv_obj_set_style_img_recolor_opa(right_heart, LV_OPA_COVER, 0);  // 完全不透明
-    lv_obj_align(right_heart, LV_ALIGN_RIGHT_MID, -0, 0);  // 右眼位置，距离右边缘40像素
+    lv_obj_align(right_heart, LV_ALIGN_RIGHT_MID, -0, -DISPLAY_VERTICAL_OFFSET);  // 右眼位置，距离右边缘40像素
     
     // 缩小图片
     lv_img_set_zoom(left_heart, 128);
@@ -569,14 +589,14 @@ void EyeDisplay::StartLovingAnimation() {
     lv_img_set_src(left_heart, &hart_img_64);
     lv_obj_set_style_img_recolor(left_heart, lv_color_hex(0xFCCCE6), 0);  // 设置为白色
     lv_obj_set_style_img_recolor_opa(left_heart, LV_OPA_COVER, 0);  // 完全不透明
-    lv_obj_align(left_heart, LV_ALIGN_LEFT_MID, 0, 0);  // 左眼位置，距离左边缘40像素
+    lv_obj_align(left_heart, LV_ALIGN_LEFT_MID, 0, -DISPLAY_VERTICAL_OFFSET);  // 左眼位置，距离左边缘40像素
     
     // 创建右眼爱心图片
     lv_obj_t* right_heart = lv_img_create(lv_screen_active());
     lv_img_set_src(right_heart, &hart_img_64);
     lv_obj_set_style_img_recolor(right_heart, lv_color_hex(0xFCCCE6), 0);  // 设置为白色
     lv_obj_set_style_img_recolor_opa(right_heart, LV_OPA_COVER, 0);  // 完全不透明
-    lv_obj_align(right_heart, LV_ALIGN_RIGHT_MID, -0, 0);  // 右眼位置，距离右边缘40像素
+    lv_obj_align(right_heart, LV_ALIGN_RIGHT_MID, -0, -DISPLAY_VERTICAL_OFFSET);  // 右眼位置，距离右边缘40像素
     
     // 保存爱心对象指针，以便在状态切换时清理
     left_heart_ = left_heart;
@@ -621,21 +641,21 @@ void EyeDisplay::StartSleepingAnimation() {
     lv_obj_set_style_text_font(zzz1_, fonts_.text_font, 0);  // 使用文本字体
     lv_obj_set_style_text_color(zzz1_, lv_color_hex(0xFCCCE6), 0);  // 黄色
     lv_label_set_text(zzz1_, "z");
-    lv_obj_align(zzz1_, LV_ALIGN_TOP_MID, -40, 50);  // 调整垂直位置到 50
+    lv_obj_align(zzz1_, LV_ALIGN_TOP_MID, -40, 50 - DISPLAY_VERTICAL_OFFSET);  // 调整垂直位置到 50
     lv_obj_set_style_text_letter_space(zzz1_, 2, 0);  // 增加字间距
 
     zzz2_ = lv_label_create(lv_screen_active());
     lv_obj_set_style_text_font(zzz2_, fonts_.text_font, 0);  // 使用文本字体
     lv_obj_set_style_text_color(zzz2_, lv_color_hex(0xFCCCE6), 0);  // 黄色
     lv_label_set_text(zzz2_, "z");
-    lv_obj_align(zzz2_, LV_ALIGN_TOP_MID, 0, 40);  // 调整垂直位置到 40
+    lv_obj_align(zzz2_, LV_ALIGN_TOP_MID, 0, 40 - DISPLAY_VERTICAL_OFFSET);  // 调整垂直位置到 40
     lv_obj_set_style_text_letter_space(zzz2_, 2, 0);  // 增加字间距
 
     zzz3_ = lv_label_create(lv_screen_active());
     lv_obj_set_style_text_font(zzz3_, fonts_.text_font, 0);  // 使用文本字体
     lv_obj_set_style_text_color(zzz3_, lv_color_hex(0xFCCCE6), 0);  // 黄色
     lv_label_set_text(zzz3_, "z");
-    lv_obj_align(zzz3_, LV_ALIGN_TOP_MID, 40, 30);  // 调整垂直位置到 30
+    lv_obj_align(zzz3_, LV_ALIGN_TOP_MID, 40, 30 - DISPLAY_VERTICAL_OFFSET);  // 调整垂直位置到 30
     lv_obj_set_style_text_letter_space(zzz3_, 2, 0);  // 增加字间距
 }
 
@@ -699,6 +719,87 @@ void EyeDisplay::StartSillyAnimation() {
     lv_anim_start(&right_anim_);
 }
 
+void EyeDisplay::StartThinkingAnimation() {
+    // 确保眼睛可见
+    lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
+    
+    // 眼睛动画 - 思考时的眨眼效果
+    lv_anim_init(&left_anim_);
+    lv_anim_set_var(&left_anim_, left_eye_);
+    lv_anim_set_values(&left_anim_, 40, 60);
+    lv_anim_set_time(&left_anim_, 2000);
+    lv_anim_set_delay(&left_anim_, 0);
+    lv_anim_set_exec_cb(&left_anim_, (lv_anim_exec_xcb_t)lv_obj_set_height);
+    lv_anim_set_path_cb(&left_anim_, lv_anim_path_linear);
+    lv_anim_set_repeat_count(&left_anim_, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_playback_time(&left_anim_, 2000);
+    lv_anim_set_playback_delay(&left_anim_, 0);
+    lv_anim_start(&left_anim_);
+
+    lv_anim_init(&right_anim_);
+    lv_anim_set_var(&right_anim_, right_eye_);
+    lv_anim_set_values(&right_anim_, 40, 60);
+    lv_anim_set_time(&right_anim_, 2000);
+    lv_anim_set_delay(&right_anim_, 0);
+    lv_anim_set_exec_cb(&right_anim_, (lv_anim_exec_xcb_t)lv_obj_set_height);
+    lv_anim_set_path_cb(&right_anim_, lv_anim_path_linear);
+    lv_anim_set_repeat_count(&right_anim_, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_playback_time(&right_anim_, 2000);
+    lv_anim_set_playback_delay(&right_anim_, 0);
+    lv_anim_start(&right_anim_);
+
+    // 创建嘴巴图片对象
+    mouth_ = lv_img_create(lv_scr_act());
+    lv_img_set_src(mouth_, &down_image);
+    lv_obj_set_pos(mouth_, (width_ - 32) / 2, height_ - 80 - DISPLAY_VERTICAL_OFFSET);
+    lv_obj_set_style_img_recolor(mouth_, lv_color_hex(0xFCCCE6), 0);
+    lv_obj_set_style_img_recolor_opa(mouth_, LV_OPA_COVER, 0);
+
+
+    // 创建左手图片
+    left_hand_ = lv_img_create(lv_scr_act());
+    lv_img_set_src(left_hand_, &hand_img);
+    lv_obj_set_style_img_recolor(left_hand_, lv_color_hex(0xFCCCE6), 0);
+    lv_obj_set_style_img_recolor_opa(left_hand_, LV_OPA_COVER, 0);
+    lv_obj_set_pos(left_hand_, 20, height_ - 70 - DISPLAY_VERTICAL_OFFSET);
+
+    // 创建右手图片
+    right_hand_ = lv_img_create(lv_scr_act());
+    lv_img_set_src(right_hand_, &hand_right_img);
+    lv_obj_set_style_img_recolor(right_hand_, lv_color_hex(0xFCCCE6), 0);
+    lv_obj_set_style_img_recolor_opa(right_hand_, LV_OPA_COVER, 0);
+    // 设置右手位置
+    lv_obj_set_pos(right_hand_, width_ - 74, height_ - 70 - DISPLAY_VERTICAL_OFFSET);
+    // 左手左右移动动画
+    static lv_anim_t left_hand_anim;
+    lv_anim_init(&left_hand_anim);
+    lv_anim_set_var(&left_hand_anim, left_hand_);
+    lv_anim_set_values(&left_hand_anim, 20, 60);
+    lv_anim_set_time(&left_hand_anim, 1500);
+    lv_anim_set_delay(&left_hand_anim, 0);
+    lv_anim_set_exec_cb(&left_hand_anim, (lv_anim_exec_xcb_t)lv_obj_set_x);
+    lv_anim_set_path_cb(&left_hand_anim, lv_anim_path_ease_in_out);
+    lv_anim_set_repeat_count(&left_hand_anim, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_playback_time(&left_hand_anim, 1500);
+    lv_anim_set_playback_delay(&left_hand_anim, 0);
+    lv_anim_start(&left_hand_anim);
+
+    // 右手左右移动动画（与左手相反）
+    static lv_anim_t right_hand_anim;
+    lv_anim_init(&right_hand_anim);
+    lv_anim_set_var(&right_hand_anim, right_hand_);
+    lv_anim_set_values(&right_hand_anim, width_ - 54, width_ - 100);
+    lv_anim_set_time(&right_hand_anim, 1500);
+    lv_anim_set_delay(&right_hand_anim, 0);
+    lv_anim_set_exec_cb(&right_hand_anim, (lv_anim_exec_xcb_t)lv_obj_set_x);
+    lv_anim_set_path_cb(&right_hand_anim, lv_anim_path_ease_in_out);
+    lv_anim_set_repeat_count(&right_hand_anim, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_playback_time(&right_hand_anim, 1500);
+    lv_anim_set_playback_delay(&right_hand_anim, 0);
+    lv_anim_start(&right_hand_anim);
+}
+
 void EyeDisplay::SetupUI() {
     DisplayLockGuard lock(this);
 
@@ -712,7 +813,9 @@ void EyeDisplay::SetupUI() {
     lv_obj_set_style_border_width(container, 0, 0);
     lv_obj_set_style_pad_all(container, 0, 0);
     lv_obj_set_flex_flow(container, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(container, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(container, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER);
+    // 设置容器的顶部内边距来实现向上偏移
+    lv_obj_set_style_pad_top(container, -DISPLAY_VERTICAL_OFFSET, 0);
 
     // Create left eye
     left_eye_ = lv_obj_create(container);

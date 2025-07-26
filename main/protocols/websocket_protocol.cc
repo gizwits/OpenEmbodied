@@ -276,6 +276,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
         //     return;
         // }
         if(event_type == "conversation.audio.delta") {
+
             constexpr std::string_view content_key = "\"content\":\"";
             size_t content_start = str_data.find(content_key);
             if (content_start != std::string_view::npos) {
@@ -323,11 +324,36 @@ bool WebsocketProtocol::OpenAudioChannel() {
 
                     if (ret == 0 && actual_len > 0) {
                         if (on_incoming_audio_ != nullptr) {
-                            // 直接用 audio_data_buffer_ 的数据生成 packet，避免多余拷贝
-                            AudioStreamPacket packet;
-                            packet.payload.assign(audio_data_buffer_.begin(), audio_data_buffer_.begin() + actual_len);
                             // 队列长度限制逻辑在下游
-                            on_incoming_audio_(std::move(packet));
+                            if (is_first_packet_ == true) {
+                                message_buffer_.clear();
+                                message_buffer_ = "{";
+                                message_buffer_ += "\"type\":\"tts\",";
+                                message_buffer_ += "\"state\":\"start\"";
+                                message_buffer_ += "}";
+                                   
+                                auto message_json = cJSON_Parse(message_buffer_.c_str());
+                                if (message_json) {
+                                    on_incoming_json_(message_json);
+                                    cJSON_Delete(message_json);
+                                }
+                                is_first_packet_ = false;
+                                // 缓冲一包数据
+                                packet_cache_.emplace();
+                                packet_cache_->payload.assign(audio_data_buffer_.begin(), audio_data_buffer_.begin() + actual_len);
+                            } else {
+                                if (packet_cache_.has_value()) {
+                                    // 先发送缓存的包
+                                    AudioStreamPacket cached_packet;
+                                    cached_packet.payload = packet_cache_->payload;
+                                    on_incoming_audio_(std::move(cached_packet));
+                                    packet_cache_.reset();
+                                    vTaskDelay(pdMS_TO_TICKS(10));
+                                }
+                                AudioStreamPacket packet;
+                                packet.payload.assign(audio_data_buffer_.begin(), audio_data_buffer_.begin() + actual_len);
+                                on_incoming_audio_(std::move(packet));
+                            }
                         }
                     }
                 }
@@ -375,7 +401,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 message_buffer_.clear();
                 message_buffer_ = "{";
                 message_buffer_ += "\"type\":\"tts\",";
-                message_buffer_ += "\"state\":\"start\"";
+                message_buffer_ += "\"state\":\"pre_start\"";
                 message_buffer_ += "}";
                 
                 auto message_json = cJSON_Parse(message_buffer_.c_str());

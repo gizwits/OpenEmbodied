@@ -207,7 +207,7 @@ private:
             ESP_LOGI(TAG, "touch_button_.OnPressDown");
 
             display_->SetEmotion("loving");
-            // Application::GetInstance().SendMessage("用户正在抚摸你");
+            Application::GetInstance().SendMessage("用户正在抚摸你");
 
         });
 
