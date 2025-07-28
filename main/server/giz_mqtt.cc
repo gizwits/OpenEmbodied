@@ -780,6 +780,12 @@ void MqttClient::app2devMsgHandler(const uint8_t *data, int32_t len)
     }
 }
 
+void MqttClient::processAttrValue(std::string attr_name, int value) {
+    ESP_LOGI(TAG, "processAttrValue: %s = %d", attr_name.c_str(), value);
+    if (attr_name == "chat_mode") {
+        Application::GetInstance().SetChatMode(value);
+    }
+}
 
 // Upload binary p0 data to dev2app/<client_id_>
 bool MqttClient::uploadP0Data(const void* data, size_t data_len) {
@@ -1046,4 +1052,3 @@ size_t MqttClient::getEstimatedMemoryUsage() {
     
     return memory;
 }
-
