@@ -96,6 +96,10 @@ void AudioCodec::Start() {
 }
 
 void AudioCodec::SetOutputVolume(int volume) {
+    /**
+    上电的时候默认会设置一次
+    */
+    static bool is_first_set = true;
     output_volume_ = volume;
     auto canPlaySound = Application::GetInstance().GetDeviceState() != kDeviceStateSpeaking;
 
@@ -120,11 +124,11 @@ void AudioCodec::SetOutputVolume(int volume) {
             });
         }
     } else {
-        if (canPlaySound) { 
-        Application::GetInstance().Schedule([this]() {
-            // 播放提示音
-            auto codec = Board::GetInstance().GetAudioCodec();
-            codec->EnableOutput(true);
+        if (canPlaySound && is_first_set == false) { 
+            Application::GetInstance().Schedule([this]() {
+                // 播放提示音
+                auto codec = Board::GetInstance().GetAudioCodec();
+                codec->EnableOutput(true);
                 Application::GetInstance().PlaySound(Lang::Sounds::P3_BO);
             });
         }
@@ -133,6 +137,7 @@ void AudioCodec::SetOutputVolume(int volume) {
     ESP_LOGI(TAG, "Set output volume to %d", output_volume_);
     Settings settings("audio", true);
     settings.SetInt("output_volume", output_volume_);
+    is_first_set = false;
 }
 
 void AudioCodec::EnableInput(bool enable) {
