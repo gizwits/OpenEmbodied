@@ -97,6 +97,7 @@ public:
     int sendResetToCloud();
     int getPublishedId();
     void OnRoomParamsUpdated(std::function<void(const RoomParams&)> callback);
+    void sendOtaProgressReport(int progress, const char* status);
     void deinit();
     void sendTraceLog(const char* level, const char* message);
 
@@ -133,7 +134,11 @@ private:
 
     static void messageReceiveHandler(void* arg);
     static void messageResendHandler(void* arg);
+    void app2devMsgHandler(const uint8_t *data, int32_t len);
     static void timerCallback(TimerHandle_t xTimer);
+    
+    void processAttrValue(std::string attr_name, int value);
+    uint8_t mqttNumRemLenBytes(const uint8_t *buf);
     bool parseRealtimeAgent(const char* in_str, int in_len, room_params_t* params);
     bool parseM2MCtrlMsg(const char* in_str, int in_len);
     void handleMqttMessage(mqtt_msg_t* msg);

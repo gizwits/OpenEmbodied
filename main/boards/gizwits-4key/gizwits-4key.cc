@@ -57,7 +57,7 @@ private:
                 Application::GetInstance().StartListening();
            }
         });
-        rec_button_.OnUpDown([this]() {
+        rec_button_.OnPressUp([this]() {
             if (Application::GetInstance().GetChatMode() == 0) {
                 Application::GetInstance().StopListening();
             }
@@ -66,9 +66,6 @@ private:
         volume_up_button_.OnClick([this]() {
             auto codec = GetAudioCodec();
             auto volume = codec->output_volume() + 10;
-            if (volume > 100) {
-                volume = 100;
-            }
             codec->SetOutputVolume(volume);
         });
         volume_up_button_.OnLongPress([this]() {
@@ -78,9 +75,6 @@ private:
         volume_down_button_.OnClick([this]() {
             auto codec = GetAudioCodec();
             auto volume = codec->output_volume() - 10;
-            if (volume < 0) {
-                volume = 0;
-            }
             codec->SetOutputVolume(volume);
         });
 

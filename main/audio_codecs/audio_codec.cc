@@ -1,6 +1,8 @@
 #include "audio_codec.h"
 #include "board.h"
 #include "settings.h"
+#include "assets/lang_config.h"
+#include "application.h"
 
 #include <esp_log.h>
 #include <cstring>
@@ -96,9 +98,31 @@ void AudioCodec::Start() {
 void AudioCodec::SetOutputVolume(int volume) {
     output_volume_ = volume;
     ESP_LOGI(TAG, "Set output volume to %d", output_volume_);
+
+    if (output_volume_ > 100) {
+        output_volume_ = 100;
+        Application::GetInstance().Schedule([this]() {
+            // 提示最大声
+            Application::GetInstance().PlaySound(Lang::Sounds::P3_BO);
+        });
+    } else if (output_volume_ < 10) {
+        output_volume_ = 10;
+        Application::GetInstance().Schedule([this]() {
+            // 提示最小声
+            Application::GetInstance().PlaySound(Lang::Sounds::P3_BO);
+        });
+    } else {
+        ESP_LOGI(TAG, "Set output volume to %d", output_volume_);
+        Application::GetInstance().Schedule([this]() {
+            // 播放提示音
+            Application::GetInstance().PlaySound(Lang::Sounds::P3_BO);
+        });
+    }
     
     Settings settings("audio", true);
     settings.SetInt("output_volume", output_volume_);
+
+    
 }
 
 void AudioCodec::EnableInput(bool enable) {
