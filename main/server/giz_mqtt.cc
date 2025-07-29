@@ -13,6 +13,7 @@
 #include <esp_wifi.h>
 #include "audio_codecs/audio_codec.h"
 #include <esp_app_desc.h>
+#include "ntp.h"
 
 #define TAG "GIZ_MQTT"
 
@@ -357,11 +358,27 @@ void MqttClient::sendTraceLog(const char* level, const char* message) {
     char topic[MQTT_TOPIC_BUFFER_SIZE] = {0};
     snprintf(topic, sizeof(topic), "sys/%s/log", client_id_.c_str());
     
-    // Format the payload - 优化：减少缓冲区大小
+    // Get current time using NTP client if available, otherwise use system time
+    std::string time_str;
+    auto& ntp_client = NtpClient::GetInstance();
+    if (ntp_client.IsSynced()) {
+        time_str = ntp_client.GetFormattedTime();
+    } else {
+        // Fallback to system time if NTP not synced
+        time_t now;
+        time(&now);
+        struct tm timeinfo;
+        localtime_r(&now, &timeinfo);
+        char sys_time_str[32];
+        strftime(sys_time_str, sizeof(sys_time_str), "%Y-%m-%d %H:%M:%S", &timeinfo);
+        time_str = std::string(sys_time_str);
+    }
+    
+    // Format the payload - 优化：减少缓冲区大小，增加时间字段
     char payload[MQTT_PAYLOAD_BUFFER_SIZE] = {0};
     snprintf(payload, sizeof(payload), 
-        "{\"message\":\"%s\",\"trace_id\":\"%s\",\"extra\":\"%s\"}", 
-        message, Application::GetInstance().GetTraceId(), level);
+        "{\"message\":\"%s\",\"trace_id\":\"%s\",\"extra\":\"%s\",\"time\":\"%s\"}", 
+        message, Application::GetInstance().GetTraceId(), level, time_str.c_str());
 
     // Publish the message
     if (!publish(topic, std::string(payload))) {
@@ -512,13 +529,15 @@ bool MqttClient::parseRealtimeAgent(const char* in_str, int in_len, room_params_
                     cJSON* access_token = cJSON_GetObjectItem(coze_websocket, "access_token");
                     cJSON* voice_lang = cJSON_GetObjectItem(coze_websocket, "voice_lang");
                     cJSON* api_domain = cJSON_GetObjectItem(coze_websocket, "api_domain");
+                    cJSON* config = cJSON_GetObjectItem(coze_websocket, "config");
 
-                    ESP_LOGI(TAG, "Field check - bot_id: %s, voice_id: %s, user_id: %s, conv_id: %s, access_token: %s",
+                    ESP_LOGI(TAG, "Field check - bot_id: %s, voice_id: %s, user_id: %s, conv_id: %s, access_token: %s, config: %s",
                              bot_id ? "found" : "missing",
                              voice_id ? "found" : "missing",
                              user_id ? "found" : "missing",
                              conv_id ? "found" : "missing",
-                             access_token ? "found" : "missing");
+                             access_token ? "found" : "missing",
+                             config ? "found" : "missing");
 
                     if (bot_id && voice_id && user_id && conv_id && access_token) {
                         ESP_LOGI(TAG, "All required fields found, copying data");
@@ -533,6 +552,44 @@ bool MqttClient::parseRealtimeAgent(const char* in_str, int in_len, room_params_
                         }
                         if (api_domain) {
                             strlcpy(params->api_domain, api_domain->valuestring, sizeof(params->api_domain));
+                        }
+                        // 解析 config 字段
+                        if (config && cJSON_IsObject(config)) {
+                            // 优化：避免使用 cJSON_Print() 来减少内存分配
+                            // 直接检查 config 对象的大小，如果太大就跳过
+                            int config_item_count = cJSON_GetArraySize(config);
+                            if (config_item_count > 50) {  // 限制配置项数量
+                                ESP_LOGW(TAG, "Config object too large (%d items), skipping", config_item_count);
+                                params->config[0] = '\0';
+                            } else {
+                                // 使用更安全的方法：只复制关键配置项
+                                char* config_str = cJSON_PrintUnformatted(config);
+                                if (config_str) {
+                                    size_t config_len = strlen(config_str);
+                                    if (config_len >= sizeof(params->config)) {
+                                        ESP_LOGW(TAG, "Config too large (%zu bytes), truncating to %zu bytes", 
+                                                 config_len, sizeof(params->config) - 1);
+                                        // 截断到安全长度，确保字符串以 null 结尾
+                                        strlcpy(params->config, config_str, sizeof(params->config));
+                                        // 检查截断后的 JSON 是否完整
+                                        if (params->config[sizeof(params->config) - 2] != '}') {
+                                            ESP_LOGW(TAG, "Config JSON was truncated, may be incomplete");
+                                        }
+                                    } else {
+                                        strlcpy(params->config, config_str, sizeof(params->config));
+                                        ESP_LOGI(TAG, "Config parsed successfully (%zu bytes)", config_len);
+                                    }
+                                    free(config_str);  // cJSON_PrintUnformatted 分配的内存需要释放
+                                    ESP_LOGI(TAG, "Config content: %s", params->config);
+                                } else {
+                                    ESP_LOGE(TAG, "Failed to print config JSON");
+                                    params->config[0] = '\0';
+                                }
+                            }
+                        } else {
+                            // 如果没有 config 字段，设置为空字符串
+                            params->config[0] = '\0';
+                            ESP_LOGI(TAG, "No config field found in coze_websocket");
                         }
                         success = true;
                         ESP_LOGI(TAG, "Successfully parsed room params");
@@ -600,6 +657,7 @@ void MqttClient::handleMqttMessage(mqtt_msg_t* msg) {
             room_params->voice_lang = std::string(params.voice_lang);
             room_params->api_domain = std::string(params.api_domain);
             room_params->user_id = std::string(params.user_id);
+            room_params->config = std::string(params.config);
             
             ESP_LOGI(TAG, "Calling room_params_updated_callback_");
             if (room_params_updated_callback_) {

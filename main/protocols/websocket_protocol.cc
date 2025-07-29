@@ -517,6 +517,39 @@ bool WebsocketProtocol::OpenAudioChannel() {
         on_audio_channel_opened_();
     }
 
+    std::string user_language = "common";
+    std::string parameters = "";
+    
+    // 如果存在 config，解析其中的参数
+    if (!room_params_.config.empty()) {
+        cJSON* config_json = cJSON_Parse(room_params_.config.c_str());
+        if (config_json) {
+            // 提取 user_language
+            cJSON* asr_config = cJSON_GetObjectItem(config_json, "asr_config");
+            if (asr_config && cJSON_IsObject(asr_config)) {
+                cJSON* user_lang_item = cJSON_GetObjectItem(asr_config, "user_language");
+                if (user_lang_item && cJSON_IsString(user_lang_item)) {
+                    user_language = std::string(user_lang_item->valuestring);
+                }
+            }
+            
+            // 提取 parameters
+            cJSON* chat_config = cJSON_GetObjectItem(config_json, "chat_config");
+            if (chat_config && cJSON_IsObject(chat_config)) {
+                cJSON* parameters_item = cJSON_GetObjectItem(chat_config, "parameters");
+                if (parameters_item && cJSON_IsObject(parameters_item)) {
+                    char* parameters_str = cJSON_Print(parameters_item);
+                    if (parameters_str) {
+                        parameters = std::string(parameters_str);
+                        free(parameters_str);
+                    }
+                }
+            }
+            cJSON_Delete(config_json);
+        }
+    }
+
+    
     char event_id[32];
     uint32_t random_value = esp_random();
     snprintf(event_id, sizeof(event_id), "%lu", random_value);
@@ -567,6 +600,9 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "\"auto_save_history\":true,";
     message += "\"conversation_id\":\"" + room_params_.conv_id + "\",";
     message += "\"user_id\":\"" + room_params_.user_id + "\",";
+    if (!parameters.empty()) {
+        message += "\"parameters\":" + parameters + ",";
+    }
     message += "\"meta_data\":{},";
     message += "\"custom_variables\":{},";
     message += "\"extra_params\":{}";
@@ -578,6 +614,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "\"channel\":1,";
     message += "\"bit_depth\":16";
     message += "},";
+    message += "\"asr_config\":{\"user_language\":\"" + user_language + "\"},";
     message += "\"output_audio\":{";
     message += "\"codec\":\"" + codec + "\",";
     message += "\"opus_config\":{";

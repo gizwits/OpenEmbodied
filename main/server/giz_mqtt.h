@@ -15,13 +15,13 @@
 // 内存优化配置
 // S3 用更大的内存
 #if CONFIG_IDF_TARGET_ESP32S3
-#define MQTT_TASK_STACK_SIZE_RCV     4096    // 消息接收任务栈大小 - 增加以处理大型JSON
+#define MQTT_TASK_STACK_SIZE_RCV     1024 * 6    // 消息接收任务栈大小 - 增加以处理大型JSON
 #define MQTT_TASK_STACK_SIZE_RESEND  4096    // 消息重发任务栈大小
 #else
-#define MQTT_TASK_STACK_SIZE_RCV     3072    // 消息接收任务栈大小 - 增加以处理大型JSON
+#define MQTT_TASK_STACK_SIZE_RCV     4096    // 消息接收任务栈大小 - 增加以处理大型JSON
 #define MQTT_TASK_STACK_SIZE_RESEND  2048    // 消息重发任务栈大小
 #endif
-#define MQTT_QUEUE_SIZE              10      // 消息队列大小
+#define MQTT_QUEUE_SIZE              8      // 消息队列大小
 #define MQTT_TOPIC_BUFFER_SIZE       48      // 主题缓冲区大小
 #define MQTT_PAYLOAD_BUFFER_SIZE     256     // 负载缓冲区大小
 #define MQTT_TOKEN_REPORT_BUFFER_SIZE 128    // Token报告缓冲区大小
@@ -76,6 +76,7 @@ typedef struct {
     char access_token[256];
     char voice_lang[64];
     char api_domain[256];
+    char config[1024];  // 新增：保存 coze_websocket.config 的 JSON 字符串，增加到 1KB
     int expires_in;
 } room_params_t;
 

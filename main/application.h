@@ -23,6 +23,7 @@
 #include "server/giz_mqtt.h"
 #include "ota.h"
 #include "background_task.h"
+#include "ntp.h"
 #if CONFIG_USE_AUDIO_PROCESSOR
 #include "audio_processor.h"
 #endif

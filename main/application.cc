@@ -505,6 +505,16 @@ void Application::Start() {
     PlaySound(Lang::Sounds::P3_CONNECT_SUCCESS);
     vTaskDelay(pdMS_TO_TICKS(500));
 
+    // Initialize NTP client
+    auto& ntp_client = NtpClient::GetInstance();
+    esp_err_t ntp_ret = ntp_client.Init();
+    if (ntp_ret == ESP_OK) {
+        ntp_client.StartSync();
+        ESP_LOGI(TAG, "NTP client initialized and started");
+    } else {
+        ESP_LOGE(TAG, "Failed to initialize NTP client: %s", esp_err_to_name(ntp_ret));
+    }
+
     // Initialize MQTT client
     protocol_ = std::make_unique<WebsocketProtocol>();
 
@@ -988,6 +998,10 @@ void Application::MainEventLoop() {
     const TickType_t timeout = pdMS_TO_TICKS(3000);
     while (true) {
         watchdog.Reset();
+
+        // Process NTP sync
+        auto& ntp_client = NtpClient::GetInstance();
+        ntp_client.ProcessSync();
 
         auto bits = xEventGroupWaitBits(event_group_, SCHEDULE_EVENT, pdTRUE, pdFALSE, timeout);
 
