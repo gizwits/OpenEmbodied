@@ -636,7 +636,7 @@ void Application::Start() {
 #if CONFIG_IDF_TARGET_ESP32C2
         const int max_packets_in_queue = 3000 / OPUS_FRAME_DURATION_MS;
 #else
-        const int max_packets_in_queue = 10000 / OPUS_FRAME_DURATION_MS;
+        const int max_packets_in_queue = 20000 / OPUS_FRAME_DURATION_MS;
 #endif
         std::lock_guard<std::mutex> lock(mutex_);
         if (audio_decode_queue_.size() < max_packets_in_queue) {
@@ -912,7 +912,7 @@ void Application::PlayMusic(const char* url) {
         #if CONFIG_IDF_TARGET_ESP32C2
             const int max_packets_in_queue = 3000 / OPUS_FRAME_DURATION_MS;
         #else
-            const int max_packets_in_queue = 10000 / OPUS_FRAME_DURATION_MS;
+            const int max_packets_in_queue = 20000 / OPUS_FRAME_DURATION_MS;
         #endif
         std::lock_guard<std::mutex> lock(mutex_);
         if (audio_decode_queue_.size() < max_packets_in_queue) {

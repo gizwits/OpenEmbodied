@@ -593,7 +593,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
         message += "\"turn_detection\": {";
         message += "\"type\": \"server_vad\",";  // 判停类型，client_vad/server_vad，默认为 client_vad
         message += "\"prefix_padding_ms\": 300,"; // server_vad模式下，VAD 检测到语音之前要包含的音频量，单位为 ms。默认为 600ms
-        message += "\"silence_duration_ms\": 500"; // server_vad模式下，检测语音停止的静音持续时间，单位为 ms。默认为 800ms
+        message += "\"silence_duration_ms\": 800"; // server_vad模式下，检测语音停止的静音持续时间，单位为 ms。默认为 800ms
         message += "},";
     }
     message += "\"chat_config\":{";

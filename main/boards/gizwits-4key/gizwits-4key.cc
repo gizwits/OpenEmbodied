@@ -35,6 +35,11 @@ private:
 
     int64_t rec_last_click_time_ = 0;
     int64_t power_on_time_ = 0;  // 记录上电时间
+    
+    // 双按钮长按检测相关变量
+    bool volume_up_long_pressed_ = false;
+    bool volume_down_long_pressed_ = false;
+    int64_t dual_long_press_time_ = 0;
 
     void InitializeI2c() {
         // Initialize I2C peripheral
@@ -55,14 +60,14 @@ private:
     }
     void InitializeButtons() {
         static int first_level = gpio_get_level(BOOT_BUTTON_GPIO);
-        boot_button_.OnPressRepeat([this](uint16_t count) {
-            ESP_LOGI(TAG, "boot_button_.OnPressRepeat");
-            if(count >= 3){
-                ResetWifiConfiguration();
-            } else {
-                // Application::GetInstance().ToggleChatState();
-            }
-        });
+        // boot_button_.OnPressRepeat([this](uint16_t count) {
+        //     ESP_LOGI(TAG, "boot_button_.OnPressRepeat");
+        //     if(count >= 3){
+        //         ResetWifiConfiguration();
+        //     } else {
+        //         // Application::GetInstance().ToggleChatState();
+        //     }
+        // });
         boot_button_.OnLongPress([this]() {
             ESP_LOGI(TAG, "boot_button_.OnLongPress");
             auto& app = Application::GetInstance();
@@ -136,12 +141,20 @@ private:
             auto volume = codec->output_volume() + 10;
             codec->SetOutputVolume(volume);
         });
+        volume_up_button_.OnLongPress([this]() {
+            ESP_LOGI(TAG, "volume_up_button_.OnLongPress");
+            CheckDualLongPress();
+        });
 
         volume_down_button_.OnClick([this]() {
             ESP_LOGI(TAG, "volume_down_button_.OnClick");
             auto codec = GetAudioCodec();
             auto volume = codec->output_volume() - 10;
             codec->SetOutputVolume(volume);
+        });
+        volume_down_button_.OnLongPress([this]() {
+            ESP_LOGI(TAG, "volume_down_button_.OnLongPress");
+            CheckDualLongPress();
         });
 
     }
@@ -217,6 +230,44 @@ public:
         int standby = gpio_get_level(STANDBY_PIN);
         ESP_LOGI(TAG, "chrg: %d, standby: %d", chrg, standby);
         return chrg == 0 || standby == 0;
+    }
+    
+    void CheckDualLongPress() {
+        int64_t current_time = esp_timer_get_time() / 1000; // 转换为毫秒
+        
+        // 检查当前哪个按钮被长按
+        if (gpio_get_level(VOLUME_UP_BUTTON_GPIO) == 0) {
+            volume_up_long_pressed_ = true;
+        }
+        if (gpio_get_level(VOLUME_DOWN_BUTTON_GPIO) == 0) {
+            volume_down_long_pressed_ = true;
+        }
+        
+        // 如果两个按钮都被长按
+        if (volume_up_long_pressed_ && volume_down_long_pressed_) {
+            if (dual_long_press_time_ == 0) {
+                dual_long_press_time_ = current_time;
+                ESP_LOGI(TAG, "开始检测双按钮长按");
+            } else {
+                // 检查是否已经长按足够时间（比如2秒）
+                const int64_t DUAL_LONG_PRESS_DURATION = 2000; // 2秒
+                if (current_time - dual_long_press_time_ >= DUAL_LONG_PRESS_DURATION) {
+                    ESP_LOGI(TAG, "双按钮长按触发 - ResetWifiConfiguration");
+                    ResetWifiConfiguration();
+                    // 重置状态
+                    volume_up_long_pressed_ = false;
+                    volume_down_long_pressed_ = false;
+                    dual_long_press_time_ = 0;
+                }
+            }
+        } else {
+            // 如果任一按钮释放，重置状态
+            if (!volume_up_long_pressed_ || !volume_down_long_pressed_) {
+                volume_up_long_pressed_ = false;
+                volume_down_long_pressed_ = false;
+                dual_long_press_time_ = 0;
+            }
+        }
     }
 
     virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
