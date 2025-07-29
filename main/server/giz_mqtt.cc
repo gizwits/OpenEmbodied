@@ -813,8 +813,8 @@ void MqttClient::ReportTimer() {
         0x00, 0x00, 0x00, 0x02,  // 数据长度
         0x14, 0xff,              // 数据类型
         0x00, // 0b01011011 switch，类型为bool，值为true：字段bit0，字段值为0b1；wakeup_word，类型为bool，值为true：字段bit1，字段值为0b1；charge_status，类型为enum，值为2：字段bit3 ~ bit2，字段值为0b10；alert_tone_language，类型为enum，值为1：字段bit4 ~ bit4，字段值为0b1；chat_mode，类型为enum，值为2：字段bit6 ~ bit5，字段值为0b10；          
-        0x64, // 音量
-        0x0a, // 电量
+        0x64, // 电量
+        0x0a, // 音量
         0x00, // rssi
     };
 
@@ -833,7 +833,7 @@ void MqttClient::ReportTimer() {
     bool discharging = false;
     if (board.GetBatteryLevel(level, charging, discharging)) {
         ESP_LOGI(TAG, "Battery level: %d, charging: %d, discharging: %d", level, charging, discharging);
-        binary_data[16] = level;
+        binary_data[15] = level;
         status |= (charging ? 1 : 0) << 2; // charge_status
         // charging = true 的时候 charge_status = 1
     }
@@ -844,7 +844,7 @@ void MqttClient::ReportTimer() {
     auto codec = Board::GetInstance().GetAudioCodec();
     int volume = codec->output_volume();
     ESP_LOGI(TAG, "Volume: %d", volume);
-    binary_data[15] = volume;
+    binary_data[16] = volume;
 
     wifi_ap_record_t ap_info;
     if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {

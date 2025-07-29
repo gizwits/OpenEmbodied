@@ -40,6 +40,7 @@ static const char* const STATE_STRINGS[] = {
     "upgrading",
     "activating",
     "fatal_error",
+    "power_off",
     "invalid_state"
 };
 

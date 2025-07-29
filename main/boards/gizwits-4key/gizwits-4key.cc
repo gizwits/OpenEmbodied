@@ -11,53 +11,30 @@
 #include <wifi_station.h>
 #include "led/circular_strip.h"
 #include <esp_timer.h>
+#include "power_manager.h"
+#include "assets/lang_config.h"
+
 
 #define TAG "GizwitsDev"
-
-
-// 电压-电量查表
-typedef struct {
-    uint16_t voltage; // mV
-    uint8_t soc;      // 百分比
-} VoltageSocPair;
-
-const VoltageSocPair dischargeCurve[] = {
-    {4163, 100}, {4098, 95}, {4039, 90}, {3983, 85}, {3930, 80}, {3878, 75}, {3829, 70}, {3784, 65}, {3745, 60}, {3710, 55},
-    {3668, 50},  {3645, 45}, {3629, 40}, {3615, 35}, {3600, 30}, {3583, 25}, {3554, 20}, {3520, 15}, {3476, 10}, {3439, 5}, {3395, 0}
-};
-
-static uint8_t estimate_soc(uint16_t voltage, const VoltageSocPair *soc_pairs, int voltage_soc_pairs_length)
-{
-    if (soc_pairs == NULL) return 0;
-    uint16_t closest_voltage = soc_pairs[0].voltage;
-    uint8_t closest_soc = soc_pairs[0].soc;
-    uint16_t min_diff = abs((int)voltage - (int)closest_voltage);
-    for (int i = 1; i < voltage_soc_pairs_length; i++) {
-        uint16_t diff = abs((int)voltage - (int)soc_pairs[i].voltage);
-        if (diff < min_diff) {
-            min_diff = diff;
-            closest_voltage = soc_pairs[i].voltage;
-            closest_soc = soc_pairs[i].soc;
-        }
-    }
-    return closest_soc;
-}
 
 class GizwitsDevBoard : public WifiBoard {
 private:
     i2c_master_bus_handle_t i2c_bus_;
-    adc_oneshot_unit_handle_t adc2_handle_;  // ADC句柄
+    adc_oneshot_unit_handle_t adc1_handle_;  // ADC句柄
 
     Button boot_button_;
     Button volume_up_button_;
     Button volume_down_button_;
     Button rec_button_;
+    PowerManager* power_manager_;
+    
     bool need_power_off_ = false;
     
     // 按钮事件队列
     QueueHandle_t button_event_queue_;
 
     int64_t rec_last_click_time_ = 0;
+    int64_t power_on_time_ = 0;  // 记录上电时间
 
     void InitializeI2c() {
         // Initialize I2C peripheral
@@ -90,36 +67,71 @@ private:
             ESP_LOGI(TAG, "boot_button_.OnLongPress");
             auto& app = Application::GetInstance();
             app.SetDeviceState(kDeviceStateIdle);
-
-            if (first_level ==0) {
+            // 低电平代表是按照开机键上电的，可以忽略
+            
+            // 计算设备运行时间
+            int64_t current_time = esp_timer_get_time() / 1000; // 转换为毫秒
+            int64_t uptime_ms = current_time - power_on_time_;
+            ESP_LOGI(TAG, "设备运行时间: %lld ms", uptime_ms);
+            
+            // 首次上电5秒内且first_level==0才忽略
+            const int64_t MIN_UPTIME_MS = 5000; // 5秒
+            if (first_level == 0 && uptime_ms < MIN_UPTIME_MS) {
                 first_level = 1;
+                ESP_LOGI(TAG, "首次上电5秒内，忽略长按操作");
             } else {
+              
+                ESP_LOGI(TAG, "执行关机操作");
+                auto codec = GetAudioCodec();
+                codec->EnableOutput(true);
+                Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
                 need_power_off_ = true;
             }
         });
         boot_button_.OnPressUp([this]() {
             ESP_LOGI(TAG, "boot_button_.OnPressUp");
             if (need_power_off_) {
+                need_power_off_ = false;
+                // 使用静态函数来避免lambda捕获问题
                 xTaskCreate([](void* arg) {
+                    auto* board = static_cast<GizwitsDevBoard*>(arg);
                     Application::GetInstance().SetDeviceState(kDeviceStateIdle);
-                    gpio_set_level(POWER_HOLD_GPIO, 0);
-                }, "power_off_task", 2048, NULL, 10, NULL);
+
+
+                    if (board->isCharging()) {
+                        // 充电中
+                        // 关灯
+                        Application::GetInstance().SetDeviceState(kDeviceStatePowerOff);
+
+                    } else {
+                        gpio_set_level(POWER_HOLD_GPIO, 0);
+                    }
+                    vTaskDelete(NULL);
+                }, "power_off_task", 4028, this, 10, NULL);
             }
         });
 
         auto chat_mode = Application::GetInstance().GetChatMode();
         ESP_LOGI(TAG, "chat_mode: %d", chat_mode);
 
-        rec_button_.OnClick([this]() {
-            ESP_LOGI(TAG, "rec_button_.OnClick");
-            Application::GetInstance().StartListening();
-        });
-        rec_button_.OnPressDown([this]() {
-            ESP_LOGI(TAG, "rec_button_.OnPressDown");
-        });
-        rec_button_.OnPressUp([this]() {
-            ESP_LOGI(TAG, "rec_button_.OnPressUp");
-        });
+        if (chat_mode == 0) {
+            rec_button_.OnPressDown([this]() {
+                ESP_LOGI(TAG, "rec_button_.OnPressDown");
+                Application::GetInstance().StartListening();
+            });
+            rec_button_.OnPressUp([this]() {
+                ESP_LOGI(TAG, "rec_button_.OnPressUp");
+                Application::GetInstance().StopListening();
+            });
+        } else {
+            rec_button_.OnClick([this]() {
+                ESP_LOGI(TAG, "rec_button_.OnClick");
+                Application::GetInstance().ToggleChatState();
+            });
+        }
+
+        
+        
         
         volume_up_button_.OnClick([this]() {
             ESP_LOGI(TAG, "volume_up_button_.OnClick");
@@ -143,33 +155,34 @@ private:
         thing_manager.AddThing(iot::CreateThing("Speaker"));
     }
 
-    // 初始化ADC
-    void InitializeAdc() {
-        adc_oneshot_unit_init_cfg_t init_config = { .unit_id = ADC_UNIT_2 };
-        ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config, &adc2_handle_));
 
-        adc_oneshot_chan_cfg_t config = { .atten = BAT_ADC_ATTEN, .bitwidth = ADC_BITWIDTH_12 };
-        ESP_ERROR_CHECK(adc_oneshot_config_channel(adc2_handle_, BAT_ADC_CHANNEL, &config));
-        
-        ESP_LOGI(TAG, "ADC initialized for battery voltage detection");
+    void InitializePowerManager() {
+        power_manager_ =
+            new PowerManager(GPIO_NUM_NC, GPIO_NUM_NC, BAT_ADC_UNIT, BAT_ADC_CHANNEL);
     }
+
 
 public:
     GizwitsDevBoard() : boot_button_(BOOT_BUTTON_GPIO),
     volume_up_button_(VOLUME_UP_BUTTON_GPIO), volume_down_button_(VOLUME_DOWN_BUTTON_GPIO),
     rec_button_(REC_BUTTON_GPIO) {
+        // 记录上电时间
+        power_on_time_ = esp_timer_get_time() / 1000; // 转换为毫秒
+        ESP_LOGI(TAG, "设备启动，上电时间戳: %lld ms", power_on_time_);
+        
         InitializeButtons();
         InitializeGpio(POWER_HOLD_GPIO, true);
         InitializeChargingGpio();
         InitializeI2c();
         InitializeIot();
-        InitializeAdc();  // 初始化ADC
+        InitializePowerManager();
     }
+
 
     ~GizwitsDevBoard() {
         // 清理ADC资源
-        if (adc2_handle_) {
-            adc_oneshot_del_unit(adc2_handle_);
+        if (adc1_handle_) {
+            adc_oneshot_del_unit(adc1_handle_);
         }
     }
 
@@ -208,62 +221,14 @@ public:
         ESP_LOGI(TAG, "chrg: %d, standby: %d", chrg, standby);
         return chrg == 0 || standby == 0;
     }
-    virtual bool GetBatteryLevel(int &level, bool &charging, bool &discharging) override {
-        // 1. 读取ADC原始值（多次采样取平均）
-        bool is_charging = isCharging();
-        
-        const int sample_count = 5;  // 采样5次取平均
-        int total_raw = 0;
-        esp_err_t ret = ESP_OK;
-        
-        for (int i = 0; i < sample_count; i++) {
-            int raw = 0;
-            ret = adc_oneshot_read(adc2_handle_, BAT_ADC_CHANNEL, &raw);
-            if (ret != ESP_OK) {
-                ESP_LOGE(TAG, "ADC2 oneshot read failed: %d", ret);
-                level = 0;
-                charging = false;
-                discharging = false;
-                return false;
-            }
-            total_raw += raw;
-        }
-        
-        int raw = total_raw / sample_count;  // 取平均值
 
-        // 2. 转换为电压（假设3.6V满量程，12位ADC，分压比2:1）
-        // 公式: 电压(mV) = raw / 4095.0 * 3600 * 2
-        float voltage = raw * 3600.0f / 4095.0f * 2.0f;
-        uint16_t voltage_mv = (uint16_t)voltage;
-        ESP_LOGI(TAG, "ADC raw: %d, voltage: %d mV", raw, voltage_mv);
-
-        charging = is_charging;
+    virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
+        charging = isCharging();
         discharging = !charging;
-
-        // 4. 估算电量
-        if (charging) {
-            // 线性估算
-            if (voltage_mv >= 4163) {
-                level = 100;
-            } else if (voltage_mv <= 3395) {
-                level = 0;
-            } else {
-                level = ((voltage_mv - 3395) * 100) / (4163 - 3395);
-            }
-        } else {
-            // 查表法
-            level = estimate_soc(voltage_mv, dischargeCurve, sizeof(dischargeCurve)/sizeof(dischargeCurve[0]));
-        }
-
-        // 限制范围
-        if (level > 100) level = 100;
-        if (level < 0) level = 0;
-
+        level = power_manager_->GetBatteryLevel();
         ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
-
         return true;
     }
-
 
     virtual Led* GetLed() override {
         static CircularStrip led(BUILTIN_LED_GPIO, 4);
