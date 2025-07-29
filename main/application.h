@@ -78,6 +78,7 @@ public:
     void AbortSpeaking(AbortReason reason);
     void PlayMusic(const char* url);
     void CancelPlayMusic();
+    void ResetDecoder();
     void ToggleChatState();
     void StartListening();
     void SetChatMode(int mode);
@@ -155,7 +156,6 @@ private:
 #ifdef CONFIG_USE_AUDIO_CODEC_DECODE_OPUS
     void WriteAudio(std::vector<uint8_t>& opus);
 #endif
-    void ResetDecoder();
     void SetDecodeSampleRate(int sample_rate, int frame_duration);
     void CheckNewVersion();
     void ShowActivationCode();

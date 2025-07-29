@@ -49,7 +49,7 @@ private:
     void run_sleep_mode(bool need_delay = true){
         auto& application = Application::GetInstance();
         if (need_delay) {
-            application.SetDeviceState(kDeviceStateIdle);
+            application.QuitTalking();
             GetAudioCodec()->EnableOutput(true);
             application.Alert("", "", "", Lang::Sounds::P3_SLEEP);
             vTaskDelay(pdMS_TO_TICKS(1500));

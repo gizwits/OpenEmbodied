@@ -277,7 +277,7 @@ bool MqttClient::publish(const std::string& topic, const std::string& payload) {
         ESP_LOGE(TAG, "MQTT client not initialized");
         return false;
     }
-    ESP_LOGI(TAG, "publish topic: %s, payload: %s", topic.c_str(), payload.c_str());
+    // ESP_LOGI(TAG, "publish topic: %s, payload: %s", topic.c_str(), payload.c_str());
     return mqtt_->Publish(topic, payload);
 }
 

@@ -681,12 +681,10 @@ void Application::Start() {
         if (strcmp(type->valuestring, "tts") == 0) {
             auto state = cJSON_GetObjectItem(root, "state");
             if (strcmp(state->valuestring, "start") == 0) {
-                Schedule([this]() {
-                    auto& board = Board::GetInstance();
-                    if (device_state_ == kDeviceStateIdle || device_state_ == kDeviceStateListening) {
-                        SetDeviceState(kDeviceStateSpeaking);
-                    }
-                });
+                auto& board = Board::GetInstance();
+                if (device_state_ == kDeviceStateIdle || device_state_ == kDeviceStateListening) {
+                    SetDeviceState(kDeviceStateSpeaking);
+                }
             } else if (strcmp(state->valuestring, "pre_start") == 0) {
                 aborted_ = false;
                 auto& board = Board::GetInstance();
@@ -698,16 +696,12 @@ void Application::Start() {
                 Schedule([this, &board]() {
                     auto display = board.GetDisplay();
                     display->SetEmotion("thinking");
-
                 });
             } else if (strcmp(state->valuestring, "stop") == 0) {
                 Schedule([this]() {
                     background_task_->WaitForCompletion();
                     auto& board = Board::GetInstance();
 
-                    // if (board.GetServo()) {
-                    //     board.GetServo()->stop();
-                    // }
                     if (device_state_ == kDeviceStateSpeaking) {
                         if (listening_mode_ == kListeningModeManualStop) {
                             SetDeviceState(kDeviceStateIdle);
@@ -1364,14 +1358,15 @@ void Application::SetDeviceState(DeviceState state) {
         case kDeviceStateSpeaking:
             display->SetStatus(Lang::Strings::SPEAKING);
             display->SetEmotion("happy");
-
-            Schedule([this]() {
-                ESP_LOGI(TAG, "GetServo");
-                auto& board = Board::GetInstance();
-                if (board.GetServo()) {
+            if (board.GetServo()) {
+                Schedule([this]() {
+                    ESP_LOGI(TAG, "GetServo");
+                    auto& board = Board::GetInstance();
                     board.GetServo()->move(0, 180, 500, 10000000);
-                }
-            });
+                });
+            }
+
+            
 
             if (listening_mode_ != kListeningModeRealtime) {
 #if CONFIG_USE_AUDIO_PROCESSOR
