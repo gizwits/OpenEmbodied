@@ -15,7 +15,8 @@
 
 #define TAG "WS"
 
-#define MAX_AUDIO_PACKET_SIZE 1024
+#define MAX_AUDIO_PACKET_SIZE 512
+#define MAX_CACHED_PACKETS 10
 
 struct Emotion {
     const char* icon;
@@ -338,20 +339,31 @@ bool WebsocketProtocol::OpenAudioChannel() {
                                     cJSON_Delete(message_json);
                                 }
                                 is_first_packet_ = false;
-                                // 缓冲一包数据
-                                packet_cache_.emplace();
-                                packet_cache_->payload.assign(audio_data_buffer_.begin(), audio_data_buffer_.begin() + actual_len);
+                                // 开始缓存模式，先缓存MAX_CACHED_PACKETS包数据
+                                cached_packet_count_ = 0;
+                                packet_cache_.clear();
+                            }
+                            
+                            // 创建当前音频包
+                            AudioStreamPacket packet;
+                            packet.payload.assign(audio_data_buffer_.begin(), audio_data_buffer_.begin() + actual_len);
+                            
+                            if (cached_packet_count_ < MAX_CACHED_PACKETS) {
+                                // 还在缓存阶段，添加到缓存
+                                packet_cache_.push_back(std::move(packet));
+                                cached_packet_count_++;
+                                ESP_LOGI(TAG, "Caching packet %d/%d", cached_packet_count_, MAX_CACHED_PACKETS);
                             } else {
-                                if (packet_cache_.has_value()) {
-                                    // 先发送缓存的包
-                                    AudioStreamPacket cached_packet;
-                                    cached_packet.payload = packet_cache_->payload;
-                                    on_incoming_audio_(std::move(cached_packet));
-                                    packet_cache_.reset();
-                                    vTaskDelay(pdMS_TO_TICKS(1));
+                                // 缓存已满，开始推送
+                                if (!packet_cache_.empty()) {
+                                    // 先推送所有缓存的包
+                                    for (auto& cached_packet : packet_cache_) {
+                                        on_incoming_audio_(std::move(cached_packet));
+                                    }
+                                    packet_cache_.clear();
+                                    ESP_LOGI(TAG, "Pushed %d cached packets", cached_packet_count_);
                                 }
-                                AudioStreamPacket packet;
-                                packet.payload.assign(audio_data_buffer_.begin(), audio_data_buffer_.begin() + actual_len);
+                                // 推送当前包
                                 on_incoming_audio_(std::move(packet));
                             }
                         }
@@ -396,6 +408,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
 
                 is_detect_emotion_ = false;
                 is_first_packet_ = true;
+                cached_packet_count_ = 0;
+                packet_cache_.clear();
 
                 message_cache_.clear();
                 message_buffer_.clear();
@@ -412,6 +426,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 
             } else if (event_type == "conversation.chat.completed" || event_type == "conversation.audio.completed") {
                 is_first_packet_ = false;
+                cached_packet_count_ = 0;
+                packet_cache_.clear();
 
                 std::string messageData = "conversation.chat.completed or conversation.audio.completed";
                 MqttClient::getInstance().sendTraceLog("info", messageData.c_str());
@@ -454,8 +470,6 @@ bool WebsocketProtocol::OpenAudioChannel() {
                     on_incoming_json_(message_json);
                     cJSON_Delete(message_json);
                 }
-
-
                 if (is_detect_emotion_ == false) {
                     // 查找 message_cache_ 是否包含 emotions
                     for (const auto& emotion : emotions) {

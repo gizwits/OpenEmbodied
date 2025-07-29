@@ -352,6 +352,7 @@ void Application::ToggleChatState() {
 }
 
 void Application::StartListening() {
+    CancelPlayMusic();
     if (device_state_ == kDeviceStateActivating) {
         ESP_LOGI(TAG, "StartListening(kDeviceStateActivating)");
         SetDeviceState(kDeviceStateIdle);
@@ -372,7 +373,6 @@ void Application::StartListening() {
                     return;
                 }
             }
-
             SetListeningMode(kListeningModeManualStop);
         });
     } else if (device_state_ == kDeviceStateSpeaking) {
@@ -1481,12 +1481,12 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
             
         });
     } else if (device_state_ == kDeviceStateListening) { 
-        ResetDecoder();
-        PlaySound(Lang::Sounds::P3_SUCCESS);
-        // 打断AI
-        Schedule([this]() {
-            protocol_->SendAbortSpeaking(kAbortReasonNone);
-        });
+        // 忽略唤醒词
+        // Schedule([this]() {
+        //     ResetDecoder();
+        //     PlaySound(Lang::Sounds::P3_SUCCESS);
+        //     protocol_->SendAbortSpeaking(kAbortReasonNone);
+        // });
     }
 }
 

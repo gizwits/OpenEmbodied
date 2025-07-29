@@ -18,8 +18,8 @@ class GpioLed : public Led {
     virtual ~GpioLed();
 
     void OnStateChanged() override;
+    void TurnOff() override;
     void TurnOn();
-    void TurnOff();
     void SetBrightness(uint8_t brightness);
 
  private:

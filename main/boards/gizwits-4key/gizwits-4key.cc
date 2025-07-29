@@ -68,12 +68,13 @@ private:
         //         // Application::GetInstance().ToggleChatState();
         //     }
         // });
+        boot_button_.OnClick([this]() {
+            ESP_LOGI(TAG, "boot_button_.OnClick");
+            Application::GetInstance().ToggleChatState();
+        });
         boot_button_.OnLongPress([this]() {
             ESP_LOGI(TAG, "boot_button_.OnLongPress");
             auto& app = Application::GetInstance();
-            app.SetDeviceState(kDeviceStateIdle);
-            // 低电平代表是按照开机键上电的，可以忽略
-            
             // 计算设备运行时间
             int64_t current_time = esp_timer_get_time() / 1000; // 转换为毫秒
             int64_t uptime_ms = current_time - power_on_time_;
@@ -105,10 +106,8 @@ private:
 
 
                     if (board->isCharging()) {
-                        // 充电中
                         // 关灯
-                        Application::GetInstance().SetDeviceState(kDeviceStatePowerOff);
-
+                        board->GetLed()->TurnOff();
                     } else {
                         gpio_set_level(POWER_HOLD_GPIO, 0);
                     }
@@ -130,7 +129,7 @@ private:
                 Application::GetInstance().StopListening();
             });
         } else {
-            rec_button_.OnClick([this]() {
+            rec_button_.OnPressUp([this]() {
                 ESP_LOGI(TAG, "rec_button_.OnClick");
                 Application::GetInstance().ToggleChatState();
             });
