@@ -28,11 +28,12 @@ private:
     Button* rec_button_ = nullptr;
     PowerSaveTimer* power_save_timer_;
     VbAduioCodec audio_codec;
+    int64_t power_on_time_ = 0;  // 记录上电时间
     // Servo servo_;
     bool sleep_flag_ = false;
 
     void InitializePowerSaveTimer() {
-        power_save_timer_ = new PowerSaveTimer(-1, 60 * 1, 60 * 3);
+        power_save_timer_ = new PowerSaveTimer(-1, 60 * 3, 60 * 5);
         power_save_timer_->OnEnterSleepMode([this]() {
             ESP_LOGI(TAG, "Enabling sleep mode");
         });
@@ -48,6 +49,8 @@ private:
     void run_sleep_mode(bool need_delay = true){
         auto& application = Application::GetInstance();
         if (need_delay) {
+            application.SetDeviceState(kDeviceStateIdle);
+            GetAudioCodec()->EnableOutput(true);
             application.Alert("", "", "", Lang::Sounds::P3_SLEEP);
             vTaskDelay(pdMS_TO_TICKS(1500));
             ESP_LOGI(TAG, "Sleep mode");
@@ -61,6 +64,7 @@ private:
     }
 
     void InitializeButtons() {
+        static int first_level = gpio_get_level(BOOT_BUTTON_GPIO);
 
         const int chat_mode = Application::GetInstance().GetChatMode();
         ESP_LOGI(TAG, "chat_modechat_modechat_mode: %d", chat_mode);
@@ -86,7 +90,7 @@ private:
         boot_button_.OnPressUp([this]() {
             ESP_LOGI(TAG, "Press up");
             if(sleep_flag_){
-                run_sleep_mode(false);
+                run_sleep_mode(true);
             }
         });
         boot_button_.OnPressRepeat([this](uint16_t count) {
@@ -95,9 +99,22 @@ private:
             }
         });
         boot_button_.OnLongPress([this]() {
-            ESP_LOGI(TAG, "Long press");
-            sleep_flag_ = true;
-            gpio_set_level(BUILTIN_LED_GPIO, 1);
+            
+            // 计算设备运行时间
+            int64_t current_time = esp_timer_get_time() / 1000; // 转换为毫秒
+            int64_t uptime_ms = current_time - power_on_time_;
+            ESP_LOGI(TAG, "设备运行时间: %lld ms", uptime_ms);
+            
+            // 首次上电5秒内且first_level==0才忽略
+            const int64_t MIN_UPTIME_MS = 5000; // 5秒
+            if (first_level == 0 && uptime_ms < MIN_UPTIME_MS) {
+                first_level = 1;
+                ESP_LOGI(TAG, "首次上电5秒内，忽略长按操作");
+            } else {
+                ESP_LOGI(TAG, "Long press");
+                sleep_flag_ = true;
+                gpio_set_level(BUILTIN_LED_GPIO, 1);
+            }
         });
     }
 
@@ -108,7 +125,11 @@ private:
     }
 
 public:
-    CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO){      
+    CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO){  
+        
+        power_on_time_ = esp_timer_get_time() / 1000; // 转换为毫秒
+        ESP_LOGI(TAG, "设备启动，上电时间戳: %lld ms", power_on_time_);
+        
         gpio_config_t io_conf = {};
         io_conf.pin_bit_mask = (1ULL << BUILTIN_LED_GPIO);
         io_conf.mode = GPIO_MODE_OUTPUT;

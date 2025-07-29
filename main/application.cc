@@ -690,7 +690,8 @@ void Application::Start() {
             } else if (strcmp(state->valuestring, "pre_start") == 0) {
                 aborted_ = false;
                 auto& board = Board::GetInstance();
-                if (board.NeedPlayProcessVoice()) {
+                if (board.NeedPlayProcessVoice() && chat_mode_ != 2) {
+                    // 自然对话不要 biu
                     ResetDecoder();
                     PlaySound(Lang::Sounds::P3_BO);
                 }
@@ -1452,6 +1453,12 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     if (chat_mode_ == 0) {
         return;
     }
+
+    if (chat_mode_ == 2 && device_state_ != kDeviceStateIdle) {
+        // 自然对话模式，聊天中的时候唤醒词不需要工作
+        return;
+    }
+
     if (device_state_ == kDeviceStateIdle) {
         
         Schedule([this, wake_word]() {
@@ -1468,20 +1475,23 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
             ToggleChatState();
         });
     } else if (device_state_ == kDeviceStateSpeaking) {
+        ResetDecoder();
+        PlaySound(Lang::Sounds::P3_SUCCESS);
+        ESP_LOGI(TAG, "WakeWordInvoke(kDeviceStateListening)");
+        SetDeviceState(kDeviceStateListening);
         Schedule([this]() {
             // 打断AI
             ESP_LOGI(TAG, "WakeWordInvoke(kDeviceStateSpeaking)");
             protocol_->SendAbortSpeaking(kAbortReasonNone);
-            ResetDecoder();
-            PlaySound(Lang::Sounds::P3_SUCCESS);
-            ESP_LOGI(TAG, "WakeWordInvoke(kDeviceStateListening)");
-            SetDeviceState(kDeviceStateListening);
+            
         });
     } else if (device_state_ == kDeviceStateListening) { 
-        // Schedule([this]() {
-        //     ResetDecoder();
-        //     PlaySound(Lang::Sounds::P3_SUCCESS);
-        // });
+        ResetDecoder();
+        PlaySound(Lang::Sounds::P3_SUCCESS);
+        // 打断AI
+        Schedule([this]() {
+            protocol_->SendAbortSpeaking(kAbortReasonNone);
+        });
     }
 }
 

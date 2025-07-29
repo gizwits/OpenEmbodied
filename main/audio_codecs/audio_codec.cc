@@ -105,7 +105,7 @@ void AudioCodec::SetOutputVolume(int volume) {
 
     if (output_volume_ > 100) {
         output_volume_ = 100;
-        if (canPlaySound) {
+        if (canPlaySound && is_first_set == false) {
             Application::GetInstance().Schedule([this]() {
                 // 提示最大声
                 auto codec = Board::GetInstance().GetAudioCodec();
@@ -115,8 +115,8 @@ void AudioCodec::SetOutputVolume(int volume) {
         }
     } else if (output_volume_ <= 10) {
         output_volume_ = 10;
-        if (canPlaySound) { 
-        Application::GetInstance().Schedule([this]() {
+        if (canPlaySound && is_first_set == false) { 
+            Application::GetInstance().Schedule([this]() {
             // 提示最小声
             auto codec = Board::GetInstance().GetAudioCodec();
             codec->EnableOutput(true);

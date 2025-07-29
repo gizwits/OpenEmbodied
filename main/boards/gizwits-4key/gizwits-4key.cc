@@ -129,9 +129,6 @@ private:
                 Application::GetInstance().ToggleChatState();
             });
         }
-
-        
-        
         
         volume_up_button_.OnClick([this]() {
             ESP_LOGI(TAG, "volume_up_button_.OnClick");

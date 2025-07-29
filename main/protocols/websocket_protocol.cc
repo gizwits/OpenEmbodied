@@ -348,7 +348,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
                                     cached_packet.payload = packet_cache_->payload;
                                     on_incoming_audio_(std::move(cached_packet));
                                     packet_cache_.reset();
-                                    vTaskDelay(pdMS_TO_TICKS(10));
+                                    vTaskDelay(pdMS_TO_TICKS(1));
                                 }
                                 AudioStreamPacket packet;
                                 packet.payload.assign(audio_data_buffer_.begin(), audio_data_buffer_.begin() + actual_len);
