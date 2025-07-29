@@ -87,7 +87,7 @@ private:
             } else {
               
                 ESP_LOGI(TAG, "执行关机操作");
-                Application::GetInstance().AbortSpeaking(kAbortReasonNone);
+                Application::GetInstance().QuitTalking();
                 auto codec = GetAudioCodec();
                 codec->EnableOutput(true);
                 Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
