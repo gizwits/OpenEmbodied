@@ -40,6 +40,7 @@ private:
     bool volume_up_long_pressed_ = false;
     bool volume_down_long_pressed_ = false;
     int64_t dual_long_press_time_ = 0;
+    bool is_sleep_ = false;
 
     void InitializeI2c() {
         // Initialize I2C peripheral
@@ -60,17 +61,18 @@ private:
     }
     void InitializeButtons() {
         static int first_level = gpio_get_level(BOOT_BUTTON_GPIO);
-        // boot_button_.OnPressRepeat([this](uint16_t count) {
-        //     ESP_LOGI(TAG, "boot_button_.OnPressRepeat");
-        //     if(count >= 3){
-        //         ResetWifiConfiguration();
-        //     } else {
-        //         // Application::GetInstance().ToggleChatState();
-        //     }
-        // });
-        boot_button_.OnClick([this]() {
-            ESP_LOGI(TAG, "boot_button_.OnClick");
-            Application::GetInstance().ToggleChatState();
+        boot_button_.OnPressDown([this]() {
+            // 点灯
+            gpio_set_level(BUILTIN_SINGLE_LED_GPIO, 0);
+        });
+        boot_button_.OnPressRepeat([this](uint16_t count) {
+
+            ESP_LOGI(TAG, "boot_button_.OnPressRepeat");
+            if(count >= 5){
+                ResetWifiConfiguration();
+            } else {
+                Application::GetInstance().ToggleChatState();
+            }
         });
         boot_button_.OnLongPress([this]() {
             ESP_LOGI(TAG, "boot_button_.OnLongPress");
@@ -91,6 +93,7 @@ private:
                 Application::GetInstance().QuitTalking();
                 vTaskDelay(pdMS_TO_TICKS(200));
                 auto codec = GetAudioCodec();
+                gpio_set_level(BUILTIN_SINGLE_LED_GPIO, 1);
                 codec->EnableOutput(true);
                 Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
                 need_power_off_ = true;
@@ -110,6 +113,7 @@ private:
                     if (board->isCharging()) {
                         // 关灯
                         board->GetLed()->TurnOff();
+                        is_sleep_ = true;
                     } else {
                         gpio_set_level(POWER_HOLD_GPIO, 0);
                     }
@@ -131,13 +135,15 @@ private:
                 Application::GetInstance().StopListening();
             });
         } else {
-            rec_button_.OnPressUp([this]() {
-                ESP_LOGI(TAG, "rec_button_.OnClick");
+            rec_button_.OnPressDown([this]() {
+                ESP_LOGI(TAG, "rec_button_.OnPressDown");
                 Application::GetInstance().ToggleChatState();
             });
         }
         
         volume_up_button_.OnClick([this]() {
+            // 点灯
+            gpio_set_level(BUILTIN_SINGLE_LED_GPIO, 0);
             ESP_LOGI(TAG, "volume_up_button_.OnClick");
             auto codec = GetAudioCodec();
             auto volume = codec->output_volume() + 10;
@@ -149,6 +155,8 @@ private:
         });
 
         volume_down_button_.OnClick([this]() {
+            // 点灯
+            gpio_set_level(BUILTIN_SINGLE_LED_GPIO, 0);
             ESP_LOGI(TAG, "volume_down_button_.OnClick");
             auto codec = GetAudioCodec();
             auto volume = codec->output_volume() - 10;
@@ -184,6 +192,7 @@ public:
         
         InitializeButtons();
         InitializeGpio(POWER_HOLD_GPIO, true);
+        InitializeGpio(BUILTIN_SINGLE_LED_GPIO, false);
         InitializeChargingGpio();
         InitializeI2c();
         InitializeIot();
