@@ -89,6 +89,7 @@ private:
               
                 ESP_LOGI(TAG, "执行关机操作");
                 Application::GetInstance().QuitTalking();
+                vTaskDelay(pdMS_TO_TICKS(200));
                 auto codec = GetAudioCodec();
                 codec->EnableOutput(true);
                 Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
@@ -96,6 +97,7 @@ private:
             }
         });
         boot_button_.OnPressUp([this]() {
+            first_level = 1;
             ESP_LOGI(TAG, "boot_button_.OnPressUp");
             if (need_power_off_) {
                 need_power_off_ = false;
@@ -186,6 +188,11 @@ public:
         InitializeI2c();
         InitializeIot();
         InitializePowerManager();
+        
+        if (power_manager_) {
+            power_manager_->CheckBatteryStatusImmediately();
+            ESP_LOGI(TAG, "启动时立即检测电量: %d", power_manager_->GetBatteryLevel());
+        }
     }
 
 

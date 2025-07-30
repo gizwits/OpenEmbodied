@@ -128,7 +128,7 @@ public:
             .skip_unhandled_events = true,
         };
         ESP_ERROR_CHECK(esp_timer_create(&timer_args, &timer_handle_));
-        ESP_ERROR_CHECK(esp_timer_start_periodic(timer_handle_, 500000));  // 1秒
+        ESP_ERROR_CHECK(esp_timer_start_periodic(timer_handle_, 500000));  // 5秒
 
         // 初始化ADC
         InitializeAdc();
@@ -162,5 +162,10 @@ public:
     bool IsCharging() { return is_charging_; }
 
     uint8_t GetBatteryLevel() { return battery_level_; }
+    
+    // 立即检测一次电量
+    void CheckBatteryStatusImmediately() {
+        CheckBatteryStatus();
+    }
 };
 #endif  // __POWER_MANAGER_H__

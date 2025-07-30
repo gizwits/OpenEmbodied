@@ -26,6 +26,7 @@
 #include <driver/gpio.h>
 #include <arpa/inet.h>
 #include <utility>
+#include <chrono>
 
 #define TAG "Application"
 
@@ -50,6 +51,9 @@ Application::Application() {
     // 初始化看门狗
     auto& watchdog = Watchdog::GetInstance();
     watchdog.Initialize(20, true);  // 10秒超时，超时后触发系统复位
+
+    // 初始化电量检查时间
+    last_battery_check_time_ = std::chrono::steady_clock::now();
 
 #if (defined(CONFIG_IDF_TARGET_ESP32C2) || defined(CONFIG_IDF_TARGET_ESP32C3))
 #if (defined(CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS) && defined(CONFIG_USE_AUDIO_CODEC_DECODE_OPUS))
@@ -480,20 +484,7 @@ void Application::Start() {
     /* Start the clock timer to update the status bar */
     esp_timer_start_periodic(clock_timer_handle_, 1000000);
 
-
-    // 检查电量
-    int level = 0;
-    bool charging = false;
-    bool discharging = false;
-    if (board.GetBatteryLevel(level, charging, discharging)) {
-        ESP_LOGI(TAG, "current Battery level: %d, charging: %d, discharging: %d", level, charging, discharging);
-        if (level <= 5) {
-            // 提示电量不足
-            SetDeviceState(kDeviceStateIdle);
-            Alert(Lang::Strings::ERROR, Lang::Strings::ERROR, "sad", Lang::Sounds::P3_BATTLE_LOW);
-            return;
-        }
-    }
+    CheckBatteryLevel();
 
     // 播放上电提示音
     PlaySound(Lang::Sounds::P3_SUCCESS);
@@ -880,11 +871,14 @@ void Application::Start() {
 }
 
 void Application::QuitTalking() {
-    ESP_LOGI(TAG, "QuitTalking");
-    protocol_->SendAbortSpeaking(kAbortReasonNone);
-    SetDeviceState(kDeviceStateIdle);
-    protocol_->CloseAudioChannel();
-    ResetDecoder();
+    if (protocol_ != nullptr) {
+        ESP_LOGI(TAG, "QuitTalking");
+        protocol_->SendAbortSpeaking(kAbortReasonNone);
+        SetDeviceState(kDeviceStateIdle);
+        protocol_->CloseAudioChannel();
+        ResetDecoder();
+    }
+    
 #if CONFIG_USE_WAKE_WORD_DETECT
     wake_word_detect_.StartDetection();
 #endif
@@ -997,6 +991,14 @@ void Application::MainEventLoop() {
         // Process NTP sync
         auto& ntp_client = NtpClient::GetInstance();
         ntp_client.ProcessSync();
+
+        // 每分钟检查一次电量
+        auto now = std::chrono::steady_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::minutes>(now - last_battery_check_time_).count();
+        if (duration >= 2) {
+            CheckBatteryLevel();
+            last_battery_check_time_ = now;
+        }
 
         auto bits = xEventGroupWaitBits(event_group_, SCHEDULE_EVENT, pdTRUE, pdFALSE, timeout);
 
@@ -1557,4 +1559,20 @@ void Application::SetChatMode(int mode) {
 
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_restart();
+}
+
+void Application::CheckBatteryLevel() {
+    // 检查电量
+    int level = 0;
+    bool charging = false;
+    bool discharging = false;
+    if (Board::GetInstance().GetBatteryLevel(level, charging, discharging)) {
+        ESP_LOGI(TAG, "current Battery level: %d, charging: %d, discharging: %d", level, charging, discharging);
+        if (level <= 10) {
+            // 提示电量不足
+            SetDeviceState(kDeviceStateIdle);
+            Alert(Lang::Strings::ERROR, Lang::Strings::ERROR, "sad", Lang::Sounds::P3_BATTLE_LOW);
+            return;
+        }
+    }
 }

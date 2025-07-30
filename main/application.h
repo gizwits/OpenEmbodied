@@ -76,6 +76,7 @@ public:
     void ChangeBot(const char* id, const char* voice_id);
     void AbortSpeaking(AbortReason reason);
     void PlayMusic(const char* url);
+    void CheckBatteryLevel();
     void CancelPlayMusic();
     void ResetDecoder();
     void ToggleChatState();
@@ -135,6 +136,9 @@ private:
     std::list<uint32_t> timestamp_queue_;
     std::mutex timestamp_mutex_;
     std::atomic<uint32_t> last_output_timestamp_ = 0;
+
+    // 新增：用于跟踪上次检查电量的时间
+    std::chrono::steady_clock::time_point last_battery_check_time_;
 
     std::unique_ptr<OpusEncoderWrapper> opus_encoder_;
     std::unique_ptr<OpusDecoderWrapper> opus_decoder_;
