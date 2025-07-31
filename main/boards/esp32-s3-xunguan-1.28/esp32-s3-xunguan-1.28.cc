@@ -5,6 +5,7 @@
 #include "config.h"
 #include "iot/thing_manager.h"
 #include "audio_codecs/box_audio_codec.h"
+#include "power_manager.h"
 
 #include "led/single_led.h"
 
@@ -31,59 +32,6 @@ LV_FONT_DECLARE(font_awesome_20_4);
 #define LIS2HH12_I2C_ADDR 0x1D  // SDO接GND为0x1D，接VDD为0x1E
 #define LIS2HH12_INT1_PIN GPIO_NUM_42
 
-// void ReadADC2_CH1_Oneshot() {
-//     adc_oneshot_unit_handle_t adc2_handle;
-//     adc_oneshot_unit_init_cfg_t init_config = {
-//         .unit_id = ADC_UNIT_2,
-//     };
-//     adc_oneshot_new_unit(&init_config, &adc2_handle);
-
-//     adc_oneshot_chan_cfg_t config = {
-//         .atten = ADC_ATTEN_DB_11,      // 0~3.6V
-//         .bitwidth = ADC_BITWIDTH_12,   // 12位精度
-//     };
-//     adc_oneshot_config_channel(adc2_handle, ADC_CHANNEL_1, &config);
-
-//     int raw = 0;
-//     esp_err_t ret = adc_oneshot_read(adc2_handle, ADC_CHANNEL_1, &raw);
-//     if (ret == ESP_OK) {
-//         ESP_LOGI("ADC2", "ADC2 CH1 raw value: %d", raw);
-//     } else {
-//         ESP_LOGE("ADC2", "ADC2 oneshot read failed: %d", ret);
-//     }
-
-//     adc_oneshot_del_unit(adc2_handle); // 用完记得释放
-// }
-
-
-// 电压-电量查表
-typedef struct {
-    uint16_t voltage; // mV
-    uint8_t soc;      // 百分比
-} VoltageSocPair;
-
-const VoltageSocPair dischargeCurve[] = {
-    {4163, 100}, {4098, 95}, {4039, 90}, {3983, 85}, {3930, 80}, {3878, 75}, {3829, 70}, {3784, 65}, {3745, 60}, {3710, 55},
-    {3668, 50},  {3645, 45}, {3629, 40}, {3615, 35}, {3600, 30}, {3583, 25}, {3554, 20}, {3520, 15}, {3476, 10}, {3439, 5}, {3395, 0}
-};
-
-static uint8_t estimate_soc(uint16_t voltage, const VoltageSocPair *soc_pairs, int voltage_soc_pairs_length)
-{
-    if (soc_pairs == NULL) return 0;
-    uint16_t closest_voltage = soc_pairs[0].voltage;
-    uint8_t closest_soc = soc_pairs[0].soc;
-    uint16_t min_diff = abs((int)voltage - (int)closest_voltage);
-    for (int i = 1; i < voltage_soc_pairs_length; i++) {
-        uint16_t diff = abs((int)voltage - (int)soc_pairs[i].voltage);
-        if (diff < min_diff) {
-            min_diff = diff;
-            closest_voltage = soc_pairs[i].voltage;
-            closest_soc = soc_pairs[i].soc;
-        }
-    }
-    return closest_soc;
-}
-
 class MovecallMojiESP32S3 : public WifiBoard {
 private:
     Button boot_button_;
@@ -95,6 +43,8 @@ private:
     i2c_master_bus_handle_t lis2hh12_i2c_bus_;
     i2c_master_dev_handle_t lis2hh12_dev_;
     int64_t power_on_timestamp_; // 上电时间戳
+    PowerManager* power_manager_;
+
 
     static void lis2hh12_task(void* arg) {
         MovecallMojiESP32S3* board = static_cast<MovecallMojiESP32S3*>(arg);
@@ -117,8 +67,12 @@ private:
                     ESP_LOGI("LIS2HH12", "Shake detected! ax=%.2f ay=%.2f az=%.2f", ax, ay, az);
                     shake_count = 0; // 触发后清零
                     // 这里可以触发你的摇晃事件
-                    board->display_->SetEmotion("vertigo");
-                    Application::GetInstance().SendMessage("用户正在摇晃你");
+                    if (board->ChannelIsOpen()) {
+                        board->display_->SetEmotion("vertigo");
+                        Application::GetInstance().SendMessage("用户正在摇晃你");
+                    } else {
+                        ESP_LOGI("LIS2HH12", "Channel is not open");
+                    }
                 }
             } else {
                 if (shake_count > 0) shake_count -= shake_count_decay;
@@ -207,11 +161,15 @@ private:
             ESP_LOGI(TAG, "touch_button_.OnPressDown");
 
             display_->SetEmotion("loving");
-            Application::GetInstance().SendMessage("用户正在抚摸你");
-
+            if (ChannelIsOpen()) {
+                Application::GetInstance().SendMessage("用户正在抚摸你");
+            } else {
+                ESP_LOGI("touch", "Channel is not open");
+            }
         });
 
         boot_button_.OnClick([this]() {
+
             auto& app = Application::GetInstance();
             // if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
             //     ResetWifiConfiguration();
@@ -224,6 +182,7 @@ private:
             auto& app = Application::GetInstance();
             app.SetDeviceState(kDeviceStateIdle);
             GetBacklight()->SetBrightness(0, false);
+
 
             if (first_level ==0) {
                 first_level = 1;
@@ -270,6 +229,14 @@ private:
         } else {
             gpio_set_level(gpio_num_, 0);
         }
+    }
+    int MaxVolume() {
+        return 80;
+    }
+
+    bool ChannelIsOpen() {
+        auto& app = Application::GetInstance();
+        return app.GetDeviceState() != kDeviceStateIdle;
     }
 
     // LIS2HH12专用I2C初始化
@@ -324,6 +291,12 @@ private:
         return true;
     }
 
+
+    void InitializePowerManager() {
+        power_manager_ =
+            new PowerManager(GPIO_NUM_NC, GPIO_NUM_NC, BAT_ADC_UNIT, BAT_ADC_CHANNEL);
+    }
+
 public:
     MovecallMojiESP32S3() : boot_button_(BOOT_BUTTON_GPIO), touch_button_(TOUCH_BUTTON_GPIO) { 
         // 记录上电时间戳
@@ -351,23 +324,13 @@ public:
         InitializeButtons();
         InitializeIot();
         xTaskCreate(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 4096, this, 5, NULL); // 启动检测任务
+        InitializePowerManager();
         // ESP_LOGI(TAG, "ReadADC2_CH1_Oneshot");
         // ReadADC2_CH1_Oneshot();
-        
-
-        int level = 0;
-        bool charging = false;
-        bool discharging = false;
-        GetBatteryLevel(level, charging, discharging);
-        ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
-
-        // if (is_charging) {
-        //     GetAudioCodec()->EnableOutput(false);
-        //     GetBacklight()->SetBrightness(0, false);
-        // } else {
-        //     GetBacklight()->RestoreBrightness();
-        // }
-        // GetBacklight()->RestoreBrightness();
+        if (power_manager_) {
+            power_manager_->CheckBatteryStatusImmediately();
+            ESP_LOGI(TAG, "启动时立即检测电量: %d", power_manager_->GetBatteryLevel());
+        }
         xTaskCreate(
             RestoreBacklightTask,      // 任务函数
             "restore_backlight",       // 名字
@@ -395,58 +358,11 @@ public:
     }
 
 
-    virtual bool GetBatteryLevel(int &level, bool &charging, bool &discharging) override {
-        // 1. 读取ADC原始值
-        bool is_charging = isCharging();
-        adc_oneshot_unit_handle_t adc2_handle;
-        adc_oneshot_unit_init_cfg_t init_config = { .unit_id = ADC_UNIT_2 };
-        adc_oneshot_new_unit(&init_config, &adc2_handle);
-
-        adc_oneshot_chan_cfg_t config = { .atten = ADC_ATTEN_DB_11, .bitwidth = ADC_BITWIDTH_12 };
-        adc_oneshot_config_channel(adc2_handle, ADC_CHANNEL_1, &config);
-
-        int raw = 0;
-        esp_err_t ret = adc_oneshot_read(adc2_handle, ADC_CHANNEL_1, &raw);
-        adc_oneshot_del_unit(adc2_handle);
-
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "ADC2 oneshot read failed: %d", ret);
-            level = 0;
-            charging = false;
-            discharging = false;
-            return false;
-        }
-
-        // 2. 转换为电压（假设3.6V满量程，12位ADC，分压比2:1）
-        // 公式: 电压(mV) = raw / 4095.0 * 3600 * 2
-        float voltage = raw * 3600.0f / 4095.0f * 2.0f;
-        uint16_t voltage_mv = (uint16_t)voltage;
-        ESP_LOGI(TAG, "ADC raw: %d, voltage: %d mV", raw, voltage_mv);
-
-        charging = is_charging;
+    virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
+        charging = isCharging();
         discharging = !charging;
-
-        // 4. 估算电量
-        if (charging) {
-            // 线性估算
-            if (voltage_mv >= 4163) {
-                level = 100;
-            } else if (voltage_mv <= 3395) {
-                level = 0;
-            } else {
-                level = ((voltage_mv - 3395) * 100) / (4163 - 3395);
-            }
-        } else {
-            // 查表法
-            level = estimate_soc(voltage_mv, dischargeCurve, sizeof(dischargeCurve)/sizeof(dischargeCurve[0]));
-        }
-
-        // 限制范围
-        if (level > 100) level = 100;
-        if (level < 0) level = 0;
-
+        level = power_manager_->GetBatteryLevel();
         ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
-
         return true;
     }
 

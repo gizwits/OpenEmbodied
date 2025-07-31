@@ -70,6 +70,7 @@ public:
     virtual bool IsWifiConfigMode();
     virtual std::string GetBoardJson() = 0;
     virtual std::string GetDeviceStatusJson() = 0;
+    virtual int MaxVolume() { return 100; }
     
     // 设备模式相关方法
     virtual DeviceMode GetDeviceMode() const { return device_mode_; }

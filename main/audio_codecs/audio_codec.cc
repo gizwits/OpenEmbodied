@@ -102,9 +102,10 @@ void AudioCodec::SetOutputVolume(int volume) {
     static bool is_first_set = true;
     output_volume_ = volume;
     auto canPlaySound = Application::GetInstance().GetDeviceState() != kDeviceStateSpeaking;
+    auto max_volume = Board::GetInstance().MaxVolume();
 
-    if (output_volume_ > 100) {
-        output_volume_ = 100;
+    if (output_volume_ > max_volume) {
+        output_volume_ = max_volume;
         if (canPlaySound && is_first_set == false) {
             Application::GetInstance().Schedule([this]() {
                 // 提示最大声

@@ -809,7 +809,7 @@ void Application::Start() {
 #if CONFIG_USE_WAKE_WORD_DETECT
     wake_word_detect_.Initialize(codec);
     wake_word_detect_.OnWakeWordDetected([this](const std::string& wake_word) {
-
+        ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
         Schedule([this, &wake_word]() {
             CancelPlayMusic();
             ESP_LOGI(TAG, "Wake word detected: %s, device state: %s, %d", wake_word.c_str(), STATE_STRINGS[device_state_], device_state_);
