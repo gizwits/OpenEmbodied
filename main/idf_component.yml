@@ -49,4 +49,3 @@ dependencies:
   ## Required IDF version
   idf:
     version: '>=5.3'
-

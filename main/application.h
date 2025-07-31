@@ -23,6 +23,7 @@
 #include "server/giz_mqtt.h"
 #include "ota.h"
 #include "background_task.h"
+#include "ntp.h"
 #if CONFIG_USE_AUDIO_PROCESSOR
 #include "audio_processor.h"
 #endif
@@ -75,7 +76,9 @@ public:
     void ChangeBot(const char* id, const char* voice_id);
     void AbortSpeaking(AbortReason reason);
     void PlayMusic(const char* url);
+    void CheckBatteryLevel();
     void CancelPlayMusic();
+    void ResetDecoder();
     void ToggleChatState();
     void StartListening();
     void SetChatMode(int mode);
@@ -134,6 +137,9 @@ private:
     std::mutex timestamp_mutex_;
     std::atomic<uint32_t> last_output_timestamp_ = 0;
 
+    // 新增：用于跟踪上次检查电量的时间
+    std::chrono::steady_clock::time_point last_battery_check_time_;
+
     std::unique_ptr<OpusEncoderWrapper> opus_encoder_;
     std::unique_ptr<OpusDecoderWrapper> opus_decoder_;
 
@@ -153,7 +159,6 @@ private:
 #ifdef CONFIG_USE_AUDIO_CODEC_DECODE_OPUS
     void WriteAudio(std::vector<uint8_t>& opus);
 #endif
-    void ResetDecoder();
     void SetDecodeSampleRate(int sample_rate, int frame_duration);
     void CheckNewVersion();
     void ShowActivationCode();

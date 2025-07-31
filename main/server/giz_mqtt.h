@@ -15,13 +15,13 @@
 // 内存优化配置
 // S3 用更大的内存
 #if CONFIG_IDF_TARGET_ESP32S3
-#define MQTT_TASK_STACK_SIZE_RCV     4096    // 消息接收任务栈大小 - 增加以处理大型JSON
+#define MQTT_TASK_STACK_SIZE_RCV     1024 * 6    // 消息接收任务栈大小 - 增加以处理大型JSON
 #define MQTT_TASK_STACK_SIZE_RESEND  4096    // 消息重发任务栈大小
 #else
-#define MQTT_TASK_STACK_SIZE_RCV     3072    // 消息接收任务栈大小 - 增加以处理大型JSON
+#define MQTT_TASK_STACK_SIZE_RCV     4096    // 消息接收任务栈大小 - 增加以处理大型JSON
 #define MQTT_TASK_STACK_SIZE_RESEND  2048    // 消息重发任务栈大小
 #endif
-#define MQTT_QUEUE_SIZE              10      // 消息队列大小
+#define MQTT_QUEUE_SIZE              8      // 消息队列大小
 #define MQTT_TOPIC_BUFFER_SIZE       48      // 主题缓冲区大小
 #define MQTT_PAYLOAD_BUFFER_SIZE     256     // 负载缓冲区大小
 #define MQTT_TOKEN_REPORT_BUFFER_SIZE 128    // Token报告缓冲区大小
@@ -76,6 +76,7 @@ typedef struct {
     char access_token[256];
     char voice_lang[64];
     char api_domain[256];
+    char config[1024];  // 新增：保存 coze_websocket.config 的 JSON 字符串，增加到 1KB
     int expires_in;
 } room_params_t;
 
@@ -96,9 +97,8 @@ public:
     bool getRoomInfo();
     int sendResetToCloud();
     int getPublishedId();
-    void sendOtaProgressReport(int progress, const char* status);
     void OnRoomParamsUpdated(std::function<void(const RoomParams&)> callback);
-    void processAttrValue(std::string attr_name, int value);
+    void sendOtaProgressReport(int progress, const char* status);
     void deinit();
     void sendTraceLog(const char* level, const char* message);
 
@@ -135,10 +135,12 @@ private:
 
     static void messageReceiveHandler(void* arg);
     static void messageResendHandler(void* arg);
+    void app2devMsgHandler(const uint8_t *data, int32_t len);
     static void timerCallback(TimerHandle_t xTimer);
+    
+    void processAttrValue(std::string attr_name, int value);
+    uint8_t mqttNumRemLenBytes(const uint8_t *buf);
     bool parseRealtimeAgent(const char* in_str, int in_len, room_params_t* params);
     bool parseM2MCtrlMsg(const char* in_str, int in_len);
     void handleMqttMessage(mqtt_msg_t* msg);
-    void app2devMsgHandler(const uint8_t *data, int32_t len);
-    uint8_t mqttNumRemLenBytes(const uint8_t *buf);
 };

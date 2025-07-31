@@ -19,6 +19,8 @@
 #include <esp_lcd_panel_vendor.h>
 #include <driver/spi_common.h>
 #include "servo.h"
+#include <vector>
+#include <string>
 
 #define TAG "CustomBoard"
 
@@ -29,6 +31,10 @@ private:
     PowerSaveTimer* power_save_timer_;
     VbAduioCodec audio_codec;
     bool sleep_flag_ = false;
+    
+    // 唤醒词列表
+    std::vector<std::string> wake_words_ = {"你好小智", "你好小云", "合养精灵", "嗨小火人"};
+    std::vector<std::string> network_config_words_ = {"开始配网"};
 
     void InitializePowerSaveTimer() {
         power_save_timer_ = new PowerSaveTimer(-1, 60 * 2, portMAX_DELAY);
@@ -58,8 +64,9 @@ private:
     void InitializeButtons() {
 
         const int chat_mode = Application::GetInstance().GetChatMode();
+        rec_button_ = new Button(BUILTIN_REC_BUTTON_GPIO);
+
         if (chat_mode == 0) {
-            rec_button_ = new Button(BUILTIN_REC_BUTTON_GPIO);
             rec_button_->OnPressUp([this]() {
                 auto &app = Application::GetInstance();
                 app.StopListening();
@@ -70,6 +77,10 @@ private:
                 app.StartListening();
             });
         } else {
+            rec_button_->OnPressDown([this]() {
+                auto &app = Application::GetInstance();
+                app.ToggleChatState();
+            });
             boot_button_.OnClick([this]() {
                 auto &app = Application::GetInstance();
                 app.ToggleChatState();
@@ -81,6 +92,11 @@ private:
                 ResetWifiConfiguration();
             }
         });
+    }
+
+    // 检查命令是否在列表中
+    bool IsCommandInList(const std::string& command, const std::vector<std::string>& command_list) {
+        return std::find(command_list.begin(), command_list.end(), command) != command_list.end();
     }
 
     // 物联网初始化，添加对 AI 可见设备
@@ -106,12 +122,12 @@ public:
 
         audio_codec.OnWakeUp([this](const std::string& command) {
             ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());
-            if (command == "你好小智" || command.find("小云") != std::string::npos){
+            if (IsCommandInList(command, wake_words_)){
                 ESP_LOGE(TAG, "vb6824 recv cmd: %d", Application::GetInstance().GetDeviceState());
                 // if(Application::GetInstance().GetDeviceState() != kDeviceStateListening){
                 // }
                 Application::GetInstance().WakeWordInvoke("你好小智");
-            } else if (command == "开始配网") {
+            } else if (IsCommandInList(command, network_config_words_)) {
                 ResetWifiConfiguration();
             }
         });

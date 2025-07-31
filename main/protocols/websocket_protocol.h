@@ -28,7 +28,8 @@ private:
     WebSocket* websocket_ = nullptr;
     EventGroupHandle_t event_group_handle_;
     TaskHandle_t close_task_handle_ = nullptr;
-    std::optional<AudioStreamPacket> packet_cache_;
+    std::vector<AudioStreamPacket> packet_cache_;
+    int cached_packet_count_ = 0;
     
     std::string message_cache_;
     std::vector<uint8_t> audio_data_buffer_;  // Reuse buffer for Ogg data

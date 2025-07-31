@@ -1,8 +1,8 @@
 {
-    "target": "esp32s3",
+    "target": "esp32c2",
     "builds": [
         {
-            "name": "doit-esp32s3-eye",
+            "name": "gizwits-c2-6824",
             "sdkconfig_append": [
                 "CONFIG_BOARD_TYPE_DOIT_AI_01_KIT=y",
                 "CONFIG_MQTT_USE_CUSTOM_CONFIG=y",
@@ -12,7 +12,9 @@
                 "CONFIG_PARTITION_TABLE_FILENAME=partitions_4M.csv",
                 "CONFIG_ESP32C2_REV_MIN_200=200",
                 "CONFIG_ESP32C2_REV_MIN_FULL=200",
-                "CONFIG_ESP_REV_MIN_FULL=200"
+                "CONFIG_ESP_REV_MIN_FULL=200",
+                "CONFIG_USE_EYE_STYLE_VB6824=y",
+                "CONFIG_USE_AUDIO_PROCESSOR=n"
             ]
         }
     ]

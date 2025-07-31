@@ -26,6 +26,7 @@
 #include <driver/gpio.h>
 #include <arpa/inet.h>
 #include <utility>
+#include <chrono>
 
 #define TAG "Application"
 
@@ -40,6 +41,7 @@ static const char* const STATE_STRINGS[] = {
     "upgrading",
     "activating",
     "fatal_error",
+    "power_off",
     "invalid_state"
 };
 
@@ -49,6 +51,9 @@ Application::Application() {
     // 初始化看门狗
     auto& watchdog = Watchdog::GetInstance();
     watchdog.Initialize(20, true);  // 10秒超时，超时后触发系统复位
+
+    // 初始化电量检查时间
+    last_battery_check_time_ = std::chrono::steady_clock::now();
 
 #if (defined(CONFIG_IDF_TARGET_ESP32C2) || defined(CONFIG_IDF_TARGET_ESP32C3))
 #if (defined(CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS) && defined(CONFIG_USE_AUDIO_CODEC_DECODE_OPUS))
@@ -159,7 +164,7 @@ void Application::CheckNewVersion() {
             background_task_ = nullptr;
             vTaskDelay(pdMS_TO_TICKS(1000));
 
-            ota_.StartUpgrade([this,display](int progress, size_t speed) {
+            ota_.StartUpgrade([display](int progress, size_t speed) {
                 char buffer[64];
                 snprintf(buffer, sizeof(buffer), "%d%% %zuKB/s", progress, speed / 1024);
                 display->SetChatMessage("system", buffer);
@@ -351,6 +356,7 @@ void Application::ToggleChatState() {
 }
 
 void Application::StartListening() {
+    CancelPlayMusic();
     if (device_state_ == kDeviceStateActivating) {
         ESP_LOGI(TAG, "StartListening(kDeviceStateActivating)");
         SetDeviceState(kDeviceStateIdle);
@@ -371,7 +377,6 @@ void Application::StartListening() {
                     return;
                 }
             }
-
             SetListeningMode(kListeningModeManualStop);
         });
     } else if (device_state_ == kDeviceStateSpeaking) {
@@ -421,13 +426,12 @@ void Application::Start() {
 
     auto& board = Board::GetInstance();
     Auth::getInstance().init();
+
     
     SetDeviceState(kDeviceStateStarting);
 
     /* Setup the display */
     auto display = board.GetDisplay();
-
-
 
     /* Setup the audio codec */
     auto codec = board.GetAudioCodec();
@@ -480,12 +484,27 @@ void Application::Start() {
     /* Start the clock timer to update the status bar */
     esp_timer_start_periodic(clock_timer_handle_, 1000000);
 
+    CheckBatteryLevel();
+
+    // 播放上电提示音
+    PlaySound(Lang::Sounds::P3_SUCCESS);
+
     /* Wait for the network to be ready */
     board.StartNetwork();
 
 
     PlaySound(Lang::Sounds::P3_CONNECT_SUCCESS);
     vTaskDelay(pdMS_TO_TICKS(500));
+
+    // Initialize NTP client
+    auto& ntp_client = NtpClient::GetInstance();
+    esp_err_t ntp_ret = ntp_client.Init();
+    if (ntp_ret == ESP_OK) {
+        ntp_client.StartSync();
+        ESP_LOGI(TAG, "NTP client initialized and started");
+    } else {
+        ESP_LOGE(TAG, "Failed to initialize NTP client: %s", esp_err_to_name(ntp_ret));
+    }
 
     // Initialize MQTT client
     protocol_ = std::make_unique<WebsocketProtocol>();
@@ -608,7 +627,7 @@ void Application::Start() {
 #if CONFIG_IDF_TARGET_ESP32C2
         const int max_packets_in_queue = 3000 / OPUS_FRAME_DURATION_MS;
 #else
-        const int max_packets_in_queue = 10000 / OPUS_FRAME_DURATION_MS;
+        const int max_packets_in_queue = 20000 / OPUS_FRAME_DURATION_MS;
 #endif
         std::lock_guard<std::mutex> lock(mutex_);
         if (audio_decode_queue_.size() < max_packets_in_queue) {
@@ -653,32 +672,27 @@ void Application::Start() {
         if (strcmp(type->valuestring, "tts") == 0) {
             auto state = cJSON_GetObjectItem(root, "state");
             if (strcmp(state->valuestring, "start") == 0) {
-                Schedule([this]() {
-                    auto& board = Board::GetInstance();
-                    if (device_state_ == kDeviceStateIdle || device_state_ == kDeviceStateListening) {
-                        SetDeviceState(kDeviceStateSpeaking);
-                    }
-                });
+                auto& board = Board::GetInstance();
+                if (device_state_ == kDeviceStateIdle || device_state_ == kDeviceStateListening) {
+                    SetDeviceState(kDeviceStateSpeaking);
+                }
             } else if (strcmp(state->valuestring, "pre_start") == 0) {
                 aborted_ = false;
                 auto& board = Board::GetInstance();
-                if (board.NeedPlayProcessVoice()) {
+                if (board.NeedPlayProcessVoice() && chat_mode_ != 2) {
+                    // 自然对话不要 biu
                     ResetDecoder();
                     PlaySound(Lang::Sounds::P3_BO);
                 }
                 Schedule([this, &board]() {
                     auto display = board.GetDisplay();
                     display->SetEmotion("thinking");
-
                 });
             } else if (strcmp(state->valuestring, "stop") == 0) {
                 Schedule([this]() {
                     background_task_->WaitForCompletion();
                     auto& board = Board::GetInstance();
 
-                    // if (board.GetServo()) {
-                    //     board.GetServo()->stop();
-                    // }
                     if (device_state_ == kDeviceStateSpeaking) {
                         if (listening_mode_ == kListeningModeManualStop) {
                             SetDeviceState(kDeviceStateIdle);
@@ -857,11 +871,14 @@ void Application::Start() {
 }
 
 void Application::QuitTalking() {
-    ESP_LOGI(TAG, "QuitTalking");
-    protocol_->SendAbortSpeaking(kAbortReasonNone);
-    SetDeviceState(kDeviceStateIdle);
-    protocol_->CloseAudioChannel();
-    ResetDecoder();
+    if (protocol_ != nullptr) {
+        ESP_LOGI(TAG, "QuitTalking");
+        protocol_->SendAbortSpeaking(kAbortReasonNone);
+        SetDeviceState(kDeviceStateIdle);
+        protocol_->CloseAudioChannel();
+        ResetDecoder();
+    }
+    
 #if CONFIG_USE_WAKE_WORD_DETECT
     wake_word_detect_.StartDetection();
 #endif
@@ -883,7 +900,7 @@ void Application::PlayMusic(const char* url) {
         #if CONFIG_IDF_TARGET_ESP32C2
             const int max_packets_in_queue = 3000 / OPUS_FRAME_DURATION_MS;
         #else
-            const int max_packets_in_queue = 10000 / OPUS_FRAME_DURATION_MS;
+            const int max_packets_in_queue = 20000 / OPUS_FRAME_DURATION_MS;
         #endif
         std::lock_guard<std::mutex> lock(mutex_);
         if (audio_decode_queue_.size() < max_packets_in_queue) {
@@ -970,6 +987,18 @@ void Application::MainEventLoop() {
     const TickType_t timeout = pdMS_TO_TICKS(3000);
     while (true) {
         watchdog.Reset();
+
+        // Process NTP sync
+        auto& ntp_client = NtpClient::GetInstance();
+        ntp_client.ProcessSync();
+
+        // 每分钟检查一次电量
+        auto now = std::chrono::steady_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::minutes>(now - last_battery_check_time_).count();
+        if (duration >= 2) {
+            CheckBatteryLevel();
+            last_battery_check_time_ = now;
+        }
 
         auto bits = xEventGroupWaitBits(event_group_, SCHEDULE_EVENT, pdTRUE, pdFALSE, timeout);
 
@@ -1331,14 +1360,15 @@ void Application::SetDeviceState(DeviceState state) {
         case kDeviceStateSpeaking:
             display->SetStatus(Lang::Strings::SPEAKING);
             display->SetEmotion("happy");
-
-            Schedule([this]() {
-                ESP_LOGI(TAG, "GetServo");
-                auto& board = Board::GetInstance();
-                if (board.GetServo()) {
+            if (board.GetServo()) {
+                Schedule([this]() {
+                    ESP_LOGI(TAG, "GetServo");
+                    auto& board = Board::GetInstance();
                     board.GetServo()->move(0, 180, 500, 10000000);
-                }
-            });
+                });
+            }
+
+            
 
             if (listening_mode_ != kListeningModeRealtime) {
 #if CONFIG_USE_AUDIO_PROCESSOR
@@ -1420,6 +1450,12 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     if (chat_mode_ == 0) {
         return;
     }
+
+    if (chat_mode_ == 2 && device_state_ != kDeviceStateIdle) {
+        // 自然对话模式，聊天中的时候唤醒词不需要工作
+        return;
+    }
+
     if (device_state_ == kDeviceStateIdle) {
         
         Schedule([this, wake_word]() {
@@ -1436,19 +1472,22 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
             ToggleChatState();
         });
     } else if (device_state_ == kDeviceStateSpeaking) {
+        ResetDecoder();
+        PlaySound(Lang::Sounds::P3_SUCCESS);
+        ESP_LOGI(TAG, "WakeWordInvoke(kDeviceStateListening)");
+        SetDeviceState(kDeviceStateListening);
         Schedule([this]() {
             // 打断AI
             ESP_LOGI(TAG, "WakeWordInvoke(kDeviceStateSpeaking)");
             protocol_->SendAbortSpeaking(kAbortReasonNone);
-            ResetDecoder();
-            PlaySound(Lang::Sounds::P3_SUCCESS);
-            ESP_LOGI(TAG, "WakeWordInvoke(kDeviceStateListening)");
-            SetDeviceState(kDeviceStateListening);
+            
         });
     } else if (device_state_ == kDeviceStateListening) { 
+        // 忽略唤醒词
         // Schedule([this]() {
         //     ResetDecoder();
         //     PlaySound(Lang::Sounds::P3_SUCCESS);
+        //     protocol_->SendAbortSpeaking(kAbortReasonNone);
         // });
     }
 }
@@ -1520,4 +1559,20 @@ void Application::SetChatMode(int mode) {
 
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_restart();
+}
+
+void Application::CheckBatteryLevel() {
+    // 检查电量
+    int level = 0;
+    bool charging = false;
+    bool discharging = false;
+    if (Board::GetInstance().GetBatteryLevel(level, charging, discharging)) {
+        ESP_LOGI(TAG, "current Battery level: %d, charging: %d, discharging: %d", level, charging, discharging);
+        if (level <= 10) {
+            // 提示电量不足
+            SetDeviceState(kDeviceStateIdle);
+            Alert(Lang::Strings::ERROR, Lang::Strings::ERROR, "sad", Lang::Sounds::P3_BATTLE_LOW);
+            return;
+        }
+    }
 }

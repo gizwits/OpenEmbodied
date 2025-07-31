@@ -22,6 +22,7 @@ public:
     virtual ~CircularStrip();
 
     void OnStateChanged() override;
+    void TurnOff() override;
     void SetBrightness(uint8_t default_brightness, uint8_t low_brightness);
     void SetAllColor(StripColor color);
     void SetSingleColor(uint8_t index, StripColor color);

@@ -15,7 +15,8 @@
 
 #define TAG "WS"
 
-#define MAX_AUDIO_PACKET_SIZE 1024
+#define MAX_AUDIO_PACKET_SIZE 512
+#define MAX_CACHED_PACKETS 10
 
 struct Emotion {
     const char* icon;
@@ -338,20 +339,31 @@ bool WebsocketProtocol::OpenAudioChannel() {
                                     cJSON_Delete(message_json);
                                 }
                                 is_first_packet_ = false;
-                                // 缓冲一包数据
-                                packet_cache_.emplace();
-                                packet_cache_->payload.assign(audio_data_buffer_.begin(), audio_data_buffer_.begin() + actual_len);
+                                // 开始缓存模式，先缓存MAX_CACHED_PACKETS包数据
+                                cached_packet_count_ = 0;
+                                packet_cache_.clear();
+                            }
+                            
+                            // 创建当前音频包
+                            AudioStreamPacket packet;
+                            packet.payload.assign(audio_data_buffer_.begin(), audio_data_buffer_.begin() + actual_len);
+                            
+                            if (cached_packet_count_ < MAX_CACHED_PACKETS) {
+                                // 还在缓存阶段，添加到缓存
+                                packet_cache_.push_back(std::move(packet));
+                                cached_packet_count_++;
+                                ESP_LOGI(TAG, "Caching packet %d/%d", cached_packet_count_, MAX_CACHED_PACKETS);
                             } else {
-                                if (packet_cache_.has_value()) {
-                                    // 先发送缓存的包
-                                    AudioStreamPacket cached_packet;
-                                    cached_packet.payload = packet_cache_->payload;
-                                    on_incoming_audio_(std::move(cached_packet));
-                                    packet_cache_.reset();
-                                    vTaskDelay(pdMS_TO_TICKS(10));
+                                // 缓存已满，开始推送
+                                if (!packet_cache_.empty()) {
+                                    // 先推送所有缓存的包
+                                    for (auto& cached_packet : packet_cache_) {
+                                        on_incoming_audio_(std::move(cached_packet));
+                                    }
+                                    packet_cache_.clear();
+                                    ESP_LOGI(TAG, "Pushed %d cached packets", cached_packet_count_);
                                 }
-                                AudioStreamPacket packet;
-                                packet.payload.assign(audio_data_buffer_.begin(), audio_data_buffer_.begin() + actual_len);
+                                // 推送当前包
                                 on_incoming_audio_(std::move(packet));
                             }
                         }
@@ -396,6 +408,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
 
                 is_detect_emotion_ = false;
                 is_first_packet_ = true;
+                cached_packet_count_ = 0;
+                packet_cache_.clear();
 
                 message_cache_.clear();
                 message_buffer_.clear();
@@ -412,6 +426,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 
             } else if (event_type == "conversation.chat.completed" || event_type == "conversation.audio.completed") {
                 is_first_packet_ = false;
+                cached_packet_count_ = 0;
+                packet_cache_.clear();
 
                 std::string messageData = "conversation.chat.completed or conversation.audio.completed";
                 MqttClient::getInstance().sendTraceLog("info", messageData.c_str());
@@ -454,8 +470,6 @@ bool WebsocketProtocol::OpenAudioChannel() {
                     on_incoming_json_(message_json);
                     cJSON_Delete(message_json);
                 }
-
-
                 if (is_detect_emotion_ == false) {
                     // 查找 message_cache_ 是否包含 emotions
                     for (const auto& emotion : emotions) {
@@ -517,6 +531,39 @@ bool WebsocketProtocol::OpenAudioChannel() {
         on_audio_channel_opened_();
     }
 
+    std::string user_language = "common";
+    std::string parameters = "";
+    
+    // 如果存在 config，解析其中的参数
+    if (!room_params_.config.empty()) {
+        cJSON* config_json = cJSON_Parse(room_params_.config.c_str());
+        if (config_json) {
+            // 提取 user_language
+            cJSON* asr_config = cJSON_GetObjectItem(config_json, "asr_config");
+            if (asr_config && cJSON_IsObject(asr_config)) {
+                cJSON* user_lang_item = cJSON_GetObjectItem(asr_config, "user_language");
+                if (user_lang_item && cJSON_IsString(user_lang_item)) {
+                    user_language = std::string(user_lang_item->valuestring);
+                }
+            }
+            
+            // 提取 parameters
+            cJSON* chat_config = cJSON_GetObjectItem(config_json, "chat_config");
+            if (chat_config && cJSON_IsObject(chat_config)) {
+                cJSON* parameters_item = cJSON_GetObjectItem(chat_config, "parameters");
+                if (parameters_item && cJSON_IsObject(parameters_item)) {
+                    char* parameters_str = cJSON_Print(parameters_item);
+                    if (parameters_str) {
+                        parameters = std::string(parameters_str);
+                        free(parameters_str);
+                    }
+                }
+            }
+            cJSON_Delete(config_json);
+        }
+    }
+
+    
     char event_id[32];
     uint32_t random_value = esp_random();
     snprintf(event_id, sizeof(event_id), "%lu", random_value);
@@ -560,13 +607,16 @@ bool WebsocketProtocol::OpenAudioChannel() {
         message += "\"turn_detection\": {";
         message += "\"type\": \"server_vad\",";  // 判停类型，client_vad/server_vad，默认为 client_vad
         message += "\"prefix_padding_ms\": 300,"; // server_vad模式下，VAD 检测到语音之前要包含的音频量，单位为 ms。默认为 600ms
-        message += "\"silence_duration_ms\": 500"; // server_vad模式下，检测语音停止的静音持续时间，单位为 ms。默认为 800ms
+        message += "\"silence_duration_ms\": 800"; // server_vad模式下，检测语音停止的静音持续时间，单位为 ms。默认为 800ms
         message += "},";
     }
     message += "\"chat_config\":{";
     message += "\"auto_save_history\":true,";
     message += "\"conversation_id\":\"" + room_params_.conv_id + "\",";
     message += "\"user_id\":\"" + room_params_.user_id + "\",";
+    if (!parameters.empty()) {
+        message += "\"parameters\":" + parameters + ",";
+    }
     message += "\"meta_data\":{},";
     message += "\"custom_variables\":{},";
     message += "\"extra_params\":{}";
@@ -578,6 +628,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "\"channel\":1,";
     message += "\"bit_depth\":16";
     message += "},";
+    message += "\"asr_config\":{\"user_language\":\"" + user_language + "\"},";
     message += "\"output_audio\":{";
     message += "\"codec\":\"" + codec + "\",";
     message += "\"opus_config\":{";

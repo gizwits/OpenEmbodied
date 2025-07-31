@@ -1,6 +1,8 @@
 #include "audio_codec.h"
 #include "board.h"
 #include "settings.h"
+#include "assets/lang_config.h"
+#include "application.h"
 
 #include <esp_log.h>
 #include <cstring>
@@ -94,11 +96,48 @@ void AudioCodec::Start() {
 }
 
 void AudioCodec::SetOutputVolume(int volume) {
+    /**
+    上电的时候默认会设置一次
+    */
+    static bool is_first_set = true;
     output_volume_ = volume;
-    ESP_LOGI(TAG, "Set output volume to %d", output_volume_);
+    auto canPlaySound = Application::GetInstance().GetDeviceState() != kDeviceStateSpeaking;
+
+    if (output_volume_ > 100) {
+        output_volume_ = 100;
+        if (canPlaySound && is_first_set == false) {
+            Application::GetInstance().Schedule([this]() {
+                // 提示最大声
+                auto codec = Board::GetInstance().GetAudioCodec();
+                codec->EnableOutput(true);
+                Application::GetInstance().PlaySound(Lang::Sounds::P3_VOICE_MAX);
+            });
+        }
+    } else if (output_volume_ <= 10) {
+        output_volume_ = 10;
+        if (canPlaySound && is_first_set == false) { 
+            Application::GetInstance().Schedule([this]() {
+            // 提示最小声
+            auto codec = Board::GetInstance().GetAudioCodec();
+            codec->EnableOutput(true);
+                Application::GetInstance().PlaySound(Lang::Sounds::P3_VOICE_MIN);
+            });
+        }
+    } else {
+        if (canPlaySound && is_first_set == false) { 
+            Application::GetInstance().Schedule([this]() {
+                // 播放提示音
+                auto codec = Board::GetInstance().GetAudioCodec();
+                codec->EnableOutput(true);
+                Application::GetInstance().PlaySound(Lang::Sounds::P3_BO);
+            });
+        }
+    }
     
+    ESP_LOGI(TAG, "Set output volume to %d", output_volume_);
     Settings settings("audio", true);
     settings.SetInt("output_volume", output_volume_);
+    is_first_set = false;
 }
 
 void AudioCodec::EnableInput(bool enable) {
