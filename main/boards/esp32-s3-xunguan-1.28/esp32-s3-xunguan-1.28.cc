@@ -6,6 +6,7 @@
 #include "iot/thing_manager.h"
 #include "audio_codecs/box_audio_codec.h"
 #include "power_manager.h"
+#include "assets/lang_config.h"
 
 #include "led/single_led.h"
 
@@ -42,7 +43,8 @@ private:
     // LIS2HH12专用I2C
     i2c_master_bus_handle_t lis2hh12_i2c_bus_;
     i2c_master_dev_handle_t lis2hh12_dev_;
-    int64_t power_on_timestamp_; // 上电时间戳
+    int64_t power_on_time_ = 0;  // 记录上电时间
+    bool is_sleep_ = false;
     PowerManager* power_manager_;
 
 
@@ -155,6 +157,7 @@ private:
 
     void InitializeButtons() {
         static int first_level = gpio_get_level(BOOT_BUTTON_GPIO);
+        ESP_LOGI(TAG, "first_level: %d", first_level);
 
         touch_button_.OnPressDown([this]() {
             //切换表情
@@ -180,27 +183,46 @@ private:
         boot_button_.OnLongPress([this]() {
             ESP_LOGI(TAG, "boot_button_.OnLongPress");
             auto& app = Application::GetInstance();
-            app.SetDeviceState(kDeviceStateIdle);
-            GetBacklight()->SetBrightness(0, false);
-
-
-            if (first_level ==0) {
+            // 计算设备运行时间
+            int64_t current_time = esp_timer_get_time() / 1000; // 转换为毫秒
+            int64_t uptime_ms = current_time - power_on_time_;
+            ESP_LOGI(TAG, "设备运行时间: %lld ms", uptime_ms);
+            
+            // 首次上电5秒内且first_level==0才忽略
+            const int64_t MIN_UPTIME_MS = 5000; // 5秒
+            if (first_level == 0 && uptime_ms < MIN_UPTIME_MS) {
                 first_level = 1;
+                ESP_LOGI(TAG, "首次上电5秒内，忽略长按操作");
             } else {
+                ESP_LOGI(TAG, "执行关机操作");
+                Application::GetInstance().QuitTalking();
+                // vTaskDelay(pdMS_TO_TICKS(200));
+                // auto codec = GetAudioCodec();
+                // codec->EnableOutput(true);
+                // Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
                 need_power_off_ = true;
-                // bool is_charging = isCharging();
-                // if (is_charging) {
-                    
-                // } else {
-                //     // 没有充电，关机
-                //     gpio_set_level(POWER_GPIO, 0);
-
-                // }
             }
         });
         boot_button_.OnPressUp([this]() {
+            first_level = 1;
+            ESP_LOGI(TAG, "boot_button_.OnPressUp");
             if (need_power_off_) {
-                gpio_set_level(POWER_GPIO, 0);
+                need_power_off_ = false;
+                // 使用静态函数来避免lambda捕获问题
+                xTaskCreate([](void* arg) {
+                    auto* board = static_cast<MovecallMojiESP32S3*>(arg);
+                    Application::GetInstance().SetDeviceState(kDeviceStateIdle);
+
+                    if (board->isCharging()) {
+                        // 充电中，只关闭背光
+                        board->GetBacklight()->SetBrightness(0, false);
+                        board->is_sleep_ = true;
+                    } else {
+                        // 没有充电，关机
+                        gpio_set_level(POWER_GPIO, 0);
+                    }
+                    vTaskDelete(NULL);
+                }, "power_off_task", 4028, this, 10, NULL);
             }
         });
 
@@ -299,8 +321,9 @@ private:
 
 public:
     MovecallMojiESP32S3() : boot_button_(BOOT_BUTTON_GPIO), touch_button_(TOUCH_BUTTON_GPIO) { 
-        // 记录上电时间戳
-        power_on_timestamp_ = esp_timer_get_time();
+        // 记录上电时间
+        power_on_time_ = esp_timer_get_time() / 1000; // 转换为毫秒
+        ESP_LOGI(TAG, "设备启动，上电时间戳: %lld ms", power_on_time_);
         
         InitializeChargingGpio();
 

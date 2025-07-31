@@ -484,10 +484,10 @@ void Application::Start() {
     /* Start the clock timer to update the status bar */
     esp_timer_start_periodic(clock_timer_handle_, 1000000);
 
-    CheckBatteryLevel();
-
     // 播放上电提示音
     PlaySound(Lang::Sounds::P3_SUCCESS);
+
+    CheckBatteryLevel();
 
     /* Wait for the network to be ready */
     board.StartNetwork();
@@ -523,7 +523,6 @@ void Application::Start() {
             Schedule([this]() {
                 QuitTalking();
                 PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
-
             });
         } else {
             if (!protocol_->GetRoomParams().access_token.empty()) {
@@ -1570,7 +1569,7 @@ void Application::CheckBatteryLevel() {
         ESP_LOGI(TAG, "current Battery level: %d, charging: %d, discharging: %d", level, charging, discharging);
         if (level <= 10) {
             // 提示电量不足
-            SetDeviceState(kDeviceStateIdle);
+            // SetDeviceState(kDeviceStateIdle);
             Alert(Lang::Strings::ERROR, Lang::Strings::ERROR, "sad", Lang::Sounds::P3_BATTLE_LOW);
             return;
         }

@@ -80,8 +80,8 @@ private:
         CalculateBatteryLevel(average_adc);
 
 
-        // ESP_LOGI("PowerManager", "ADC值: %d 平均值: %ld 电量: %u%%", adc_value, average_adc,
-        //          battery_level_);
+        ESP_LOGI("PowerManager", "ADC值: %d 平均值: %ld 电量: %u%%", adc_value, average_adc,
+                 battery_level_);
     }
 
     void CalculateBatteryLevel(uint32_t average_adc) {

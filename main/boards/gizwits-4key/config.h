@@ -33,9 +33,9 @@
 #define STANDBY_PIN      GPIO_NUM_3    // STDBY pin
 
 // Battery ADC configuration
-#define BAT_ADC_CHANNEL  ADC_CHANNEL_0  // Battery voltage ADC channel
+#define BAT_ADC_CHANNEL  ADC_CHANNEL_1  // Battery voltage ADC channel
 #define BAT_ADC_ATTEN    ADC_ATTEN_DB_11 // ADC attenuation
-#define BAT_ADC_UNIT     ADC_UNIT_1
+#define BAT_ADC_UNIT     ADC_UNIT_2
 #define POWER_CHARGE_LED_PIN GPIO_NUM_NC
 
 #endif // _BOARD_CONFIG_H_
