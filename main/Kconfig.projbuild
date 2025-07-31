@@ -75,6 +75,8 @@ choice BOARD_TYPE
         bool "机智云ESP32-S3 Gokit5"
     config BOARD_TYPE_GIZWITS_4KEY
         bool "机智云ESP32-S3 4键"
+    config BOARD_TYPE_GIZWITS_4KEY_ML307
+        bool "机智云ESP32-S3 4键ML307"
     config BOARD_TYPE_GIZWITS_C2_6824
         bool "机智云ESP32-C2 6824"
     config BOARD_TYPE_GIZWITS_C2_6824_TOY
@@ -113,8 +115,6 @@ choice BOARD_TYPE
         bool "AtomMatrix + Echo Base"
     config BOARD_TYPE_XMINI_C3
         bool "虾哥 Mini C3"
-    config BOARD_TYPE_ESP32S3_KORVO2_V3
-        bool "ESP32S3_KORVO2_V3开发板"
     config BOARD_TYPE_ESP_SPARKBOT
         bool "ESP-SparkBot开发板"
     config BOARD_TYPE_ESP_SPOT_S3

@@ -2,7 +2,6 @@
 #include "giz_api.h"
 #include "board.h"
 #include <esp_log.h>
-#include <ml307_mqtt.h>
 #include "protocol/iot_protocol.h"
 #include "protocol/ota_protocol.h"
 #include <cstring>
@@ -55,9 +54,9 @@ void MqttClient::InitAttrsFromJson() {
 // MqttClient implementation
 bool MqttClient::initialize() {
     
-    if (mqtt_ != nullptr) {
+    if (mqtt_) {
         ESP_LOGW(TAG, "Mqtt client already started");
-        delete mqtt_;
+        mqtt_.reset();
     }
 
     Settings settings("wifi", true);
@@ -163,7 +162,8 @@ bool MqttClient::initialize() {
         return false;
     }
 
-    mqtt_ = Board::GetInstance().CreateMqtt();
+    auto network = Board::GetInstance().GetNetwork();
+    mqtt_ = network->CreateMqtt(1);
     mqtt_->SetKeepAlive(20);
 
     mqtt_->OnDisconnected([this]() {
@@ -273,7 +273,7 @@ bool MqttClient::initialize() {
 }
 
 bool MqttClient::publish(const std::string& topic, const std::string& payload) {
-    if (mqtt_ == nullptr) {
+    if (!mqtt_) {
         ESP_LOGE(TAG, "MQTT client not initialized");
         return false;
     }
@@ -282,7 +282,7 @@ bool MqttClient::publish(const std::string& topic, const std::string& payload) {
 }
 
 bool MqttClient::subscribe(const std::string& topic) {
-    if (mqtt_ == nullptr) {
+    if (!mqtt_) {
         ESP_LOGE(TAG, "MQTT client not initialized");
         return false;
     }
@@ -330,7 +330,7 @@ bool MqttClient::getRoomInfo() {
 }
 
 int MqttClient::sendResetToCloud() {
-    if (mqtt_ == nullptr || mqtt_event_ == 0) {
+    if (!mqtt_ || mqtt_event_ == 0) {
         return -2;
     }
 
@@ -441,8 +441,7 @@ void MqttClient::deinit() {
     }
 
     if (mqtt_) {
-        delete mqtt_;
-        mqtt_ = nullptr;
+        mqtt_.reset();
     }
 }
 
