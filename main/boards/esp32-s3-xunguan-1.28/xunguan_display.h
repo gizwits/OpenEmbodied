@@ -121,10 +121,6 @@ private:
     lv_anim_t right_eye_anim_;
     lv_obj_t* right_eye_;
     
-    // Blinking animation variables
-    static lv_anim_t left_blink_anim;
-    static lv_anim_t right_blink_anim;
-    
     // LVGL flush callback
     static void lvgl_flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map);
     
@@ -146,7 +142,7 @@ private:
     // Vertigo recovery timer
     esp_timer_handle_t vertigo_recovery_timer_;
     bool vertigo_mode_active_;
-    
+
     // Loving animation lock
     bool loving_mode_active_;
 
@@ -154,6 +150,13 @@ private:
     lv_obj_t* ota_progress_bar_;
     lv_obj_t* ota_number_label_;
     int ota_progress_;
+
+    // Blink animation user data structure
+    struct BlinkUserData {
+        lv_obj_t* right_eye;
+        int original_left_y;
+        int original_right_y;
+    };
 
 public:
     XunguanDisplay();
@@ -226,9 +229,12 @@ private:
     void StartVertigoRotationAnimation(lv_obj_t* left_spiral, lv_obj_t* right_spiral);  // Vertigo rotation animation
     void StartHappyBlinkingAnimation(lv_obj_t* left_circle, lv_obj_t* right_circle, int original_size);  // Happy blinking animation
     void StartTearFallingAnimation(lv_obj_t* left_tear, lv_obj_t* right_tear, int start_y);  // Tear falling animation
-    void StartMouthCompressionAnimation(lv_obj_t* mouth_img, int original_width, int original_height);  // Mouth compression animation
+    void StartThinkingFloatAnimation(lv_obj_t* left_eye, lv_obj_t* right_eye, int original_y);  // Thinking float animation
     static void simple_color_anim_cb(void* var, int32_t v);
     static void heart_zoom_anim_cb(void* var, int32_t v);
+    static void blink_anim_cb(void* var, int32_t v);  // Blinking animation callback
+    static void thinking_float_anim_cb(void* var, int32_t v);  // Thinking float animation callback
+    static void eye_scaling_anim_cb(void* var, int32_t v);  // Synchronized eye scaling animation callback
 };
 
 #endif // XUNGUAN_DISPLAY_H 

@@ -300,7 +300,7 @@ private:
                 // 设置充电时的自定义帧率：100-125Hz (8-10ms延迟)
                 // 需要强制转换成 XunguanDisplay 类型
                 if (xunguan_display) {
-                    if (xunguan_display->SetCustomFrameRate(10, 20)) {
+                    if (xunguan_display->SetCustomFrameRate(20, 30)) {
                         ESP_LOGI(TAG, "充电帧率设置成功");
                     } else {
                         ESP_LOGE(TAG, "充电帧率设置失败");
@@ -390,7 +390,7 @@ public:
 
         if (charging) {
             // 降低发热            
-            xunguan_display->SetCustomFrameRate(10, 20);
+            xunguan_display->SetCustomFrameRate(20, 30);
         } else {
             xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL);
         }
