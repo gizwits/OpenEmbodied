@@ -1313,7 +1313,7 @@ void Application::SetDeviceState(DeviceState state) {
             break;
         case kDeviceStateListening:
             display->SetStatus(Lang::Strings::LISTENING);
-            display->SetEmotion("relaxed");
+            display->SetEmotion("neutral");
 
             if (board.GetServo()) {
                 board.GetServo()->stop();
