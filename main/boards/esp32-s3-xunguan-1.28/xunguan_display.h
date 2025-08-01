@@ -121,6 +121,10 @@ private:
     lv_anim_t right_eye_anim_;
     lv_obj_t* right_eye_;
     
+    // Blinking animation variables
+    static lv_anim_t left_blink_anim;
+    static lv_anim_t right_blink_anim;
+    
     // LVGL flush callback
     static void lvgl_flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map);
     
@@ -145,6 +149,11 @@ private:
     
     // Loving animation lock
     bool loving_mode_active_;
+
+    // OTA mode variables
+    lv_obj_t* ota_progress_bar_;
+    lv_obj_t* ota_number_label_;
+    int ota_progress_;
 
 public:
     XunguanDisplay();
@@ -183,6 +192,13 @@ public:
     void StartSillyAnimation();
     void StartVertigoAnimation();
 
+    // OTA mode methods
+    void EnterOTAMode();
+    void SetOTAProgress(int progress);
+
+    // WiFi config method
+    void EnterWifiConfig();
+
 private:
     // Initialize SPI bus
     bool InitializeSpi();
@@ -209,6 +225,8 @@ private:
     void StartSillyEyeHeightAnimation(lv_obj_t* left_eye, lv_obj_t* right_eye);  // Silly eye height animation
     void StartVertigoRotationAnimation(lv_obj_t* left_spiral, lv_obj_t* right_spiral);  // Vertigo rotation animation
     void StartHappyBlinkingAnimation(lv_obj_t* left_circle, lv_obj_t* right_circle, int original_size);  // Happy blinking animation
+    void StartTearFallingAnimation(lv_obj_t* left_tear, lv_obj_t* right_tear, int start_y);  // Tear falling animation
+    void StartMouthCompressionAnimation(lv_obj_t* mouth_img, int original_width, int original_height);  // Mouth compression animation
     static void simple_color_anim_cb(void* var, int32_t v);
     static void heart_zoom_anim_cb(void* var, int32_t v);
 };
