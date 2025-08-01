@@ -3,6 +3,7 @@
 
 #include <esp_log.h>
 #include <driver/ledc.h>
+#include "application.h"
 
 #define TAG "Backlight"
 
@@ -44,8 +45,10 @@ void Backlight::RestoreBrightness() {
 }
 
 void Backlight::SetBrightness(uint8_t brightness, bool permanent) {
-    if (brightness > 100) {
-        brightness = 100;
+    auto& board = Board::GetInstance();
+    auto max_brightness = board.MaxBacklightBrightness();
+    if (brightness > max_brightness) {
+        brightness = max_brightness;
     }
 
     if (brightness_ == brightness) {
@@ -57,7 +60,14 @@ void Backlight::SetBrightness(uint8_t brightness, bool permanent) {
         settings.SetInt("brightness", brightness);
     }
 
-    target_brightness_ = brightness;
+    ESP_LOGI(TAG, "IsCharging: %d", board.IsCharging());
+    // 充电中 强制降低亮度
+    if (board.IsCharging()) {
+        target_brightness_ = 5;
+    } else {
+        target_brightness_ = brightness;
+    }
+
     step_ = (target_brightness_ > brightness_) ? 1 : -1;
 
     if (transition_timer_ != nullptr) {

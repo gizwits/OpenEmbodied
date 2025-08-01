@@ -11,6 +11,39 @@
 #include <sys/param.h>
 #include <unistd.h>
 #include <cstring>
+#include <lvgl.h>
+
+/*
+ * 帧率控制接口使用示例：
+ * 
+ * // 1. 设置预定义模式
+ * display->SetFrameRateMode(XunguanDisplay::FrameRateMode::POWER_SAVE);   // 低功耗模式
+ * display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL);       // 正常模式
+ * display->SetFrameRateMode(XunguanDisplay::FrameRateMode::SMOOTH);       // 流畅模式
+ * 
+ * // 2. 设置自定义帧率
+ * display->SetCustomFrameRate(10, 25);  // 10-25ms延迟范围
+ * 
+ * // 3. 获取当前设置
+ * auto mode = display->GetCurrentFrameRateMode();
+ * auto min_delay = display->GetCurrentMinDelay();
+ * auto max_delay = display->GetCurrentMaxDelay();
+ * auto tick_period = display->GetCurrentTickPeriod();
+ * 
+ * 帧率模式说明：
+ * - POWER_SAVE: 8-20ms延迟，8ms tick (50-125Hz) - 最低功耗
+ * - NORMAL: 5-15ms延迟，2ms tick (67-200Hz) - 平衡性能和功耗
+ * - SMOOTH: 2-8ms延迟，1ms tick (125-500Hz) - 最高流畅度
+ * - CUSTOM: 自定义延迟范围
+ * 
+ * 动画函数使用示例：
+ * // 文本透明度动画 - 改变文本的透明度（0-255），实现淡入淡出效果
+ * // 适用于文本标签、按钮等有文本内容的对象
+ * display->StartSimpleColorAnimation(some_text_label);
+ * 
+ * // 睡眠UI - 使用绝对布局创建三个"z"标签，实现睡眠动画效果
+ * display->StartSleepingAnimation();
+ */
 
 #define TAG "XunguanDisplay"
 #define EYE_COLOR 0x40E0D0  // Tiffany Blue color for eyes
@@ -21,9 +54,16 @@ _lock_t XunguanDisplay::lvgl_api_lock = {0};
 XunguanDisplay::XunguanDisplay() 
     : Display(), pending_animation_(), animation_queue_enabled_(true),
       panel_io_(nullptr), panel_(nullptr), lvgl_display_(nullptr), initialized_(false),
-      left_eye_(nullptr), container_(nullptr), current_state_(EyeState::IDLE),
+      current_frame_rate_mode_(FrameRateMode::NORMAL),
+      current_min_delay_ms_(5), current_max_delay_ms_(15), current_tick_period_us_(2000),
+      left_eye_(nullptr), container_(nullptr), 
+      zzz1_(nullptr), zzz2_(nullptr), zzz3_(nullptr),
+      zzz1_anim_(), zzz2_anim_(), zzz3_anim_(),
+      current_state_(EyeState::IDLE),
       left_eye_anim_(), right_eye_anim_(), right_eye_(nullptr),
-      lvgl_tick_timer_(nullptr), lvgl_task_handle_(nullptr) {
+      lvgl_tick_timer_(nullptr), lvgl_task_handle_(nullptr),
+      vertigo_recovery_timer_(nullptr), vertigo_mode_active_(false),
+      loving_mode_active_(false) {
     
     // Initialize static lock
     _lock_init(&lvgl_api_lock);
@@ -33,6 +73,11 @@ XunguanDisplay::~XunguanDisplay() {
     if (lvgl_tick_timer_) {
         esp_timer_stop(lvgl_tick_timer_);
         esp_timer_delete(lvgl_tick_timer_);
+    }
+    
+    if (vertigo_recovery_timer_) {
+        esp_timer_stop(vertigo_recovery_timer_);
+        esp_timer_delete(vertigo_recovery_timer_);
     }
     
     if (lvgl_task_handle_) {
@@ -253,13 +298,14 @@ bool XunguanDisplay::InitializeLvglTimer() {
         return false;
     }
     
-    ret = esp_timer_start_periodic(lvgl_tick_timer_, 2000);  // 2ms period
+    // 使用当前配置的tick周期
+    ret = esp_timer_start_periodic(lvgl_tick_timer_, current_tick_period_us_);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start LVGL tick timer: %s", esp_err_to_name(ret));
         return false;
     }
     
-    ESP_LOGI(TAG, "LVGL tick timer started successfully");
+    ESP_LOGI(TAG, "LVGL tick timer started successfully with period: %lu us", current_tick_period_us_);
     return true;
 }
 
@@ -285,10 +331,10 @@ bool XunguanDisplay::CreateLvglTask() {
 }
 
 void XunguanDisplay::lvgl_task(void* arg) {
+    XunguanDisplay* self = static_cast<XunguanDisplay*>(arg);
     ESP_LOGI(TAG, "Starting LVGL task");
     
     uint32_t time_till_next_ms = 0;
-    uint32_t loop_count = 0;
     
     // Log immediately to confirm task started
     ESP_LOGI(TAG, "LVGL task entered main loop");
@@ -300,9 +346,9 @@ void XunguanDisplay::lvgl_task(void* arg) {
         time_till_next_ms = lv_timer_handler();
         _lock_release(&lvgl_api_lock);
         
-        // Ensure minimum delay to prevent excessive CPU usage
-        time_till_next_ms = MAX(time_till_next_ms, 5);  // At least 5ms
-        time_till_next_ms = MIN(time_till_next_ms, 15); // Cap at 15ms
+        // 使用当前配置的延迟范围
+        time_till_next_ms = MAX(time_till_next_ms, self->current_min_delay_ms_);
+        time_till_next_ms = MIN(time_till_next_ms, self->current_max_delay_ms_);
         vTaskDelay(pdMS_TO_TICKS(time_till_next_ms));
         
     }
@@ -393,6 +439,18 @@ void XunguanDisplay::SetEmotion(const char* emotion) {
     
     if (!animation_queue_enabled_) {
         ESP_LOGW(TAG, "Animation queue is disabled");
+        return;
+    }
+    
+    // Check if vertigo mode is active - disable emotion changes during vertigo
+    if (vertigo_mode_active_) {
+        ESP_LOGW(TAG, "Vertigo mode active, ignoring emotion change: %s", emotion);
+        return;
+    }
+    
+    // Check if loving animation is active - disable emotion changes during loving animation
+    if (loving_mode_active_) {
+        ESP_LOGW(TAG, "Loving mode active, ignoring emotion change: %s", emotion);
         return;
     }
     
@@ -541,7 +599,107 @@ void XunguanDisplay::StartIdleAnimation() {
 }
 
 void XunguanDisplay::StartHappyAnimation() {
-    ESP_LOGI(TAG, "StartHappyAnimation called");
+    ESP_LOGI(TAG, "StartHappyAnimation called - creating two circles");
+    
+    auto screen = lv_screen_active();
+    if (!screen) {
+        ESP_LOGE(TAG, "No active screen found!");
+        return;
+    }
+    
+    // Clear existing UI elements
+    ClearUIElements();
+    DisplayLockGuard lock(this);
+    
+    // Set background to black
+    lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
+    
+    // Calculate screen dimensions
+    int screen_width = DISPLAY_WIDTH;
+    int screen_height = DISPLAY_HEIGHT;
+    
+    ESP_LOGI(TAG, "Creating two circles with screen size: %dx%d", screen_width, screen_height);
+    
+    // Calculate positions for centered circles
+    int circle_spacing = screen_width / 3;  // 1/3 of screen width between circles
+    int left_circle_x = (screen_width / 2) - (circle_spacing / 2);
+    int right_circle_x = (screen_width / 2) + (circle_spacing / 2);
+    int circle_y = (screen_height / 2) - 10;  // Slightly above center
+    
+    // Circle dimensions
+    int circle_size = 60;
+    int y_offset = - 20;
+    
+    // Create left circle
+    left_eye_ = lv_obj_create(screen);
+    if (!left_eye_) {
+        ESP_LOGE(TAG, "Failed to create left circle!");
+        return;
+    }
+    
+    // Set left circle properties
+    lv_obj_set_size(left_eye_, circle_size, circle_size);
+    lv_obj_set_pos(left_eye_, left_circle_x - circle_size/2, circle_y - circle_size/2 + y_offset);
+    lv_obj_set_style_radius(left_eye_, circle_size/2, 0);  // Make it perfectly round
+    lv_obj_set_style_bg_color(left_eye_, lv_color_hex(EYE_COLOR), 0);
+    lv_obj_set_style_bg_opa(left_eye_, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(left_eye_, 0, 0);  // No border
+    lv_obj_set_style_shadow_width(left_eye_, 0, 0);  // No shadow
+    lv_obj_set_style_outline_width(left_eye_, 0, 0);  // No outline
+    
+    ESP_LOGI(TAG, "Left circle created at position (%d,%d)", left_circle_x - circle_size/2, circle_y - circle_size/2);
+    
+    // Create right circle
+    right_eye_ = lv_obj_create(screen);
+    if (!right_eye_) {
+        ESP_LOGE(TAG, "Failed to create right circle!");
+        return;
+    }
+    
+    // Set right circle properties
+    lv_obj_set_size(right_eye_, circle_size, circle_size);
+    lv_obj_set_pos(right_eye_, right_circle_x - circle_size/2, circle_y - circle_size/2 + y_offset);
+    lv_obj_set_style_radius(right_eye_, circle_size/2, 0);  // Make it perfectly round
+    lv_obj_set_style_bg_color(right_eye_, lv_color_hex(EYE_COLOR), 0);
+    lv_obj_set_style_bg_opa(right_eye_, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(right_eye_, 0, 0);  // No border
+    lv_obj_set_style_shadow_width(right_eye_, 0, 0);  // No shadow
+    lv_obj_set_style_outline_width(right_eye_, 0, 0);  // No outline
+    
+    ESP_LOGI(TAG, "Right circle created at position (%d,%d)", right_circle_x - circle_size/2, circle_y - circle_size/2);
+    
+    // Force refresh the screen
+    lv_obj_invalidate(screen);
+    
+    ESP_LOGI(TAG, "Two circles created successfully");
+    
+    // Start blinking animation for the circles
+    StartHappyBlinkingAnimation(left_eye_, right_eye_, circle_size);
+    
+    // Create mouth image below the circles
+    lv_obj_t* mouth_img = lv_img_create(screen);
+    if (!mouth_img) {
+        ESP_LOGE(TAG, "Failed to create mouth image!");
+        return;
+    }
+    
+    // Set mouth image properties
+    lv_img_set_src(mouth_img, &mouse_img);
+    lv_obj_set_style_img_recolor(mouth_img, lv_color_hex(EYE_COLOR), 0); 
+    lv_obj_set_style_img_recolor_opa(mouth_img, LV_OPA_COVER, 0);
+    
+    // Position mouth below the circles - use zoom to scale down the mouth
+    int mouth_width = mouse_img.header.w;
+    int mouth_height = mouse_img.header.h;
+    int mouth_x = (screen_width / 2) - (mouth_width / 2);
+    int mouth_y = circle_y;  // 20 pixels below circles
+    
+    lv_obj_set_size(mouth_img, mouth_width, mouth_height);
+    lv_obj_set_pos(mouth_img, mouth_x, mouth_y);
+    lv_img_set_zoom(mouth_img, 128);  // Scale down to 50% (256 = 100%, 128 = 50%)
+    
+    ESP_LOGI(TAG, "Mouth image created at position (%d,%d)", mouth_x, mouth_y);
 }
 
 void XunguanDisplay::StartSadAnimation() {
@@ -573,7 +731,7 @@ void XunguanDisplay::StartLovingAnimation() {
     int heart_width = hart_img.header.w;   // Read width from image
     int heart_height = hart_img.header.h;  // Read height from image
     
-    // Calculate positions for centered hearts
+    // Calculate positions for centered hearts - adjust for scaling effect
     int heart_spacing = screen_width / 3;  // 1/3 of screen width between hearts
     int left_heart_x = (screen_width / 2) - (heart_spacing / 2) - (heart_width / 2);
     int right_heart_x = (screen_width / 2) + (heart_spacing / 2) - (heart_width / 2);
@@ -619,8 +777,53 @@ void XunguanDisplay::StartLovingAnimation() {
     
     ESP_LOGI(TAG, "Two hearts created successfully");
     
-    // Start heart scaling animation
-    StartHeartScalingAnimation(left_eye_, right_eye_, heart_width * 0.5, heart_height * 0.5);
+    // Set loving mode active
+    loving_mode_active_ = true;
+    ESP_LOGI(TAG, "Loving mode activated - emotion changes disabled");
+    
+    // Start heart scaling animation - pass actual heart dimensions
+    StartHeartScalingAnimation(left_eye_, right_eye_, heart_width, heart_height);
+    
+    // Create recovery timer for 4 seconds
+    if (!vertigo_recovery_timer_) {
+        const esp_timer_create_args_t vertigo_timer_args = {
+            .callback = [](void* arg) {
+                XunguanDisplay* self = static_cast<XunguanDisplay*>(arg);
+                if (!self) {
+                    ESP_LOGE(TAG, "Loving recovery timer callback: invalid self pointer");
+                    return;
+                }
+                
+                ESP_LOGI(TAG, "Loving recovery timer triggered - returning to idle animation");
+                
+                // Clear loving mode flag
+                self->loving_mode_active_ = false;
+                
+                // Stop current animation and start idle animation
+                self->StopCurrentAnimation();
+                self->StartIdleAnimation();
+                
+                ESP_LOGI(TAG, "Loving mode deactivated - emotion changes re-enabled");
+            },
+            .arg = this,
+            .name = "loving_recovery"
+        };
+        
+        esp_err_t ret = esp_timer_create(&vertigo_timer_args, &vertigo_recovery_timer_);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to create loving recovery timer: %s", esp_err_to_name(ret));
+            return;
+        }
+    }
+    
+    // Start 4-second timer
+    esp_err_t ret = esp_timer_start_once(vertigo_recovery_timer_, 4000000);  // 4 seconds in microseconds
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start loving recovery timer: %s", esp_err_to_name(ret));
+        return;
+    }
+    
+    ESP_LOGI(TAG, "Loving recovery timer started - will return to idle in 4 seconds");
 }
 
 void XunguanDisplay::StartThinkingAnimation() {
@@ -629,6 +832,84 @@ void XunguanDisplay::StartThinkingAnimation() {
 
 void XunguanDisplay::StartShockedAnimation() {
     ESP_LOGI(TAG, "StartShockedAnimation called");
+    
+    auto screen = lv_screen_active();
+    if (!screen) {
+        ESP_LOGE(TAG, "No active screen found!");
+        return;
+    }
+    
+    // Clear existing UI elements
+    ClearUIElements();
+    DisplayLockGuard lock(this);
+
+    ESP_LOGI(TAG, "ClearUIElements called");
+    
+    // Set background to black
+    lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
+    ESP_LOGI(TAG, "Screen background set to black");
+    // Create left eye
+    left_eye_ = lv_obj_create(screen);
+    ESP_LOGI(TAG, "Left eye created: %p", left_eye_);
+    if (!left_eye_) {
+        ESP_LOGE(TAG, "Failed to create left eye!");
+        return;
+    }
+    
+    // Calculate eye dimensions and positions based on screen size
+    int screen_width = DISPLAY_WIDTH;
+    int screen_height = DISPLAY_HEIGHT;
+    
+    // Eye dimensions - Y axis longer than X axis
+    int eye_width = screen_width / 6;   // 1/6 of screen width
+    int eye_height = eye_width * 2;     // Y axis twice as long as X axis
+    
+    // Calculate positions for centered eyes
+    int eye_spacing = screen_width / 3;  // 1/3 of screen width between eyes (increased from 1/4)
+    int left_eye_x = (screen_width / 2) - (eye_spacing / 2) - (eye_width / 2);
+    int right_eye_x = (screen_width / 2) + (eye_spacing / 2) - (eye_width / 2);
+    int eye_y = (screen_height / 2) - (eye_height / 2);
+    
+    ESP_LOGI(TAG, "Screen: %dx%d, Eye: %dx%d, Positions: L(%d,%d) R(%d,%d)", 
+             screen_width, screen_height, eye_width, eye_height, left_eye_x, eye_y, right_eye_x, eye_y);
+    
+    int y_offset = 2;
+    // Set left eye properties
+    lv_obj_set_size(left_eye_, eye_width, eye_height);
+    lv_obj_set_pos(left_eye_, left_eye_x, eye_y - y_offset);
+    lv_obj_set_style_radius(left_eye_, eye_width / 2, 0);  // Rounded corners
+    lv_obj_set_style_bg_color(left_eye_, lv_color_hex(EYE_COLOR), 0);
+    lv_obj_set_style_bg_opa(left_eye_, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(left_eye_, 0, 0);  // No border
+    
+    ESP_LOGI(TAG, "Left eye created: size=%dx%d, pos=(%d,%d)", eye_width, eye_height, left_eye_x, eye_y);
+    
+    // Create right eye
+    right_eye_ = lv_obj_create(screen);
+    if (!right_eye_) {
+        ESP_LOGE(TAG, "Failed to create right eye!");
+        return;
+    }
+    
+    // Set right eye properties
+    lv_obj_set_size(right_eye_, eye_width, eye_height);
+    lv_obj_set_pos(right_eye_, right_eye_x, eye_y - y_offset);
+    lv_obj_set_style_radius(right_eye_, eye_width / 2, 0);  // Rounded corners
+    lv_obj_set_style_bg_color(right_eye_, lv_color_hex(EYE_COLOR), 0);
+    lv_obj_set_style_bg_opa(right_eye_, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(right_eye_, 0, 0);  // No border
+    
+    ESP_LOGI(TAG, "Right eye created: size=%dx%d, pos=(%d,%d)", eye_width, eye_height, right_eye_x, eye_y);
+    
+    // Force refresh the screen
+    lv_obj_invalidate(screen);
+    
+    ESP_LOGI(TAG, "Two eyes created successfully - starting Y-axis animation");
+    
+    // Start Y-axis scaling animation for both eyes
+    ESP_LOGI(TAG, "Eyes created, left_eye_: %p, right_eye_: %p, height: %d", left_eye_, right_eye_, eye_height);
+    StartEyeScalingAnimation(left_eye_, right_eye_, eye_height);
 }
 
 void XunguanDisplay::StartSleepingAnimation() {
@@ -642,16 +923,292 @@ void XunguanDisplay::StartSleepingAnimation() {
     
     // Clear existing UI elements
     ClearUIElements();
+    DisplayLockGuard lock(this);
+    
+    // Set background to black
+    lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
+    
+    // Calculate screen dimensions
+    int screen_width = DISPLAY_WIDTH;
+    int screen_height = DISPLAY_HEIGHT;
+    
+    ESP_LOGI(TAG, "Creating sleep UI with screen size: %dx%d", screen_width, screen_height);
+    
+    // Create three "z" labels with absolute positioning for 240x240 circular screen
+    // Positioned in the upper area to avoid the center where eyes would be
+    // 
+    // For a 240x240 circular screen:
+    // - Center is at (120, 120)
+    // - Upper area is roughly y < 100
+    // - Left area is roughly x < 120  
+    // - Right area is roughly x > 120
+    // 
+    // Positioning strategy:
+    // - zzz1: Upper left (60, 50) - avoids center, visible in upper left
+    // - zzz2: Upper center (113, 30) - centered horizontally, high up
+    // - zzz3: Upper right (160, 30) - higher position, forms diagonal line with zzz1
+    // First "z" - upper left area (60, 50)
+    zzz1_ = lv_label_create(screen);
+    if (!zzz1_) {
+        ESP_LOGE(TAG, "Failed to create zzz1 label!");
+        return;
+    }
+    lv_label_set_text(zzz1_, "z");
+    lv_obj_set_style_text_color(zzz1_, lv_color_hex(EYE_COLOR), 0);  // Pink color
+    lv_obj_set_style_text_font(zzz1_, &lv_font_montserrat_14, 0);  // Use Montserrat font
+    lv_obj_set_style_text_letter_space(zzz1_, 2, 0);  // Increase letter spacing
+    lv_obj_set_pos(zzz1_, 60, 50);  // Upper left area for circular screen
+    
+    ESP_LOGI(TAG, "zzz1 created at position (60, 50)");
+    
+    // Second "z" - upper center area (113, 30)
+    zzz2_ = lv_label_create(screen);
+    if (!zzz2_) {
+        ESP_LOGE(TAG, "Failed to create zzz2 label!");
+        return;
+    }
+    lv_label_set_text(zzz2_, "z");
+    lv_obj_set_style_text_color(zzz2_, lv_color_hex(EYE_COLOR), 0);  // Pink color
+    lv_obj_set_style_text_font(zzz2_, &lv_font_montserrat_14, 0);  // Use Montserrat font
+    lv_obj_set_style_text_letter_space(zzz2_, 2, 0);  // Increase letter spacing
+    lv_obj_set_pos(zzz2_, screen_width / 2 - 7, 30);  // Upper center for circular screen
+    
+    ESP_LOGI(TAG, "zzz2 created at position (%d, 30)", screen_width / 2 - 7);
+    
+    // Third "z" - upper right area (160, 30) - higher position for diagonal line
+    zzz3_ = lv_label_create(screen);
+    if (!zzz3_) {
+        ESP_LOGE(TAG, "Failed to create zzz3 label!");
+        return;
+    }
+    lv_label_set_text(zzz3_, "z");
+    lv_obj_set_style_text_color(zzz3_, lv_color_hex(EYE_COLOR), 0);  // Pink color
+    lv_obj_set_style_text_font(zzz3_, &lv_font_montserrat_14, 0);  // Use Montserrat font
+    lv_obj_set_style_text_letter_space(zzz3_, 2, 0);  // Increase letter spacing
+    lv_obj_set_pos(zzz3_, screen_width - 80, 30);  // Higher position for diagonal line
+    
+    ESP_LOGI(TAG, "zzz3 created at position (%d, 30)", screen_width - 80);
+    
+    // Create two eyes below the zzz labels with squinting effect
+    // Eye dimensions - X axis longer than Y axis for squinting effect
+    int eye_width = screen_width / 3;   // 1/4 of screen width (reduced from 1/3)
+    int eye_height = eye_width / 4;     // Y axis 1/4 of X axis (reduced from 1/3)
+    
+    // Calculate positions for centered eyes below zzz labels
+    int eye_spacing = screen_width / 2;  // 1/2 of screen width between eyes (increased from 1/3)
+    int left_eye_x = (screen_width / 2) - (eye_spacing / 2) - (eye_width / 2);
+    int right_eye_x = (screen_width / 2) + (eye_spacing / 2) - (eye_width / 2);
+    int eye_y = 100;  // Position below zzz labels
+    
+    ESP_LOGI(TAG, "Creating squinting eyes: size=%dx%d, positions: L(%d,%d) R(%d,%d)", 
+             eye_width, eye_height, left_eye_x, eye_y, right_eye_x, eye_y);
+    
+    // Create left eye
+    left_eye_ = lv_obj_create(screen);
+    if (!left_eye_) {
+        ESP_LOGE(TAG, "Failed to create left eye!");
+        return;
+    }
+    
+    // Set left eye properties for squinting effect
+    lv_obj_set_size(left_eye_, eye_width, eye_height);
+    lv_obj_set_pos(left_eye_, left_eye_x, eye_y);
+    lv_obj_set_style_radius(left_eye_, eye_height / 2, 0);  // Rounded corners based on height
+    lv_obj_set_style_bg_color(left_eye_, lv_color_hex(EYE_COLOR), 0);
+    lv_obj_set_style_bg_opa(left_eye_, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(left_eye_, 0, 0);  // No border
+    lv_obj_set_style_border_side(left_eye_, LV_BORDER_SIDE_NONE, 0);  // No border side
+    lv_obj_set_style_pad_all(left_eye_, 0, 0);  // No padding
+    lv_obj_set_style_shadow_width(left_eye_, 0, 0);  // No shadow
+    lv_obj_set_style_outline_width(left_eye_, 0, 0);  // No outline
+    
+    ESP_LOGI(TAG, "Left eye created: size=%dx%d, pos=(%d,%d)", eye_width, eye_height, left_eye_x, eye_y);
+    
+    // Create right eye
+    right_eye_ = lv_obj_create(screen);
+    if (!right_eye_) {
+        ESP_LOGE(TAG, "Failed to create right eye!");
+        return;
+    }
+    
+    // Set right eye properties for squinting effect
+    lv_obj_set_size(right_eye_, eye_width, eye_height);
+    lv_obj_set_pos(right_eye_, right_eye_x, eye_y);
+    lv_obj_set_style_radius(right_eye_, eye_height / 2, 0);  // Rounded corners based on height
+    lv_obj_set_style_bg_color(right_eye_, lv_color_hex(EYE_COLOR), 0);
+    lv_obj_set_style_bg_opa(right_eye_, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(right_eye_, 0, 0);  // No border
+    lv_obj_set_style_border_side(right_eye_, LV_BORDER_SIDE_NONE, 0);  // No border side
+    lv_obj_set_style_pad_all(right_eye_, 0, 0);  // No padding
+    lv_obj_set_style_shadow_width(right_eye_, 0, 0);  // No shadow
+    lv_obj_set_style_outline_width(right_eye_, 0, 0);  // No outline
+    
+    ESP_LOGI(TAG, "Right eye created: size=%dx%d, pos=(%d,%d)", eye_width, eye_height, right_eye_x, eye_y);
+    
+    // Start animations for the "z" labels
+    StartSimpleColorAnimation(zzz1_);      // First "z" starts immediately
+    StartSimpleColorAnimation(zzz2_);    // Second "z" starts after 500ms
+    StartSimpleColorAnimation(zzz3_);   // Third "z" starts after 1000ms
     
     
+    // StartSimpleColorAnimation(left_eye_);
+    // StartSimpleColorAnimation(right_eye_);
+    // Force refresh the screen
+    lv_obj_invalidate(screen);
 }
 
 void XunguanDisplay::StartSillyAnimation() {
     ESP_LOGI(TAG, "StartSillyAnimation called");
+    
+    auto screen = lv_screen_active();
+    if (!screen) {
+        ESP_LOGE(TAG, "No active screen found!");
+        return;
+    }
+    
+    // Clear existing UI elements
+    ClearUIElements();
+    DisplayLockGuard lock(this);
+    
+    // Set background to black
+    lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
+    
+    // Calculate eye dimensions and positions based on screen size
+    int screen_width = DISPLAY_WIDTH;
+    int screen_height = DISPLAY_HEIGHT;
+    
+    // Eye dimensions for silly animation
+    int eye_width = screen_width / 6;   // 1/6 of screen width
+    int eye_height = eye_width * 2;     // Y axis twice as long as X axis
+    
+    // Calculate positions for centered eyes
+    int eye_spacing = screen_width / 3;  // 1/3 of screen width between eyes
+    int left_eye_x = (screen_width / 2) - (eye_spacing / 2) - (eye_width / 2);
+    int right_eye_x = (screen_width / 2) + (eye_spacing / 2) - (eye_width / 2);
+    int eye_y = (screen_height / 2) - (eye_height / 2);
+    
+    ESP_LOGI(TAG, "Screen: %dx%d, Eye: %dx%d, Positions: L(%d,%d) R(%d,%d)", 
+             screen_width, screen_height, eye_width, eye_height, left_eye_x, eye_y, right_eye_x, eye_y);
+    
+    // Create left eye
+    left_eye_ = lv_obj_create(screen);
+    if (!left_eye_) {
+        ESP_LOGE(TAG, "Failed to create left eye!");
+        return;
+    }
+    
+    // Set left eye properties
+    lv_obj_set_size(left_eye_, eye_width, eye_height);
+    lv_obj_set_pos(left_eye_, left_eye_x, eye_y);
+    lv_obj_set_style_radius(left_eye_, eye_width / 2, 0);  // Rounded corners
+    lv_obj_set_style_bg_color(left_eye_, lv_color_hex(EYE_COLOR), 0);
+    lv_obj_set_style_bg_opa(left_eye_, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(left_eye_, 0, 0);  // No border
+    
+    ESP_LOGI(TAG, "Left eye created: size=%dx%d, pos=(%d,%d)", eye_width, eye_height, left_eye_x, eye_y);
+    
+    // Create right eye
+    right_eye_ = lv_obj_create(screen);
+    if (!right_eye_) {
+        ESP_LOGE(TAG, "Failed to create right eye!");
+        return;
+    }
+    
+    // Set right eye properties
+    lv_obj_set_size(right_eye_, eye_width, eye_height);
+    lv_obj_set_pos(right_eye_, right_eye_x, eye_y);
+    lv_obj_set_style_radius(right_eye_, eye_width / 2, 0);  // Rounded corners
+    lv_obj_set_style_bg_color(right_eye_, lv_color_hex(EYE_COLOR), 0);
+    lv_obj_set_style_bg_opa(right_eye_, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(right_eye_, 0, 0);  // No border
+    
+    ESP_LOGI(TAG, "Right eye created: size=%dx%d, pos=(%d,%d)", eye_width, eye_height, right_eye_x, eye_y);
+    
+    // Force refresh the screen
+    lv_obj_invalidate(screen);
+    
+    ESP_LOGI(TAG, "Two eyes created successfully - starting silly height animation");
+    
+    // Start silly height animation
+    StartSillyEyeHeightAnimation(left_eye_, right_eye_);
 }
 
 void XunguanDisplay::StartVertigoAnimation() {
     ESP_LOGI(TAG, "StartVertigoAnimation called");
+    
+    // Set vertigo mode active
+    vertigo_mode_active_ = true;
+    ESP_LOGI(TAG, "Vertigo mode activated - emotion changes disabled");
+    
+    auto screen = lv_screen_active();
+    if (!screen) {
+        ESP_LOGE(TAG, "No active screen found!");
+        return;
+    }
+    
+    // Clear existing UI elements
+    ClearUIElements();
+    DisplayLockGuard lock(this);
+    
+    // Set background to black
+    lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
+    
+    // Hide the original eyes
+    if (left_eye_) {
+        lv_obj_add_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (right_eye_) {
+        lv_obj_add_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
+    }
+    
+    // Calculate screen dimensions
+    int screen_width = DISPLAY_WIDTH;
+    int screen_height = DISPLAY_HEIGHT;
+    
+    ESP_LOGI(TAG, "Creating vertigo animation with screen size: %dx%d", screen_width, screen_height);
+    
+    // Create left spiral image
+    left_eye_ = lv_img_create(screen);
+    if (!left_eye_) {
+        ESP_LOGE(TAG, "Failed to create left spiral image!");
+        return;
+    }
+    
+    // Set left spiral image properties
+    lv_img_set_src(left_eye_, &spiral_img_64);
+    lv_obj_set_style_img_recolor(left_eye_, lv_color_hex(EYE_COLOR), 0);  // Use EYE_COLOR
+    lv_obj_set_style_img_recolor_opa(left_eye_, LV_OPA_COVER, 0);
+    lv_obj_align(left_eye_, LV_ALIGN_LEFT_MID, 0, 0);  // Left side, middle
+    lv_img_set_zoom(left_eye_, 128);  // Scale down to 50%
+    
+    ESP_LOGI(TAG, "Left spiral created");
+    
+    // Create right spiral image
+    right_eye_ = lv_img_create(screen);
+    if (!right_eye_) {
+        ESP_LOGE(TAG, "Failed to create right spiral image!");
+        return;
+    }
+    
+    // Set right spiral image properties
+    lv_img_set_src(right_eye_, &spiral_img_64);
+    lv_obj_set_style_img_recolor(right_eye_, lv_color_hex(EYE_COLOR), 0);  // Use EYE_COLOR
+    lv_obj_set_style_img_recolor_opa(right_eye_, LV_OPA_COVER, 0);
+    lv_obj_align(right_eye_, LV_ALIGN_RIGHT_MID, 0, 0);  // Right side, middle
+    lv_img_set_zoom(right_eye_, 128);  // Scale down to 50%
+    
+    ESP_LOGI(TAG, "Right spiral created");
+    
+    // Force refresh the screen
+    lv_obj_invalidate(screen);
+    
+    ESP_LOGI(TAG, "Two spiral images created successfully - starting rotation animation");
+    
+    // Start rotation animation
+    StartVertigoRotationAnimation(left_eye_, right_eye_);
 }
 
 void XunguanDisplay::ClearUIElements() {
@@ -690,6 +1247,33 @@ void XunguanDisplay::ClearUIElements() {
     if (container_) {
         lv_obj_del(container_);
         container_ = nullptr;
+    }
+    
+    // Clear sleep UI elements
+    if (zzz1_) {
+        lv_obj_del(zzz1_);
+        zzz1_ = nullptr;
+    }
+    if (zzz2_) {
+        lv_obj_del(zzz2_);
+        zzz2_ = nullptr;
+    }
+    if (zzz3_) {
+        lv_obj_del(zzz3_);
+        zzz3_ = nullptr;
+    }
+    
+    // Clear all other UI elements (including mouth images)
+    lv_obj_t* current_screen = lv_screen_active();
+    if (current_screen) {
+        uint32_t i;
+        for (i = 0; i < lv_obj_get_child_cnt(current_screen); i++) {
+            lv_obj_t* child = lv_obj_get_child(current_screen, i);
+            // Only delete if it's not left_eye_ or right_eye_ (they're handled separately)
+            if (child != left_eye_ && child != right_eye_) {
+                lv_obj_del(child);
+            }
+        }
     }
     
     // Force a refresh after clearing
@@ -748,27 +1332,26 @@ void XunguanDisplay::StartEyeScalingAnimation(lv_obj_t* left_eye, lv_obj_t* righ
 
 // Custom callback removed - using LVGL built-in lv_obj_set_height function
 
-void XunguanDisplay::StartSimpleColorAnimation(lv_obj_t* left_eye, lv_obj_t* right_eye) {
-    ESP_LOGI(TAG, "Starting simple color animation");
+void XunguanDisplay::StartSimpleColorAnimation(lv_obj_t* obj) {
+    ESP_LOGI(TAG, "Starting text opacity animation for object: %p", obj);
     
-    if (!left_eye || !right_eye) {
-        ESP_LOGE(TAG, "Invalid eye objects!");
+    if (!obj) {
+        ESP_LOGE(TAG, "Invalid object!");
         return;
     }
     
-    // Stop any existing animations on these objects
-    lv_anim_del(left_eye, simple_color_anim_cb);
-    lv_anim_del(right_eye, simple_color_anim_cb);
-    lv_anim_del(left_eye, (lv_anim_exec_xcb_t)lv_obj_set_height);
-    lv_anim_del(right_eye, (lv_anim_exec_xcb_t)lv_obj_set_height);
+    // Stop any existing animations on this object
+    lv_anim_del(obj, simple_color_anim_cb);
+    lv_anim_del(obj, (lv_anim_exec_xcb_t)lv_obj_set_height);
+    lv_anim_del(obj, (lv_anim_exec_xcb_t)lv_obj_set_width);
     
     // Animation parameters
     int anim_duration = 2000;  // 2 seconds per cycle
     
-    // Start left eye animation
+    // Start animation
     lv_anim_init(&left_eye_anim_);
-    lv_anim_set_var(&left_eye_anim_, left_eye);
-    lv_anim_set_values(&left_eye_anim_, 0, 255);  // Opacity animation
+    lv_anim_set_var(&left_eye_anim_, obj);
+    lv_anim_set_values(&left_eye_anim_, 100, 255);  // Text opacity animation
     lv_anim_set_time(&left_eye_anim_, anim_duration);
     lv_anim_set_exec_cb(&left_eye_anim_, simple_color_anim_cb);
     lv_anim_set_path_cb(&left_eye_anim_, lv_anim_path_ease_in_out);
@@ -776,25 +1359,17 @@ void XunguanDisplay::StartSimpleColorAnimation(lv_obj_t* left_eye, lv_obj_t* rig
     lv_anim_set_playback_time(&left_eye_anim_, anim_duration);
     lv_anim_start(&left_eye_anim_);
     
-    ESP_LOGI(TAG, "Simple color animation started");
+    ESP_LOGI(TAG, "Text opacity animation started for object: %p", obj);
 }
 
 void XunguanDisplay::simple_color_anim_cb(void* var, int32_t v) {
-    lv_obj_t* eye = (lv_obj_t*)var;
-    if (!eye) {
-        ESP_LOGE(TAG, "Color animation callback: invalid eye object");
+    lv_obj_t* obj = (lv_obj_t*)var;
+    if (!obj) {
         return;
     }
     
-    // Simple opacity animation
-    lv_obj_set_style_bg_opa(eye, v, 0);
-    
-    // Debug log every 20th call to avoid spam
-    static int call_count = 0;
-    call_count++;
-    if (call_count % 20 == 0) {
-        ESP_LOGI(TAG, "Color animation callback: eye %p, opacity: %ld", eye, (long)v);
-    }
+    // Change text opacity instead of background opacity
+    lv_obj_set_style_text_opa(obj, v, 0);
 } 
 
 void XunguanDisplay::StartHeartScalingAnimation(lv_obj_t* left_heart, lv_obj_t* right_heart, int original_width, int original_height) {
@@ -820,7 +1395,7 @@ void XunguanDisplay::StartHeartScalingAnimation(lv_obj_t* left_heart, lv_obj_t* 
     // Start left heart zoom animation
     lv_anim_init(&left_eye_anim_);
     lv_anim_set_var(&left_eye_anim_, left_heart);
-    lv_anim_set_values(&left_eye_anim_, 256 / 2, 179 / 2);  // 256 = 100%, 179 = 70%
+    lv_anim_set_values(&left_eye_anim_, 179, 179 / 2);  // 256 = 100%, 179 = 70% (fixed scaling values)
     lv_anim_set_time(&left_eye_anim_, anim_duration);
     lv_anim_set_exec_cb(&left_eye_anim_, heart_zoom_anim_cb);
     lv_anim_set_path_cb(&left_eye_anim_, lv_anim_path_ease_in_out);
@@ -833,7 +1408,7 @@ void XunguanDisplay::StartHeartScalingAnimation(lv_obj_t* left_heart, lv_obj_t* 
     // Start right heart zoom animation (with delay for alternating effect)
     lv_anim_init(&right_eye_anim_);
     lv_anim_set_var(&right_eye_anim_, right_heart);
-    lv_anim_set_values(&right_eye_anim_, 256 / 2, 179 / 2);  // 256 = 100%, 179 = 70%
+    lv_anim_set_values(&right_eye_anim_, 179, 179 / 2);  // 256 = 100%, 179 = 70% (fixed scaling values)
     lv_anim_set_time(&right_eye_anim_, anim_duration);
     lv_anim_set_exec_cb(&right_eye_anim_, heart_zoom_anim_cb);
     lv_anim_set_path_cb(&right_eye_anim_, lv_anim_path_ease_in_out);
@@ -843,7 +1418,7 @@ void XunguanDisplay::StartHeartScalingAnimation(lv_obj_t* left_heart, lv_obj_t* 
     lv_anim_start(&right_eye_anim_);
     
     ESP_LOGI(TAG, "Right heart animation started");
-    ESP_LOGI(TAG, "Heart zoom animation started - zoom range: 70%% to 100%%");
+    ESP_LOGI(TAG, "Heart zoom animation started - zoom range: 70%% to 100%% (256 to 179)");
 } 
 
 void XunguanDisplay::heart_zoom_anim_cb(void* var, int32_t v) {
@@ -855,7 +1430,9 @@ void XunguanDisplay::heart_zoom_anim_cb(void* var, int32_t v) {
     
     // Set zoom transform (v is in 256ths, so 256 = 100%)
     lv_obj_set_style_transform_zoom(heart, v, 0);
-} 
+}
+
+ 
 
 void XunguanDisplay::QueueAnimation(AnimationType type) {
     ESP_LOGI(TAG, "Queueing animation: %d", static_cast<int>(type));
@@ -954,3 +1531,298 @@ void XunguanDisplay::StartAnimation(AnimationType type) {
             break;
     }
 } 
+
+// Frame rate control implementation
+bool XunguanDisplay::SetFrameRateMode(FrameRateMode mode) {
+    ESP_LOGI(TAG, "Setting frame rate mode: %d", static_cast<int>(mode));
+    
+    uint32_t min_ms, max_ms, tick_period_us;
+    
+    switch (mode) {
+        case FrameRateMode::POWER_SAVE:
+            min_ms = 8;
+            max_ms = 20;
+            tick_period_us = 8000;  // 8ms tick
+            ESP_LOGI(TAG, "Power save mode");
+            break;
+            
+        case FrameRateMode::NORMAL:
+            min_ms = 5;
+            max_ms = 15;
+            tick_period_us = 2000;  // 2ms tick
+            ESP_LOGI(TAG, "Normal mode");
+            break;
+            
+        case FrameRateMode::SMOOTH:
+            min_ms = 2;
+            max_ms = 8;
+            tick_period_us = 1000;  // 1ms tick
+            ESP_LOGI(TAG, "Smooth mode");
+            break;
+            
+        case FrameRateMode::CUSTOM:
+            ESP_LOGW(TAG, "Custom mode requires SetCustomFrameRate() call");
+            return false;
+            
+        default:
+            ESP_LOGE(TAG, "Unknown frame rate mode");
+            return false;
+    }
+    
+    return UpdateFrameRateSettings(mode, min_ms, max_ms, tick_period_us);
+}
+
+bool XunguanDisplay::SetCustomFrameRate(uint32_t min_ms, uint32_t max_ms) {
+    ESP_LOGI(TAG, "Setting custom frame rate: %lu-%lu ms", min_ms, max_ms);
+    
+    // Validate parameters
+    if (min_ms < 1 || max_ms < min_ms || max_ms > 100) {
+        ESP_LOGE(TAG, "Invalid custom frame rate parameters");
+        return false;
+    }
+    
+    // Calculate tick period based on min delay (tick should be <= min delay)
+    uint32_t tick_period_us = MIN(min_ms * 1000, 2000);  // Max 2ms tick
+    
+    return UpdateFrameRateSettings(FrameRateMode::CUSTOM, min_ms, max_ms, tick_period_us);
+}
+
+bool XunguanDisplay::UpdateFrameRateSettings(FrameRateMode mode, uint32_t min_ms, uint32_t max_ms, uint32_t tick_period_us) {
+    ESP_LOGI(TAG, "Updating frame rate settings: mode=%d, min=%lu ms, max=%lu ms, tick=%lu us", 
+             static_cast<int>(mode), min_ms, max_ms, tick_period_us);
+    
+    // Update internal variables
+    current_frame_rate_mode_ = mode;
+    current_min_delay_ms_ = min_ms;
+    current_max_delay_ms_ = max_ms;
+    current_tick_period_us_ = tick_period_us;
+    
+    // Apply new settings if display is initialized
+    if (initialized_) {
+        ApplyFrameRateSettings();
+    }
+    
+    ESP_LOGI(TAG, "Frame rate settings updated successfully");
+    return true;
+}
+
+void XunguanDisplay::ApplyFrameRateSettings() {
+    ESP_LOGI(TAG, "Applying frame rate settings");
+    
+    if (!lvgl_tick_timer_) {
+        ESP_LOGW(TAG, "LVGL tick timer not initialized");
+        return;
+    }
+    
+    // Stop current timer
+    esp_timer_stop(lvgl_tick_timer_);
+    
+    // Restart with new period
+    esp_err_t ret = esp_timer_start_periodic(lvgl_tick_timer_, current_tick_period_us_);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to restart LVGL tick timer: %s", esp_err_to_name(ret));
+        return;
+    }
+    
+    ESP_LOGI(TAG, "Frame rate settings applied: min=%lu ms, max=%lu ms, tick=%lu us", 
+             current_min_delay_ms_, current_max_delay_ms_, current_tick_period_us_);
+} 
+
+void XunguanDisplay::StartSillyEyeHeightAnimation(lv_obj_t* left_eye, lv_obj_t* right_eye) {
+    ESP_LOGI(TAG, "Starting silly eye height animation - left: %p, right: %p", left_eye, right_eye);
+    
+    if (!left_eye || !right_eye) {
+        ESP_LOGE(TAG, "Invalid eye objects!");
+        return;
+    }
+    
+    // Stop any existing animations on these objects
+    lv_anim_del(left_eye, (lv_anim_exec_xcb_t)lv_obj_set_height);
+    lv_anim_del(right_eye, (lv_anim_exec_xcb_t)lv_obj_set_height);
+    
+    // Ensure eyes are visible
+    lv_obj_clear_flag(left_eye, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(right_eye, LV_OBJ_FLAG_HIDDEN);
+    
+    // Animation parameters
+    int anim_duration = 1000;  // 1 second per cycle
+    int min_height = 40;        // Minimum height
+    int max_height = 80;        // Maximum height
+    
+    ESP_LOGI(TAG, "Animation params - duration: %d, height range: %d to %d", anim_duration, min_height, max_height);
+    
+    // Left eye height animation
+    lv_anim_init(&left_eye_anim_);
+    lv_anim_set_var(&left_eye_anim_, left_eye);
+    lv_anim_set_values(&left_eye_anim_, min_height, max_height);
+    lv_anim_set_time(&left_eye_anim_, anim_duration);
+    lv_anim_set_delay(&left_eye_anim_, 0);
+    lv_anim_set_exec_cb(&left_eye_anim_, (lv_anim_exec_xcb_t)lv_obj_set_height);
+    lv_anim_set_path_cb(&left_eye_anim_, lv_anim_path_linear);
+    lv_anim_set_repeat_count(&left_eye_anim_, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_playback_time(&left_eye_anim_, anim_duration);
+    lv_anim_set_playback_delay(&left_eye_anim_, 0);
+    lv_anim_start(&left_eye_anim_);
+    
+    ESP_LOGI(TAG, "Left eye silly animation started");
+    
+    // Right eye height animation
+    lv_anim_init(&right_eye_anim_);
+    lv_anim_set_var(&right_eye_anim_, right_eye);
+    lv_anim_set_values(&right_eye_anim_, min_height, max_height);
+    lv_anim_set_time(&right_eye_anim_, anim_duration);
+    lv_anim_set_delay(&right_eye_anim_, 0);
+    lv_anim_set_exec_cb(&right_eye_anim_, (lv_anim_exec_xcb_t)lv_obj_set_height);
+    lv_anim_set_path_cb(&right_eye_anim_, lv_anim_path_linear);
+    lv_anim_set_repeat_count(&right_eye_anim_, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_playback_time(&right_eye_anim_, anim_duration);
+    lv_anim_set_playback_delay(&right_eye_anim_, 0);
+    lv_anim_start(&right_eye_anim_);
+    
+    ESP_LOGI(TAG, "Right eye silly animation started");
+    ESP_LOGI(TAG, "Silly eye height animation started - height range: %d to %d pixels", min_height, max_height);
+} 
+
+void XunguanDisplay::StartVertigoRotationAnimation(lv_obj_t* left_spiral, lv_obj_t* right_spiral) {
+    ESP_LOGI(TAG, "Starting vertigo rotation animation - left: %p, right: %p", left_spiral, right_spiral);
+    
+    if (!left_spiral || !right_spiral) {
+        ESP_LOGE(TAG, "Invalid spiral objects!");
+        return;
+    }
+    
+    // Stop any existing animations on these objects
+    lv_anim_del(left_spiral, (lv_anim_exec_xcb_t)lv_img_set_angle);
+    lv_anim_del(right_spiral, (lv_anim_exec_xcb_t)lv_img_set_angle);
+    
+    // Animation parameters
+    int anim_duration = 1500;  // 1.5 seconds per cycle
+    int rotation_angle = 3600;  // 10 full rotations (360 * 10)
+    
+    ESP_LOGI(TAG, "Animation params - duration: %d, rotation: %d degrees", anim_duration, rotation_angle);
+    
+    // Left spiral rotation animation (clockwise)
+    lv_anim_init(&left_eye_anim_);
+    lv_anim_set_var(&left_eye_anim_, left_spiral);
+    lv_anim_set_values(&left_eye_anim_, 0, -rotation_angle);  // Clockwise rotation
+    lv_anim_set_time(&left_eye_anim_, anim_duration);
+    lv_anim_set_delay(&left_eye_anim_, 0);
+    lv_anim_set_exec_cb(&left_eye_anim_, (lv_anim_exec_xcb_t)lv_img_set_angle);
+    lv_anim_set_path_cb(&left_eye_anim_, lv_anim_path_linear);
+    lv_anim_set_repeat_count(&left_eye_anim_, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_start(&left_eye_anim_);
+    
+    ESP_LOGI(TAG, "Left spiral rotation animation started (clockwise)");
+    
+    // Right spiral rotation animation (counter-clockwise)
+    lv_anim_init(&right_eye_anim_);
+    lv_anim_set_var(&right_eye_anim_, right_spiral);
+    lv_anim_set_values(&right_eye_anim_, 0, rotation_angle);  // Counter-clockwise rotation
+    lv_anim_set_time(&right_eye_anim_, anim_duration);
+    lv_anim_set_delay(&right_eye_anim_, 0);
+    lv_anim_set_exec_cb(&right_eye_anim_, (lv_anim_exec_xcb_t)lv_img_set_angle);
+    lv_anim_set_path_cb(&right_eye_anim_, lv_anim_path_linear);
+    lv_anim_set_repeat_count(&right_eye_anim_, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_start(&right_eye_anim_);
+    
+    ESP_LOGI(TAG, "Right spiral rotation animation started (counter-clockwise)");
+    ESP_LOGI(TAG, "Vertigo rotation animation started - %d degrees in %d ms", rotation_angle, anim_duration);
+    
+    // Create recovery timer for 4 seconds
+    if (!vertigo_recovery_timer_) {
+        const esp_timer_create_args_t vertigo_timer_args = {
+            .callback = [](void* arg) {
+                XunguanDisplay* self = static_cast<XunguanDisplay*>(arg);
+                if (!self) {
+                    ESP_LOGE(TAG, "Vertigo recovery timer callback: invalid self pointer");
+                    return;
+                }
+                
+                ESP_LOGI(TAG, "Vertigo recovery timer triggered - returning to idle animation");
+                
+                // Clear vertigo mode flag
+                self->vertigo_mode_active_ = false;
+                
+                // Stop current animation and start idle animation
+                self->StopCurrentAnimation();
+                self->StartIdleAnimation();
+                
+                ESP_LOGI(TAG, "Vertigo mode deactivated - emotion changes re-enabled");
+            },
+            .arg = this,
+            .name = "vertigo_recovery"
+        };
+        
+        esp_err_t ret = esp_timer_create(&vertigo_timer_args, &vertigo_recovery_timer_);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to create vertigo recovery timer: %s", esp_err_to_name(ret));
+            return;
+        }
+    }
+    
+    // Start 4-second timer
+    esp_err_t ret = esp_timer_start_once(vertigo_recovery_timer_, 4000000);  // 4 seconds in microseconds
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start vertigo recovery timer: %s", esp_err_to_name(ret));
+        return;
+    }
+    
+    ESP_LOGI(TAG, "Vertigo recovery timer started - will return to idle in 4 seconds");
+} 
+
+void XunguanDisplay::StartHappyBlinkingAnimation(lv_obj_t* left_circle, lv_obj_t* right_circle, int original_size) {
+    ESP_LOGI(TAG, "Starting happy blinking animation - left: %p, right: %p, size: %d", left_circle, right_circle, original_size);
+    
+    if (!left_circle || !right_circle) {
+        ESP_LOGE(TAG, "Invalid circle objects!");
+        return;
+    }
+    
+    // Stop any existing animations on these objects
+    lv_anim_del(left_circle, (lv_anim_exec_xcb_t)lv_obj_set_height);
+    lv_anim_del(left_circle, (lv_anim_exec_xcb_t)lv_obj_set_width);
+    lv_anim_del(right_circle, (lv_anim_exec_xcb_t)lv_obj_set_height);
+    lv_anim_del(right_circle, (lv_anim_exec_xcb_t)lv_obj_set_width);
+    
+    // Ensure circles are visible
+    lv_obj_clear_flag(left_circle, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(right_circle, LV_OBJ_FLAG_HIDDEN);
+    
+    // Animation parameters - faster Y-axis blinking for happy mood
+    int anim_duration = 800;  // 0.8 seconds per cycle (faster)
+    int min_height = original_size * 3 / 4;  // Shrink height to 75% (gentle blink)
+    int max_height = original_size;  // Full height
+    
+    ESP_LOGI(TAG, "Animation params - duration: %d, height range: %d to %d", anim_duration, min_height, max_height);
+    
+    // Left circle Y-axis blinking animation
+    lv_anim_init(&left_eye_anim_);
+    lv_anim_set_var(&left_eye_anim_, left_circle);
+    lv_anim_set_values(&left_eye_anim_, max_height, min_height);
+    lv_anim_set_time(&left_eye_anim_, anim_duration);
+    lv_anim_set_delay(&left_eye_anim_, 0);
+    lv_anim_set_exec_cb(&left_eye_anim_, (lv_anim_exec_xcb_t)lv_obj_set_height);
+    lv_anim_set_path_cb(&left_eye_anim_, lv_anim_path_ease_in_out);
+    lv_anim_set_repeat_count(&left_eye_anim_, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_playback_time(&left_eye_anim_, anim_duration);
+    lv_anim_set_playback_delay(&left_eye_anim_, 0);
+    lv_anim_start(&left_eye_anim_);
+    
+    ESP_LOGI(TAG, "Left circle Y-axis blinking animation started");
+    
+    // Right circle Y-axis blinking animation (synchronized)
+    lv_anim_init(&right_eye_anim_);
+    lv_anim_set_var(&right_eye_anim_, right_circle);
+    lv_anim_set_values(&right_eye_anim_, max_height, min_height);
+    lv_anim_set_time(&right_eye_anim_, anim_duration);
+    lv_anim_set_delay(&right_eye_anim_, 0);
+    lv_anim_set_exec_cb(&right_eye_anim_, (lv_anim_exec_xcb_t)lv_obj_set_height);
+    lv_anim_set_path_cb(&right_eye_anim_, lv_anim_path_ease_in_out);
+    lv_anim_set_repeat_count(&right_eye_anim_, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_playback_time(&right_eye_anim_, anim_duration);
+    lv_anim_set_playback_delay(&right_eye_anim_, 0);
+    lv_anim_start(&right_eye_anim_);
+    
+    ESP_LOGI(TAG, "Right circle Y-axis blinking animation started");
+    ESP_LOGI(TAG, "Happy Y-axis blinking animation started - height range: %d to %d pixels", min_height, max_height);
+}

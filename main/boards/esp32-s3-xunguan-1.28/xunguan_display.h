@@ -68,15 +68,50 @@ public:
     void StopCurrentAnimation();
     void StartAnimation(AnimationType type);
 
+    // Frame rate control interface
+    enum class FrameRateMode {
+        POWER_SAVE = 0,    // 低功耗模式：8-20ms (50-125Hz)
+        NORMAL = 1,        // 正常模式：5-15ms (67-200Hz) 
+        SMOOTH = 2,        // 流畅模式：2-8ms (125-500Hz)
+        CUSTOM = 3         // 自定义模式
+    };
+    
+    // Frame rate control methods
+    bool SetFrameRateMode(FrameRateMode mode);
+    bool SetCustomFrameRate(uint32_t min_ms, uint32_t max_ms);
+    FrameRateMode GetCurrentFrameRateMode() const { return current_frame_rate_mode_; }
+    uint32_t GetCurrentMinDelay() const { return current_min_delay_ms_; }
+    uint32_t GetCurrentMaxDelay() const { return current_max_delay_ms_; }
+    uint32_t GetCurrentTickPeriod() const { return current_tick_period_us_; }
+    
+
 private:
     esp_lcd_panel_io_handle_t panel_io_;
     esp_lcd_panel_handle_t panel_;
     lv_display_t* lvgl_display_;
     bool initialized_;
     
+    // Frame rate control variables
+    FrameRateMode current_frame_rate_mode_;
+    uint32_t current_min_delay_ms_;
+    uint32_t current_max_delay_ms_;
+    uint32_t current_tick_period_us_;
+    
+    // Frame rate control methods
+    bool UpdateFrameRateSettings(FrameRateMode mode, uint32_t min_ms, uint32_t max_ms, uint32_t tick_period_us);
+    void ApplyFrameRateSettings();
+    
     // UI elements - simplified
     lv_obj_t* left_eye_;
     lv_obj_t* container_;
+    
+    // Sleep UI elements
+    lv_obj_t* zzz1_;  // First "z" label
+    lv_obj_t* zzz2_;  // Second "z" label  
+    lv_obj_t* zzz3_;  // Third "z" label
+    lv_anim_t zzz1_anim_;  // Animation for first "z"
+    lv_anim_t zzz2_anim_;  // Animation for second "z"
+    lv_anim_t zzz3_anim_;  // Animation for third "z"
     
     // Current state
     EyeState current_state_;
@@ -103,6 +138,13 @@ private:
     
     // Task handle
     TaskHandle_t lvgl_task_handle_;
+    
+    // Vertigo recovery timer
+    esp_timer_handle_t vertigo_recovery_timer_;
+    bool vertigo_mode_active_;
+    
+    // Loving animation lock
+    bool loving_mode_active_;
 
 public:
     XunguanDisplay();
@@ -162,8 +204,11 @@ private:
     
     // Animation helper functions
     void StartEyeScalingAnimation(lv_obj_t* left_eye, lv_obj_t* right_eye, int original_height);
-    void StartSimpleColorAnimation(lv_obj_t* left_eye, lv_obj_t* right_eye);
+    void StartSimpleColorAnimation(lv_obj_t* obj);  // Text opacity animation
     void StartHeartScalingAnimation(lv_obj_t* left_heart, lv_obj_t* right_heart, int original_width, int original_height);
+    void StartSillyEyeHeightAnimation(lv_obj_t* left_eye, lv_obj_t* right_eye);  // Silly eye height animation
+    void StartVertigoRotationAnimation(lv_obj_t* left_spiral, lv_obj_t* right_spiral);  // Vertigo rotation animation
+    void StartHappyBlinkingAnimation(lv_obj_t* left_circle, lv_obj_t* right_circle, int original_size);  // Happy blinking animation
     static void simple_color_anim_cb(void* var, int32_t v);
     static void heart_zoom_anim_cb(void* var, int32_t v);
 };

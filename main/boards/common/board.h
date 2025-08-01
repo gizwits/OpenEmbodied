@@ -71,6 +71,8 @@ public:
     virtual std::string GetBoardJson() = 0;
     virtual std::string GetDeviceStatusJson() = 0;
     virtual int MaxVolume() { return 100; }
+    virtual int MaxBacklightBrightness() { return 100; }
+    virtual bool IsCharging() { return false; }
     
     // 设备模式相关方法
     virtual DeviceMode GetDeviceMode() const { return device_mode_; }

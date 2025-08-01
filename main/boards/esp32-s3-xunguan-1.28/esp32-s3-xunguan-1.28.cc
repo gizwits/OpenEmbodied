@@ -115,6 +115,10 @@ private:
         }
     }
 
+    int MaxBacklightBrightness() {
+        return 60;
+    }
+
     void InitializeChargingGpio() {
         gpio_config_t io_conf = {
             .pin_bit_mask = (1ULL << CHARGING_PIN) | (1ULL << STANDBY_PIN),
@@ -184,7 +188,7 @@ private:
                     auto* board = static_cast<MovecallMojiESP32S3*>(arg);
                     Application::GetInstance().SetDeviceState(kDeviceStateIdle);
 
-                    if (board->isCharging()) {
+                    if (board->IsCharging()) {
                         // 充电中，只关闭背光
                         board->GetBacklight()->SetBrightness(0, false);
                         board->is_sleep_ = true;
@@ -273,13 +277,6 @@ private:
         i2c_master_transmit(lis2hh12_dev_, buf, 2, 100 / portTICK_PERIOD_MS);
     }
 
-    bool isCharging() {
-        int chrg = gpio_get_level(CHARGING_PIN);
-        int standby = gpio_get_level(STANDBY_PIN);
-        ESP_LOGI(TAG, "chrg: %d, standby: %d", chrg, standby);
-        return chrg == 0 || standby == 0;
-    }
-
     virtual bool NeedPlayProcessVoice() override {
         return true;
     }
@@ -288,6 +285,54 @@ private:
     void InitializePowerManager() {
         power_manager_ =
             new PowerManager(GPIO_NUM_NC, GPIO_NUM_NC, BAT_ADC_UNIT, BAT_ADC_CHANNEL);
+        
+
+        // 注册充电状态改变回调
+        power_manager_->SetChargingStatusCallback([this](bool is_charging) {
+            ESP_LOGI(TAG, "充电状态改变: %s", is_charging ? "开始充电" : "停止充电");
+            XunguanDisplay* xunguan_display = static_cast<XunguanDisplay*>(GetDisplay());
+            if (is_charging) {
+                // 充电开始时的处理逻辑
+                ESP_LOGI(TAG, "检测到开始充电");
+                // 降低发热                
+                GetBacklight()->SetBrightness(5, false);
+                
+                // 设置充电时的自定义帧率：100-125Hz (8-10ms延迟)
+                // 需要强制转换成 XunguanDisplay 类型
+                if (xunguan_display) {
+                    if (xunguan_display->SetCustomFrameRate(10, 20)) {
+                        ESP_LOGI(TAG, "充电帧率设置成功");
+                    } else {
+                        ESP_LOGE(TAG, "充电帧率设置失败");
+                    }
+                } else {
+                    ESP_LOGE(TAG, "无法获取 XunguanDisplay 对象");
+                }
+            } else {
+                // 充电停止时的处理逻辑
+                ESP_LOGI(TAG, "检测到停止充电");
+                
+                // 恢复正常帧率模式
+                // 需要强制转换成 XunguanDisplay 类型
+                if (xunguan_display) {
+                    ESP_LOGI(TAG, "停止充电，恢复正常帧率模式");
+                    if (xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL)) {
+                        ESP_LOGI(TAG, "正常帧率模式恢复成功");
+                    } else {
+                        ESP_LOGE(TAG, "正常帧率模式恢复失败");
+                    }
+                } else {
+                    ESP_LOGE(TAG, "无法获取 XunguanDisplay 对象");
+                }
+                
+                if (is_sleep_) {
+                    // 关机
+                    gpio_set_level(POWER_GPIO, 0);
+                } else {
+                    GetBacklight()->RestoreBrightness();
+                }
+            }
+        });
     }
 
 public:
@@ -298,7 +343,7 @@ public:
         
         InitializeChargingGpio();
 
-        bool is_charging = isCharging();
+        bool is_charging = IsCharging();
         // if (is_charging) {
         //     // 充电中
         // } else {
@@ -337,8 +382,18 @@ public:
 
     static void RestoreBacklightTask(void* arg) {
         auto* self = static_cast<MovecallMojiESP32S3*>(arg);
-        vTaskDelay(pdMS_TO_TICKS(400));
+        int level;
+        bool charging, discharging;
+        self->GetBatteryLevel(level, charging, discharging);
+        XunguanDisplay* xunguan_display = static_cast<XunguanDisplay*>(self->GetDisplay());
         self->GetBacklight()->RestoreBrightness();
+
+        if (charging) {
+            // 降低发热            
+            xunguan_display->SetCustomFrameRate(10, 20);
+        } else {
+            xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL);
+        }
         vTaskDelete(NULL); // 任务结束时删除自己
     }
 
@@ -352,8 +407,16 @@ public:
     }
 
 
+
+    virtual bool IsCharging() override {
+        int chrg = gpio_get_level(CHARGING_PIN);
+        int standby = gpio_get_level(STANDBY_PIN);
+        ESP_LOGI(TAG, "chrg: %d, standby: %d", chrg, standby);
+        return chrg == 0 || standby == 0;
+    }
+
     virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
-        charging = isCharging();
+        charging = IsCharging();
         discharging = !charging;
         level = power_manager_->GetBatteryLevel();
         ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);

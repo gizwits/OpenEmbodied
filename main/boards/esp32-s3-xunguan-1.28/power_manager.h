@@ -5,6 +5,7 @@
 #include <esp_adc/adc_oneshot.h>
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <functional>
 
 class PowerManager {
 private:
@@ -35,6 +36,9 @@ private:
 
     adc_oneshot_unit_handle_t adc_handle_;
 
+    // 充电状态改变回调函数
+    std::function<void(bool)> charging_status_callback_ = nullptr;
+
     void CheckBatteryStatus() {
         uint64_t current_time = esp_timer_get_time(); // 获取当前时间（微秒）
 
@@ -53,9 +57,15 @@ private:
 
             // 如果状态有变化
             if (new_is_charging != is_charging_) {
+                bool old_charging_status = is_charging_;
                 is_charging_ = new_is_charging;
                 change_count_++;  // 增加变化次数
                 last_change_time_ = current_time;  // 更新最后变化时间
+                
+                // 调用充电状态改变回调
+                if (charging_status_callback_) {
+                    charging_status_callback_(is_charging_);
+                }
             }
         }
 
@@ -166,6 +176,11 @@ public:
     // 立即检测一次电量
     void CheckBatteryStatusImmediately() {
         CheckBatteryStatus();
+    }
+
+    // 设置充电状态改变回调函数
+    void SetChargingStatusCallback(std::function<void(bool)> callback) {
+        charging_status_callback_ = callback;
     }
 };
 #endif  // __POWER_MANAGER_H__
