@@ -113,7 +113,7 @@ private:
                     if (board->isCharging()) {
                         // 关灯
                         board->GetLed()->TurnOff();
-                        is_sleep_ = true;
+                        board->is_sleep_ = true;
                     } else {
                         gpio_set_level(POWER_HOLD_GPIO, 0);
                     }
