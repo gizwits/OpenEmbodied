@@ -1,0 +1,171 @@
+#ifndef XUNGUAN_DISPLAY_H
+#define XUNGUAN_DISPLAY_H
+
+#include "display.h"
+#include <esp_lcd_panel_io.h>
+#include <esp_lcd_panel_ops.h>
+#include <lvgl.h>
+#include <driver/spi_master.h>
+#include <esp_lcd_gc9a01.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/queue.h>
+#include "assert.h"
+
+class XunguanDisplay : public Display {
+public:
+    // Empty enum for compatibility
+    enum class EyeState {
+        IDLE,       // 待机状态：缓慢眨眼
+        HAPPY,
+        LAUGHING,
+        SAD,
+        ANGRY,
+        CRYING,
+        LOVING,
+        EMBARRASSED,
+        SURPRISED,
+        SHOCKED,
+        THINKING,
+        WINKING,
+        COOL,
+        RELAXED,
+        DELICIOUS,
+        KISSY,
+        CONFIDENT,
+        SLEEPING,
+        SILLY,
+        VERTIGO,
+        CONFUSED
+    };
+
+    // Animation queue system
+    enum class AnimationType {
+        NONE,
+        IDLE,
+        HAPPY,
+        SAD,
+        LOVING,
+        THINKING,
+        SHOCKED,
+        SLEEPING,
+        SILLY,
+        VERTIGO
+    };
+    
+    struct AnimationRequest {
+        AnimationType type;
+        bool is_pending;
+        AnimationRequest() : type(AnimationType::NONE), is_pending(false) {}
+    };
+    
+    AnimationRequest pending_animation_;
+    bool animation_queue_enabled_;
+    
+    // Animation queue methods
+    void QueueAnimation(AnimationType type);
+    void ProcessAnimationQueue();
+    void StopCurrentAnimation();
+    void StartAnimation(AnimationType type);
+
+private:
+    esp_lcd_panel_io_handle_t panel_io_;
+    esp_lcd_panel_handle_t panel_;
+    lv_display_t* lvgl_display_;
+    bool initialized_;
+    
+    // UI elements - simplified
+    lv_obj_t* left_eye_;
+    lv_obj_t* container_;
+    
+    // Current state
+    EyeState current_state_;
+    
+    // Animation variables
+    lv_anim_t left_eye_anim_;
+    lv_anim_t right_eye_anim_;
+    lv_obj_t* right_eye_;
+    
+    // LVGL flush callback
+    static void lvgl_flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map);
+    
+    // Display update callback
+    static void lvgl_port_update_callback(lv_display_t* disp);
+    
+    // LVGL task
+    static void lvgl_task(void* arg);
+    
+    // Mutex for LVGL thread safety
+    static _lock_t lvgl_api_lock;
+    
+    // Timer for LVGL tick
+    esp_timer_handle_t lvgl_tick_timer_;
+    
+    // Task handle
+    TaskHandle_t lvgl_task_handle_;
+
+public:
+    XunguanDisplay();
+    ~XunguanDisplay() override;
+    
+    // Initialize display hardware
+    bool Initialize();
+    
+    // Override Display methods
+    bool Lock(int timeout_ms = 0) override;
+    void Unlock() override;
+    
+    // Setup UI
+    void SetupUI();
+    
+    // Set emotion (override from Display) - empty for compatibility
+    void SetEmotion(const char* emotion) override;
+    
+    // Test function to cycle through emotions - empty for compatibility
+    void TestNextEmotion();
+    
+    // Animation functions - empty for compatibility
+    void start_blink_animation();
+    void start_look_animation();
+    void start_idle_animation();
+    void start_scale_animation();
+    
+    // Animation methods for different states
+    void StartIdleAnimation();
+    void StartHappyAnimation();
+    void StartSadAnimation();
+    void StartLovingAnimation();
+    void StartThinkingAnimation();
+    void StartShockedAnimation();
+    void StartSleepingAnimation();
+    void StartSillyAnimation();
+    void StartVertigoAnimation();
+
+private:
+    // Initialize SPI bus
+    bool InitializeSpi();
+    
+    // Initialize LCD panel
+    bool InitializeLcdPanel();
+    
+    // Initialize LVGL
+    bool InitializeLvgl();
+    
+    // Initialize LVGL timer
+    bool InitializeLvglTimer();
+    
+    // Create LVGL task
+    bool CreateLvglTask();
+    
+    // Helper function to clear existing UI elements
+    void ClearUIElements();
+    
+    // Animation helper functions
+    void StartEyeScalingAnimation(lv_obj_t* left_eye, lv_obj_t* right_eye, int original_height);
+    void StartSimpleColorAnimation(lv_obj_t* left_eye, lv_obj_t* right_eye);
+    void StartHeartScalingAnimation(lv_obj_t* left_heart, lv_obj_t* right_heart, int original_width, int original_height);
+    static void simple_color_anim_cb(void* var, int32_t v);
+    static void heart_zoom_anim_cb(void* var, int32_t v);
+};
+
+#endif // XUNGUAN_DISPLAY_H 
