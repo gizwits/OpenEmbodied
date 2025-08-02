@@ -14,6 +14,7 @@
 #include "auth.h"
 #include "mcp_server.h"
 #include "settings.h"
+#include "wifi_station.h"
 
 #if CONFIG_USE_AUDIO_PROCESSOR
 #include "afe_audio_processor.h"
@@ -40,6 +41,7 @@ static const char* const STATE_STRINGS[] = {
     "speaking",
     "upgrading",
     "activating",
+    "sleeping",
     "fatal_error",
     "power_off",
     "invalid_state"
@@ -308,6 +310,8 @@ void Application::PlaySound(const std::string_view& sound) {
 }
 
 void Application::ToggleChatState() {
+    Board::GetInstance().WakeUpPowerSaveTimer();
+
 
     if (player_.IsDownloading()) {
         CancelPlayMusic();
@@ -356,6 +360,8 @@ void Application::ToggleChatState() {
 }
 
 void Application::StartListening() {
+    Board::GetInstance().WakeUpPowerSaveTimer();
+
     CancelPlayMusic();
     if (device_state_ == kDeviceStateActivating) {
         ESP_LOGI(TAG, "StartListening(kDeviceStateActivating)");
@@ -516,103 +522,7 @@ void Application::Start() {
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
 
 
-#if CONFIG_USE_GIZWITS_MQTT
-    auto& mqtt_client = MqttClient::getInstance();
-    mqtt_client.OnRoomParamsUpdated([this](const RoomParams& params) {
-        // 判断 protocol_ 是否启动
-        // 如果启动了，就断开重新连接
-
-        if (protocol_->IsAudioChannelOpened()) {
-            // 先停止所有正在进行的操作
-            Schedule([this]() {
-                QuitTalking();
-                PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
-            });
-        } else {
-            if (!protocol_->GetRoomParams().access_token.empty()) {
-                PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
-            }
-        }
-
-        Schedule([this]() {
-            MqttClient::getInstance().sendTraceLog("info", "获取配置智能体成功");
-        });
-        protocol_->UpdateRoomParams(params);
-    });
-
-    if (!mqtt_client.initialize()) {
-        ESP_LOGE(TAG, "Failed to initialize MQTT client");
-        Alert(Lang::Strings::ERROR, Lang::Strings::ERROR, "sad", Lang::Sounds::P3_EXCLAMATION);
-        return;
-    }
-#else
-
-
-    bool need_activation = settings.GetInt("need_activation");
-    bool has_authkey = !Auth::getInstance().getAuthKey().empty();
-
-    if(need_activation == 1) {
-        if (!has_authkey) {
-            GServer::activationLimitDevice([this, &settings](mqtt_config_t* config) {
-                ESP_LOGI(TAG, "Device ID: %s", config->device_id);
-                settings.SetString("did", config->device_id);
-                settings.SetInt("need_activation", 0);
-                GServer::getWebsocketConfig([this](RoomParams* config) {
-                    if (config) {
-                        protocol_->UpdateRoomParams(*config);
-                    }
-                });
-            });
-        } else {
-            GServer::activationDevice([this, &settings](mqtt_config_t* config) {
-                settings.SetInt("need_activation", 0);
-                GServer::getWebsocketConfig([this](RoomParams* config) {
-                    if (config) {
-                        protocol_->UpdateRoomParams(*config);
-                    }
-                });
-            });
-        }
-    } else {
-        GServer::getWebsocketConfig([this](RoomParams* config) {
-            if (config) {
-                protocol_->UpdateRoomParams(*config);
-            }
-        });
-    }
-
-    if (!has_authkey) {
-        if (need_activation == 1) {
-            GServer::activationLimitDevice([this, &settings](mqtt_config_t* config) {
-                ESP_LOGI(TAG, "Device ID: %s", config->device_id);
-                settings.SetString("did", config->device_id);
-                settings.SetInt("need_activation", 0);
-                GServer::getWebsocketConfig([this](RoomParams* config) {
-                    if (config) {
-                        protocol_->UpdateRoomParams(*config);
-                    }
-                });
-            });
-            
-        } else {
-            
-        }
-        
-    } else {
-        if (need_activation == 1) {
-            ESP_LOGI(TAG, "need_activation is true");
-            // 调用注册
-            GServer::activationDevice([this, &settings](mqtt_config_t* config) {
-                settings.SetInt("need_activation", 0);
-                GServer::getWebsocketConfig([this](RoomParams* config) {
-                    if (config) {
-                        protocol_->UpdateRoomParams(*config);
-                    }
-                });
-            });
-        }
-    }
-#endif
+    initGizwitsServer();
 
     CheckNewVersion();
     
@@ -638,7 +548,7 @@ void Application::Start() {
         }
     });
     protocol_->OnAudioChannelOpened([this, codec, &board]() {
-        // board.SetPowerSaveMode(false);
+        board.SetPowerSaveMode(false);
         if (protocol_->server_sample_rate() != codec->output_sample_rate()) {
             ESP_LOGW(TAG, "Server sample rate %d does not match device output sample rate %d, resampling may cause distortion",
                 protocol_->server_sample_rate(), codec->output_sample_rate());
@@ -649,18 +559,9 @@ void Application::Start() {
             MqttClient::getInstance().sendTraceLog("info", "socket 通道打开");
         });
 
-// #if CONFIG_IOT_PROTOCOL_XIAOZHI
-//         auto& thing_manager = iot::ThingManager::GetInstance();
-//         protocol_->SendIotDescriptors(thing_manager.GetDescriptorsJson());
-//         std::string states;
-//         if (thing_manager.GetStatesJson(states, false)) {
-//             protocol_->SendIotStates(states);
-//         }
-// #endif
     });
     protocol_->OnAudioChannelClosed([this, &board]() {
-
-        // board.SetPowerSaveMode(true);
+        board.SetPowerSaveMode(true);
         Schedule([this]() {
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
@@ -815,6 +716,8 @@ void Application::Start() {
     wake_word_detect_.Initialize(codec);
     wake_word_detect_.OnWakeWordDetected([this](const std::string& wake_word) {
         ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
+        Board::GetInstance().WakeUpPowerSaveTimer();
+
         // 提高唤醒词速度 用 task
         xTaskCreate([](void* arg) {
             Application* app = (Application*)arg;
@@ -837,10 +740,9 @@ void Application::Start() {
 
                 if (!app->protocol_ || !app->protocol_->OpenAudioChannel()) {
                     app->wake_word_detect_.StartDetection();
-                    return;
+                } else {
+                    app->SetListeningMode(app->chat_mode_ == 2  ? kListeningModeRealtime : kListeningModeAutoStop);
                 }
-
-                app->SetListeningMode(app->chat_mode_ == 2  ? kListeningModeRealtime : kListeningModeAutoStop);
             } else if (app->device_state_ == kDeviceStateSpeaking) {
                 // 关键词打断，继续监听
                 app->protocol_->SendAbortSpeaking(kAbortReasonNone);
@@ -852,6 +754,8 @@ void Application::Start() {
                 display->SetChatMessage("assistant", "");
             } else if (app->device_state_ == kDeviceStateActivating) {
                 app->SetDeviceState(kDeviceStateIdle);
+            } else if (app->device_state_ == kDeviceStateSleeping) {
+                app->ExitSleepMode();
             }
             vTaskDelete(NULL);
         }, "wake_word_detect_task", 4096, this, 10, nullptr);
@@ -1281,6 +1185,30 @@ void Application::SetDeviceState(DeviceState state) {
         return;
     }
 
+    // 如果从休眠状态切换到其他状态，需要先重新连接 wifi
+    if (device_state_ == kDeviceStateSleeping && state != kDeviceStateSleeping) {
+        ESP_LOGI(TAG, "Exiting sleep mode, reconnecting WiFi...");
+        
+        // 重新连接 wifi
+        auto& wifi_station = WifiStation::GetInstance();
+        if (!wifi_station.IsConnected()) {
+            wifi_station.Start();
+            
+            // 等待 wifi 连接
+            if (!wifi_station.WaitForConnected(30 * 1000)) { // 30秒超时
+                ESP_LOGE(TAG, "Failed to reconnect to WiFi, staying in sleep mode");
+                return;
+            }
+        }
+        
+        // 恢复屏幕背光
+        auto& board = Board::GetInstance();
+        auto backlight = board.GetBacklight();
+        if (backlight) {
+            backlight->RestoreBrightness();
+        }
+    }
+
     Schedule([this, state]() {
         std::string message = "SetDeviceState: " + std::string(STATE_STRINGS[state]);
         MqttClient::getInstance().sendTraceLog("info", message.c_str());
@@ -1394,6 +1322,48 @@ void Application::SetDeviceState(DeviceState state) {
             }
             ResetDecoder();
             break;
+        case kDeviceStateSleeping: {
+            // 休眠模式：关闭屏幕、socket、wifi
+            ESP_LOGI(TAG, "Entering sleep mode");
+            
+            Schedule([this]() {
+                // 关闭屏幕背光
+                auto& board = Board::GetInstance();
+                auto display = board.GetDisplay();
+                auto backlight = board.GetBacklight();
+
+                auto codec = Board::GetInstance().GetAudioCodec();
+                codec->EnableOutput(true);
+                PlaySound(Lang::Sounds::P3_SLEEP);
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                if (backlight) {
+                    backlight->SetBrightness(0);
+                }
+                
+                // 关闭 socket 连接
+                if (protocol_) {
+                    protocol_->CloseAudioChannel();
+                }
+                // 关闭 mqtt
+                auto& mqtt_client = MqttClient::getInstance();
+                mqtt_client.deinit();
+                
+                // 关闭 wifi
+                auto& wifi_station = WifiStation::GetInstance();
+                wifi_station.Stop();
+                
+                display->SetStatus(Lang::Strings::STANDBY);
+                display->SetEmotion("sleepy");
+            });
+            break;
+        }
+        case kDeviceStateStarting:
+        case kDeviceStateWifiConfiguring:
+        case kDeviceStateUpgrading:
+        case kDeviceStateActivating:
+        case kDeviceStateFatalError:
+            // 这些状态不需要特殊处理
+            break;
         default:
             // Do nothing
             break;
@@ -1447,7 +1417,7 @@ void Application::SendTextToAI(const std::string& text) {
 }
 
 void Application::WakeWordInvoke(const std::string& wake_word) {
-    Board::GetInstance().ResetPowerSaveTimer();
+    Board::GetInstance().WakeUpPowerSaveTimer();
 
 #if CONFIG_USE_GIZWITS_MQTT
     auto& mqtt_client = MqttClient::getInstance();
@@ -1520,19 +1490,17 @@ bool Application::CanEnterSleepMode() {
     // if (protocol_ && protocol_->IsAudioChannelOpened()) {
     //     return false;
     // }
-
     // 如果正在下载，不允许睡眠
     if (player_.IsDownloading()) {
         return false;
     }
 
     // 如果正在充电，不允许睡眠
-    if (Board::GetInstance().IsCharging()) {
-        return false;
-    }
+    // if (Board::GetInstance().IsCharging()) {
+    //     return false;
+    // }
 
     // 现在可以安全地进入睡眠模式
-    ESP_LOGI(TAG, "CanEnterSleepMode");
     return true;
 }
 
@@ -1591,4 +1559,156 @@ bool Application::CheckBatteryLevel() {
         }
     }
     return true;
+}
+
+void Application::EnterSleepMode() {
+    ESP_LOGI(TAG, "Entering sleep mode");
+    SetDeviceState(kDeviceStateSleeping);
+}
+
+void Application::ExitSleepMode() {
+    ESP_LOGI(TAG, "Exiting sleep mode");
+
+    // 恢复屏幕背光
+    auto& board = Board::GetInstance();
+    auto backlight = board.GetBacklight();
+    if (backlight) {
+        backlight->RestoreBrightness();
+    }
+    // 提示音
+    auto codec = Board::GetInstance().GetAudioCodec();
+    codec->EnableOutput(true);
+    PlaySound(Lang::Sounds::P3_WAKE_UP);
+    
+    // 重新连接 wifi
+    auto& wifi_station = WifiStation::GetInstance();
+    if (!wifi_station.IsConnected()) {
+        ESP_LOGI(TAG, "Reconnecting to WiFi...");
+        wifi_station.Start();
+        
+        // 等待 wifi 连接
+        if (!wifi_station.WaitForConnected(30 * 1000)) { // 30秒超时
+            ESP_LOGE(TAG, "Failed to reconnect to WiFi");
+            return;
+        }
+    }
+
+    // 重新连接mqtt
+    auto& mqtt_client = MqttClient::getInstance();
+    mqtt_client.initialize();
+    Board::GetInstance().WakeUpPowerSaveTimer();
+}
+
+void Application::initGizwitsServer() {
+    
+
+#if CONFIG_USE_GIZWITS_MQTT
+    auto& mqtt_client = MqttClient::getInstance();
+    mqtt_client.OnRoomParamsUpdated([this](const RoomParams& params) {
+        // 判断 protocol_ 是否启动
+        // 如果启动了，就断开重新连接
+
+        if (protocol_->IsAudioChannelOpened()) {
+            // 先停止所有正在进行的操作
+            Schedule([this]() {
+                QuitTalking();
+                PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
+            });
+        } else {
+            if (!protocol_->GetRoomParams().access_token.empty() && device_state_ != kDeviceStateSleeping) {
+                PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
+            }
+        }
+
+        Schedule([this]() {
+            MqttClient::getInstance().sendTraceLog("info", "获取配置智能体成功");
+        });
+        protocol_->UpdateRoomParams(params);
+        if(device_state_ == kDeviceStateSleeping) {
+            Schedule([this]() {
+                // 直接连接
+                SetDeviceState(kDeviceStateConnecting);
+                if (!protocol_->OpenAudioChannel()) {
+                    return;
+                }
+                ResetDecoder();
+                SetListeningMode(chat_mode_ == 2  ? kListeningModeRealtime : kListeningModeAutoStop);
+            });
+        }
+    });
+
+    if (!mqtt_client.initialize()) {
+        ESP_LOGE(TAG, "Failed to initialize MQTT client");
+        Alert(Lang::Strings::ERROR, Lang::Strings::ERROR, "sad", Lang::Sounds::P3_EXCLAMATION);
+        return;
+    }
+#else
+
+
+    bool need_activation = settings.GetInt("need_activation");
+    bool has_authkey = !Auth::getInstance().getAuthKey().empty();
+
+    if(need_activation == 1) {
+        if (!has_authkey) {
+            GServer::activationLimitDevice([this, &settings](mqtt_config_t* config) {
+                ESP_LOGI(TAG, "Device ID: %s", config->device_id);
+                settings.SetString("did", config->device_id);
+                settings.SetInt("need_activation", 0);
+                GServer::getWebsocketConfig([this](RoomParams* config) {
+                    if (config) {
+                        protocol_->UpdateRoomParams(*config);
+                    }
+                });
+            });
+        } else {
+            GServer::activationDevice([this, &settings](mqtt_config_t* config) {
+                settings.SetInt("need_activation", 0);
+                GServer::getWebsocketConfig([this](RoomParams* config) {
+                    if (config) {
+                        protocol_->UpdateRoomParams(*config);
+                    }
+                });
+            });
+        }
+    } else {
+        GServer::getWebsocketConfig([this](RoomParams* config) {
+            if (config) {
+                protocol_->UpdateRoomParams(*config);
+            }
+        });
+    }
+
+    if (!has_authkey) {
+        if (need_activation == 1) {
+            GServer::activationLimitDevice([this, &settings](mqtt_config_t* config) {
+                ESP_LOGI(TAG, "Device ID: %s", config->device_id);
+                settings.SetString("did", config->device_id);
+                settings.SetInt("need_activation", 0);
+                GServer::getWebsocketConfig([this](RoomParams* config) {
+                    if (config) {
+                        protocol_->UpdateRoomParams(*config);
+                    }
+                });
+            });
+            
+        } else {
+            
+        }
+        
+    } else {
+        if (need_activation == 1) {
+            ESP_LOGI(TAG, "need_activation is true");
+            // 调用注册
+            GServer::activationDevice([this, &settings](mqtt_config_t* config) {
+                settings.SetInt("need_activation", 0);
+                GServer::getWebsocketConfig([this](RoomParams* config) {
+                    if (config) {
+                        protocol_->UpdateRoomParams(*config);
+                    }
+                });
+            });
+        }
+    }
+#endif
+
 }

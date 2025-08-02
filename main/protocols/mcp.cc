@@ -141,11 +141,12 @@ void CozeMCPParser::handle_mcp(std::string_view data) {
     }
     else if (strcmp(name->valuestring, "sleep_control") == 0) {
         Application::GetInstance().QuitTalking();
-        // 关闭屏幕
-        cJSON_AddStringToObject(mcp_data, "method", "set_brightness_temporary");
-        cJSON_AddStringToObject(mcp_data, "name", "Screen");
-        cJSON_AddNumberToObject(params_data, "brightness", 0);
-
+        if (Board::GetInstance().IsCharging() == false) {
+            // 非充电状态关闭屏幕
+            cJSON_AddStringToObject(mcp_data, "method", "set_brightness_temporary");
+            cJSON_AddStringToObject(mcp_data, "name", "Screen");
+            cJSON_AddNumberToObject(params_data, "brightness", 0);
+        }
          send_tool_output_response(event_id, 
                                     cJSON_GetStringValue(conv_id), 
                                     cJSON_GetStringValue(tool_call_id), 

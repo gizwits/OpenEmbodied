@@ -231,6 +231,11 @@ void CircularStrip::OnStateChanged() {
             Blink(color, 500);
             break;
         }
+        case kDeviceStateSleeping: {
+            StripColor color = { 1, 1, 1 }; // 最低亮度
+            SetAllColor(color);
+            break;
+        }
         default:
             ESP_LOGW(TAG, "Unknown led strip event: %d", device_state);
             return;

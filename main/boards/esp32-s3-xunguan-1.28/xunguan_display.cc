@@ -12,6 +12,7 @@
 #include <unistd.h>
 #include <cstring>
 #include <lvgl.h>
+#include "application.h"
 
 /*
  * 帧率控制接口使用示例：
@@ -77,8 +78,15 @@ XunguanDisplay::~XunguanDisplay() {
     }
     
     if (vertigo_recovery_timer_) {
+        vertigo_mode_active_ = false;
         esp_timer_stop(vertigo_recovery_timer_);
         esp_timer_delete(vertigo_recovery_timer_);
+    }
+    
+    if (loving_recovery_timer_) {
+        loving_mode_active_ = false;
+        esp_timer_stop(loving_recovery_timer_);
+        esp_timer_delete(loving_recovery_timer_);
     }
     
     if (lvgl_task_handle_) {
@@ -828,8 +836,8 @@ void XunguanDisplay::StartLovingAnimation() {
     lv_anim_start(&right_eye_anim_);
     
     // Create recovery timer for 4 seconds
-    if (!vertigo_recovery_timer_) {
-        const esp_timer_create_args_t vertigo_timer_args = {
+    if (!loving_recovery_timer_) {
+        const esp_timer_create_args_t loving_recovery_timer_args = {
             .callback = [](void* arg) {
                 XunguanDisplay* self = static_cast<XunguanDisplay*>(arg);
                 if (!self) {
@@ -837,25 +845,36 @@ void XunguanDisplay::StartLovingAnimation() {
                 }
                 
                 // Clear loving mode flag
+                ESP_LOGI(TAG, "loving_recovery");
                 self->loving_mode_active_ = false;
                 
                 // Stop current animation and start idle animation
                 self->StopCurrentAnimation();
-                self->StartIdleAnimation();
+                const auto& app = Application::GetInstance();
+                auto state = app.GetDeviceState();
+                if (state == kDeviceStateSleeping || state == kDeviceStateIdle) {
+                    self->StartSleepingAnimation();
+                } else {
+                    self->StartIdleAnimation();
+                }
             },
             .arg = this,
             .name = "loving_recovery"
         };
         
-        esp_err_t ret = esp_timer_create(&vertigo_timer_args, &vertigo_recovery_timer_);
+        esp_err_t ret = esp_timer_create(&loving_recovery_timer_args, &loving_recovery_timer_);
         if (ret != ESP_OK) {
+            loving_mode_active_ = false;
+            ESP_LOGE(TAG, "Failed to create loving recovery timer: %s", esp_err_to_name(ret));
             return;
         }
     }
     
     // Start 4-second timer
-    esp_err_t ret = esp_timer_start_once(vertigo_recovery_timer_, 4000000);  // 4 seconds in microseconds
+    esp_err_t ret = esp_timer_start_once(loving_recovery_timer_, 4000000);  // 4 seconds in microseconds
     if (ret != ESP_OK) {
+        loving_mode_active_ = false;
+        ESP_LOGE(TAG, "Failed to start loving recovery timer: %s", esp_err_to_name(ret));
         return;
     }
 }
@@ -1866,17 +1885,18 @@ void XunguanDisplay::StartVertigoRotationAnimation(lv_obj_t* left_spiral, lv_obj
                     ESP_LOGE(TAG, "Vertigo recovery timer callback: invalid self pointer");
                     return;
                 }
-                
-                
-                
                 // Clear vertigo mode flag
+                ESP_LOGI(TAG, "vertigo_recovery");
                 self->vertigo_mode_active_ = false;
-                
                 // Stop current animation and start idle animation
                 self->StopCurrentAnimation();
-                self->StartIdleAnimation();
-                
-                
+                const auto& app = Application::GetInstance();
+                auto state = app.GetDeviceState();
+                if (state == kDeviceStateSleeping || state == kDeviceStateIdle) {
+                    self->StartSleepingAnimation();
+                } else {
+                    self->StartIdleAnimation();
+                }
             },
             .arg = this,
             .name = "vertigo_recovery"
@@ -1884,6 +1904,7 @@ void XunguanDisplay::StartVertigoRotationAnimation(lv_obj_t* left_spiral, lv_obj
         
         esp_err_t ret = esp_timer_create(&vertigo_timer_args, &vertigo_recovery_timer_);
         if (ret != ESP_OK) {
+            vertigo_mode_active_ = false;
             ESP_LOGE(TAG, "Failed to create vertigo recovery timer: %s", esp_err_to_name(ret));
             return;
         }
@@ -1892,6 +1913,7 @@ void XunguanDisplay::StartVertigoRotationAnimation(lv_obj_t* left_spiral, lv_obj
     // Start 4-second timer
     esp_err_t ret = esp_timer_start_once(vertigo_recovery_timer_, 4000000);  // 4 seconds in microseconds
     if (ret != ESP_OK) {
+        vertigo_mode_active_ = false;
         ESP_LOGE(TAG, "Failed to start vertigo recovery timer: %s", esp_err_to_name(ret));
         return;
     }

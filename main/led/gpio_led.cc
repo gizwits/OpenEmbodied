@@ -240,6 +240,10 @@ void GpioLed::OnStateChanged() {
             SetBrightness(ACTIVATING_BRIGHTNESS);
             StartContinuousBlink(500);
             break;
+        case kDeviceStateSleeping:
+            SetBrightness(1); // 最低亮度
+            TurnOn();
+            break;
         default:
             ESP_LOGE(TAG, "Unknown gpio led event: %d", device_state);
             return;

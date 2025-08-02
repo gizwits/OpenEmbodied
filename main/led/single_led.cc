@@ -155,6 +155,10 @@ void SingleLed::OnStateChanged() {
             SetColor(0, DEFAULT_BRIGHTNESS, 0);
             StartContinuousBlink(500);
             break;
+        case kDeviceStateSleeping:
+            SetColor(1, 1, 1); // 最低亮度
+            TurnOn();
+            break;
         default:
             ESP_LOGW(TAG, "Unknown led strip event: %d", device_state);
             return;

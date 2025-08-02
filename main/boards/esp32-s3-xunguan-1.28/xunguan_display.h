@@ -147,7 +147,8 @@ private:
     esp_timer_handle_t vertigo_recovery_timer_;
     bool vertigo_mode_active_;
 
-    // Loving animation lock
+    // Loving recovery timer
+    esp_timer_handle_t loving_recovery_timer_;
     bool loving_mode_active_;
 
     // OTA mode variables

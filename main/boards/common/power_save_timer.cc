@@ -104,5 +104,4 @@ void PowerSaveTimer::WakeUp() {
 
 void PowerSaveTimer::ResetTimer() {
     ticks_ = 0;
-    ESP_LOGI(TAG, "Power save timer reset");
 }

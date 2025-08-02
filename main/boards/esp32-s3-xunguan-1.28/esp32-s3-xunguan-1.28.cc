@@ -48,22 +48,39 @@ private:
     PowerManager* power_manager_;
     TickType_t last_touch_time_ = 0;  // 上次抚摸触发时间
     PowerSaveTimer* power_save_timer_;
+    bool is_charging_sleep_ = false;
 
 
     void InitializePowerSaveTimer() {
-        // power_save_timer_ = new PowerSaveTimer(-1, 60 * 20, 60 * 60 * 3);
-        power_save_timer_ = new PowerSaveTimer(-1, 20 * 1, 30 * 2);
+        // 20 分钟进休眠
+        // 30 分钟 关机
+        power_save_timer_ = new PowerSaveTimer(-1, 60 * 20, 60 * 30);
+        // power_save_timer_ = new PowerSaveTimer(-1, 20 * 1, 60 * 2);
         power_save_timer_->OnEnterSleepMode([this]() {
             ESP_LOGE(TAG, "Enabling sleep mode");
-            // 关闭 wifi，进入待机模式
-            
+            if(IsCharging()) {
+                // 充电中
+                is_charging_sleep_ = true;
+                Application::GetInstance().Schedule([this]() {
+                    Application::GetInstance().QuitTalking();
+                    Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
+                });
+
+            } else {
+                // 关闭 wifi，进入待机模式
+                Application::GetInstance().EnterSleepMode();
+            }
         });
         power_save_timer_->OnExitSleepMode([this]() {
-            ESP_LOGE(TAG, "Exiting sleep mode");
-            // 关机
-            PowerOff();
+            ESP_LOGE(TAG, "退出休眠模式");
         });
         power_save_timer_->OnShutdownRequest([this]() {
+            // 关机
+            if (IsCharging()) {
+                // 充电模式下不管
+            } else {
+                PowerOff();
+            }
         });
         power_save_timer_->SetEnabled(true);
     }
@@ -71,6 +88,12 @@ private:
     virtual void ResetPowerSaveTimer() {
         if (power_save_timer_) {
             power_save_timer_->ResetTimer();
+        }
+    };
+
+    virtual void WakeUpPowerSaveTimer() {
+        if (power_save_timer_) {
+            power_save_timer_->WakeUp();
         }
     };
 
@@ -173,6 +196,7 @@ private:
 
         touch_button_.OnPressDown([this]() {
             //切换表情
+            CheckAndHandleEnterSleepMode();
             ESP_LOGI(TAG, "touch_button_.OnPressDown");
 
             TickType_t current_time = xTaskGetTickCount();
@@ -193,7 +217,7 @@ private:
         });
 
         boot_button_.OnClick([this]() {
-
+            CheckAndHandleEnterSleepMode();
             auto& app = Application::GetInstance();
             // if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
             //     ResetWifiConfiguration();
@@ -234,18 +258,15 @@ private:
                     auto* board = static_cast<MovecallMojiESP32S3*>(arg);
                     board->display_->SetEmotion("neutral");
 
-                    // if (board->IsCharging()) {
-                    //     // 充电中，只关闭背光
-                    //     board->GetBacklight()->SetBrightness(0, false);
-                    //     board->is_sleep_ = true;
-                    // } else {
-                    //     // 没有充电，关机
-                    //     board->PowerOff();
-                    // }
-                    // 充电中也可以关机
-                    board->PowerOff();
-
-                    Application::GetInstance().QuitTalking();
+                    if (board->IsCharging()) {
+                        // 充电中，只关闭背光
+                        board->GetBacklight()->SetBrightness(0, false);
+                        board->is_charging_sleep_ = true;
+                        Application::GetInstance().QuitTalking();
+                    } else {
+                        // 没有充电，关机
+                        board->PowerOff();
+                    }
                     vTaskDelete(NULL);
                 }, "power_off_task", 4028, this, 10, NULL);
             }
@@ -376,6 +397,11 @@ private:
                 } else {
                     ESP_LOGE(TAG, "无法获取 XunguanDisplay 对象");
                 }
+
+                if (this->is_charging_sleep_) {
+                    ESP_LOGI(TAG, "充电停止，关机");
+                    PowerOff();
+                }
             }
 
             // 通知 mqtt 
@@ -393,16 +419,8 @@ public:
         
         InitializeChargingGpio();
 
-        bool is_charging = IsCharging();
-        // if (is_charging) {
-        //     // 充电中
-        // } else {
-        //     // 没有充电
-        //     InitializeGpio(POWER_GPIO, true);
-        // }
         InitializeGpio(POWER_GPIO, true);
 
-        ESP_LOGI(TAG, "is_charging: %d", is_charging);
         InitializeI2c();
         InitializeGpio(AUDIO_CODEC_PA_PIN, true);
         // InitializeGpio(DISPLAY_BACKLIGHT_PIN, false);
@@ -433,6 +451,14 @@ public:
 
     virtual void PowerOff() override {
         gpio_set_level(POWER_GPIO, 0);
+    }
+
+    void CheckAndHandleEnterSleepMode() {
+        auto& app = Application::GetInstance();
+        if (app.GetDeviceState() == kDeviceStateSleeping) {
+            // 如果休眠中
+            app.ExitSleepMode();
+        }
     }
 
     static void RestoreBacklightTask(void* arg) {

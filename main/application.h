@@ -47,6 +47,7 @@ enum DeviceState {
     kDeviceStateSpeaking,
     kDeviceStateUpgrading,
     kDeviceStateActivating,
+    kDeviceStateSleeping,  // 休眠模式：关闭屏幕、socket、wifi
     kDeviceStateFatalError
 };
 
@@ -93,12 +94,17 @@ public:
     void SendMcpMessage(const std::string& payload);
     void SendTextToAI(const std::string& text);
 
+    // 关闭 wifi 的休眠
+    void EnterSleepMode();
+    void ExitSleepMode();
+
     const char* GetTraceId() const { return trace_id_; }
     void GenerateTraceId();
 private:
     Application();
     ~Application();
-
+    void initGizwitsServer();
+    
 #if CONFIG_USE_WAKE_WORD_DETECT
     WakeWordDetect wake_word_detect_;
 #endif
