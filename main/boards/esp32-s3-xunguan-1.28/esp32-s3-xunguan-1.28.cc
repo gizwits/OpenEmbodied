@@ -170,7 +170,6 @@ private:
                 ESP_LOGI(TAG, "首次上电5秒内，忽略长按操作");
             } else {
                 ESP_LOGI(TAG, "执行关机操作");
-                Application::GetInstance().QuitTalking();
                 // vTaskDelay(pdMS_TO_TICKS(200));
                 // auto codec = GetAudioCodec();
                 // codec->EnableOutput(true);
@@ -186,7 +185,7 @@ private:
                 // 使用静态函数来避免lambda捕获问题
                 xTaskCreate([](void* arg) {
                     auto* board = static_cast<MovecallMojiESP32S3*>(arg);
-                    Application::GetInstance().SetDeviceState(kDeviceStateIdle);
+                    board->display_->SetEmotion("neutral");
 
                     if (board->IsCharging()) {
                         // 充电中，只关闭背光
@@ -194,14 +193,18 @@ private:
                         board->is_sleep_ = true;
                     } else {
                         // 没有充电，关机
-                        gpio_set_level(POWER_GPIO, 0);
+                        board->PowerOff();
                     }
+
+                    Application::GetInstance().QuitTalking();
                     vTaskDelete(NULL);
                 }, "power_off_task", 4028, this, 10, NULL);
             }
         });
 
         boot_button_.OnMultipleClick([this]() {
+            GetBacklight()->SetBrightness(0, false);
+            vTaskDelay(pdMS_TO_TICKS(500));
             ResetWifiConfiguration();
         }, 3);
     }
@@ -300,7 +303,7 @@ private:
                 // 设置充电时的自定义帧率：100-125Hz (8-10ms延迟)
                 // 需要强制转换成 XunguanDisplay 类型
                 if (xunguan_display) {
-                    if (xunguan_display->SetCustomFrameRate(20, 30)) {
+                    if (xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::POWER_SAVE)) {
                         ESP_LOGI(TAG, "充电帧率设置成功");
                     } else {
                         ESP_LOGE(TAG, "充电帧率设置失败");
@@ -327,7 +330,7 @@ private:
                 
                 if (is_sleep_) {
                     // 关机
-                    gpio_set_level(POWER_GPIO, 0);
+                    PowerOff();
                 } else {
                     GetBacklight()->RestoreBrightness();
                 }
@@ -380,6 +383,10 @@ public:
         );
     }
 
+    virtual void PowerOff() override {
+        gpio_set_level(POWER_GPIO, 0);
+    }
+
     static void RestoreBacklightTask(void* arg) {
         auto* self = static_cast<MovecallMojiESP32S3*>(arg);
         int level;
@@ -390,7 +397,7 @@ public:
 
         if (charging) {
             // 降低发热            
-            xunguan_display->SetCustomFrameRate(20, 30);
+            xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::POWER_SAVE);
         } else {
             xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL);
         }

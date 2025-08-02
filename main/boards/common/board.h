@@ -73,6 +73,7 @@ public:
     virtual int MaxVolume() { return 100; }
     virtual int MaxBacklightBrightness() { return 100; }
     virtual bool IsCharging() { return false; }
+    virtual void PowerOff() {};
     
     // 设备模式相关方法
     virtual DeviceMode GetDeviceMode() const { return device_mode_; }

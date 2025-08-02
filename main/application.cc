@@ -134,7 +134,7 @@ void Application::CheckNewVersion() {
         if (ota_.HasNewVersion()) {
 
 
-            Alert(Lang::Strings::OTA_UPGRADE, Lang::Strings::UPGRADING, "happy", Lang::Sounds::P3_UPGRADE);
+            Alert(Lang::Strings::OTA_UPGRADE, Lang::Strings::UPGRADING, "neutral", Lang::Sounds::P3_UPGRADE);
 
             vTaskDelay(pdMS_TO_TICKS(3000));
             
@@ -487,11 +487,13 @@ void Application::Start() {
     // 播放上电提示音
     PlaySound(Lang::Sounds::P3_SUCCESS);
 
-    CheckBatteryLevel();
-
     /* Wait for the network to be ready */
     board.StartNetwork();
 
+    bool battery_ok = CheckBatteryLevel(true);
+    if (!battery_ok) {
+        return;
+    }
 
     PlaySound(Lang::Sounds::P3_CONNECT_SUCCESS);
     vTaskDelay(pdMS_TO_TICKS(500));
@@ -995,7 +997,7 @@ void Application::MainEventLoop() {
         auto now = std::chrono::steady_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::minutes>(now - last_battery_check_time_).count();
         if (duration >= 2) {
-            CheckBatteryLevel();
+            CheckBatteryLevel(false);
             last_battery_check_time_ = now;
         }
 
@@ -1560,7 +1562,7 @@ void Application::SetChatMode(int mode) {
     esp_restart();
 }
 
-void Application::CheckBatteryLevel() {
+bool Application::CheckBatteryLevel(bool force_off) {
     // 检查电量
     int level = 0;
     bool charging = false;
@@ -1571,7 +1573,14 @@ void Application::CheckBatteryLevel() {
             // 提示电量不足
             // SetDeviceState(kDeviceStateIdle);
             Alert(Lang::Strings::ERROR, Lang::Strings::ERROR, "sad", Lang::Sounds::P3_BATTLE_LOW);
-            return;
+            if (force_off) {
+                Schedule([this]() {
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                    Board::GetInstance().PowerOff();
+                });
+            }
+            return false;
         }
     }
+    return true;
 }

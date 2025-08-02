@@ -76,7 +76,7 @@ public:
     void ChangeBot(const char* id, const char* voice_id);
     void AbortSpeaking(AbortReason reason);
     void PlayMusic(const char* url);
-    void CheckBatteryLevel();
+    bool CheckBatteryLevel(bool force_off);
     void CancelPlayMusic();
     void ResetDecoder();
     void ToggleChatState();

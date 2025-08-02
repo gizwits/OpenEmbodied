@@ -950,7 +950,7 @@ void XunguanDisplay::StartThinkingAnimation() {
     lv_img_set_src(hand, &hand_img);
     lv_obj_set_style_img_recolor(hand, lv_color_hex(EYE_COLOR), 0);  // Use EYE_COLOR
     lv_obj_set_style_img_recolor_opa(hand, LV_OPA_COVER, 0);
-    lv_img_set_zoom(hand, 150);  // Scale down to 50%
+    lv_img_set_zoom(hand, 128);  // Scale down to 50%
 
     // hand_img 原始 220x220，缩放到 40%（256=100%，102=40%）
     // lv_img_set_zoom(hand, 102);
@@ -1062,7 +1062,7 @@ void XunguanDisplay::StartSleepingAnimation() {
     }
     lv_label_set_text(zzz1_, "z");
     lv_obj_set_style_text_color(zzz1_, lv_color_hex(EYE_COLOR), 0);  // Pink color
-    lv_obj_set_style_text_font(zzz1_, &lv_font_montserrat_14, 0);  // Use Montserrat font
+    lv_obj_set_style_text_font(zzz1_, &lv_font_montserrat_22, 0);  // Use Montserrat font
     lv_obj_set_style_text_letter_space(zzz1_, 2, 0);  // Increase letter spacing
     lv_obj_set_pos(zzz1_, 60, 50);  // Upper left area for circular screen
     
@@ -1074,7 +1074,7 @@ void XunguanDisplay::StartSleepingAnimation() {
     }
     lv_label_set_text(zzz2_, "z");
     lv_obj_set_style_text_color(zzz2_, lv_color_hex(EYE_COLOR), 0);  // Pink color
-    lv_obj_set_style_text_font(zzz2_, &lv_font_montserrat_14, 0);  // Use Montserrat font
+    lv_obj_set_style_text_font(zzz2_, &lv_font_montserrat_22, 0);  // Use Montserrat font
     lv_obj_set_style_text_letter_space(zzz2_, 2, 0);  // Increase letter spacing
     lv_obj_set_pos(zzz2_, screen_width / 2 - 7, 30);  // Upper center for circular screen
     
@@ -1087,7 +1087,7 @@ void XunguanDisplay::StartSleepingAnimation() {
     }
     lv_label_set_text(zzz3_, "z");
     lv_obj_set_style_text_color(zzz3_, lv_color_hex(EYE_COLOR), 0);  // Pink color
-    lv_obj_set_style_text_font(zzz3_, &lv_font_montserrat_14, 0);  // Use Montserrat font
+    lv_obj_set_style_text_font(zzz3_, &lv_font_montserrat_22, 0);  // Use Montserrat font
     lv_obj_set_style_text_letter_space(zzz3_, 2, 0);  // Increase letter spacing
     lv_obj_set_pos(zzz3_, screen_width - 80, 30);  // Higher position for diagonal line
     
@@ -1101,7 +1101,7 @@ void XunguanDisplay::StartSleepingAnimation() {
     int eye_spacing = screen_width / 2.5;  // 1/2 of screen width between eyes (increased from 1/3)
     int left_eye_x = (screen_width / 2) - (eye_spacing / 2) - (eye_width / 2);
     int right_eye_x = (screen_width / 2) + (eye_spacing / 2) - (eye_width / 2);
-    int eye_y = 100;  // Position below zzz labels
+    int eye_y = 110;  // Position below zzz labels
     
     
     // Create left eye
@@ -1418,7 +1418,7 @@ void XunguanDisplay::StartEyeScalingAnimation(lv_obj_t* left_eye, lv_obj_t* righ
     
     // Animation parameters
     int min_height = original_height * 8 / 10;  // Shrink to 8/10 (slight)
-    int anim_duration = 1000;  // 1 second per cycle
+    int anim_duration = 700;  // 1 second per cycle
     
     // 使用单个动画和回调函数同时处理两个眼睛
     lv_anim_init(&left_eye_anim_);
@@ -1729,7 +1729,7 @@ bool XunguanDisplay::SetFrameRateMode(FrameRateMode mode) {
         case FrameRateMode::POWER_SAVE:
             min_ms = 8;
             max_ms = 20;
-            tick_period_us = 4000;  // 8ms tick
+            tick_period_us = 2700;  // 8ms tick
             
             break;
             
@@ -2169,7 +2169,7 @@ void XunguanDisplay::EnterOTAMode() {
     
     lv_obj_align(ota_number_label_, LV_ALIGN_CENTER, 0, 0);
     lv_label_set_text(ota_number_label_, "0%");
-    lv_obj_set_style_text_font(ota_number_label_, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(ota_number_label_, &lv_font_montserrat_22, 0);
     lv_obj_set_style_text_color(ota_number_label_, lv_color_hex(EYE_COLOR), 0);
     
     // 重置进度
