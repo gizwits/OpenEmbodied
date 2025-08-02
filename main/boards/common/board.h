@@ -74,6 +74,7 @@ public:
     virtual int MaxBacklightBrightness() { return 100; }
     virtual bool IsCharging() { return false; }
     virtual void PowerOff() {};
+    virtual void ResetPowerSaveTimer() {};  // 新增：重置电源保存定时器
     
     // 设备模式相关方法
     virtual DeviceMode GetDeviceMode() const { return device_mode_; }

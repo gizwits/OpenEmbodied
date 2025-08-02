@@ -11,6 +11,7 @@
 #include "xunguan_display.h"
 
 #include <wifi_station.h>
+#include "power_save_timer.h"
 #include <esp_log.h>
 #include <esp_efuse_table.h>
 #include <driver/i2c_master.h>
@@ -45,6 +46,33 @@ private:
     i2c_master_dev_handle_t lis2hh12_dev_;
     int64_t power_on_time_ = 0;  // 记录上电时间
     PowerManager* power_manager_;
+    TickType_t last_touch_time_ = 0;  // 上次抚摸触发时间
+    PowerSaveTimer* power_save_timer_;
+
+
+    void InitializePowerSaveTimer() {
+        // power_save_timer_ = new PowerSaveTimer(-1, 60 * 20, 60 * 60 * 3);
+        power_save_timer_ = new PowerSaveTimer(-1, 20 * 1, 30 * 2);
+        power_save_timer_->OnEnterSleepMode([this]() {
+            ESP_LOGE(TAG, "Enabling sleep mode");
+            // 关闭 wifi，进入待机模式
+            
+        });
+        power_save_timer_->OnExitSleepMode([this]() {
+            ESP_LOGE(TAG, "Exiting sleep mode");
+            // 关机
+            PowerOff();
+        });
+        power_save_timer_->OnShutdownRequest([this]() {
+        });
+        power_save_timer_->SetEnabled(true);
+    }
+
+    virtual void ResetPowerSaveTimer() {
+        if (power_save_timer_) {
+            power_save_timer_->ResetTimer();
+        }
+    };
 
 
     static void lis2hh12_task(void* arg) {
@@ -54,6 +82,8 @@ private:
         int shake_count = 0;
         const int shake_count_threshold = 10; // 连续3次才算shake
         const int shake_count_decay = 1;     // 每次没检测到就-1
+        TickType_t last_shake_time = 0;      // 上次摇晃触发时间
+        const TickType_t shake_cooldown = pdMS_TO_TICKS(5000); // 5秒冷却时间
         while (1) {
             // 读取X/Y/Z
             int16_t x = (int16_t)((board->lis2hh12_read_reg_pub(0x29) << 8) | board->lis2hh12_read_reg_pub(0x28));
@@ -65,14 +95,22 @@ private:
             if (fabs(ax - last_ax) > threshold || fabs(ay - last_ay) > threshold || fabs(az - last_az) > threshold) {
                 shake_count++;
                 if (shake_count >= shake_count_threshold) {
-                    ESP_LOGI("LIS2HH12", "Shake detected! ax=%.2f ay=%.2f az=%.2f", ax, ay, az);
-                    shake_count = 0; // 触发后清零
-                    // 这里可以触发你的摇晃事件
-                    if (board->ChannelIsOpen()) {
-                        board->display_->SetEmotion("vertigo");
-                        Application::GetInstance().SendMessage("用户正在摇晃你");
+                    TickType_t current_time = xTaskGetTickCount();
+                    // 检查是否已经过了冷却时间
+                    if (current_time - last_shake_time >= shake_cooldown) {
+                        ESP_LOGI("LIS2HH12", "Shake detected! ax=%.2f ay=%.2f az=%.2f", ax, ay, az);
+                        last_shake_time = current_time; // 更新上次触发时间
+                        shake_count = 0; // 触发后清零
+                        // 这里可以触发你的摇晃事件
+                        if (board->ChannelIsOpen()) {
+                            board->display_->SetEmotion("vertigo");
+                            Application::GetInstance().SendMessage("用户正在摇晃你");
+                        } else {
+                            ESP_LOGI("LIS2HH12", "Channel is not open");
+                        }
                     } else {
-                        ESP_LOGI("LIS2HH12", "Channel is not open");
+                        ESP_LOGI("LIS2HH12", "Shake detected but in cooldown period");
+                        shake_count = 0; // 重置计数但不触发
                     }
                 }
             } else {
@@ -115,7 +153,7 @@ private:
     }
 
     int MaxBacklightBrightness() {
-        return 60;
+        return 50;
     }
 
     void InitializeChargingGpio() {
@@ -137,11 +175,20 @@ private:
             //切换表情
             ESP_LOGI(TAG, "touch_button_.OnPressDown");
 
-            display_->SetEmotion("loving");
-            if (ChannelIsOpen()) {
-                Application::GetInstance().SendMessage("用户正在抚摸你");
+            TickType_t current_time = xTaskGetTickCount();
+            const TickType_t touch_cooldown = pdMS_TO_TICKS(5000); // 5秒冷却时间
+            
+            // 检查是否已经过了冷却时间
+            if (current_time - last_touch_time_ >= touch_cooldown) {
+                last_touch_time_ = current_time; // 更新上次触发时间
+                display_->SetEmotion("loving");
+                if (ChannelIsOpen()) {
+                    Application::GetInstance().SendMessage("用户正在抚摸你");
+                } else {
+                    ESP_LOGI("touch", "Channel is not open");
+                }
             } else {
-                ESP_LOGI("touch", "Channel is not open");
+                ESP_LOGI("touch", "Touch detected but in cooldown period");
             }
         });
 
@@ -173,6 +220,7 @@ private:
                 // auto codec = GetAudioCodec();
                 // codec->EnableOutput(true);
                 // Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
+                this->GetBacklight()->SetBrightness(0, false);
                 need_power_off_ = true;
             }
         });
@@ -258,7 +306,7 @@ private:
         i2c_device_config_t dev_cfg = {
             .dev_addr_length = I2C_ADDR_BIT_LEN_7,
             .device_address = LIS2HH12_I2C_ADDR,
-            .scl_speed_hz = 400000,
+            .scl_speed_hz = 100000,  // 降低到100kHz，提高稳定性
         };
         ESP_ERROR_CHECK(i2c_master_bus_add_device(lis2hh12_i2c_bus_, &dev_cfg, &lis2hh12_dev_));
     }
@@ -329,6 +377,11 @@ private:
                     ESP_LOGE(TAG, "无法获取 XunguanDisplay 对象");
                 }
             }
+
+            // 通知 mqtt 
+            auto& mqtt_client = MqttClient::getInstance();
+            mqtt_client.ReportTimer();
+
         });
     }
 
@@ -361,6 +414,7 @@ public:
         InitializeIot();
         xTaskCreate(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 4096, this, 5, NULL); // 启动检测任务
         InitializePowerManager();
+        InitializePowerSaveTimer();
         // ESP_LOGI(TAG, "ReadADC2_CH1_Oneshot");
         // ReadADC2_CH1_Oneshot();
         if (power_manager_) {
@@ -412,7 +466,6 @@ public:
     virtual bool IsCharging() override {
         int chrg = gpio_get_level(CHARGING_PIN);
         int standby = gpio_get_level(STANDBY_PIN);
-        ESP_LOGI(TAG, "chrg: %d, standby: %d", chrg, standby);
         return chrg == 0 || standby == 0;
     }
 

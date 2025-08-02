@@ -492,7 +492,7 @@ void Application::Start() {
 
     bool battery_ok = CheckBatteryLevel();
     if (!battery_ok) {
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        vTaskDelay(pdMS_TO_TICKS(3000));
         Board::GetInstance().PowerOff();
         return;
     }
@@ -638,7 +638,7 @@ void Application::Start() {
         }
     });
     protocol_->OnAudioChannelOpened([this, codec, &board]() {
-        board.SetPowerSaveMode(false);
+        // board.SetPowerSaveMode(false);
         if (protocol_->server_sample_rate() != codec->output_sample_rate()) {
             ESP_LOGW(TAG, "Server sample rate %d does not match device output sample rate %d, resampling may cause distortion",
                 protocol_->server_sample_rate(), codec->output_sample_rate());
@@ -660,7 +660,7 @@ void Application::Start() {
     });
     protocol_->OnAudioChannelClosed([this, &board]() {
 
-        board.SetPowerSaveMode(true);
+        // board.SetPowerSaveMode(true);
         Schedule([this]() {
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
@@ -671,6 +671,8 @@ void Application::Start() {
     });
     protocol_->OnIncomingJson([this, display](const cJSON* root) {
         // Parse JSON data
+        // 有交互
+        Board::GetInstance().ResetPowerSaveTimer();
         auto type = cJSON_GetObjectItem(root, "type");
         if (strcmp(type->valuestring, "tts") == 0) {
             auto state = cJSON_GetObjectItem(root, "state");
@@ -813,43 +815,47 @@ void Application::Start() {
     wake_word_detect_.Initialize(codec);
     wake_word_detect_.OnWakeWordDetected([this](const std::string& wake_word) {
         ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
-        Schedule([this, &wake_word]() {
-            CancelPlayMusic();
-            ESP_LOGI(TAG, "Wake word detected: %s, device state: %s, %d", wake_word.c_str(), STATE_STRINGS[device_state_], device_state_);
-            if (device_state_ == kDeviceStateIdle) {
+        // 提高唤醒词速度 用 task
+        xTaskCreate([](void* arg) {
+            Application* app = (Application*)arg;
+
+            app->CancelPlayMusic();
+            // 检测到唤醒词时重置电源保存定时器
+            Board::GetInstance().ResetPowerSaveTimer();
+            if (app->device_state_ == kDeviceStateIdle) {
                 auto& board = Board::GetInstance();
                 // 还原屏幕亮度
                 auto backlight = board.GetBacklight();
                 if (backlight) {
                     backlight->RestoreBrightness();
                 }
-                ResetDecoder();
-                PlaySound(Lang::Sounds::P3_SUCCESS);
+                app->ResetDecoder();
+                app->PlaySound(Lang::Sounds::P3_SUCCESS);
 
-                SetDeviceState(kDeviceStateConnecting);
-                wake_word_detect_.EncodeWakeWordData();
+                app->SetDeviceState(kDeviceStateConnecting);
+                app->wake_word_detect_.EncodeWakeWordData();
 
-                if (!protocol_ || !protocol_->OpenAudioChannel()) {
-                    wake_word_detect_.StartDetection();
+                if (!app->protocol_ || !app->protocol_->OpenAudioChannel()) {
+                    app->wake_word_detect_.StartDetection();
                     return;
                 }
 
-                ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
-                SetListeningMode(chat_mode_ == 2  ? kListeningModeRealtime : kListeningModeAutoStop);
-            } else if (device_state_ == kDeviceStateSpeaking) {
+                app->SetListeningMode(app->chat_mode_ == 2  ? kListeningModeRealtime : kListeningModeAutoStop);
+            } else if (app->device_state_ == kDeviceStateSpeaking) {
                 // 关键词打断，继续监听
-                protocol_->SendAbortSpeaking(kAbortReasonNone);
-                ResetDecoder();
-                PlaySound(Lang::Sounds::P3_SUCCESS);
+                app->protocol_->SendAbortSpeaking(kAbortReasonNone);
+                app->ResetDecoder();
+                app->PlaySound(Lang::Sounds::P3_SUCCESS);
                 vTaskDelay(pdMS_TO_TICKS(300));
-                ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
-                SetListeningMode(chat_mode_ == 2  ? kListeningModeRealtime : kListeningModeAutoStop);
+                app->SetListeningMode(app->chat_mode_ == 2  ? kListeningModeRealtime : kListeningModeAutoStop);
                 auto display = Board::GetInstance().GetDisplay();
                 display->SetChatMessage("assistant", "");
-            } else if (device_state_ == kDeviceStateActivating) {
-                SetDeviceState(kDeviceStateIdle);
+            } else if (app->device_state_ == kDeviceStateActivating) {
+                app->SetDeviceState(kDeviceStateIdle);
             }
-        });
+            vTaskDelete(NULL);
+        }, "wake_word_detect_task", 4096, this, 10, nullptr);
+     
     });
     wake_word_detect_.StartDetection();
 #endif
@@ -1441,6 +1447,8 @@ void Application::SendTextToAI(const std::string& text) {
 }
 
 void Application::WakeWordInvoke(const std::string& wake_word) {
+    Board::GetInstance().ResetPowerSaveTimer();
+
 #if CONFIG_USE_GIZWITS_MQTT
     auto& mqtt_client = MqttClient::getInstance();
     mqtt_client.sendTraceLog("info", "唤醒词触发");
@@ -1508,19 +1516,23 @@ void Application::GenerateTraceId() {
 
 
 bool Application::CanEnterSleepMode() {
-    if (device_state_ != kDeviceStateIdle) {
-        return false;
-    }
+    // 如果音频通道打开，不允许睡眠
+    // if (protocol_ && protocol_->IsAudioChannelOpened()) {
+    //     return false;
+    // }
 
-    if (protocol_ && protocol_->IsAudioChannelOpened()) {
-        return false;
-    }
-
+    // 如果正在下载，不允许睡眠
     if (player_.IsDownloading()) {
         return false;
     }
 
-    // Now it is safe to enter sleep mode
+    // 如果正在充电，不允许睡眠
+    if (Board::GetInstance().IsCharging()) {
+        return false;
+    }
+
+    // 现在可以安全地进入睡眠模式
+    ESP_LOGI(TAG, "CanEnterSleepMode");
     return true;
 }
 
@@ -1575,7 +1587,6 @@ bool Application::CheckBatteryLevel() {
             // 提示电量不足
             // SetDeviceState(kDeviceStateIdle);
             Alert(Lang::Strings::ERROR, Lang::Strings::ERROR, "sad", Lang::Sounds::P3_BATTLE_LOW);
-        
             return false;
         }
     }

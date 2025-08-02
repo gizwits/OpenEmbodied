@@ -61,6 +61,7 @@ XunguanDisplay::XunguanDisplay()
       zzz1_anim_(), zzz2_anim_(), zzz3_anim_(),
       current_state_(EyeState::IDLE),
       left_eye_anim_(), right_eye_anim_(), right_eye_(nullptr),
+      mouth_(nullptr), mouth_anim_(),
       lvgl_tick_timer_(nullptr), lvgl_task_handle_(nullptr),
       vertigo_recovery_timer_(nullptr), vertigo_mode_active_(false),
       loving_mode_active_(false), ota_progress_bar_(nullptr), ota_number_label_(nullptr), ota_progress_(0) {
@@ -606,97 +607,32 @@ void XunguanDisplay::StartHappyAnimation() {
     
     // Clear existing UI elements
     ClearUIElements();
+    StartIdleAnimation();
     DisplayLockGuard lock(this);
     
-    // Set background to black
-    lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
+    // 获取屏幕尺寸
+    int width_ = DISPLAY_WIDTH;
+    int height_ = DISPLAY_HEIGHT;
     
-    // Calculate screen dimensions
-    int screen_width = DISPLAY_WIDTH;
-    int screen_height = DISPLAY_HEIGHT;
-    
-    
-    
-    // Calculate positions for centered circles
-    int circle_spacing = screen_width / 3;  // 1/3 of screen width between circles
-    int left_circle_x = (screen_width / 2) - (circle_spacing / 2);
-    int right_circle_x = (screen_width / 2) + (circle_spacing / 2);
-    int circle_y = (screen_height / 2) - 10;  // Slightly above center
-    
-    // Circle dimensions
-    int circle_size = 60;
-    int y_offset = - 20;
-    
-    // Create left circle
-    left_eye_ = lv_obj_create(screen);
-    if (!left_eye_) {
-        ESP_LOGE(TAG, "Failed to create left circle!");
-        return;
-    }
-    
-    // Set left circle properties
-    lv_obj_set_size(left_eye_, circle_size, circle_size);
-    lv_obj_set_pos(left_eye_, left_circle_x - circle_size/2, circle_y - circle_size/2 + y_offset);
-    lv_obj_set_style_radius(left_eye_, circle_size/2, 0);  // Make it perfectly round
-    lv_obj_set_style_bg_color(left_eye_, lv_color_hex(EYE_COLOR), 0);
-    lv_obj_set_style_bg_opa(left_eye_, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(left_eye_, 0, 0);  // No border
-    lv_obj_set_style_shadow_width(left_eye_, 0, 0);  // No shadow
-    lv_obj_set_style_outline_width(left_eye_, 0, 0);  // No outline
-    
-    
-    
-    // Create right circle
-    right_eye_ = lv_obj_create(screen);
-    if (!right_eye_) {
-        ESP_LOGE(TAG, "Failed to create right circle!");
-        return;
-    }
-    
-    // Set right circle properties
-    lv_obj_set_size(right_eye_, circle_size, circle_size);
-    lv_obj_set_pos(right_eye_, right_circle_x - circle_size/2, circle_y - circle_size/2 + y_offset);
-    lv_obj_set_style_radius(right_eye_, circle_size/2, 0);  // Make it perfectly round
-    lv_obj_set_style_bg_color(right_eye_, lv_color_hex(EYE_COLOR), 0);
-    lv_obj_set_style_bg_opa(right_eye_, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(right_eye_, 0, 0);  // No border
-    lv_obj_set_style_shadow_width(right_eye_, 0, 0);  // No shadow
-    lv_obj_set_style_outline_width(right_eye_, 0, 0);  // No outline
-    
-    
-    
-    // Force refresh the screen
-    lv_obj_invalidate(screen);
-    
-    
-    
-    // Start blinking animation for the circles
-    StartHappyBlinkingAnimation(left_eye_, right_eye_, circle_size);
-    
-    // Create mouth image below the circles
-    lv_obj_t* mouth_img = lv_img_create(screen);
-    if (!mouth_img) {
-        ESP_LOGE(TAG, "Failed to create mouth image!");
-        return;
-    }
-    
-    // Set mouth image properties
-    lv_img_set_src(mouth_img, &mouse_img);
-    lv_obj_set_style_img_recolor(mouth_img, lv_color_hex(EYE_COLOR), 0); 
-    lv_obj_set_style_img_recolor_opa(mouth_img, LV_OPA_COVER, 0);
-    
-    // Position mouth below the circles - use zoom to scale down the mouth
-    int mouth_width = mouse_img.header.w;
-    int mouth_height = mouse_img.header.h;
-    int mouth_x = (screen_width / 2) - (mouth_width / 2);
-    int mouth_y = circle_y;  // 10 pixels below circles
-    
-    lv_obj_set_size(mouth_img, mouth_width, mouth_height);
-    lv_obj_set_pos(mouth_img, mouth_x, mouth_y);
-    
-    
-    
+    // 创建嘴巴图片对象
+    mouth_ = lv_img_create(screen);
+    lv_img_set_src(mouth_, &down_image);
+    lv_obj_set_pos(mouth_, (width_ - 32) / 2, height_ - 52);  // 居中，距离底部52像素
+    lv_obj_set_style_img_recolor(mouth_, lv_color_hex(EYE_COLOR), 0);  // 设置青色
+    lv_obj_set_style_img_recolor_opa(mouth_, LV_OPA_COVER, 0);  // 设置不透明度
+
+    // 创建嘴巴动画
+    lv_anim_init(&mouth_anim_);
+    lv_anim_set_var(&mouth_anim_, mouth_);
+    lv_anim_set_values(&mouth_anim_, height_ - 52, height_ - 62);  // 在-52到-62像素之间移动
+    lv_anim_set_time(&mouth_anim_, 1500);
+    lv_anim_set_delay(&mouth_anim_, 0);
+    lv_anim_set_exec_cb(&mouth_anim_, (lv_anim_exec_xcb_t)lv_obj_set_y);
+    lv_anim_set_path_cb(&mouth_anim_, lv_anim_path_ease_in_out);
+    lv_anim_set_repeat_count(&mouth_anim_, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_playback_time(&mouth_anim_, 1500);
+    lv_anim_set_playback_delay(&mouth_anim_, 0);
+    lv_anim_start(&mouth_anim_);
 }
 
 void XunguanDisplay::StartSadAnimation() {
@@ -952,8 +888,6 @@ void XunguanDisplay::StartThinkingAnimation() {
     lv_obj_set_style_img_recolor_opa(hand, LV_OPA_COVER, 0);
     lv_img_set_zoom(hand, 128);  // Scale down to 50%
 
-    // hand_img 原始 220x220，缩放到 40%（256=100%，102=40%）
-    // lv_img_set_zoom(hand, 102);
     // 居中放在眼睛下方
     int hand_width = hand_img.header.w;
     int hand_height = hand_img.header.h;
@@ -965,18 +899,21 @@ void XunguanDisplay::StartThinkingAnimation() {
     lv_obj_set_style_shadow_width(hand, 0, 0);
     lv_obj_set_style_outline_width(hand, 0, 0);
     
-    // 为hand_img添加渐出动画
-    lv_anim_init(&left_eye_anim_);
-    lv_anim_set_var(&left_eye_anim_, hand);
-    lv_anim_set_values(&left_eye_anim_, LV_OPA_COVER, LV_OPA_TRANSP);  // 从完全不透明到完全透明
-    lv_anim_set_time(&left_eye_anim_, 2000);  // 2秒渐出时间
-    lv_anim_set_delay(&left_eye_anim_, 1000);  // 1秒延迟后开始
-    lv_anim_set_exec_cb(&left_eye_anim_, (lv_anim_exec_xcb_t)lv_obj_set_style_img_opa);
-    lv_anim_set_path_cb(&left_eye_anim_, lv_anim_path_ease_in_out);
-    lv_anim_set_repeat_count(&left_eye_anim_, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_playback_time(&left_eye_anim_, 2000);  // 2秒渐入时间
-    lv_anim_set_playback_delay(&left_eye_anim_, 1000);  // 1秒延迟后开始渐入
-    lv_anim_start(&left_eye_anim_);
+    // 创建轻微上下晃动的动画
+    lv_anim_t hand_anim;
+    lv_anim_init(&hand_anim);
+    lv_anim_set_var(&hand_anim, hand);
+    lv_anim_set_values(&hand_anim, hand_y, hand_y + 6);  // 上下6像素的晃动
+    lv_anim_set_time(&hand_anim, 1000);  // 1秒一个周期
+    lv_anim_set_exec_cb(&hand_anim, [](void* var, int32_t value) {
+        lv_obj_t* obj = static_cast<lv_obj_t*>(var);
+        lv_obj_set_y(obj, value);
+    });
+    lv_anim_set_path_cb(&hand_anim, lv_anim_path_ease_in_out);  // 使用缓动效果
+    lv_anim_set_repeat_count(&hand_anim, LV_ANIM_REPEAT_INFINITE);  // 无限循环
+    lv_anim_set_playback_time(&hand_anim, 1000);  // 回放时间1秒
+    lv_anim_set_playback_delay(&hand_anim, 0);  // 无延迟
+    lv_anim_start(&hand_anim);
 
 }
 
@@ -1354,6 +1291,9 @@ void XunguanDisplay::ClearUIElements() {
         lv_anim_del(right_eye_, thinking_float_anim_cb);
         lv_anim_del(right_eye_, eye_scaling_anim_cb);
     }
+    if (mouth_) {
+        lv_anim_del(mouth_, (lv_anim_exec_xcb_t)lv_obj_set_y);
+    }
     
     // Clear existing objects
     if (left_eye_) {
@@ -1367,6 +1307,10 @@ void XunguanDisplay::ClearUIElements() {
     if (container_) {
         lv_obj_del(container_);
         container_ = nullptr;
+    }
+    if (mouth_) {
+        lv_obj_del(mouth_);
+        mouth_ = nullptr;
     }
     
     // Clear sleep UI elements
@@ -1674,6 +1618,9 @@ void XunguanDisplay::StopCurrentAnimation() {
         lv_anim_del(right_eye_, blink_anim_cb);
         lv_anim_del(right_eye_, thinking_float_anim_cb);
         lv_anim_del(right_eye_, eye_scaling_anim_cb);
+    }
+    if (mouth_) {
+        lv_anim_del(mouth_, (lv_anim_exec_xcb_t)lv_obj_set_y);
     }
     
     // Clear UI elements

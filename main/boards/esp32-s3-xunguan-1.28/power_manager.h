@@ -13,7 +13,7 @@ private:
     static constexpr struct {
         uint16_t adc;
         uint8_t level;
-    } BATTERY_LEVELS[] = {{1700, 0}, {2000, 100}};
+    } BATTERY_LEVELS[] = {{1750, 0}, {2010, 100}};
     static constexpr size_t BATTERY_LEVELS_COUNT = 2;
     static constexpr size_t ADC_VALUES_COUNT = 10;
 

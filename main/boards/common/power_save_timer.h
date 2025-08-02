@@ -15,6 +15,7 @@ public:
     void OnExitSleepMode(std::function<void()> callback);
     void OnShutdownRequest(std::function<void()> callback);
     void WakeUp();
+    void ResetTimer();  // 新增：重置计数器但不改变睡眠状态
 
 private:
     void PowerSaveCheck();

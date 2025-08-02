@@ -121,6 +121,10 @@ private:
     lv_anim_t right_eye_anim_;
     lv_obj_t* right_eye_;
     
+    // Mouth animation variables
+    lv_obj_t* mouth_;
+    lv_anim_t mouth_anim_;
+    
     // LVGL flush callback
     static void lvgl_flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map);
     
