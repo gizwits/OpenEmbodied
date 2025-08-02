@@ -528,7 +528,9 @@ void Application::Start() {
     
     // Initialize the protocol
     protocol_->OnNetworkError([this](const std::string& message) {
-        SetDeviceState(kDeviceStateIdle);
+        if (device_state_ != kDeviceStateSleeping) {
+            SetDeviceState(kDeviceStateIdle);
+        }
         Alert(Lang::Strings::ERROR, message.c_str(), "sad", Lang::Sounds::P3_EXCLAMATION);
 
         Schedule([this, message]() {
@@ -565,7 +567,9 @@ void Application::Start() {
         Schedule([this]() {
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
-            SetDeviceState(kDeviceStateIdle);
+            if (device_state_ != kDeviceStateSleeping) {
+                SetDeviceState(kDeviceStateIdle);
+            }
 
             MqttClient::getInstance().sendTraceLog("info", "socket 通道关闭");
         });
@@ -755,6 +759,7 @@ void Application::Start() {
             } else if (app->device_state_ == kDeviceStateActivating) {
                 app->SetDeviceState(kDeviceStateIdle);
             } else if (app->device_state_ == kDeviceStateSleeping) {
+                ESP_LOGI(TAG, "Wake word detected in sleep mode");
                 app->ExitSleepMode();
             }
             vTaskDelete(NULL);
@@ -788,6 +793,7 @@ void Application::QuitTalking() {
         ESP_LOGI(TAG, "QuitTalking");
         protocol_->SendAbortSpeaking(kAbortReasonNone);
         SetDeviceState(kDeviceStateIdle);
+        vTaskDelay(pdMS_TO_TICKS(300));
         protocol_->CloseAudioChannel();
         ResetDecoder();
     }
@@ -1181,6 +1187,7 @@ void Application::SetListeningMode(ListeningMode mode) {
 }
 
 void Application::SetDeviceState(DeviceState state) {
+    ESP_LOGI(TAG, "SetDeviceState: %s -> %s", STATE_STRINGS[device_state_], STATE_STRINGS[state]);
     if (device_state_ == state) {
         return;
     }
@@ -1326,35 +1333,7 @@ void Application::SetDeviceState(DeviceState state) {
             // 休眠模式：关闭屏幕、socket、wifi
             ESP_LOGI(TAG, "Entering sleep mode");
             
-            Schedule([this]() {
-                // 关闭屏幕背光
-                auto& board = Board::GetInstance();
-                auto display = board.GetDisplay();
-                auto backlight = board.GetBacklight();
-
-                auto codec = Board::GetInstance().GetAudioCodec();
-                codec->EnableOutput(true);
-                PlaySound(Lang::Sounds::P3_SLEEP);
-                vTaskDelay(pdMS_TO_TICKS(1000));
-                if (backlight) {
-                    backlight->SetBrightness(0);
-                }
-                
-                // 关闭 socket 连接
-                if (protocol_) {
-                    protocol_->CloseAudioChannel();
-                }
-                // 关闭 mqtt
-                auto& mqtt_client = MqttClient::getInstance();
-                mqtt_client.deinit();
-                
-                // 关闭 wifi
-                auto& wifi_station = WifiStation::GetInstance();
-                wifi_station.Stop();
-                
-                display->SetStatus(Lang::Strings::STANDBY);
-                display->SetEmotion("sleepy");
-            });
+            
             break;
         }
         case kDeviceStateStarting:
@@ -1418,6 +1397,7 @@ void Application::SendTextToAI(const std::string& text) {
 
 void Application::WakeWordInvoke(const std::string& wake_word) {
     Board::GetInstance().WakeUpPowerSaveTimer();
+    
 
 #if CONFIG_USE_GIZWITS_MQTT
     auto& mqtt_client = MqttClient::getInstance();
@@ -1470,6 +1450,10 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
         //     PlaySound(Lang::Sounds::P3_SUCCESS);
         //     protocol_->SendAbortSpeaking(kAbortReasonNone);
         // });
+    } else if (device_state_ == kDeviceStateSleeping) {
+        Schedule([this]() {
+            ExitSleepMode();
+        });
     }
 }
 
@@ -1553,7 +1537,6 @@ bool Application::CheckBatteryLevel() {
         ESP_LOGI(TAG, "current Battery level: %d, charging: %d, discharging: %d", level, charging, discharging);
         if (level <= 10) {
             // 提示电量不足
-            // SetDeviceState(kDeviceStateIdle);
             Alert(Lang::Strings::ERROR, Lang::Strings::ERROR, "sad", Lang::Sounds::P3_BATTLE_LOW);
             return false;
         }
@@ -1563,40 +1546,75 @@ bool Application::CheckBatteryLevel() {
 
 void Application::EnterSleepMode() {
     ESP_LOGI(TAG, "Entering sleep mode");
-    SetDeviceState(kDeviceStateSleeping);
+   
+
+    Schedule([this]() {
+        // 关闭 mqtt
+         // 关闭屏幕背光
+        auto& board = Board::GetInstance();
+        auto display = board.GetDisplay();
+        auto backlight = board.GetBacklight();
+
+        auto codec = Board::GetInstance().GetAudioCodec();
+        codec->EnableOutput(true);
+        PlaySound(Lang::Sounds::P3_SLEEP);
+        auto& mqtt_client = MqttClient::getInstance();
+        mqtt_client.disconnect();
+        vTaskDelay(pdMS_TO_TICKS(1500));
+        // 关闭 socket 连接
+        QuitTalking();
+        vTaskDelay(pdMS_TO_TICKS(1000));
+
+        // 关闭 wifi
+        auto& wifi_station = WifiStation::GetInstance();
+        wifi_station.Stop();
+        SetDeviceState(kDeviceStateSleeping);
+
+    
+        display->SetStatus(Lang::Strings::STANDBY);
+        display->SetEmotion("sleepy");
+        if (backlight) {
+            backlight->SetBrightness(0);
+        }
+        
+    });
+    
 }
 
 void Application::ExitSleepMode() {
     ESP_LOGI(TAG, "Exiting sleep mode");
-
     // 恢复屏幕背光
-    auto& board = Board::GetInstance();
-    auto backlight = board.GetBacklight();
-    if (backlight) {
-        backlight->RestoreBrightness();
-    }
-    // 提示音
-    auto codec = Board::GetInstance().GetAudioCodec();
-    codec->EnableOutput(true);
-    PlaySound(Lang::Sounds::P3_WAKE_UP);
-    
-    // 重新连接 wifi
-    auto& wifi_station = WifiStation::GetInstance();
-    if (!wifi_station.IsConnected()) {
-        ESP_LOGI(TAG, "Reconnecting to WiFi...");
-        wifi_station.Start();
-        
-        // 等待 wifi 连接
-        if (!wifi_station.WaitForConnected(30 * 1000)) { // 30秒超时
-            ESP_LOGE(TAG, "Failed to reconnect to WiFi");
-            return;
+   
+    Schedule([this]() {
+        auto& board = Board::GetInstance();
+        auto backlight = board.GetBacklight();
+        if (backlight) {
+            backlight->RestoreBrightness();
         }
-    }
+        // 提示音
+        auto codec = Board::GetInstance().GetAudioCodec();
+        codec->EnableOutput(true);
+        PlaySound(Lang::Sounds::P3_WAKE_UP);
+        
+        // 重新连接 wifi
+        auto& wifi_station = WifiStation::GetInstance();
+        if (!wifi_station.IsConnected()) {
+            ESP_LOGI(TAG, "Reconnecting to WiFi...");
+            wifi_station.Start();
+            
+            // 等待 wifi 连接
+            if (!wifi_station.WaitForConnected(30 * 1000)) { // 30秒超时
+                ESP_LOGE(TAG, "Failed to reconnect to WiFi");
+                return;
+            }
+        }
 
-    // 重新连接mqtt
-    auto& mqtt_client = MqttClient::getInstance();
-    mqtt_client.initialize();
-    Board::GetInstance().WakeUpPowerSaveTimer();
+        // 重新连接mqtt
+        auto& mqtt_client = MqttClient::getInstance();
+        mqtt_client.connect();
+        Board::GetInstance().WakeUpPowerSaveTimer();
+    });
+    
 }
 
 void Application::initGizwitsServer() {
@@ -1642,6 +1660,7 @@ void Application::initGizwitsServer() {
         Alert(Lang::Strings::ERROR, Lang::Strings::ERROR, "sad", Lang::Sounds::P3_EXCLAMATION);
         return;
     }
+    mqtt_client.connect();
 #else
 
 

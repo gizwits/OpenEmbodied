@@ -125,6 +125,10 @@ private:
     lv_obj_t* mouth_;
     lv_anim_t mouth_anim_;
     
+    // Hand animation variables
+    lv_obj_t* left_hand_;
+    lv_obj_t* right_hand_;
+    
     // LVGL flush callback
     static void lvgl_flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map);
     
@@ -190,7 +194,8 @@ public:
     void start_scale_animation();
     
     // Animation methods for different states
-    void StartIdleAnimation();
+    void StartIdleAnimation(int offset_y_params);
+    void StartIdleAnimationNoLock(int offset_y_params);  // Internal method without lock
     void StartHappyAnimation();
     void StartSadAnimation();
     void StartLovingAnimation();
@@ -225,6 +230,7 @@ private:
     
     // Helper function to clear existing UI elements
     void ClearUIElements();
+    void ClearUIElementsNoLock();  // Internal method without lock
     
     // Animation helper functions
     void StartEyeScalingAnimation(lv_obj_t* left_eye, lv_obj_t* right_eye, int original_height);

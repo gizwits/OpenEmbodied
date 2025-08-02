@@ -205,12 +205,6 @@ bool MqttClient::initialize() {
     ESP_LOGI(TAG, "  客户端 ID: %s", client_id_.c_str());
     ESP_LOGI(TAG, "  token: %s", password_.c_str());
 
-    ESP_LOGI(TAG, "Connecting to endpoint %s:%d", endpoint_.c_str(), port_);
-    if (!mqtt_->Connect(endpoint_, port_, client_id_, username_, password_)) {
-        ESP_LOGE(TAG, "Failed to connect to endpoint");
-        return false;
-    }
-
     // Create message queue
     message_queue_ = xQueueCreate(MQTT_QUEUE_SIZE, sizeof(mqtt_msg_t));
     if (!message_queue_) {
@@ -231,7 +225,31 @@ bool MqttClient::initialize() {
     xTaskCreate(messageReceiveHandler, "mqtt_rcv", MQTT_TASK_STACK_SIZE_RCV, this, 5, nullptr);
     xTaskCreate(messageResendHandler, "mqtt_resend", MQTT_TASK_STACK_SIZE_RESEND, this, 5, nullptr);
 
-    ESP_LOGI(TAG, "Connected to endpoint");
+    // 打印内存使用情况
+    printMemoryUsage();
+    
+    return true;
+}
+
+bool MqttClient::connect() {
+    if (mqtt_ == nullptr) {
+        ESP_LOGE(TAG, "MQTT client not initialized");
+        return false;
+    }
+    
+    if (endpoint_.empty()) {
+        ESP_LOGE(TAG, "MQTT endpoint is not specified");
+        return false;
+    }
+    
+    ESP_LOGI(TAG, "Connecting to MQTT endpoint %s:%d", endpoint_.c_str(), port_);
+    if (!mqtt_->Connect(endpoint_, port_, client_id_, username_, password_)) {
+        ESP_LOGE(TAG, "Failed to connect to MQTT endpoint");
+        return false;
+    }
+    
+    ESP_LOGI(TAG, "Successfully connected to MQTT endpoint");
+    
     // 订阅配置响应和推送
     std::string response_topic = "llm/" + client_id_ + "/config/response";
     std::string push_topic = "llm/" + client_id_ + "/config/push";
@@ -261,14 +279,23 @@ bool MqttClient::initialize() {
         sendTraceLog("error", "订阅 p0 通知 失败");
     }
     
-    
     // 获取房间信息
     getRoomInfo();
     mqtt_event_ = 1;
     
-    // 打印内存使用情况
-    printMemoryUsage();
+    return true;
+}
+
+bool MqttClient::disconnect() {
+    if (mqtt_ == nullptr) {
+        ESP_LOGW(TAG, "MQTT client not initialized, nothing to disconnect");
+        return false;
+    }
     
+    ESP_LOGI(TAG, "Disconnecting from MQTT endpoint");
+    mqtt_->Disconnect();
+    mqtt_event_ = 0;
+    ESP_LOGI(TAG, "Successfully disconnected from MQTT endpoint");
     return true;
 }
 

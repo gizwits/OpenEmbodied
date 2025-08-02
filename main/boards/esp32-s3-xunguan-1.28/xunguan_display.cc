@@ -63,9 +63,10 @@ XunguanDisplay::XunguanDisplay()
       current_state_(EyeState::IDLE),
       left_eye_anim_(), right_eye_anim_(), right_eye_(nullptr),
       mouth_(nullptr), mouth_anim_(),
+      left_hand_(nullptr), right_hand_(nullptr),
       lvgl_tick_timer_(nullptr), lvgl_task_handle_(nullptr),
       vertigo_recovery_timer_(nullptr), vertigo_mode_active_(false),
-      loving_mode_active_(false), ota_progress_bar_(nullptr), ota_number_label_(nullptr), ota_progress_(0) {
+      loving_recovery_timer_(nullptr), loving_mode_active_(false), ota_progress_bar_(nullptr), ota_number_label_(nullptr), ota_progress_(0) {
     
     // Initialize static lock
     _lock_init(&lvgl_api_lock);
@@ -78,15 +79,15 @@ XunguanDisplay::~XunguanDisplay() {
     }
     
     if (vertigo_recovery_timer_) {
-        vertigo_mode_active_ = false;
         esp_timer_stop(vertigo_recovery_timer_);
         esp_timer_delete(vertigo_recovery_timer_);
+        vertigo_recovery_timer_ = nullptr;
     }
     
     if (loving_recovery_timer_) {
-        loving_mode_active_ = false;
         esp_timer_stop(loving_recovery_timer_);
         esp_timer_delete(loving_recovery_timer_);
+        loving_recovery_timer_ = nullptr;
     }
     
     if (lvgl_task_handle_) {
@@ -99,9 +100,6 @@ XunguanDisplay::~XunguanDisplay() {
 }
 
 bool XunguanDisplay::Initialize() {
-    
-    
-    
     if (!InitializeSpi()) {
         ESP_LOGE(TAG, "Failed to initialize SPI");
         return false;
@@ -147,7 +145,7 @@ bool XunguanDisplay::Initialize() {
     
     // Start idle animation after initialization
     
-    StartIdleAnimation();
+    StartIdleAnimation(0);
     
     // Add a small delay to ensure everything is ready
     vTaskDelay(pdMS_TO_TICKS(100));
@@ -326,7 +324,7 @@ bool XunguanDisplay::CreateLvglTask() {
         "LVGL",
         8192,  // Increase stack size
         this,
-        5,     // Increase priority
+        2,     // Lower priority to reduce CPU load
         &lvgl_task_handle_
     );
     
@@ -355,9 +353,13 @@ void XunguanDisplay::lvgl_task(void* arg) {
         time_till_next_ms = lv_timer_handler();
         _lock_release(&lvgl_api_lock);
         
-        // 使用当前配置的延迟范围
+        // 使用当前配置的延迟范围，并增加最小延迟以减少CPU负载
         time_till_next_ms = MAX(time_till_next_ms, self->current_min_delay_ms_);
         time_till_next_ms = MIN(time_till_next_ms, self->current_max_delay_ms_);
+        
+        // 增加额外的休眠时间以减少CPU负载
+        time_till_next_ms += 2;  // 额外增加2ms休眠
+        
         vTaskDelay(pdMS_TO_TICKS(time_till_next_ms));
         
     }
@@ -524,9 +526,8 @@ void XunguanDisplay::TestNextEmotion() {
 }
 
 // Animation methods - empty implementations
-void XunguanDisplay::StartIdleAnimation() {
-    
-    
+void XunguanDisplay::StartIdleAnimation(int offset_y_params) {
+    DisplayLockGuard lock(this);
     
     auto screen = lv_screen_active();
     if (!screen) {
@@ -534,12 +535,9 @@ void XunguanDisplay::StartIdleAnimation() {
         return;
     }
     
-    // Clear existing UI elements
-    ClearUIElements();
-    DisplayLockGuard lock(this);
+    // Clear existing UI elements (without lock since we already have it)
+    ClearUIElementsNoLock();
 
-    
-    
     // Set background to black
     lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
@@ -561,21 +559,19 @@ void XunguanDisplay::StartIdleAnimation() {
     int eye_height = eye_width * 2;     // Y axis twice as long as X axis
     
     // Calculate positions for centered eyes
-    int eye_spacing = screen_width / 3;  // 1/3 of screen width between eyes (increased from 1/4)
+    int eye_spacing = screen_width / 2.5;  // 1/3 of screen width between eyes (increased from 1/4)
     int left_eye_x = (screen_width / 2) - (eye_spacing / 2) - (eye_width / 2);
     int right_eye_x = (screen_width / 2) + (eye_spacing / 2) - (eye_width / 2);
     int eye_y = (screen_height / 2) - (eye_height / 2);
     
-    int y_offset = 2;
+    int y_offset = -2 + offset_y_params;
     // Set left eye properties
     lv_obj_set_size(left_eye_, eye_width, eye_height);
-    lv_obj_set_pos(left_eye_, left_eye_x, eye_y - y_offset);
+    lv_obj_set_pos(left_eye_, left_eye_x, eye_y + y_offset);
     lv_obj_set_style_radius(left_eye_, eye_width / 2, 0);  // Rounded corners
     lv_obj_set_style_bg_color(left_eye_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(left_eye_, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(left_eye_, 0, 0);  // No border
-    
-    
     
     // Create right eye
     right_eye_ = lv_obj_create(screen);
@@ -586,7 +582,7 @@ void XunguanDisplay::StartIdleAnimation() {
     
     // Set right eye properties
     lv_obj_set_size(right_eye_, eye_width, eye_height);
-    lv_obj_set_pos(right_eye_, right_eye_x, eye_y - y_offset);
+    lv_obj_set_pos(right_eye_, right_eye_x, eye_y + y_offset);
     lv_obj_set_style_radius(right_eye_, eye_width / 2, 0);  // Rounded corners
     lv_obj_set_style_bg_color(right_eye_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(right_eye_, LV_OPA_COVER, 0);
@@ -596,16 +592,80 @@ void XunguanDisplay::StartIdleAnimation() {
     
     // Force refresh the screen
     lv_obj_invalidate(screen);
+    // Start Y-axis scaling animation for both eyes
     
+    StartEyeScalingAnimation(left_eye_, right_eye_, eye_height);
+}
+
+void XunguanDisplay::StartIdleAnimationNoLock(int offset_y_params) {
+    auto screen = lv_screen_active();
+    if (!screen) {
+        ESP_LOGE(TAG, "No active screen found!");
+        return;
+    }
     
+    // Clear existing UI elements (without lock since we already have it)
+    ClearUIElementsNoLock();
+
+    // Set background to black
+    lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
     
+    // Create left eye
+    left_eye_ = lv_obj_create(screen);
+    
+    if (!left_eye_) {
+        ESP_LOGE(TAG, "Failed to create left eye!");
+        return;
+    }
+    
+    // Calculate eye dimensions and positions based on screen size
+    int screen_width = DISPLAY_WIDTH;
+    int screen_height = DISPLAY_HEIGHT;
+    
+    // Eye dimensions - Y axis longer than X axis
+    int eye_width = screen_width / 6;   // 1/6 of screen width
+    int eye_height = eye_width * 2;     // Y axis twice as long as X axis
+    
+    // Calculate positions for centered eyes
+    int eye_spacing = screen_width / 2.5;  // 1/3 of screen width between eyes (increased from 1/4)
+    int left_eye_x = (screen_width / 2) - (eye_spacing / 2) - (eye_width / 2);
+    int right_eye_x = (screen_width / 2) + (eye_spacing / 2) - (eye_width / 2);
+    int eye_y = (screen_height / 2) - (eye_height / 2);
+    
+    int y_offset = -2 + offset_y_params;
+    // Set left eye properties
+    lv_obj_set_size(left_eye_, eye_width, eye_height);
+    lv_obj_set_pos(left_eye_, left_eye_x, eye_y + y_offset);
+    lv_obj_set_style_radius(left_eye_, eye_width / 2, 0);  // Rounded corners
+    lv_obj_set_style_bg_color(left_eye_, lv_color_hex(EYE_COLOR), 0);
+    lv_obj_set_style_bg_opa(left_eye_, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(left_eye_, 0, 0);  // No border
+    
+    // Create right eye
+    right_eye_ = lv_obj_create(screen);
+    if (!right_eye_) {
+        ESP_LOGE(TAG, "Failed to create right eye!");
+        return;
+    }
+    
+    // Set right eye properties
+    lv_obj_set_size(right_eye_, eye_width, eye_height);
+    lv_obj_set_pos(right_eye_, right_eye_x, eye_y + y_offset);
+    lv_obj_set_style_radius(right_eye_, eye_width / 2, 0);  // Rounded corners
+    lv_obj_set_style_bg_color(right_eye_, lv_color_hex(EYE_COLOR), 0);
+    lv_obj_set_style_bg_opa(right_eye_, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(right_eye_, 0, 0);  // No border
+    
+    // Force refresh the screen
+    lv_obj_invalidate(screen);
     // Start Y-axis scaling animation for both eyes
     
     StartEyeScalingAnimation(left_eye_, right_eye_, eye_height);
 }
 
 void XunguanDisplay::StartHappyAnimation() {
-    
+    DisplayLockGuard lock(this);
     
     auto screen = lv_screen_active();
     if (!screen) {
@@ -613,10 +673,9 @@ void XunguanDisplay::StartHappyAnimation() {
         return;
     }
     
-    // Clear existing UI elements
-    ClearUIElements();
-    StartIdleAnimation();
-    DisplayLockGuard lock(this);
+    // Clear existing UI elements (without lock since we already have it)
+    ClearUIElementsNoLock();
+    StartIdleAnimationNoLock(0);
     
     // 获取屏幕尺寸
     int width_ = DISPLAY_WIDTH;
@@ -633,18 +692,18 @@ void XunguanDisplay::StartHappyAnimation() {
     lv_anim_init(&mouth_anim_);
     lv_anim_set_var(&mouth_anim_, mouth_);
     lv_anim_set_values(&mouth_anim_, height_ - 52, height_ - 62);  // 在-52到-62像素之间移动
-    lv_anim_set_time(&mouth_anim_, 1500);
+    lv_anim_set_time(&mouth_anim_, 800);
     lv_anim_set_delay(&mouth_anim_, 0);
     lv_anim_set_exec_cb(&mouth_anim_, (lv_anim_exec_xcb_t)lv_obj_set_y);
     lv_anim_set_path_cb(&mouth_anim_, lv_anim_path_ease_in_out);
     lv_anim_set_repeat_count(&mouth_anim_, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_playback_time(&mouth_anim_, 1500);
+    lv_anim_set_playback_time(&mouth_anim_, 800);
     lv_anim_set_playback_delay(&mouth_anim_, 0);
     lv_anim_start(&mouth_anim_);
 }
 
 void XunguanDisplay::StartSadAnimation() {
-    
+    DisplayLockGuard lock(this);
     
     auto screen = lv_screen_active();
     if (!screen) {
@@ -652,9 +711,8 @@ void XunguanDisplay::StartSadAnimation() {
         return;
     }
     
-    // Clear existing UI elements
-    ClearUIElements();
-    DisplayLockGuard lock(this);
+    // Clear existing UI elements (without lock since we already have it)
+    ClearUIElementsNoLock();
     
     // Set background to black
     lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
@@ -762,14 +820,15 @@ void XunguanDisplay::StartSadAnimation() {
 }
 
 void XunguanDisplay::StartLovingAnimation() {
+    DisplayLockGuard lock(this);
+    
     auto screen = lv_screen_active();
     if (!screen) {
         return;
     }
     
-    // Clear existing UI elements
-    ClearUIElements();
-    DisplayLockGuard lock(this);
+    // Clear existing UI elements (without lock since we already have it)
+    ClearUIElementsNoLock();
     
     // Set background to black
     lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
@@ -790,9 +849,9 @@ void XunguanDisplay::StartLovingAnimation() {
     int heart_height = hart_img.header.h;
     
     // 计算左右爱心的位置，确保有足够间隔
-    int left_heart_x = 10;  // 距离左边缘20像素
-    int right_heart_x = screen_width - 10 - heart_width;  // 距离右边缘20像素
-    int heart_y = (screen_height / 2) - (heart_height / 2) - 20;  // 屏幕中心向上20像素
+    int left_heart_x = 5;  // 距离左边缘20像素
+    int right_heart_x = screen_width - 5 - heart_width;  // 距离右边缘20像素
+    int heart_y = (screen_height / 2) - (heart_height / 2) - 10;  // 屏幕中心向上20像素
     
     // 创建左眼爱心图片
     left_eye_ = lv_img_create(screen);
@@ -836,6 +895,7 @@ void XunguanDisplay::StartLovingAnimation() {
     lv_anim_start(&right_eye_anim_);
     
     // Create recovery timer for 4 seconds
+    ESP_LOGI(TAG, "Creating loving recovery timer");
     if (!loving_recovery_timer_) {
         const esp_timer_create_args_t loving_recovery_timer_args = {
             .callback = [](void* arg) {
@@ -849,13 +909,12 @@ void XunguanDisplay::StartLovingAnimation() {
                 self->loving_mode_active_ = false;
                 
                 // Stop current animation and start idle animation
-                self->StopCurrentAnimation();
                 const auto& app = Application::GetInstance();
                 auto state = app.GetDeviceState();
                 if (state == kDeviceStateSleeping || state == kDeviceStateIdle) {
                     self->StartSleepingAnimation();
                 } else {
-                    self->StartIdleAnimation();
+                    self->StartIdleAnimation(0);
                 }
             },
             .arg = this,
@@ -868,9 +927,16 @@ void XunguanDisplay::StartLovingAnimation() {
             ESP_LOGE(TAG, "Failed to create loving recovery timer: %s", esp_err_to_name(ret));
             return;
         }
+        ESP_LOGI(TAG, "Loving recovery timer created successfully");
     }
     
     // Start 4-second timer
+    if (!loving_recovery_timer_) {
+        ESP_LOGE(TAG, "Loving recovery timer is null, cannot start");
+        loving_mode_active_ = false;
+        return;
+    }
+    
     esp_err_t ret = esp_timer_start_once(loving_recovery_timer_, 4000000);  // 4 seconds in microseconds
     if (ret != ESP_OK) {
         loving_mode_active_ = false;
@@ -880,73 +946,102 @@ void XunguanDisplay::StartLovingAnimation() {
 }
 
 void XunguanDisplay::StartThinkingAnimation() {
+    DisplayLockGuard lock(this);
     
-
     auto screen = lv_screen_active();
     if (!screen) {
         ESP_LOGE(TAG, "No active screen found!");
         return;
     }
 
-    // 清理现有UI
-    ClearUIElements();
-    // 创建基础动画
-    StartIdleAnimation();
-    DisplayLockGuard lock(this);
+    // 清理现有UI (without lock since we already have it)
+    ClearUIElementsNoLock();
+    // 创建基础动画 (without lock since we already have it)
+    StartIdleAnimationNoLock(-20);
     int screen_width = DISPLAY_WIDTH;
     int screen_height = DISPLAY_HEIGHT;
 
-    // 创建小手图片（hand_img）
-    lv_obj_t* hand = lv_img_create(screen);
-    if (!hand) {
-        ESP_LOGE(TAG, "Failed to create hand image!");
-        return;
-    }
-    lv_img_set_src(hand, &hand_img);
-    lv_obj_set_style_img_recolor(hand, lv_color_hex(EYE_COLOR), 0);  // Use EYE_COLOR
-    lv_obj_set_style_img_recolor_opa(hand, LV_OPA_COVER, 0);
-    lv_img_set_zoom(hand, 128);  // Scale down to 50%
 
-    // 居中放在眼睛下方
-    int hand_width = hand_img.header.w;
-    int hand_height = hand_img.header.h;
-    int hand_x = (screen_width - hand_width * 0.4) / 2 - 20;
-    int hand_y = screen_height / 2 + 25;  // 向下移动15像素
-    lv_obj_set_pos(hand, hand_x, hand_y);
-    // 可选：设置无边框、无阴影
-    lv_obj_set_style_border_width(hand, 0, 0);
-    lv_obj_set_style_shadow_width(hand, 0, 0);
-    lv_obj_set_style_outline_width(hand, 0, 0);
+    // 创建嘴巴图片对象
+    mouth_ = lv_img_create(screen);
+    lv_img_set_src(mouth_, &down_image);
+    lv_obj_set_pos(mouth_, (screen_width - 32) / 2, screen_height - 62);  // 居中，距离底部52像素
+    lv_obj_set_style_img_recolor(mouth_, lv_color_hex(EYE_COLOR), 0);  // 设置青色
+    lv_obj_set_style_img_recolor_opa(mouth_, LV_OPA_COVER, 0);  // 设置不透明度
+
+    // 创建嘴巴动画
+    lv_anim_init(&mouth_anim_);
+    lv_anim_set_var(&mouth_anim_, mouth_);
+    lv_anim_set_values(&mouth_anim_, screen_height - 82, screen_height - 92);  // 在-52到-62像素之间移动
+    lv_anim_set_time(&mouth_anim_, 800);
+    lv_anim_set_delay(&mouth_anim_, 0);
+    lv_anim_set_exec_cb(&mouth_anim_, (lv_anim_exec_xcb_t)lv_obj_set_y);
+    lv_anim_set_path_cb(&mouth_anim_, lv_anim_path_ease_in_out);
+    lv_anim_set_repeat_count(&mouth_anim_, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_playback_time(&mouth_anim_, 800);
+    lv_anim_set_playback_delay(&mouth_anim_, 0);
+    lv_anim_start(&mouth_anim_);
+
+    // 创建左手图片
+    left_hand_ = lv_img_create(screen);
+    lv_img_set_src(left_hand_, &hand_img);
+    lv_obj_set_style_img_recolor(left_hand_, lv_color_hex(0xFCCCE6), 0);
+    lv_obj_set_style_img_recolor_opa(left_hand_, LV_OPA_COVER, 0);
+    lv_obj_set_pos(left_hand_, 20, screen_height - 70);
+    lv_obj_set_style_img_recolor(left_hand_, lv_color_hex(EYE_COLOR), 0);  // 设置青色
+    lv_obj_set_style_img_recolor_opa(left_hand_, LV_OPA_COVER, 0);  // 设置不透明度
+
+    // 创建右手图片
+    right_hand_ = lv_img_create(screen);
+    lv_img_set_src(right_hand_, &hand_right_img);
+    lv_obj_set_style_img_recolor(right_hand_, lv_color_hex(0xFCCCE6), 0);
+    lv_obj_set_style_img_recolor_opa(right_hand_, LV_OPA_COVER, 0);
+    // 设置右手位置
+    lv_obj_set_pos(right_hand_, screen_width - 74, screen_height - 70);
+    lv_obj_set_style_img_recolor(right_hand_, lv_color_hex(EYE_COLOR), 0);  // 设置青色
+    lv_obj_set_style_img_recolor_opa(right_hand_, LV_OPA_COVER, 0);  // 设置不透明度
     
-    // 创建轻微上下晃动的动画
-    lv_anim_t hand_anim;
-    lv_anim_init(&hand_anim);
-    lv_anim_set_var(&hand_anim, hand);
-    lv_anim_set_values(&hand_anim, hand_y, hand_y + 6);  // 上下6像素的晃动
-    lv_anim_set_time(&hand_anim, 1000);  // 1秒一个周期
-    lv_anim_set_exec_cb(&hand_anim, [](void* var, int32_t value) {
-        lv_obj_t* obj = static_cast<lv_obj_t*>(var);
-        lv_obj_set_y(obj, value);
-    });
-    lv_anim_set_path_cb(&hand_anim, lv_anim_path_ease_in_out);  // 使用缓动效果
-    lv_anim_set_repeat_count(&hand_anim, LV_ANIM_REPEAT_INFINITE);  // 无限循环
-    lv_anim_set_playback_time(&hand_anim, 1000);  // 回放时间1秒
-    lv_anim_set_playback_delay(&hand_anim, 0);  // 无延迟
-    lv_anim_start(&hand_anim);
+    // 左手左右移动动画
+    static lv_anim_t left_hand_anim;
+    lv_anim_init(&left_hand_anim);
+    lv_anim_set_var(&left_hand_anim, left_hand_);
+    lv_anim_set_values(&left_hand_anim, 40, 60);
+    lv_anim_set_time(&left_hand_anim, 800);
+    lv_anim_set_delay(&left_hand_anim, 0);
+    lv_anim_set_exec_cb(&left_hand_anim, (lv_anim_exec_xcb_t)lv_obj_set_x);
+    lv_anim_set_path_cb(&left_hand_anim, lv_anim_path_ease_in_out);
+    lv_anim_set_repeat_count(&left_hand_anim, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_playback_time(&left_hand_anim, 800);
+    lv_anim_set_playback_delay(&left_hand_anim, 0);
+    lv_anim_start(&left_hand_anim);
+
+    // 右手左右移动动画（与左手相反）
+    static lv_anim_t right_hand_anim;
+    lv_anim_init(&right_hand_anim);
+    lv_anim_set_var(&right_hand_anim, right_hand_);
+    lv_anim_set_values(&right_hand_anim, screen_width - 74, screen_width - 90);
+    lv_anim_set_time(&right_hand_anim, 800);
+    lv_anim_set_delay(&right_hand_anim, 0);
+    lv_anim_set_exec_cb(&right_hand_anim, (lv_anim_exec_xcb_t)lv_obj_set_x);
+    lv_anim_set_path_cb(&right_hand_anim, lv_anim_path_ease_in_out);
+    lv_anim_set_repeat_count(&right_hand_anim, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_playback_time(&right_hand_anim, 800);
+    lv_anim_set_playback_delay(&right_hand_anim, 0);
+    lv_anim_start(&right_hand_anim);
 
 }
 
 void XunguanDisplay::StartShockedAnimation() {
+    DisplayLockGuard lock(this);
     
     auto screen = lv_screen_active();
     if (!screen) {
         return;
     }
     
-    // Clear existing UI elements
-    ClearUIElements();
-    StartIdleAnimation();
-    DisplayLockGuard lock(this);
+    // Clear existing UI elements (without lock since we already have it)
+    ClearUIElementsNoLock();
+    StartIdleAnimationNoLock(0);
 
     int screen_width = DISPLAY_WIDTH;
     int screen_height = DISPLAY_HEIGHT;
@@ -980,15 +1075,15 @@ void XunguanDisplay::StartShockedAnimation() {
 }
 
 void XunguanDisplay::StartSleepingAnimation() {
+    DisplayLockGuard lock(this);
     
     auto screen = lv_screen_active();
     if (!screen) {
         return;
     }
     
-    // Clear existing UI elements
-    ClearUIElements();
-    DisplayLockGuard lock(this);
+    // Clear existing UI elements (without lock since we already have it)
+    ClearUIElementsNoLock();
     
     // Set background to black
     lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
@@ -998,20 +1093,6 @@ void XunguanDisplay::StartSleepingAnimation() {
     int screen_width = DISPLAY_WIDTH;
     int screen_height = DISPLAY_HEIGHT;
     
-    // Create three "z" labels with absolute positioning for 240x240 circular screen
-    // Positioned in the upper area to avoid the center where eyes would be
-    // 
-    // For a 240x240 circular screen:
-    // - Center is at (120, 120)
-    // - Upper area is roughly y < 100
-    // - Left area is roughly x < 120  
-    // - Right area is roughly x > 120
-    // 
-    // Positioning strategy:
-    // - zzz1: Upper left (60, 50) - avoids center, visible in upper left
-    // - zzz2: Upper center (113, 30) - centered horizontally, high up
-    // - zzz3: Upper right (160, 30) - higher position, forms diagonal line with zzz1
-    // First "z" - upper left area (60, 50)
     zzz1_ = lv_label_create(screen);
     if (!zzz1_) {
         return;
@@ -1050,11 +1131,11 @@ void XunguanDisplay::StartSleepingAnimation() {
     
     // Create two eyes below the zzz labels with squinting effect
     // Eye dimensions - X axis longer than Y axis for squinting effect
-    int eye_width = screen_width / 3.5;   // 1/4 of screen width (reduced from 1/3)
+    int eye_width = screen_width / 3.6;   // 1/4 of screen width (reduced from 1/3)
     int eye_height = eye_width / 4;     // Y axis 1/4 of X axis (reduced from 1/3)
     
     // Calculate positions for centered eyes below zzz labels
-    int eye_spacing = screen_width / 2.5;  // 1/2 of screen width between eyes (increased from 1/3)
+    int eye_spacing = screen_width / 2.4;  // 1/2 of screen width between eyes (increased from 1/3)
     int left_eye_x = (screen_width / 2) - (eye_spacing / 2) - (eye_width / 2);
     int right_eye_x = (screen_width / 2) + (eye_spacing / 2) - (eye_width / 2);
     int eye_y = 110;  // Position below zzz labels
@@ -1113,6 +1194,7 @@ void XunguanDisplay::StartSleepingAnimation() {
 }
 
 void XunguanDisplay::StartSillyAnimation() {
+    DisplayLockGuard lock(this);
     
     auto screen = lv_screen_active();
     if (!screen) {
@@ -1120,9 +1202,8 @@ void XunguanDisplay::StartSillyAnimation() {
         return;
     }
     
-    // Clear existing UI elements
-    ClearUIElements();
-    DisplayLockGuard lock(this);
+    // Clear existing UI elements (without lock since we already have it)
+    ClearUIElementsNoLock();
     
     // Set background to black
     lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
@@ -1184,6 +1265,7 @@ void XunguanDisplay::StartSillyAnimation() {
 }
 
 void XunguanDisplay::StartVertigoAnimation() {
+    DisplayLockGuard lock(this);
     
     // Set vertigo mode active
     vertigo_mode_active_ = true;
@@ -1194,9 +1276,8 @@ void XunguanDisplay::StartVertigoAnimation() {
         return;
     }
     
-    // Clear existing UI elements
-    ClearUIElements();
-    DisplayLockGuard lock(this);
+    // Clear existing UI elements (without lock since we already have it)
+    ClearUIElementsNoLock();
     
     // Set background to black
     lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
@@ -1255,7 +1336,10 @@ void XunguanDisplay::StartVertigoAnimation() {
 
 void XunguanDisplay::ClearUIElements() {
     DisplayLockGuard lock(this);
+    ClearUIElementsNoLock();
+}
 
+void XunguanDisplay::ClearUIElementsNoLock() {
     auto screen = lv_screen_active();
     if (!screen) {
         return;
@@ -1313,6 +1397,12 @@ void XunguanDisplay::ClearUIElements() {
     if (mouth_) {
         lv_anim_del(mouth_, (lv_anim_exec_xcb_t)lv_obj_set_y);
     }
+    if (left_hand_) {
+        lv_anim_del(left_hand_, (lv_anim_exec_xcb_t)lv_obj_set_x);
+    }
+    if (right_hand_) {
+        lv_anim_del(right_hand_, (lv_anim_exec_xcb_t)lv_obj_set_x);
+    }
     
     // Clear existing objects
     if (left_eye_) {
@@ -1330,6 +1420,14 @@ void XunguanDisplay::ClearUIElements() {
     if (mouth_) {
         lv_obj_del(mouth_);
         mouth_ = nullptr;
+    }
+    if (left_hand_) {
+        lv_obj_del(left_hand_);
+        left_hand_ = nullptr;
+    }
+    if (right_hand_) {
+        lv_obj_del(right_hand_);
+        right_hand_ = nullptr;
     }
     
     // Clear sleep UI elements
@@ -1381,7 +1479,7 @@ void XunguanDisplay::StartEyeScalingAnimation(lv_obj_t* left_eye, lv_obj_t* righ
     
     // Animation parameters
     int min_height = original_height * 8 / 10;  // Shrink to 8/10 (slight)
-    int anim_duration = 700;  // 1 second per cycle
+    int anim_duration = 600;  // 1 second per cycle
     
     // 使用单个动画和回调函数同时处理两个眼睛
     lv_anim_init(&left_eye_anim_);
@@ -1482,7 +1580,7 @@ void XunguanDisplay::StartHeartScalingAnimation(lv_obj_t* left_heart, lv_obj_t* 
     lv_anim_del(right_heart, (lv_anim_exec_xcb_t)lv_obj_set_height);
     
     // Animation parameters
-    int anim_duration = 1500;  // 1.5 seconds per cycle
+    int anim_duration = 800;  // 1.5 seconds per cycle
     
     
     
@@ -1615,7 +1713,7 @@ void XunguanDisplay::ProcessAnimationQueue() {
 }
 
 void XunguanDisplay::StopCurrentAnimation() {
-    
+    DisplayLockGuard lock(this);
     
     // Stop all animations first
     if (left_eye_) {
@@ -1641,11 +1739,15 @@ void XunguanDisplay::StopCurrentAnimation() {
     if (mouth_) {
         lv_anim_del(mouth_, (lv_anim_exec_xcb_t)lv_obj_set_y);
     }
+    if (left_hand_) {
+        lv_anim_del(left_hand_, (lv_anim_exec_xcb_t)lv_obj_set_x);
+    }
+    if (right_hand_) {
+        lv_anim_del(right_hand_, (lv_anim_exec_xcb_t)lv_obj_set_x);
+    }
     
-    // Clear UI elements
-    ClearUIElements();
-    DisplayLockGuard lock(this);
-
+    // Clear UI elements (without lock since we already have it)
+    ClearUIElementsNoLock();
 }
 
 void XunguanDisplay::StartAnimation(AnimationType type) {
@@ -1653,7 +1755,7 @@ void XunguanDisplay::StartAnimation(AnimationType type) {
     
     switch (type) {
         case AnimationType::IDLE:
-            StartIdleAnimation();
+            StartIdleAnimation(0);
             break;
         case AnimationType::HAPPY:
             StartHappyAnimation();
@@ -1693,23 +1795,22 @@ bool XunguanDisplay::SetFrameRateMode(FrameRateMode mode) {
     
     switch (mode) {
         case FrameRateMode::POWER_SAVE:
-            min_ms = 8;
-            max_ms = 20;
-            tick_period_us = 2700;  // 8ms tick
-            
+            min_ms = 15;
+            max_ms = 30;
+            tick_period_us = 5000;  // 5ms tick
             break;
             
         case FrameRateMode::NORMAL:
-            min_ms = 5;
-            max_ms = 15;
-            tick_period_us = 2000;  // 2ms tick
+            min_ms = 10;
+            max_ms = 20;
+            tick_period_us = 4000;  // 4ms tick
             
             break;
             
         case FrameRateMode::SMOOTH:
-            min_ms = 2;
-            max_ms = 8;
-            tick_period_us = 1000;  // 1ms tick
+            min_ms = 8;
+            max_ms = 15;
+            tick_period_us = 3000;  // 3ms tick
             
             break;
             
@@ -1844,7 +1945,7 @@ void XunguanDisplay::StartVertigoRotationAnimation(lv_obj_t* left_spiral, lv_obj
     lv_anim_del(right_spiral, (lv_anim_exec_xcb_t)lv_img_set_angle);
     
     // Animation parameters
-    int anim_duration = 1500;  // 1.5 seconds per cycle
+    int anim_duration = 800;  // 1.5 seconds per cycle
     int rotation_angle = 3600;  // 10 full rotations (360 * 10)
     
     
@@ -1889,13 +1990,12 @@ void XunguanDisplay::StartVertigoRotationAnimation(lv_obj_t* left_spiral, lv_obj
                 ESP_LOGI(TAG, "vertigo_recovery");
                 self->vertigo_mode_active_ = false;
                 // Stop current animation and start idle animation
-                self->StopCurrentAnimation();
                 const auto& app = Application::GetInstance();
                 auto state = app.GetDeviceState();
                 if (state == kDeviceStateSleeping || state == kDeviceStateIdle) {
                     self->StartSleepingAnimation();
                 } else {
-                    self->StartIdleAnimation();
+                    self->StartIdleAnimation(0);
                 }
             },
             .arg = this,
@@ -2179,12 +2279,10 @@ void XunguanDisplay::SetOTAProgress(int progress) {
 }
 
 void XunguanDisplay::EnterWifiConfig() {
-    
-
-    
-    ClearUIElements();
-    
     DisplayLockGuard lock(this);
+    
+    // Clear existing UI elements (without lock since we already have it)
+    ClearUIElementsNoLock();
     
     auto screen = lv_screen_active();
     if (!screen) {

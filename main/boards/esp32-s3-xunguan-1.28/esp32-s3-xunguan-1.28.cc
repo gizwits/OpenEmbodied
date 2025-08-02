@@ -195,8 +195,7 @@ private:
         ESP_LOGI(TAG, "first_level: %d", first_level);
 
         touch_button_.OnPressDown([this]() {
-            //切换表情
-            CheckAndHandleEnterSleepMode();
+          
             ESP_LOGI(TAG, "touch_button_.OnPressDown");
 
             TickType_t current_time = xTaskGetTickCount();
@@ -205,11 +204,19 @@ private:
             // 检查是否已经过了冷却时间
             if (current_time - last_touch_time_ >= touch_cooldown) {
                 last_touch_time_ = current_time; // 更新上次触发时间
+
+                //切换表情
+                if (CheckAndHandleEnterSleepMode()) {
+                    // 交给休眠逻辑托管
+                    ESP_LOGI(TAG, "触摸唤醒");
+                    return;
+                }
                 display_->SetEmotion("loving");
                 if (ChannelIsOpen()) {
                     Application::GetInstance().SendMessage("用户正在抚摸你");
                 } else {
                     ESP_LOGI("touch", "Channel is not open");
+                    Application::GetInstance().ToggleChatState();
                 }
             } else {
                 ESP_LOGI("touch", "Touch detected but in cooldown period");
@@ -217,7 +224,11 @@ private:
         });
 
         boot_button_.OnClick([this]() {
-            CheckAndHandleEnterSleepMode();
+            if (CheckAndHandleEnterSleepMode()) {
+                // 交给休眠逻辑托管
+                ESP_LOGI(TAG, "长按唤醒");
+                return;
+            }
             auto& app = Application::GetInstance();
             // if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
             //     ResetWifiConfiguration();
@@ -274,8 +285,10 @@ private:
 
         boot_button_.OnMultipleClick([this]() {
             GetBacklight()->SetBrightness(0, false);
-            vTaskDelay(pdMS_TO_TICKS(500));
-            ResetWifiConfiguration();
+            Application::GetInstance().Schedule([this]() {
+                vTaskDelay(pdMS_TO_TICKS(500));
+                ResetWifiConfiguration();
+            });
         }, 3);
     }
 
@@ -453,12 +466,14 @@ public:
         gpio_set_level(POWER_GPIO, 0);
     }
 
-    void CheckAndHandleEnterSleepMode() {
+    bool CheckAndHandleEnterSleepMode() {
         auto& app = Application::GetInstance();
         if (app.GetDeviceState() == kDeviceStateSleeping) {
             // 如果休眠中
             app.ExitSleepMode();
+            return true;
         }
+        return false;
     }
 
     static void RestoreBacklightTask(void* arg) {
@@ -492,6 +507,7 @@ public:
     virtual bool IsCharging() override {
         int chrg = gpio_get_level(CHARGING_PIN);
         int standby = gpio_get_level(STANDBY_PIN);
+        // return false;
         return chrg == 0 || standby == 0;
     }
 
