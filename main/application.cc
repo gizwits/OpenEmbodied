@@ -490,8 +490,10 @@ void Application::Start() {
     /* Wait for the network to be ready */
     board.StartNetwork();
 
-    bool battery_ok = CheckBatteryLevel(true);
+    bool battery_ok = CheckBatteryLevel();
     if (!battery_ok) {
+        vTaskDelay(pdMS_TO_TICKS(2000));
+        Board::GetInstance().PowerOff();
         return;
     }
 
@@ -997,7 +999,7 @@ void Application::MainEventLoop() {
         auto now = std::chrono::steady_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::minutes>(now - last_battery_check_time_).count();
         if (duration >= 2) {
-            CheckBatteryLevel(false);
+            CheckBatteryLevel();
             last_battery_check_time_ = now;
         }
 
@@ -1562,7 +1564,7 @@ void Application::SetChatMode(int mode) {
     esp_restart();
 }
 
-bool Application::CheckBatteryLevel(bool force_off) {
+bool Application::CheckBatteryLevel() {
     // 检查电量
     int level = 0;
     bool charging = false;
@@ -1573,12 +1575,7 @@ bool Application::CheckBatteryLevel(bool force_off) {
             // 提示电量不足
             // SetDeviceState(kDeviceStateIdle);
             Alert(Lang::Strings::ERROR, Lang::Strings::ERROR, "sad", Lang::Sounds::P3_BATTLE_LOW);
-            if (force_off) {
-                Schedule([this]() {
-                    vTaskDelay(pdMS_TO_TICKS(1000));
-                    Board::GetInstance().PowerOff();
-                });
-            }
+        
             return false;
         }
     }

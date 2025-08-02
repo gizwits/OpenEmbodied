@@ -44,7 +44,6 @@ private:
     i2c_master_bus_handle_t lis2hh12_i2c_bus_;
     i2c_master_dev_handle_t lis2hh12_dev_;
     int64_t power_on_time_ = 0;  // 记录上电时间
-    bool is_sleep_ = false;
     PowerManager* power_manager_;
 
 
@@ -187,14 +186,16 @@ private:
                     auto* board = static_cast<MovecallMojiESP32S3*>(arg);
                     board->display_->SetEmotion("neutral");
 
-                    if (board->IsCharging()) {
-                        // 充电中，只关闭背光
-                        board->GetBacklight()->SetBrightness(0, false);
-                        board->is_sleep_ = true;
-                    } else {
-                        // 没有充电，关机
-                        board->PowerOff();
-                    }
+                    // if (board->IsCharging()) {
+                    //     // 充电中，只关闭背光
+                    //     board->GetBacklight()->SetBrightness(0, false);
+                    //     board->is_sleep_ = true;
+                    // } else {
+                    //     // 没有充电，关机
+                    //     board->PowerOff();
+                    // }
+                    // 充电中也可以关机
+                    board->PowerOff();
 
                     Application::GetInstance().QuitTalking();
                     vTaskDelete(NULL);
@@ -326,13 +327,6 @@ private:
                     }
                 } else {
                     ESP_LOGE(TAG, "无法获取 XunguanDisplay 对象");
-                }
-                
-                if (is_sleep_) {
-                    // 关机
-                    PowerOff();
-                } else {
-                    GetBacklight()->RestoreBrightness();
                 }
             }
         });
