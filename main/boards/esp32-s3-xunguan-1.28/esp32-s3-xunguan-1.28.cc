@@ -163,14 +163,89 @@ private:
 
     // SPI初始化
     void InitializeSpi() {
-        // SPI initialization is now handled by XunguanDisplay
+        spi_bus_config_t buscfg = {
+            .mosi_io_num = DISPLAY_SPI_MOSI_PIN,
+            .miso_io_num = -1,  // No MISO for this display
+            .sclk_io_num = DISPLAY_SPI_SCLK_PIN,
+            .quadwp_io_num = -1,
+            .quadhd_io_num = -1,
+            .max_transfer_sz = DISPLAY_WIDTH * 40 * sizeof(uint16_t),  // Reduced for power saving
+        };
+        
+        esp_err_t ret = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "SPI bus initialization failed: %s", esp_err_to_name(ret));
+        }
     }
 
     // GC9A01初始化
     void InitializeGc9a01Display() {
-        // Create and initialize XunguanDisplay
+        esp_lcd_panel_io_spi_config_t io_config = {
+            .cs_gpio_num = DISPLAY_SPI_CS_PIN,
+            .dc_gpio_num = DISPLAY_SPI_DC_PIN,
+            .spi_mode = 0,
+            .pclk_hz = DISPLAY_SPI_SCLK_HZ,
+            .trans_queue_depth = 10,
+            .lcd_cmd_bits = 8,
+            .lcd_param_bits = 8,
+        };
+        
+        esp_lcd_panel_io_handle_t panel_io = nullptr;
+        esp_err_t ret = esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_config, &panel_io);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Panel IO creation failed: %s", esp_err_to_name(ret));
+            return;
+        }
+        
+        esp_lcd_panel_dev_config_t panel_config = {
+            .reset_gpio_num = DISPLAY_SPI_RESET_PIN,
+            .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR,
+            .bits_per_pixel = 16,
+        };
+        
+        esp_lcd_panel_handle_t panel = nullptr;
+        ret = esp_lcd_new_panel_gc9a01(panel_io, &panel_config, &panel);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Panel creation failed: %s", esp_err_to_name(ret));
+            return;
+        }
+        
+        ret = esp_lcd_panel_reset(panel);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Panel reset failed: %s", esp_err_to_name(ret));
+            return;
+        }
+        
+        ret = esp_lcd_panel_init(panel);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Panel init failed: %s", esp_err_to_name(ret));
+            return;
+        }
+        
+        // Invert colors for GC9A01
+        ret = esp_lcd_panel_invert_color(panel, true);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Panel color invert failed: %s", esp_err_to_name(ret));
+            return;
+        }
+        
+        // Mirror display
+        ret = esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Panel mirror failed: %s", esp_err_to_name(ret));
+            return;
+        }
+        
+        // Turn on display
+        ret = esp_lcd_panel_disp_on_off(panel, true);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Panel display on failed: %s", esp_err_to_name(ret));
+            return;
+        }
+        
+        // Create and initialize XunguanDisplay with the initialized panel
         display_ = new XunguanDisplay();
-        if (!display_->Initialize()) {
+        if (!display_->Initialize(panel_io, panel)) {
             ESP_LOGE(TAG, "Failed to initialize XunguanDisplay");
         }
     }

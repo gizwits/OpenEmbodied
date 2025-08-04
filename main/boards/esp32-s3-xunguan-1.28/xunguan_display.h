@@ -177,6 +177,9 @@ public:
     // Initialize display hardware
     bool Initialize();
     
+    // Initialize display with pre-initialized panel handles
+    bool Initialize(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel);
+    
     // Override Display methods
     bool Lock(int timeout_ms = 0) override;
     void Unlock() override;
@@ -220,12 +223,6 @@ public:
 private:
     // Initialize GPIO pins to prevent floating
     bool InitializeGpio();
-    
-    // Initialize SPI bus
-    bool InitializeSpi();
-    
-    // Initialize LCD panel
-    bool InitializeLcdPanel();
     
     // Initialize LVGL
     bool InitializeLvgl();

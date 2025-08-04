@@ -100,19 +100,21 @@ XunguanDisplay::~XunguanDisplay() {
 }
 
 bool XunguanDisplay::Initialize() {
-    if (!InitializeSpi()) {
-        ESP_LOGE(TAG, "Failed to initialize SPI");
+    // This method is kept for backward compatibility but should not be used
+    // Use Initialize(panel_io, panel) instead
+    ESP_LOGE(TAG, "Initialize() called without panel handles. Use Initialize(panel_io, panel) instead.");
+    return false;
+}
+
+bool XunguanDisplay::Initialize(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel) {
+    if (!panel_io || !panel) {
+        ESP_LOGE(TAG, "Invalid panel handles provided");
         return false;
     }
     
-    
-    
-    if (!InitializeLcdPanel()) {
-        ESP_LOGE(TAG, "Failed to initialize LCD panel");
-        return false;
-    }
-    
-    
+    // Store the panel handles
+    panel_io_ = panel_io;
+    panel_ = panel;
     
     if (!InitializeLvgl()) {
         ESP_LOGE(TAG, "Failed to initialize LVGL");
@@ -155,93 +157,7 @@ bool XunguanDisplay::Initialize() {
     return true;
 }
 
-bool XunguanDisplay::InitializeSpi() {
-    
-    
-    spi_bus_config_t buscfg = {
-        .mosi_io_num = DISPLAY_SPI_MOSI_PIN,
-        .miso_io_num = -1,  // No MISO for this display
-        .sclk_io_num = DISPLAY_SPI_SCLK_PIN,
-        .quadwp_io_num = -1,
-        .quadhd_io_num = -1,
-        .max_transfer_sz = DISPLAY_WIDTH * 40 * sizeof(uint16_t),  // Reduced for power saving
-    };
-    
-    esp_err_t ret = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "SPI bus initialization failed: %s", esp_err_to_name(ret));
-        return false;
-    }
-    
-    return true;
-}
 
-bool XunguanDisplay::InitializeLcdPanel() {
-    
-    
-    esp_lcd_panel_io_spi_config_t io_config = {
-        .cs_gpio_num = DISPLAY_SPI_CS_PIN,
-        .dc_gpio_num = DISPLAY_SPI_DC_PIN,
-        .spi_mode = 0,
-        .pclk_hz = DISPLAY_SPI_SCLK_HZ,
-        .trans_queue_depth = 10,
-        .lcd_cmd_bits = 8,
-        .lcd_param_bits = 8,
-    };
-    
-    esp_err_t ret = esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_config, &panel_io_);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Panel IO creation failed: %s", esp_err_to_name(ret));
-        return false;
-    }
-    
-    esp_lcd_panel_dev_config_t panel_config = {
-        .reset_gpio_num = DISPLAY_SPI_RESET_PIN,
-        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR,
-        .bits_per_pixel = 16,
-    };
-    
-    ret = esp_lcd_new_panel_gc9a01(panel_io_, &panel_config, &panel_);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Panel creation failed: %s", esp_err_to_name(ret));
-        return false;
-    }
-    
-    ret = esp_lcd_panel_reset(panel_);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Panel reset failed: %s", esp_err_to_name(ret));
-        return false;
-    }
-    
-    ret = esp_lcd_panel_init(panel_);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Panel init failed: %s", esp_err_to_name(ret));
-        return false;
-    }
-    
-    // Invert colors for GC9A01
-    ret = esp_lcd_panel_invert_color(panel_, true);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Panel color invert failed: %s", esp_err_to_name(ret));
-        return false;
-    }
-    
-    // Mirror display
-    ret = esp_lcd_panel_mirror(panel_, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Panel mirror failed: %s", esp_err_to_name(ret));
-        return false;
-    }
-    
-    // Turn on display
-    ret = esp_lcd_panel_disp_on_off(panel_, true);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Panel display on failed: %s", esp_err_to_name(ret));
-        return false;
-    }
-    
-    return true;
-}
 
 bool XunguanDisplay::InitializeLvgl() {
     
