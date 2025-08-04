@@ -392,17 +392,15 @@ private:
         auto& app = Application::GetInstance();
         return app.GetDeviceState() != kDeviceStateIdle;
     }
-
-    // LIS2HH12专用I2C初始化
     void InitializeLis2hh12I2c() {
         i2c_master_bus_config_t i2c_bus_cfg = {
             .i2c_port = I2C_NUM_0, // 用另一个I2C控制器
             .sda_io_num = GPIO_NUM_38,      // LIS2HH12的SDA
             .scl_io_num = GPIO_NUM_41,      // LIS2HH12的SCL
             .clk_source = I2C_CLK_SRC_DEFAULT,
-            .glitch_ignore_cnt = 3,         // 优化毛刺忽略计数
-            .intr_priority = 0,              // 使用标准中断优先级
-            .trans_queue_depth = 10,         // 增加传输队列深度
+            .glitch_ignore_cnt = 7,
+            .intr_priority = 0,
+            .trans_queue_depth = 0,
             .flags = {
                 .enable_internal_pullup = 1,
             },
@@ -411,7 +409,7 @@ private:
         i2c_device_config_t dev_cfg = {
             .dev_addr_length = I2C_ADDR_BIT_LEN_7,
             .device_address = LIS2HH12_I2C_ADDR,
-            .scl_speed_hz = 400000,  // 提升到400kHz，提高读取速度
+            .scl_speed_hz = 400000,  // 降低到100kHz，提高稳定性
         };
         ESP_ERROR_CHECK(i2c_master_bus_add_device(lis2hh12_i2c_bus_, &dev_cfg, &lis2hh12_dev_));
     }
@@ -514,7 +512,7 @@ public:
         InitializeLis2hh12();    // 初始化LIS2HH12
         InitializeButtons();
         InitializeIot();
-        xTaskCreate(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 1024 * 3, this, 1, NULL); // 启动检测任务
+        xTaskCreate(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 1024 * 4, this, 1, NULL); // 启动检测任务
         InitializePowerManager();
         InitializePowerSaveTimer();
         // ESP_LOGI(TAG, "ReadADC2_CH1_Oneshot");
