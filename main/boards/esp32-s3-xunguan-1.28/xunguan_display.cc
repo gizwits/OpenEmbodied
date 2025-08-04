@@ -234,22 +234,19 @@ bool XunguanDisplay::InitializeLvglTimer() {
 
 bool XunguanDisplay::CreateLvglTask() {
     
-    
-    BaseType_t ret = xTaskCreatePinnedToCore(
+    BaseType_t ret = xTaskCreate(
         lvgl_task,
         "LVGL",
-        8192,  // Increase stack size
+        4 * 1024,  // 增加栈大小到16KB
         this,
-        1,     // Lower priority to reduce CPU load
-        &lvgl_task_handle_,
-        1
+        1,     // 提高优先级到2
+        &lvgl_task_handle_
     );
     
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create LVGL task");
         return false;
     }
-    
     
     return true;
 }
@@ -262,9 +259,7 @@ void XunguanDisplay::lvgl_task(void* arg) {
     
     // Log immediately to confirm task started
     
-    
     while (1) {
-        
         // Minimize lock holding time
         _lock_acquire(&lvgl_api_lock);
         time_till_next_ms = lv_timer_handler();
@@ -278,7 +273,6 @@ void XunguanDisplay::lvgl_task(void* arg) {
         time_till_next_ms += 2;  // 额外增加2ms休眠
         
         vTaskDelay(pdMS_TO_TICKS(time_till_next_ms));
-        
     }
 }
 
@@ -914,39 +908,38 @@ void XunguanDisplay::StartThinkingAnimation() {
     lv_img_set_src(right_hand_, &hand_right_img);
     lv_obj_set_style_img_recolor(right_hand_, lv_color_hex(0xFCCCE6), 0);
     lv_obj_set_style_img_recolor_opa(right_hand_, LV_OPA_COVER, 0);
+    
     // 设置右手位置
     lv_obj_set_pos(right_hand_, screen_width - 74, screen_height - 70);
     lv_obj_set_style_img_recolor(right_hand_, lv_color_hex(EYE_COLOR), 0);  // 设置青色
     lv_obj_set_style_img_recolor_opa(right_hand_, LV_OPA_COVER, 0);  // 设置不透明度
-    lv_img_set_zoom(left_hand_, 256 * 0.9); 
+    lv_img_set_zoom(right_hand_, 256 * 0.9); 
     
     // 左手左右移动动画
-    static lv_anim_t left_hand_anim;
-    lv_anim_init(&left_hand_anim);
-    lv_anim_set_var(&left_hand_anim, left_hand_);
-    lv_anim_set_values(&left_hand_anim, 40, 60);
-    lv_anim_set_time(&left_hand_anim, 600);
-    lv_anim_set_delay(&left_hand_anim, 0);
-    lv_anim_set_exec_cb(&left_hand_anim, (lv_anim_exec_xcb_t)lv_obj_set_x);
-    lv_anim_set_path_cb(&left_hand_anim, lv_anim_path_ease_in_out);
-    lv_anim_set_repeat_count(&left_hand_anim, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_playback_time(&left_hand_anim, 600);
-    lv_anim_set_playback_delay(&left_hand_anim, 0);
-    lv_anim_start(&left_hand_anim);
+    lv_anim_init(&left_eye_anim_);
+    lv_anim_set_var(&left_eye_anim_, left_hand_);
+    lv_anim_set_values(&left_eye_anim_, 40, 60);
+    lv_anim_set_time(&left_eye_anim_, 600);
+    lv_anim_set_delay(&left_eye_anim_, 0);
+    lv_anim_set_exec_cb(&left_eye_anim_, (lv_anim_exec_xcb_t)lv_obj_set_x);
+    lv_anim_set_path_cb(&left_eye_anim_, lv_anim_path_ease_in_out);
+    lv_anim_set_repeat_count(&left_eye_anim_, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_playback_time(&left_eye_anim_, 600);
+    lv_anim_set_playback_delay(&left_eye_anim_, 0);
+    lv_anim_start(&left_eye_anim_);
 
     // 右手左右移动动画（与左手相反）
-    static lv_anim_t right_hand_anim;
-    lv_anim_init(&right_hand_anim);
-    lv_anim_set_var(&right_hand_anim, right_hand_);
-    lv_anim_set_values(&right_hand_anim, screen_width - 84, screen_width - 100);
-    lv_anim_set_time(&right_hand_anim, 600);
-    lv_anim_set_delay(&right_hand_anim, 0);
-    lv_anim_set_exec_cb(&right_hand_anim, (lv_anim_exec_xcb_t)lv_obj_set_x);
-    lv_anim_set_path_cb(&right_hand_anim, lv_anim_path_ease_in_out);
-    lv_anim_set_repeat_count(&right_hand_anim, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_playback_time(&right_hand_anim, 600);
-    lv_anim_set_playback_delay(&right_hand_anim, 0);
-    lv_anim_start(&right_hand_anim);
+    lv_anim_init(&right_eye_anim_);
+    lv_anim_set_var(&right_eye_anim_, right_hand_);
+    lv_anim_set_values(&right_eye_anim_, screen_width - 84, screen_width - 100);
+    lv_anim_set_time(&right_eye_anim_, 600);
+    lv_anim_set_delay(&right_eye_anim_, 0);
+    lv_anim_set_exec_cb(&right_eye_anim_, (lv_anim_exec_xcb_t)lv_obj_set_x);
+    lv_anim_set_path_cb(&right_eye_anim_, lv_anim_path_ease_in_out);
+    lv_anim_set_repeat_count(&right_eye_anim_, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_playback_time(&right_eye_anim_, 600);
+    lv_anim_set_playback_delay(&right_eye_anim_, 0);
+    lv_anim_start(&right_eye_anim_);
 }
 
 void XunguanDisplay::StartShockedAnimation() {
@@ -1395,6 +1388,15 @@ void XunguanDisplay::StartEyeScalingAnimation(lv_obj_t* left_eye, lv_obj_t* righ
     lv_anim_del(left_eye, eye_scaling_anim_cb);
     lv_anim_del(right_eye, eye_scaling_anim_cb);
     
+    // 清理可能存在的用户数据
+    lv_anim_t* existing_anim = lv_anim_get(left_eye, (lv_anim_exec_xcb_t)eye_scaling_anim_cb);
+    if (existing_anim) {
+        BlinkUserData* existing_data = (BlinkUserData*)lv_anim_get_user_data(existing_anim);
+        if (existing_data) {
+            delete existing_data;
+        }
+    }
+    
     // Animation parameters
     int min_height = original_height * 8 / 10;  // Shrink to 8/10 (slight)
     int anim_duration = 600;  // 1 second per cycle
@@ -1417,7 +1419,6 @@ void XunguanDisplay::StartEyeScalingAnimation(lv_obj_t* left_eye, lv_obj_t* righ
     lv_anim_set_user_data(&left_eye_anim_, user_data);
     
     lv_anim_start(&left_eye_anim_);
-    
 }
 
 // Custom callback removed - using LVGL built-in lv_obj_set_height function
@@ -1594,18 +1595,14 @@ void XunguanDisplay::heart_zoom_anim_cb(void* var, int32_t v) {
 
 void XunguanDisplay::QueueAnimation(AnimationType type) {
     
-    
     // If same animation is already pending, ignore
     if (pending_animation_.is_pending && pending_animation_.type == type) {
-        
         return;
     }
     
     // Set pending animation
     pending_animation_.type = type;
     pending_animation_.is_pending = true;
-    
-    
     
     // Process the queue immediately
     ProcessAnimationQueue();
@@ -1616,8 +1613,6 @@ void XunguanDisplay::ProcessAnimationQueue() {
         return;
     }
     
-    
-    
     // Stop current animation first
     StopCurrentAnimation();
     
@@ -1626,8 +1621,6 @@ void XunguanDisplay::ProcessAnimationQueue() {
     
     // Clear pending flag
     pending_animation_.is_pending = false;
-    
-    
 }
 
 void XunguanDisplay::StopCurrentAnimation() {
@@ -1643,6 +1636,33 @@ void XunguanDisplay::StopCurrentAnimation() {
         lv_anim_del(left_eye_, blink_anim_cb);
         lv_anim_del(left_eye_, thinking_float_anim_cb);
         lv_anim_del(left_eye_, eye_scaling_anim_cb);
+        
+        // 清理眨眼动画的用户数据
+        lv_anim_t* anim = lv_anim_get(left_eye_, (lv_anim_exec_xcb_t)blink_anim_cb);
+        if (anim) {
+            BlinkUserData* user_data = (BlinkUserData*)lv_anim_get_user_data(anim);
+            if (user_data) {
+                delete user_data;
+            }
+        }
+        
+        // 清理思考浮动动画的用户数据
+        anim = lv_anim_get(left_eye_, (lv_anim_exec_xcb_t)thinking_float_anim_cb);
+        if (anim) {
+            BlinkUserData* user_data = (BlinkUserData*)lv_anim_get_user_data(anim);
+            if (user_data) {
+                delete user_data;
+            }
+        }
+        
+        // 清理眼睛缩放动画的用户数据
+        anim = lv_anim_get(left_eye_, (lv_anim_exec_xcb_t)eye_scaling_anim_cb);
+        if (anim) {
+            BlinkUserData* user_data = (BlinkUserData*)lv_anim_get_user_data(anim);
+            if (user_data) {
+                delete user_data;
+            }
+        }
     }
     if (right_eye_) {
         lv_anim_del(right_eye_, (lv_anim_exec_xcb_t)lv_obj_set_height);
@@ -1705,31 +1725,38 @@ void XunguanDisplay::StartAnimation(AnimationType type) {
     }
 } 
 
-// Frame rate control implementation
+/**
+ * @brief 设置帧率模式
+ * 
+ * 提供三种预定义的帧率模式，每种模式都有不同的性能和功耗平衡：
+ * - POWER_SAVE: 最低功耗，适合电池供电场景
+ * - NORMAL: 平衡性能和功耗，适合日常使用
+ * - SMOOTH: 最高流畅度，适合需要流畅动画的场景
+ * 
+ * @param mode 帧率模式枚举值
+ * @return true 设置成功，false 设置失败
+ */
 bool XunguanDisplay::SetFrameRateMode(FrameRateMode mode) {
-    
     
     uint32_t min_ms, max_ms, tick_period_us;
     
     switch (mode) {
         case FrameRateMode::POWER_SAVE:
-            min_ms = 15;
-            max_ms = 30;
-            tick_period_us = 5000;  // 5ms tick
+            min_ms = 20;           // 最小延迟20ms (50 FPS)
+            max_ms = 30;           // 最大延迟40ms (25 FPS)
+            tick_period_us = 8000; // 8ms tick周期，125Hz
             break;
             
         case FrameRateMode::NORMAL:
-            min_ms = 10;
-            max_ms = 20;
-            tick_period_us = 4000;  // 4ms tick
-            
+            min_ms = 15;           // 最小延迟15ms (67 FPS)
+            max_ms = 25;           // 最大延迟25ms (40 FPS)
+            tick_period_us = 6000; // 6ms tick周期，167Hz
             break;
             
         case FrameRateMode::SMOOTH:
-            min_ms = 8;
-            max_ms = 15;
-            tick_period_us = 3000;  // 3ms tick
-            
+            min_ms = 10;           // 最小延迟10ms (100 FPS)
+            max_ms = 20;           // 最大延迟20ms (50 FPS)
+            tick_period_us = 4000; // 4ms tick周期，250Hz
             break;
             
         case FrameRateMode::CUSTOM:
@@ -1744,50 +1771,77 @@ bool XunguanDisplay::SetFrameRateMode(FrameRateMode mode) {
     return UpdateFrameRateSettings(mode, min_ms, max_ms, tick_period_us);
 }
 
+/**
+ * @brief 设置自定义帧率
+ * 
+ * 允许用户自定义帧率范围，提供更灵活的帧率控制。
+ * 参数验证确保帧率在合理范围内，避免系统过载。
+ * 
+ * @param min_ms 最小延迟时间(毫秒)，对应最高帧率
+ * @param max_ms 最大延迟时间(毫秒)，对应最低帧率
+ * @return true 设置成功，false 参数无效
+ */
 bool XunguanDisplay::SetCustomFrameRate(uint32_t min_ms, uint32_t max_ms) {
     
-    
-    // Validate parameters
+    // 参数验证：确保延迟时间在合理范围内
     if (min_ms < 1 || max_ms < min_ms || max_ms > 100) {
         ESP_LOGE(TAG, "Invalid custom frame rate parameters");
         return false;
     }
     
-    // Calculate tick period based on min delay (tick should be <= min delay)
-    uint32_t tick_period_us = MIN(min_ms * 1000, 4000);  // Max 2ms tick
+    // 计算tick周期：基于最小延迟，确保tick频率足够高
+    // tick周期应该小于等于最小延迟，最大不超过4ms
+    uint32_t tick_period_us = MIN(min_ms * 1000, 4000);  // 最大4ms tick周期
     
     return UpdateFrameRateSettings(FrameRateMode::CUSTOM, min_ms, max_ms, tick_period_us);
 }
 
+/**
+ * @brief 更新帧率设置
+ * 
+ * 内部方法，用于更新帧率相关的所有参数。
+ * 如果显示已初始化，会立即应用新设置。
+ * 
+ * @param mode 帧率模式
+ * @param min_ms 最小延迟时间(毫秒)
+ * @param max_ms 最大延迟时间(毫秒)
+ * @param tick_period_us tick周期(微秒)
+ * @return true 更新成功
+ */
 bool XunguanDisplay::UpdateFrameRateSettings(FrameRateMode mode, uint32_t min_ms, uint32_t max_ms, uint32_t tick_period_us) {
     
-    // Update internal variables
-    current_frame_rate_mode_ = mode;
-    current_min_delay_ms_ = min_ms;
-    current_max_delay_ms_ = max_ms;
-    current_tick_period_us_ = tick_period_us;
+    // 更新内部变量
+    current_frame_rate_mode_ = mode;      // 当前帧率模式
+    current_min_delay_ms_ = min_ms;       // 最小延迟时间
+    current_max_delay_ms_ = max_ms;       // 最大延迟时间
+    current_tick_period_us_ = tick_period_us; // tick周期
     
-    // Apply new settings if display is initialized
+    // 如果显示已初始化，立即应用新设置
     if (initialized_) {
         ApplyFrameRateSettings();
     }
     
-    
     return true;
 }
 
+/**
+ * @brief 应用帧率设置
+ * 
+ * 将当前帧率设置应用到LVGL定时器。
+ * 通过重启定时器来更新tick周期，从而改变LVGL的刷新频率。
+ */
 void XunguanDisplay::ApplyFrameRateSettings() {
     
-    
+    // 检查LVGL定时器是否已初始化
     if (!lvgl_tick_timer_) {
         ESP_LOGW(TAG, "LVGL tick timer not initialized");
         return;
     }
     
-    // Stop current timer
+    // 停止当前定时器
     esp_timer_stop(lvgl_tick_timer_);
     
-    // Restart with new period
+    // 使用新的周期重启定时器
     esp_err_t ret = esp_timer_start_periodic(lvgl_tick_timer_, current_tick_period_us_);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to restart LVGL tick timer: %s", esp_err_to_name(ret));
@@ -1941,7 +1995,6 @@ void XunguanDisplay::StartVertigoRotationAnimation(lv_obj_t* left_spiral, lv_obj
 
 void XunguanDisplay::StartHappyBlinkingAnimation(lv_obj_t* left_circle, lv_obj_t* right_circle, int original_size) {
     
-    
     if (!left_circle || !right_circle) {
         ESP_LOGE(TAG, "Invalid circle objects!");
         return;
@@ -1957,6 +2010,15 @@ void XunguanDisplay::StartHappyBlinkingAnimation(lv_obj_t* left_circle, lv_obj_t
     lv_anim_del(right_circle, (lv_anim_exec_xcb_t)lv_obj_set_y);
     lv_anim_del(right_circle, blink_anim_cb);
     
+    // 清理可能存在的用户数据
+    lv_anim_t* existing_anim = lv_anim_get(left_circle, (lv_anim_exec_xcb_t)blink_anim_cb);
+    if (existing_anim) {
+        BlinkUserData* existing_data = (BlinkUserData*)lv_anim_get_user_data(existing_anim);
+        if (existing_data) {
+            delete existing_data;
+        }
+    }
+    
     // Ensure circles are visible
     lv_obj_clear_flag(left_circle, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(right_circle, LV_OBJ_FLAG_HIDDEN);
@@ -1970,7 +2032,6 @@ void XunguanDisplay::StartHappyBlinkingAnimation(lv_obj_t* left_circle, lv_obj_t
     // 计算Y坐标调整（保持眼睛居中）
     int original_y = lv_obj_get_y(left_circle);
     int min_y = original_y + (max_height - min_height) / 2;  // 压缩时向上调整Y坐标
-    
     
     // 使用单个动画和回调函数同时处理两个眼睛
     lv_anim_init(&left_eye_anim_);
@@ -1992,12 +2053,9 @@ void XunguanDisplay::StartHappyBlinkingAnimation(lv_obj_t* left_circle, lv_obj_t
     lv_anim_set_user_data(&left_eye_anim_, user_data);
     
     lv_anim_start(&left_eye_anim_);
-    
-    
 }
 
 void XunguanDisplay::StartThinkingFloatAnimation(lv_obj_t* left_eye, lv_obj_t* right_eye, int original_y) {
-    
     
     if (!left_eye || !right_eye) {
         ESP_LOGE(TAG, "Invalid eye objects!");
@@ -2010,6 +2068,15 @@ void XunguanDisplay::StartThinkingFloatAnimation(lv_obj_t* left_eye, lv_obj_t* r
     lv_anim_del(left_eye, thinking_float_anim_cb);
     lv_anim_del(right_eye, thinking_float_anim_cb);
     
+    // 清理可能存在的用户数据
+    lv_anim_t* existing_anim = lv_anim_get(left_eye, (lv_anim_exec_xcb_t)thinking_float_anim_cb);
+    if (existing_anim) {
+        BlinkUserData* existing_data = (BlinkUserData*)lv_anim_get_user_data(existing_anim);
+        if (existing_data) {
+            delete existing_data;
+        }
+    }
+    
     // Ensure eyes are visible
     lv_obj_clear_flag(left_eye, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(right_eye, LV_OBJ_FLAG_HIDDEN);
@@ -2019,8 +2086,6 @@ void XunguanDisplay::StartThinkingFloatAnimation(lv_obj_t* left_eye, lv_obj_t* r
     int float_distance = 8;     // 8像素的浮动距离
     int start_pos = 0;
     int end_pos = float_distance;
-    
-    
     
     // 使用单个动画和回调函数同时处理两个眼睛
     lv_anim_init(&left_eye_anim_);
@@ -2042,8 +2107,6 @@ void XunguanDisplay::StartThinkingFloatAnimation(lv_obj_t* left_eye, lv_obj_t* r
     lv_anim_set_user_data(&left_eye_anim_, user_data);
     
     lv_anim_start(&left_eye_anim_);
-    
-    
 }
 
 void XunguanDisplay::StartTearFallingAnimation(lv_obj_t* left_tear, lv_obj_t* right_tear, int start_y) {

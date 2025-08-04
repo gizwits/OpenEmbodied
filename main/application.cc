@@ -608,7 +608,6 @@ void Application::Start() {
             } else if (strcmp(state->valuestring, "stop") == 0) {
                 ESP_LOGI(TAG, "tts stop");
                 Schedule([this]() {
-                    background_task_->WaitForCompletion();
                     auto& board = Board::GetInstance();
 
                     if (device_state_ == kDeviceStateSpeaking) {

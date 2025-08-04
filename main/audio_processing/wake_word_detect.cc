@@ -2,6 +2,7 @@
 #include "application.h"
 
 #include <esp_log.h>
+#include <esp_task_wdt.h>
 #include <model_path.h>
 #include <arpa/inet.h>
 #include <sstream>
@@ -110,14 +111,14 @@ void WakeWordDetect::AudioDetectionTask() {
     auto fetch_size = afe_iface_->get_fetch_chunksize(afe_data_);
     auto feed_size = afe_iface_->get_feed_chunksize(afe_data_);
     ESP_LOGI(TAG, "Audio detection task started, feed size: %d fetch size: %d",
-        feed_size, fetch_size);
+        fetch_size, feed_size);
 
     while (true) {
-        xEventGroupWaitBits(event_group_, DETECTION_RUNNING_EVENT, pdFALSE, pdTRUE, portMAX_DELAY);
+        xEventGroupWaitBits(event_group_, DETECTION_RUNNING_EVENT, pdFALSE, pdTRUE, pdMS_TO_TICKS(1000));
 
-        auto res = afe_iface_->fetch_with_delay(afe_data_, portMAX_DELAY);
+        auto res = afe_iface_->fetch_with_delay(afe_data_, pdMS_TO_TICKS(100)); // 使用100ms超时而不是无限等待
         if (res == nullptr || res->ret_value == ESP_FAIL) {
-            continue;;
+            continue;
         }
 
         // Store the wake word data for voice recognition, like who is speaking
@@ -131,6 +132,7 @@ void WakeWordDetect::AudioDetectionTask() {
                 wake_word_detected_callback_(last_detected_wake_word_);
             }
         }
+        
     }
 }
 

@@ -105,9 +105,9 @@ void AfeAudioProcessor::AudioProcessorTask() {
         feed_size, fetch_size);
 
     while (true) {
-        xEventGroupWaitBits(event_group_, PROCESSOR_RUNNING, pdFALSE, pdTRUE, portMAX_DELAY);
+        xEventGroupWaitBits(event_group_, PROCESSOR_RUNNING, pdFALSE, pdTRUE, pdMS_TO_TICKS(1000));
 
-        auto res = afe_iface_->fetch_with_delay(afe_data_, portMAX_DELAY);
+        auto res = afe_iface_->fetch_with_delay(afe_data_, pdMS_TO_TICKS(100));
         if ((xEventGroupGetBits(event_group_) & PROCESSOR_RUNNING) == 0) {
             continue;
         }

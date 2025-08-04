@@ -514,7 +514,7 @@ public:
         InitializeLis2hh12();    // 初始化LIS2HH12
         InitializeButtons();
         InitializeIot();
-        xTaskCreate(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 4096, this, 1, NULL); // 启动检测任务
+        xTaskCreate(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 1024 * 3, this, 1, NULL); // 启动检测任务
         InitializePowerManager();
         InitializePowerSaveTimer();
         // ESP_LOGI(TAG, "ReadADC2_CH1_Oneshot");
