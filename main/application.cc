@@ -598,6 +598,7 @@ void Application::Start() {
                     auto display = board.GetDisplay();
                     display->SetEmotion("thinking");
                 });
+                has_emotion_ = false;
             } else if (strcmp(state->valuestring, "stop") == 0) {
                 Schedule([this]() {
                     background_task_->WaitForCompletion();
@@ -633,6 +634,7 @@ void Application::Start() {
             if (cJSON_IsString(emotion)) {
                 Schedule([this, display, emotion_str = std::string(emotion->valuestring)]() {
                     display->SetEmotion(emotion_str.c_str());
+                    has_emotion_ = true;
                 });
             }
 #if CONFIG_IOT_PROTOCOL_MCP
@@ -1302,8 +1304,13 @@ void Application::SetDeviceState(DeviceState state) {
             }
             break;
         case kDeviceStateSpeaking:
-            display->SetStatus(Lang::Strings::SPEAKING);
-            display->SetEmotion("happy");
+
+            if (!has_emotion_) {
+                // 没有情绪，则设置为开心
+                display->SetStatus(Lang::Strings::SPEAKING);
+                display->SetEmotion("happy");
+            }
+            
             if (board.GetServo()) {
                 Schedule([this]() {
                     ESP_LOGI(TAG, "GetServo");
@@ -1535,8 +1542,8 @@ bool Application::CheckBatteryLevel() {
     bool discharging = false;
     if (Board::GetInstance().GetBatteryLevel(level, charging, discharging)) {
         ESP_LOGI(TAG, "current Battery level: %d, charging: %d, discharging: %d", level, charging, discharging);
-        if (level <= 10) {
-            // 提示电量不足
+        if (level <= 10 && discharging) {
+            // 电量
             Alert(Lang::Strings::ERROR, Lang::Strings::ERROR, "sad", Lang::Sounds::P3_BATTLE_LOW);
             return false;
         }

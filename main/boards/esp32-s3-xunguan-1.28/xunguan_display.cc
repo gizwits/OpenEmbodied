@@ -66,7 +66,7 @@ XunguanDisplay::XunguanDisplay()
       left_hand_(nullptr), right_hand_(nullptr),
       lvgl_tick_timer_(nullptr), lvgl_task_handle_(nullptr),
       vertigo_recovery_timer_(nullptr), vertigo_mode_active_(false),
-      loving_recovery_timer_(nullptr), loving_mode_active_(false), ota_progress_bar_(nullptr), ota_number_label_(nullptr), ota_progress_(0) {
+      loving_recovery_timer_(nullptr), loving_mode_active_(false), ota_progress_bar_(nullptr), ota_number_label_(nullptr), ota_progress_(0), power_save_mode_enabled_(false) {
     
     // Initialize static lock
     _lock_init(&lvgl_api_lock);
@@ -164,7 +164,7 @@ bool XunguanDisplay::InitializeSpi() {
         .sclk_io_num = DISPLAY_SPI_SCLK_PIN,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
-        .max_transfer_sz = DISPLAY_WIDTH * 80 * sizeof(uint16_t),
+        .max_transfer_sz = DISPLAY_WIDTH * 40 * sizeof(uint16_t),  // Reduced for power saving
     };
     
     esp_err_t ret = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
@@ -294,7 +294,7 @@ bool XunguanDisplay::InitializeLvglTimer() {
     
     const esp_timer_create_args_t lvgl_tick_timer_args = {
         .callback = [](void* arg) {
-            lv_tick_inc(2);  // 2ms tick
+            lv_tick_inc(4);  // 2ms tick
         },
         .name = "lvgl_tick"
     };
@@ -319,13 +319,14 @@ bool XunguanDisplay::InitializeLvglTimer() {
 bool XunguanDisplay::CreateLvglTask() {
     
     
-    BaseType_t ret = xTaskCreate(
+    BaseType_t ret = xTaskCreatePinnedToCore(
         lvgl_task,
         "LVGL",
         8192,  // Increase stack size
         this,
-        2,     // Lower priority to reduce CPU load
-        &lvgl_task_handle_
+        1,     // Lower priority to reduce CPU load
+        &lvgl_task_handle_,
+        0
     );
     
     if (ret != pdPASS) {
@@ -446,7 +447,7 @@ void XunguanDisplay::SetupUI() {
 }
 
 void XunguanDisplay::SetEmotion(const char* emotion) {
-    
+    ESP_LOGI(TAG, "SetEmotion: %s", emotion);
     
     if (!animation_queue_enabled_) {
         ESP_LOGW(TAG, "Animation queue is disabled");
@@ -990,6 +991,7 @@ void XunguanDisplay::StartThinkingAnimation() {
     lv_obj_set_pos(left_hand_, 20, screen_height - 70);
     lv_obj_set_style_img_recolor(left_hand_, lv_color_hex(EYE_COLOR), 0);  // 设置青色
     lv_obj_set_style_img_recolor_opa(left_hand_, LV_OPA_COVER, 0);  // 设置不透明度
+    lv_img_set_zoom(left_hand_, 256 * 0.9); 
 
     // 创建右手图片
     right_hand_ = lv_img_create(screen);
@@ -1000,18 +1002,19 @@ void XunguanDisplay::StartThinkingAnimation() {
     lv_obj_set_pos(right_hand_, screen_width - 74, screen_height - 70);
     lv_obj_set_style_img_recolor(right_hand_, lv_color_hex(EYE_COLOR), 0);  // 设置青色
     lv_obj_set_style_img_recolor_opa(right_hand_, LV_OPA_COVER, 0);  // 设置不透明度
+    lv_img_set_zoom(left_hand_, 256 * 0.9); 
     
     // 左手左右移动动画
     static lv_anim_t left_hand_anim;
     lv_anim_init(&left_hand_anim);
     lv_anim_set_var(&left_hand_anim, left_hand_);
     lv_anim_set_values(&left_hand_anim, 40, 60);
-    lv_anim_set_time(&left_hand_anim, 800);
+    lv_anim_set_time(&left_hand_anim, 600);
     lv_anim_set_delay(&left_hand_anim, 0);
     lv_anim_set_exec_cb(&left_hand_anim, (lv_anim_exec_xcb_t)lv_obj_set_x);
     lv_anim_set_path_cb(&left_hand_anim, lv_anim_path_ease_in_out);
     lv_anim_set_repeat_count(&left_hand_anim, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_playback_time(&left_hand_anim, 800);
+    lv_anim_set_playback_time(&left_hand_anim, 600);
     lv_anim_set_playback_delay(&left_hand_anim, 0);
     lv_anim_start(&left_hand_anim);
 
@@ -1019,16 +1022,15 @@ void XunguanDisplay::StartThinkingAnimation() {
     static lv_anim_t right_hand_anim;
     lv_anim_init(&right_hand_anim);
     lv_anim_set_var(&right_hand_anim, right_hand_);
-    lv_anim_set_values(&right_hand_anim, screen_width - 74, screen_width - 90);
-    lv_anim_set_time(&right_hand_anim, 800);
+    lv_anim_set_values(&right_hand_anim, screen_width - 84, screen_width - 100);
+    lv_anim_set_time(&right_hand_anim, 600);
     lv_anim_set_delay(&right_hand_anim, 0);
     lv_anim_set_exec_cb(&right_hand_anim, (lv_anim_exec_xcb_t)lv_obj_set_x);
     lv_anim_set_path_cb(&right_hand_anim, lv_anim_path_ease_in_out);
     lv_anim_set_repeat_count(&right_hand_anim, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_playback_time(&right_hand_anim, 800);
+    lv_anim_set_playback_time(&right_hand_anim, 600);
     lv_anim_set_playback_delay(&right_hand_anim, 0);
     lv_anim_start(&right_hand_anim);
-
 }
 
 void XunguanDisplay::StartShockedAnimation() {
@@ -2097,7 +2099,7 @@ void XunguanDisplay::StartThinkingFloatAnimation(lv_obj_t* left_eye, lv_obj_t* r
     lv_obj_clear_flag(right_eye, LV_OBJ_FLAG_HIDDEN);
     
     // Animation parameters - 轻微的上下浮动
-    int anim_duration = 2000;  // 2秒一个周期
+    int anim_duration = 1000;  // 2秒一个周期
     int float_distance = 8;     // 8像素的浮动距离
     int start_pos = 0;
     int end_pos = float_distance;

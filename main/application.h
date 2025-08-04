@@ -137,6 +137,7 @@ private:
     std::chrono::steady_clock::time_point last_output_time_;
     std::list<AudioStreamPacket> audio_decode_queue_;
     std::condition_variable audio_decode_cv_;
+    bool has_emotion_ = false;
 
     // 新增：用于维护音频包的timestamp队列
     std::list<uint32_t> timestamp_queue_;

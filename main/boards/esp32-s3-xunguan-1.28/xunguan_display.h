@@ -159,6 +159,9 @@ private:
     lv_obj_t* ota_progress_bar_;
     lv_obj_t* ota_number_label_;
     int ota_progress_;
+    
+    // Power management
+    bool power_save_mode_enabled_;
 
     // Blink animation user data structure
     struct BlinkUserData {
@@ -211,8 +214,13 @@ public:
 
     // WiFi config method
     void EnterWifiConfig();
+    
+    // Power management methods
 
 private:
+    // Initialize GPIO pins to prevent floating
+    bool InitializeGpio();
+    
     // Initialize SPI bus
     bool InitializeSpi();
     

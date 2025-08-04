@@ -284,11 +284,7 @@ private:
         });
 
         boot_button_.OnMultipleClick([this]() {
-            GetBacklight()->SetBrightness(0, false);
-            Application::GetInstance().Schedule([this]() {
-                vTaskDelay(pdMS_TO_TICKS(500));
-                ResetWifiConfiguration();
-            });
+            ResetWifiConfiguration();
         }, 3);
     }
 
