@@ -405,31 +405,63 @@ private:
                 .enable_internal_pullup = 1,
             },
         };
-        ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &lis2hh12_i2c_bus_));
+        esp_err_t ret = i2c_new_master_bus(&i2c_bus_cfg, &lis2hh12_i2c_bus_);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to create LIS2HH12 I2C bus: %s", esp_err_to_name(ret));
+            return;
+        }
+        
         i2c_device_config_t dev_cfg = {
             .dev_addr_length = I2C_ADDR_BIT_LEN_7,
             .device_address = LIS2HH12_I2C_ADDR,
-            .scl_speed_hz = 400000,  // 降低到100kHz，提高稳定性
+            .scl_speed_hz = 50000,  // 降低到100kHz，提高稳定性
         };
-        ESP_ERROR_CHECK(i2c_master_bus_add_device(lis2hh12_i2c_bus_, &dev_cfg, &lis2hh12_dev_));
+        ret = i2c_master_bus_add_device(lis2hh12_i2c_bus_, &dev_cfg, &lis2hh12_dev_);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to add LIS2HH12 device: %s", esp_err_to_name(ret));
+            return;
+        }
+        
+        ESP_LOGI(TAG, "LIS2HH12 I2C initialized successfully");
     }
 
     void InitializeLis2hh12() {
+        // 首先检测设备是否存在
+        uint8_t who_am_i = this->lis2hh12_read_reg(0x0F); // WHO_AM_I寄存器
+        ESP_LOGI(TAG, "LIS2HH12 WHO_AM_I: 0x%02X", who_am_i);
+        
+        if (who_am_i != 0x41) { // LIS2HH12的WHO_AM_I值应该是0x41
+            ESP_LOGE(TAG, "LIS2HH12 not found! Expected 0x41, got 0x%02X", who_am_i);
+            return;
+        }
+        
+        ESP_LOGI(TAG, "LIS2HH12 detected successfully");
+        
         // 0x20: CTRL1, 0x57 = 100Hz, all axes enable, normal mode
         this->lis2hh12_write_reg(0x20, 0x57);
         // 0x23: CTRL4, 0x00 = continuous update, LSB at lower address
         this->lis2hh12_write_reg(0x23, 0x00);
+        
+        ESP_LOGI(TAG, "LIS2HH12 initialized successfully");
     }
 
     // LIS2HH12 I2C读写成员函数
     uint8_t lis2hh12_read_reg(uint8_t reg) {
         uint8_t data = 0;
-        i2c_master_transmit_receive(lis2hh12_dev_, &reg, 1, &data, 1, 50 / portTICK_PERIOD_MS);  // 优化超时时间
+        esp_err_t ret = i2c_master_transmit_receive(lis2hh12_dev_, &reg, 1, &data, 1, pdMS_TO_TICKS(100));
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "LIS2HH12 read reg 0x%02X failed: %s", reg, esp_err_to_name(ret));
+            return 0;
+        }
         return data;
     }
+    
     void lis2hh12_write_reg(uint8_t reg, uint8_t value) {
         uint8_t buf[2] = {reg, value};
-        i2c_master_transmit(lis2hh12_dev_, buf, 2, 50 / portTICK_PERIOD_MS);  // 优化超时时间
+        esp_err_t ret = i2c_master_transmit(lis2hh12_dev_, buf, 2, pdMS_TO_TICKS(100));
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "LIS2HH12 write reg 0x%02X failed: %s", reg, esp_err_to_name(ret));
+        }
     }
 
     virtual bool NeedPlayProcessVoice() override {
@@ -510,6 +542,13 @@ public:
         InitializeGc9a01Display();
         InitializeLis2hh12I2c(); // 新增LIS2HH12专用I2C
         InitializeLis2hh12();    // 初始化LIS2HH12
+        
+        // 检查I2C设备是否正常
+        if (lis2hh12_dev_ == nullptr) {
+            ESP_LOGE(TAG, "LIS2HH12 device not initialized, skipping sensor task");
+        } else {
+            ESP_LOGI(TAG, "LIS2HH12 device initialized successfully");
+        }
         InitializeButtons();
         InitializeIot();
         xTaskCreate(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 1024 * 4, this, 1, NULL); // 启动检测任务

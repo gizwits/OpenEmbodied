@@ -52,7 +52,7 @@ Application::Application() {
     
     // 初始化看门狗
     auto& watchdog = Watchdog::GetInstance();
-    watchdog.Initialize(20, true);  // 10秒超时，超时后触发系统复位
+    watchdog.Initialize(30, true);
 
     // 初始化电量检查时间
     last_battery_check_time_ = std::chrono::steady_clock::now();
@@ -471,8 +471,8 @@ void Application::Start() {
 #if CONFIG_USE_AUDIO_PROCESSOR
     xTaskCreatePinnedToCore([](void* arg) {
         Application* app = (Application*)arg;
-        auto& watchdog = Watchdog::GetInstance();
-        watchdog.SubscribeTask(xTaskGetCurrentTaskHandle());
+        // auto& watchdog = Watchdog::GetInstance();
+        // watchdog.SubscribeTask(xTaskGetCurrentTaskHandle());
         app->AudioLoop();
         vTaskDelete(NULL);
     }, "audio_loop", 4096 * 2, this, 8, &audio_loop_task_handle_, 1);
@@ -480,8 +480,8 @@ void Application::Start() {
     // 非 AUDIO_PROCESSOR 就是 6824
     xTaskCreate([](void* arg) {
         Application* app = (Application*)arg;
-        auto& watchdog = Watchdog::GetInstance();
-        watchdog.SubscribeTask(xTaskGetCurrentTaskHandle());
+        // auto& watchdog = Watchdog::GetInstance();
+        // watchdog.SubscribeTask(xTaskGetCurrentTaskHandle());
         app->AudioLoop();
         vTaskDelete(NULL);
     }, "audio_loop", 3072, this, 8, &audio_loop_task_handle_);
@@ -583,10 +583,12 @@ void Application::Start() {
             auto state = cJSON_GetObjectItem(root, "state");
             if (strcmp(state->valuestring, "start") == 0) {
                 if (!has_emotion_) {
-                    auto display = Board::GetInstance().GetDisplay();
-                    // 没有情绪，则设置为开心
-                    display->SetStatus(Lang::Strings::SPEAKING);
-                    display->SetEmotion("happy");
+                    Schedule([this]() {
+                        auto display = Board::GetInstance().GetDisplay();
+                        // 没有情绪，则设置为开心
+                        display->SetStatus(Lang::Strings::SPEAKING);
+                        display->SetEmotion("happy");
+                    });
                 }
             } else if (strcmp(state->valuestring, "pre_start") == 0) {
                 aborted_ = false;
@@ -872,13 +874,8 @@ void Application::OnClockTimer() {
     auto display = Board::GetInstance().GetDisplay();
     display->UpdateStatusBar();
 
-    // Print the debug info every 10 seconds
+            // Print the debug info every 10 seconds
     if (clock_ticks_ % 10 == 0) {
-        // char buffer[500];
-        // vTaskList(buffer);
-        // ESP_LOGI(TAG, "Task list: \n%s", buffer);
-        // SystemInfo::PrintRealTimeStats(pdMS_TO_TICKS(1000));
-
         int free_sram = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
         int min_free_sram = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
         ESP_LOGI(TAG, "Free internal: %u minimal internal: %u", free_sram, min_free_sram);
@@ -912,7 +909,7 @@ void Application::Schedule(std::function<void()> callback) {
 // they should use Schedule to call this function
 void Application::MainEventLoop() {
     auto& watchdog = Watchdog::GetInstance();
-    const TickType_t timeout = pdMS_TO_TICKS(3000);
+    const TickType_t timeout = pdMS_TO_TICKS(1000);
     while (true) {
         watchdog.Reset();
 
@@ -939,6 +936,7 @@ void Application::MainEventLoop() {
                 task();
             }
         }
+        watchdog.Reset();
     }
 }
 
@@ -973,9 +971,9 @@ void Application::ChangeBot(const char* id, const char* voice_id) {
 // The Audio Loop is used to input and output audio data
 void Application::AudioLoop() {
     auto codec = Board::GetInstance().GetAudioCodec();
-    auto& watchdog = Watchdog::GetInstance();
+    // auto& watchdog = Watchdog::GetInstance();
     while (true) {
-        watchdog.Reset();
+        // watchdog.Reset();
         OnAudioInput();
         if (codec->output_enabled()) {
             OnAudioOutput();
@@ -994,8 +992,29 @@ void Application::OnAudioOutput() {
     auto now = std::chrono::steady_clock::now();
     auto codec = Board::GetInstance().GetAudioCodec();
     const int max_silence_seconds = 10;
+    
+    // 重置看门狗定时器
+    // auto& watchdog = Watchdog::GetInstance();
+    // watchdog.Reset();
+    
+    // 添加状态监控日志
+    static int log_counter = 0;
+    if (++log_counter % 100 == 0) { // 每100次调用打印一次
+        ESP_LOGI(TAG, "OnAudioOutput: state=%s, queue_size=%zu, output_enabled=%d", 
+                 STATE_STRINGS[device_state_], audio_decode_queue_.size(), codec->output_enabled());
+    }
 
     std::unique_lock<std::mutex> lock(mutex_);
+    
+    // 添加死锁检测
+    static auto last_lock_time = std::chrono::steady_clock::now();
+    auto current_time = std::chrono::steady_clock::now();
+    auto lock_duration = std::chrono::duration_cast<std::chrono::milliseconds>(current_time - last_lock_time).count();
+    if (lock_duration > 1000) { // 如果锁持有时间超过1秒，记录警告
+        ESP_LOGW(TAG, "Mutex lock held for %lld ms, possible deadlock", lock_duration);
+    }
+    last_lock_time = current_time;
+    
     if (audio_decode_queue_.empty()) {
         // Disable the output if there is no audio data for a long time
         if (device_state_ == kDeviceStateIdle) {
@@ -1028,10 +1047,18 @@ void Application::OnAudioOutput() {
 
 
     busy_decoding_audio_ = true;
-    background_task_->Schedule([this, codec, packet = std::move(packet)]() mutable {
+    auto start_time = std::chrono::steady_clock::now();
+    background_task_->Schedule([this, codec, packet = std::move(packet), start_time]() mutable {
         busy_decoding_audio_ = false;
         if (aborted_) {
             return;
+        }
+        
+        // 监控音频解码时间
+        auto end_time = std::chrono::steady_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+        if (duration > 100) { // 如果解码时间超过100ms，记录警告
+            ESP_LOGW(TAG, "Audio decoding took %lld ms", duration);
         }
 #ifdef CONFIG_USE_AUDIO_CODEC_DECODE_OPUS
         WriteAudio(packet.payload);
@@ -1047,6 +1074,22 @@ void Application::OnAudioOutput() {
 }
 
 void Application::OnAudioInput() {
+    // 重置看门狗定时器
+    // auto& watchdog = Watchdog::GetInstance();
+    // watchdog.Reset();
+    
+    // 添加状态监控日志
+    static int input_log_counter = 0;
+    if (++input_log_counter % 100 == 0) { // 每100次调用打印一次
+        ESP_LOGI(TAG, "OnAudioInput: state=%s, wake_word_running=%d", 
+                 STATE_STRINGS[device_state_], 
+#if CONFIG_USE_WAKE_WORD_DETECT
+                 wake_word_detect_.IsDetectionRunning()
+#else
+                 0
+#endif
+                );
+    }
 
     // ESP_LOGI(TAG, "OnAudioInput %d", wake_word_detect_.IsDetectionRunning());
    
