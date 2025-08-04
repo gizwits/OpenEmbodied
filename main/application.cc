@@ -582,24 +582,31 @@ void Application::Start() {
         if (strcmp(type->valuestring, "tts") == 0) {
             auto state = cJSON_GetObjectItem(root, "state");
             if (strcmp(state->valuestring, "start") == 0) {
-                auto& board = Board::GetInstance();
-                if (device_state_ == kDeviceStateIdle || device_state_ == kDeviceStateListening) {
-                    SetDeviceState(kDeviceStateSpeaking);
+                if (!has_emotion_) {
+                    auto display = Board::GetInstance().GetDisplay();
+                    // 没有情绪，则设置为开心
+                    display->SetStatus(Lang::Strings::SPEAKING);
+                    display->SetEmotion("happy");
                 }
             } else if (strcmp(state->valuestring, "pre_start") == 0) {
                 aborted_ = false;
-                auto& board = Board::GetInstance();
-                if (board.NeedPlayProcessVoice() && chat_mode_ != 2) {
-                    // 自然对话不要 biu
-                    ResetDecoder();
-                    PlaySound(Lang::Sounds::P3_BO);
-                }
-                Schedule([this, &board]() {
+                Schedule([this]() {
+                    auto& board = Board::GetInstance();
+                    if (device_state_ == kDeviceStateIdle || device_state_ == kDeviceStateListening) {
+                        SetDeviceState(kDeviceStateSpeaking);
+                    }
+                    if (board.NeedPlayProcessVoice() && chat_mode_ != 2) {
+                        // 自然对话不要 biu
+                        ResetDecoder();
+                        PlaySound(Lang::Sounds::P3_BO);
+                    }
                     auto display = board.GetDisplay();
                     display->SetEmotion("thinking");
                 });
                 has_emotion_ = false;
+                
             } else if (strcmp(state->valuestring, "stop") == 0) {
+                ESP_LOGI(TAG, "tts stop");
                 Schedule([this]() {
                     background_task_->WaitForCompletion();
                     auto& board = Board::GetInstance();
@@ -754,10 +761,11 @@ void Application::Start() {
                 app->protocol_->SendAbortSpeaking(kAbortReasonNone);
                 app->ResetDecoder();
                 app->PlaySound(Lang::Sounds::P3_SUCCESS);
-                vTaskDelay(pdMS_TO_TICKS(300));
                 app->SetListeningMode(app->chat_mode_ == 2  ? kListeningModeRealtime : kListeningModeAutoStop);
                 auto display = Board::GetInstance().GetDisplay();
                 display->SetChatMessage("assistant", "");
+                vTaskDelay(pdMS_TO_TICKS(300));
+                app->aborted_ = true;
             } else if (app->device_state_ == kDeviceStateActivating) {
                 app->SetDeviceState(kDeviceStateIdle);
             } else if (app->device_state_ == kDeviceStateSleeping) {
@@ -1305,11 +1313,11 @@ void Application::SetDeviceState(DeviceState state) {
             break;
         case kDeviceStateSpeaking:
 
-            if (!has_emotion_) {
-                // 没有情绪，则设置为开心
-                display->SetStatus(Lang::Strings::SPEAKING);
-                display->SetEmotion("happy");
-            }
+            // if (!has_emotion_) {
+            //     // 没有情绪，则设置为开心
+            //     display->SetStatus(Lang::Strings::SPEAKING);
+            //     display->SetEmotion("happy");
+            // }
             
             if (board.GetServo()) {
                 Schedule([this]() {
@@ -1496,11 +1504,11 @@ bool Application::CanEnterSleepMode() {
 }
 
 void Application::SendMcpMessage(const std::string& payload) {
-    Schedule([this, payload]() {
-        if (protocol_) {
-            // protocol_->SendMcpMessage(payload);
-        }
-    });
+    // Schedule([this, payload]() {
+    //     if (protocol_) {
+    //         protocol_->SendMcpMessage(payload);
+    //     }
+    // });
 }
 
 

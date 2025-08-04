@@ -239,6 +239,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     // 用来标记是否触发 progress
     // 如果触发了，收到第一包音频再进入说话模式
     static bool is_first_packet_ = false;
+    static bool is_start_progress_ = false;
     static bool is_detect_emotion_ = false;
     error_occurred_ = false;
     busy_sending_audio_ = false;  // 重置音频发送标志
@@ -408,6 +409,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
 
                 is_detect_emotion_ = false;
                 is_first_packet_ = true;
+                is_start_progress_ = true;
                 cached_packet_count_ = 0;
                 packet_cache_.clear();
 
@@ -439,9 +441,11 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 message_buffer_ += "}";
                 
                 auto message_json = cJSON_Parse(message_buffer_.c_str());
-                if (message_json) {
+                if (message_json && is_start_progress_ == true) {
                     on_incoming_json_(message_json);
                     cJSON_Delete(message_json);
+                    // 结束流程
+                    is_start_progress_ = false;
                 }
             } else if (event_type == "input_audio_buffer.speech_started") {
 

@@ -325,9 +325,9 @@ private:
             .sda_io_num = GPIO_NUM_38,      // LIS2HH12的SDA
             .scl_io_num = GPIO_NUM_41,      // LIS2HH12的SCL
             .clk_source = I2C_CLK_SRC_DEFAULT,
-            .glitch_ignore_cnt = 7,
-            .intr_priority = 0,
-            .trans_queue_depth = 0,
+            .glitch_ignore_cnt = 3,         // 优化毛刺忽略计数
+            .intr_priority = 0,              // 使用标准中断优先级
+            .trans_queue_depth = 10,         // 增加传输队列深度
             .flags = {
                 .enable_internal_pullup = 1,
             },
@@ -336,7 +336,7 @@ private:
         i2c_device_config_t dev_cfg = {
             .dev_addr_length = I2C_ADDR_BIT_LEN_7,
             .device_address = LIS2HH12_I2C_ADDR,
-            .scl_speed_hz = 100000,  // 降低到100kHz，提高稳定性
+            .scl_speed_hz = 400000,  // 提升到400kHz，提高读取速度
         };
         ESP_ERROR_CHECK(i2c_master_bus_add_device(lis2hh12_i2c_bus_, &dev_cfg, &lis2hh12_dev_));
     }
@@ -351,12 +351,12 @@ private:
     // LIS2HH12 I2C读写成员函数
     uint8_t lis2hh12_read_reg(uint8_t reg) {
         uint8_t data = 0;
-        i2c_master_transmit_receive(lis2hh12_dev_, &reg, 1, &data, 1, 100 / portTICK_PERIOD_MS);
+        i2c_master_transmit_receive(lis2hh12_dev_, &reg, 1, &data, 1, 50 / portTICK_PERIOD_MS);  // 优化超时时间
         return data;
     }
     void lis2hh12_write_reg(uint8_t reg, uint8_t value) {
         uint8_t buf[2] = {reg, value};
-        i2c_master_transmit(lis2hh12_dev_, buf, 2, 100 / portTICK_PERIOD_MS);
+        i2c_master_transmit(lis2hh12_dev_, buf, 2, 50 / portTICK_PERIOD_MS);  // 优化超时时间
     }
 
     virtual bool NeedPlayProcessVoice() override {
@@ -439,7 +439,7 @@ public:
         InitializeLis2hh12();    // 初始化LIS2HH12
         InitializeButtons();
         InitializeIot();
-        xTaskCreate(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 4096, this, 5, NULL); // 启动检测任务
+        xTaskCreate(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 4096, this, 1, NULL); // 启动检测任务
         InitializePowerManager();
         InitializePowerSaveTimer();
         // ESP_LOGI(TAG, "ReadADC2_CH1_Oneshot");
@@ -497,8 +497,6 @@ public:
         static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
         return &backlight;
     }
-
-
 
     virtual bool IsCharging() override {
         int chrg = gpio_get_level(CHARGING_PIN);

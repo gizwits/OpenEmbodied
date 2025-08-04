@@ -326,7 +326,7 @@ bool XunguanDisplay::CreateLvglTask() {
         this,
         1,     // Lower priority to reduce CPU load
         &lvgl_task_handle_,
-        0
+        1
     );
     
     if (ret != pdPASS) {
