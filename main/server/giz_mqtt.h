@@ -139,7 +139,8 @@ private:
     static void messageResendHandler(void* arg);
     void app2devMsgHandler(const uint8_t *data, int32_t len);
     static void timerCallback(TimerHandle_t xTimer);
-    
+    static void reconnectTask(void* arg);
+
     void processAttrValue(std::string attr_name, int value);
     uint8_t mqttNumRemLenBytes(const uint8_t *buf);
     bool parseRealtimeAgent(const char* in_str, int in_len, room_params_t* params);

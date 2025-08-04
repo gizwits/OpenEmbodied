@@ -164,11 +164,13 @@ bool MqttClient::initialize() {
     }
 
     mqtt_ = Board::GetInstance().CreateMqtt();
-    mqtt_->SetKeepAlive(20);
+    mqtt_->SetKeepAlive(10);
 
     mqtt_->OnDisconnected([this]() {
         ESP_LOGI(TAG, "Disconnected from endpoint");
         mqtt_event_ = 0;
+        // 重新连接
+        xTaskCreate(reconnectTask, "reconnect", 1024 * 4, this, 5, nullptr);
     });
 
     mqtt_->OnMessage([this](const std::string& topic, const std::string& payload) {
@@ -197,7 +199,7 @@ bool MqttClient::initialize() {
         if (message_queue_) {
             xQueueSendToBack(message_queue_, &msg, portMAX_DELAY);
         }
-    });
+    })
 
     ESP_LOGI(TAG, "MQTT 连接参数:");
     ESP_LOGI(TAG, "  URL: %s", endpoint_.c_str());
@@ -229,6 +231,14 @@ bool MqttClient::initialize() {
     printMemoryUsage();
     
     return true;
+}
+
+void MqttClient::reconnectTask(void* arg) {
+    MqttClient* client = static_cast<MqttClient*>(arg);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    ESP_LOGI(TAG, "Reconnecting to endpoint");
+    client->connect();
+    vTaskDelete(nullptr);
 }
 
 bool MqttClient::connect() {
