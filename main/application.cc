@@ -348,6 +348,7 @@ void Application::Start() {
 
     Settings settings("wifi", true);
     chat_mode_ = settings.GetInt("chat_mode", 1); // 0=按键说话, 1=唤醒词, 2=自然对话
+    // chat_mode_ = 2; // 0=按键说话, 1=唤醒词, 2=自然对话
     ESP_LOGI(TAG, "chat_mode_: %d", chat_mode_);
 
     auto& board = Board::GetInstance();
@@ -581,6 +582,8 @@ void Application::Start() {
         display->SetChatMessage("system", "");
         // Play the success sound to indicate the device is ready
         // audio_service_.PlaySound(Lang::Sounds::P3_SUCCESS);
+        display->SetEmotion("sleepy");
+
     }
 
     // Print heap stats
@@ -677,16 +680,16 @@ void Application::MainEventLoop() {
 }
 
 void Application::OnWakeWordDetected() {
-    ESP_LOGE(TAG, "OnWakeWordDetected");
+    ESP_LOGI(TAG, "OnWakeWordDetected");
     if (!protocol_) {
         return;
     }
 
-    ESP_LOGE(TAG, "device_state_: %d", device_state_);
     if (device_state_ == kDeviceStateIdle) {
+        ResetDecoder();
+        PlaySound(Lang::Sounds::P3_SUCCESS);
         audio_service_.EncodeWakeWord();
 
-        ESP_LOGE(TAG, "protocol_->IsAudioChannelOpened(): %d", protocol_->IsAudioChannelOpened());
         if (!protocol_->IsAudioChannelOpened()) {
             SetDeviceState(kDeviceStateConnecting);
             if (!protocol_->OpenAudioChannel()) {
@@ -712,6 +715,9 @@ void Application::OnWakeWordDetected() {
 #endif
     } else if (device_state_ == kDeviceStateSpeaking) {
         AbortSpeaking(kAbortReasonWakeWordDetected);
+        ResetDecoder();
+        PlaySound(Lang::Sounds::P3_SUCCESS);
+        SetDeviceState(kDeviceStateListening);
     } else if (device_state_ == kDeviceStateActivating) {
         SetDeviceState(kDeviceStateIdle);
     }
@@ -773,7 +779,6 @@ void Application::SetDeviceState(DeviceState state) {
             break;
         case kDeviceStateSpeaking:
             display->SetStatus(Lang::Strings::SPEAKING);
-
             if (listening_mode_ != kListeningModeRealtime) {
                 audio_service_.EnableVoiceProcessing(false);
                 // Only AFE wake word can be detected in speaking mode
@@ -831,6 +836,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
         Schedule([this, wake_word]() {
             audio_service_.ResetDecoder();
             audio_service_.PlaySound(Lang::Sounds::P3_SUCCESS);
+            ToggleChatState();
             if (protocol_) {
                 protocol_->SendWakeWordDetected(wake_word); 
             }
@@ -839,7 +845,6 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
             if (backlight) {
                 backlight->RestoreBrightness();
             }
-            ToggleChatState();
         }); 
     } else if (device_state_ == kDeviceStateSpeaking) {
         audio_service_.ResetDecoder();

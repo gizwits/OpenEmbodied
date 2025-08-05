@@ -39,13 +39,15 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms) {
         afe_config->vad_model_name = vad_model_name;
     }
 
-    if (ns_model_name != nullptr) {
-        afe_config->ns_init = true;
-        afe_config->ns_model_name = ns_model_name;
-        afe_config->afe_ns_mode = AFE_NS_MODE_NET;
-    } else {
-        afe_config->ns_init = false;
-    }
+    // if (ns_model_name != nullptr) {
+    //     afe_config->ns_init = true;
+    //     afe_config->ns_model_name = ns_model_name;
+    //     afe_config->afe_ns_mode = AFE_NS_MODE_NET;
+    // } else {
+    //     afe_config->ns_init = false;
+    // }
+    afe_config->ns_init = false;
+
 
     afe_config->afe_perferred_core = 1;
     afe_config->afe_perferred_priority = 1;

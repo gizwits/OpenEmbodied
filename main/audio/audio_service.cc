@@ -73,7 +73,7 @@ void AudioService::Initialize(AudioCodec* codec) {
 
     if (wake_word_) {
         wake_word_->OnWakeWordDetected([this](const std::string& wake_word) {
-            ESP_LOGE(TAG, "Wake word detected: %s", wake_word.c_str());
+            ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
             if (callbacks_.on_wake_word_detected) {
                 callbacks_.on_wake_word_detected(wake_word);
             }
@@ -497,7 +497,7 @@ void AudioService::EnableWakeWordDetection(bool enable) {
         return;
     }
 
-    ESP_LOGD(TAG, "%s wake word detection", enable ? "Enabling" : "Disabling");
+    ESP_LOGI(TAG, "%s wake word detection", enable ? "Enabling" : "Disabling");
     if (enable) {
         if (!wake_word_initialized_) {
             if (!wake_word_->Initialize(codec_)) {
