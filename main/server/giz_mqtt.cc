@@ -163,7 +163,7 @@ bool MqttClient::initialize() {
 
     auto network = Board::GetInstance().GetNetwork();
     mqtt_ = network->CreateMqtt(1);
-    mqtt_->SetKeepAlive(10);
+    mqtt_->SetKeepAlive(8);
 
     mqtt_->OnDisconnected([this]() {
         ESP_LOGI(TAG, "Disconnected from endpoint");
@@ -291,7 +291,7 @@ bool MqttClient::connect() {
     }
     
     // 获取房间信息
-    getRoomInfo();
+    GetRoomInfo();
     mqtt_event_ = 1;
     
     return true;
@@ -343,16 +343,19 @@ void MqttClient::sendTokenReport(int total, int output, int input) {
     }
 }
 
-void MqttClient::OnRoomParamsUpdated(std::function<void(const RoomParams&)> callback) {
+void MqttClient::OnRoomParamsUpdated(std::function<void(const RoomParams&, bool is_mutual)> callback) {
     room_params_updated_callback_ = callback;
 }
 
-bool MqttClient::getRoomInfo() {
+bool MqttClient::GetRoomInfo(bool is_active_request) {
     const char* msg = "{\"method\":\"websocket.auth.request\"}";  // 优化：简化JSON格式
 
     if (!publish("llm/" + client_id_ + "/config/request", msg)) {
         return false;
     }
+
+    // 设置请求类型标志
+    is_active_request_ = is_active_request;
 
     if (timer_) {
         xTimerDelete(timer_, 0);
@@ -510,7 +513,7 @@ void MqttClient::messageResendHandler(void* arg) {
                     client->timer_ = nullptr;
                 }
             } else {
-                client->getRoomInfo();
+                client->GetRoomInfo();
             }
         }
     }
@@ -664,7 +667,8 @@ bool MqttClient::parseM2MCtrlMsg(const char* in_str, int in_len) {
         } else if (strcmp(method->valuestring, "rtc.room.leave") == 0) {
             // Handle room leave
         } else if (strcmp(method->valuestring, "websocket.config.change") == 0) {
-            getRoomInfo();
+            // 服务器推送配置变更，传递 false 表示非主动请求
+            GetRoomInfo(false);
         }
     }
 
@@ -696,12 +700,15 @@ void MqttClient::handleMqttMessage(mqtt_msg_t* msg) {
             room_params->user_id = std::string(params.user_id);
             room_params->config = std::string(params.config);
             
-            ESP_LOGI(TAG, "Calling room_params_updated_callback_");
+            ESP_LOGI(TAG, "Calling room_params_updated_callback_ with is_mutual=%s", is_active_request_ ? "true" : "false");
             if (room_params_updated_callback_) {
-                room_params_updated_callback_(*room_params);
+                room_params_updated_callback_(*room_params, is_active_request_);
             } else {
                 ESP_LOGE(TAG, "room_params_updated_callback_ is null");
             }
+            
+            // 重置标志
+            is_active_request_ = false;
             
             delete room_params;
         }

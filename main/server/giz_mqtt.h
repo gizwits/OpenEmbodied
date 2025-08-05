@@ -97,10 +97,10 @@ public:
     bool subscribe(const std::string& topic);
     void setMessageCallback(std::function<void(const std::string&, const std::string&)> callback);
     void sendTokenReport(int total, int output, int input);
-    bool getRoomInfo();
+    bool GetRoomInfo(bool is_active_request = true);
     int sendResetToCloud();
     int getPublishedId();
-    void OnRoomParamsUpdated(std::function<void(const RoomParams&)> callback);
+    void OnRoomParamsUpdated(std::function<void(const RoomParams&, bool is_mutual)> callback);
     void sendOtaProgressReport(int progress, const char* status);
     void deinit();
     void sendTraceLog(const char* level, const char* message);
@@ -120,7 +120,7 @@ public:
 
 private:
     std::unique_ptr<Mqtt> mqtt_;
-    std::function<void(const RoomParams&)> room_params_updated_callback_;
+    std::function<void(const RoomParams&, bool is_mutual)> room_params_updated_callback_;
     std::function<void(const std::string&, const std::string&)> message_callback_;
     QueueHandle_t message_queue_ = nullptr;
     SemaphoreHandle_t mqtt_sem_ = nullptr;
@@ -134,6 +134,7 @@ private:
     int port_ = 1883;
     std::string client_id_;
     std::string username_;
+    bool is_active_request_ = false;  // 标记是否为主动请求
     static int attr_size_;
 
     static void messageReceiveHandler(void* arg);

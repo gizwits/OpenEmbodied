@@ -433,6 +433,8 @@ void Application::Start() {
         });
         last_error_message_ = message;
         xEventGroupSetBits(event_group_, MAIN_EVENT_ERROR);
+
+        MqttClient::getInstance().GetRoomInfo(true);
     });
     protocol_->OnIncomingAudio([this](AudioStreamPacket&& packet) {
         if (device_state_ == kDeviceStateSpeaking) {
@@ -756,7 +758,7 @@ void Application::SetDeviceState(DeviceState state) {
         case kDeviceStateUnknown:
         case kDeviceStateIdle:
             display->SetStatus(Lang::Strings::STANDBY);
-            display->SetEmotion("neutral");
+            display->SetEmotion("sleepy");
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(true);
             break;
@@ -906,19 +908,23 @@ void Application::PlaySound(const std::string_view& sound) {
 void Application::initGizwitsServer() {
 #if CONFIG_USE_GIZWITS_MQTT
     auto& mqtt_client = MqttClient::getInstance();
-    mqtt_client.OnRoomParamsUpdated([this](const RoomParams& params) {
+    mqtt_client.OnRoomParamsUpdated([this](const RoomParams& params, bool is_mutual) {
         // 判断 protocol_ 是否启动
         // 如果启动了，就断开重新连接
 
         if (protocol_->IsAudioChannelOpened()) {
             // 先停止所有正在进行的操作
-            Schedule([this]() {
+            Schedule([this, is_mutual]() {
                 QuitTalking();
-                PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
+                if (!is_mutual) {
+                    PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
+                }
             });
         } else {
             if (!protocol_->GetRoomParams().access_token.empty() && device_state_ != kDeviceStateSleeping) {
-                PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
+                if (!is_mutual) {
+                    PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
+                }
             }
         }
 
@@ -1015,8 +1021,6 @@ void Application::initGizwitsServer() {
 #endif
 
 }
-
-
 
 void Application::StartReportTimer() {
     if (report_timer_handle_ != nullptr) {
@@ -1142,13 +1146,10 @@ void Application::ExitSleepMode() {
 void Application::HandleNetError() {
     ESP_LOGE(TAG, "HandleNetError");
     Schedule([this]() {
-        ESP_LOGE(TAG, "HandleNetError2");
-        if (device_state_ != kDeviceStateIdle) {
-            ESP_LOGE(TAG, "HandleNetError3");
-            ResetDecoder();
-            PlaySound(Lang::Sounds::P3_NET_ERR);
-        }
         QuitTalking();
+        ESP_LOGE(TAG, "HandleNetError2");
+        ResetDecoder();
+        PlaySound(Lang::Sounds::P3_NET_ERR);
     });
 }
 void Application::SendTextToAI(const std::string& text) {
@@ -1162,16 +1163,15 @@ void Application::ResetDecoder() {
 }
 
 void Application::QuitTalking() {
-    if (protocol_ != nullptr) {
+    if (protocol_ != nullptr && protocol_->IsAudioChannelOpened()) {
         ESP_LOGI(TAG, "QuitTalking");
         protocol_->SendAbortSpeaking(kAbortReasonNone);
         SetDeviceState(kDeviceStateIdle);
         protocol_->CloseAudioChannel();
         ResetDecoder();
     }
-    
     audio_service_.EnableWakeWordDetection(true);
-
+    auto display = Board::GetInstance().GetDisplay();
 }
 
 

@@ -503,6 +503,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
             } else if (event_type == "error") {
                 ESP_LOGE(TAG, "Error: %s", str_data.data());
                 MqttClient::getInstance().sendTraceLog("error", str_data.data());
+                SetError(str_data.data());
             }
             
             cJSON_Delete(root);
