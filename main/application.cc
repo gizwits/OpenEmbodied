@@ -705,7 +705,7 @@ void Application::OnWakeWordDetected() {
 #else
         SetListeningMode(chat_mode_ == 2  ? kListeningModeRealtime : kListeningModeAutoStop);
         // Play the pop up sound to indicate the wake word is detected
-        audio_service_.PlaySound(Lang::Sounds::P3_POPUP);
+        // audio_service_.PlaySound(Lang::Sounds::P3_POPUP);
 #endif
     } else if (device_state_ == kDeviceStateSpeaking) {
         AbortSpeaking(kAbortReasonWakeWordDetected);

@@ -18,6 +18,16 @@ void AudioCodec::OutputData(std::vector<int16_t>& data) {
     Write(data.data(), data.size());
 }
 
+#ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+bool AudioCodec::InputData(std::vector<uint8_t>& opus) {
+    int samples = Read(opus.data(), opus.size());
+    if (samples > 0) {
+        return true;
+    }
+    return false;
+}
+#endif
+
 bool AudioCodec::InputData(std::vector<int16_t>& data) {
     int samples = Read(data.data(), data.size());
     if (samples > 0) {
@@ -34,6 +44,7 @@ void AudioCodec::Start() {
         output_volume_ = 10;
     }
 
+#if !defined(CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS)
     if (tx_handle_ != nullptr) {
         ESP_ERROR_CHECK(i2s_channel_enable(tx_handle_));
     }
@@ -41,6 +52,7 @@ void AudioCodec::Start() {
     if (rx_handle_ != nullptr) {
         ESP_ERROR_CHECK(i2s_channel_enable(rx_handle_));
     }
+#endif
 
     EnableInput(true);
     EnableOutput(true);

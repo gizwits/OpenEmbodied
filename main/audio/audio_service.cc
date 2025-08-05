@@ -59,10 +59,30 @@ void AudioService::Initialize(AudioCodec* codec) {
     wake_word_ = nullptr;
 #endif
 
+#ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+    audio_processor_->OnOutput([this](std::vector<uint8_t>&& opus) {
+        ESP_LOGD(TAG, "Audio processor output: opus.size()=%zu", opus.size());
+        // 直接推送到管道
+        auto packet = std::make_unique<AudioStreamPacket>();
+        packet->payload = std::move(opus);
+        packet->sample_rate = 16000;
+        packet->frame_duration = OPUS_FRAME_DURATION_MS;
+        packet->timestamp = 0;
+        {
+            std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+            audio_send_queue_.push_back(std::move(packet));
+        }
+        if (callbacks_.on_send_queue_available) {
+            callbacks_.on_send_queue_available();
+        }
+    });
+#else
     audio_processor_->OnOutput([this](std::vector<int16_t>&& data) {
         ESP_LOGD(TAG, "Audio processor output: data.size()=%zu", data.size());
         PushTaskToEncodeQueue(kAudioTaskTypeEncodeToSendQueue, std::move(data));
     });
+#endif
+
 
     audio_processor_->OnVadStateChange([this](bool speaking) {
         voice_detected_ = speaking;
@@ -206,6 +226,68 @@ bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, in
     return true;
 }
 
+#if defined(CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS)
+bool AudioService::ReadAudioData(std::vector<uint8_t>& opus, int sample_rate, int samples) {
+    opus.resize(samples);
+    if (!codec_->InputData(opus)) {
+        return false;
+    }
+    return true;
+}
+#endif
+
+#if defined(CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS)
+
+void AudioService::AudioInputTask() {
+    while (true) {
+        EventBits_t bits = xEventGroupWaitBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING |
+            AS_EVENT_WAKE_WORD_RUNNING | AS_EVENT_AUDIO_PROCESSOR_RUNNING,
+            pdFALSE, pdFALSE, portMAX_DELAY);
+
+        if (service_stopped_) {
+            break;
+        }
+        if (audio_input_need_warmup_) {
+            audio_input_need_warmup_ = false;
+            vTaskDelay(pdMS_TO_TICKS(120));
+            continue;
+        }
+
+        /* Used for audio testing in NetworkConfiguring mode by clicking the BOOT button */
+        if (bits & AS_EVENT_AUDIO_TESTING_RUNNING) {
+            if (audio_testing_queue_.size() >= AUDIO_TESTING_MAX_DURATION_MS / OPUS_FRAME_DURATION_MS) {
+                ESP_LOGW(TAG, "Audio testing queue is full, stopping audio testing");
+                EnableAudioTesting(false);
+                continue;
+            }
+            std::vector<int16_t> data;
+            int samples = OPUS_FRAME_DURATION_MS * 16000 / 1000;
+            if (ReadAudioData(data, 16000, samples)) {
+                // TODO
+                continue;
+            }
+        }
+
+        /* Feed the audio processor */
+        if (bits & AS_EVENT_AUDIO_PROCESSOR_RUNNING) {
+            std::vector<uint8_t> data;
+            int samples = audio_processor_->GetFeedSize();
+            if (samples > 0) {
+                if (ReadAudioData(data, 16000, samples)) {
+                    audio_processor_->Feed(std::move(data));
+                    continue;
+                }
+            }
+        }
+
+        ESP_LOGE(TAG, "Should not be here, bits: %lx", bits);
+        break;
+    }
+
+    ESP_LOGW(TAG, "Audio input task stopped");
+}
+
+#else
 void AudioService::AudioInputTask() {
     while (true) {
         EventBits_t bits = xEventGroupWaitBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING |
@@ -274,6 +356,7 @@ void AudioService::AudioInputTask() {
 
     ESP_LOGW(TAG, "Audio input task stopped");
 }
+#endif
 
 void AudioService::AudioOutputTask() {
     while (true) {

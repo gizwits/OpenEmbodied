@@ -1,6 +1,6 @@
 #include "wifi_board.h"
 #include "audio_codecs/no_audio_codec.h"
-#include "audio_codecs/vb6824_audio_codec.h"
+#include "audio/codecs/vb6824_audio_codec.h"
 #include "display/eye_toy_single_display.h"
 #include "system_reset.h"
 #include "application.h"

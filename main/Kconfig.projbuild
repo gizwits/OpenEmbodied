@@ -272,14 +272,8 @@ choice DISPLAY_ESP32S3_KORVO2_V3
 endchoice
 
 
-config USE_EYE_STYLE_ES8311
-    bool "ES8311"
-    default n
-    help
-        ES8311
-
 config USE_EYE_STYLE_VB6824
-    bool "VB6824"
+    bool "Use VB6824"
     default n
     help
         VB6824
@@ -389,10 +383,10 @@ config USE_AUDIO_CODEC_ENCODE_OPUS
     bool "use audio codec encode opus"
     default y
 
-config USE_AUDIO_CODEC_DECODE_OPUS
-    depends on BOARD_TYPE_GIZWITS_C2_6824_TOY || BOARD_TYPE_GIZWITS_C2_6824 || BOARD_TYPE_DOIT_AI_01_KIT || BOARD_TYPE_DOIT_AI_01_KIT_LCD || BOARD_TYPE_DOIT_AI_01_KIT_NFC || BOARD_TYPE_DOIT_ESP32S3_EYE_6824
-    bool "use audio codec decode opus"
-    default n
+# config USE_AUDIO_CODEC_DECODE_OPUS
+#     depends on BOARD_TYPE_GIZWITS_C2_6824_TOY || BOARD_TYPE_GIZWITS_C2_6824 || BOARD_TYPE_DOIT_AI_01_KIT || BOARD_TYPE_DOIT_AI_01_KIT_LCD || BOARD_TYPE_DOIT_AI_01_KIT_NFC || BOARD_TYPE_DOIT_ESP32S3_EYE_6824
+#     bool "use audio codec decode opus"
+#     default n
         
 
 choice IOT_PROTOCOL

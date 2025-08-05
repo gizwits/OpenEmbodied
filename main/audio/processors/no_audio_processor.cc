@@ -8,6 +8,19 @@ void NoAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms) {
     frame_samples_ = frame_duration_ms * 16000 / 1000;
 }
 
+#ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+void NoAudioProcessor::Feed(std::vector<uint8_t>&& opus) {
+    if (!is_running_ || !output_callback_) {
+        return;
+    }
+
+    if (opus.size() != frame_samples_) {
+        ESP_LOGE(TAG, "Feed opus size is not equal to frame size, feed size: %u, frame size: %u", opus.size(), frame_samples_);
+        return;
+    }
+    output_callback_(std::move(opus));
+}
+#else
 void NoAudioProcessor::Feed(std::vector<int16_t>&& data) {
     if (!is_running_ || !output_callback_) {
         return;
@@ -29,6 +42,7 @@ void NoAudioProcessor::Feed(std::vector<int16_t>&& data) {
         output_callback_(std::move(data));
     }
 }
+#endif
 
 void NoAudioProcessor::Start() {
     is_running_ = true;
@@ -42,9 +56,15 @@ bool NoAudioProcessor::IsRunning() {
     return is_running_;
 }
 
+#ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+void NoAudioProcessor::OnOutput(std::function<void(std::vector<uint8_t>&& opus)> callback) {
+    output_callback_ = callback;
+}
+#else
 void NoAudioProcessor::OnOutput(std::function<void(std::vector<int16_t>&& data)> callback) {
     output_callback_ = callback;
 }
+#endif
 
 void NoAudioProcessor::OnVadStateChange(std::function<void(bool speaking)> callback) {
     vad_state_change_callback_ = callback;
