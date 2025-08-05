@@ -52,7 +52,7 @@ Application::Application() {
     
     // 初始化看门狗
     auto& watchdog = Watchdog::GetInstance();
-    watchdog.Initialize(30, true);
+    watchdog.Initialize(60, true);
 
     // 初始化电量检查时间
     last_battery_check_time_ = std::chrono::steady_clock::now();
@@ -528,6 +528,7 @@ void Application::Start() {
     
     // Initialize the protocol
     protocol_->OnNetworkError([this](const std::string& message) {
+        ESP_LOGE(TAG, "OnNetworkError: %s", message.c_str());
         if (device_state_ != kDeviceStateSleeping) {
             SetDeviceState(kDeviceStateIdle);
         }
@@ -563,6 +564,7 @@ void Application::Start() {
 
     });
     protocol_->OnAudioChannelClosed([this, &board]() {
+        ESP_LOGE(TAG, "OnAudioChannelClosed");
         board.SetPowerSaveMode(true);
         Schedule([this]() {
             auto display = Board::GetInstance().GetDisplay();
@@ -997,13 +999,6 @@ void Application::OnAudioOutput() {
     // auto& watchdog = Watchdog::GetInstance();
     // watchdog.Reset();
     
-    // 添加状态监控日志
-    static int log_counter = 0;
-    if (++log_counter % 100 == 0) { // 每100次调用打印一次
-        ESP_LOGI(TAG, "OnAudioOutput: state=%s, queue_size=%zu, output_enabled=%d", 
-                 STATE_STRINGS[device_state_], audio_decode_queue_.size(), codec->output_enabled());
-    }
-
     std::unique_lock<std::mutex> lock(mutex_);
     
     // 添加死锁检测
@@ -1077,19 +1072,6 @@ void Application::OnAudioInput() {
     // 重置看门狗定时器
     // auto& watchdog = Watchdog::GetInstance();
     // watchdog.Reset();
-    
-    // 添加状态监控日志
-    static int input_log_counter = 0;
-    if (++input_log_counter % 100 == 0) { // 每100次调用打印一次
-        ESP_LOGI(TAG, "OnAudioInput: state=%s, wake_word_running=%d", 
-                 STATE_STRINGS[device_state_], 
-#if CONFIG_USE_WAKE_WORD_DETECT
-                 wake_word_detect_.IsDetectionRunning()
-#else
-                 0
-#endif
-                );
-    }
 
     // ESP_LOGI(TAG, "OnAudioInput %d", wake_word_detect_.IsDetectionRunning());
    
@@ -1672,6 +1654,19 @@ void Application::ExitSleepMode() {
         Board::GetInstance().WakeUpPowerSaveTimer();
     });
     
+}
+
+void Application::HandleNetError() {
+    ESP_LOGE(TAG, "HandleNetError");
+    Schedule([this]() {
+        ESP_LOGE(TAG, "HandleNetError2");
+        if (device_state_ != kDeviceStateIdle) {
+            ESP_LOGE(TAG, "HandleNetError3");
+            ResetDecoder();
+            PlaySound(Lang::Sounds::P3_NET_ERR);
+        }
+        QuitTalking();
+    });
 }
 
 void Application::initGizwitsServer() {

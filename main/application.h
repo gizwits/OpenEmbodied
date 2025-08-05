@@ -97,6 +97,7 @@ public:
     // 关闭 wifi 的休眠
     void EnterSleepMode();
     void ExitSleepMode();
+    void HandleNetError();
 
     const char* GetTraceId() const { return trace_id_; }
     void GenerateTraceId();

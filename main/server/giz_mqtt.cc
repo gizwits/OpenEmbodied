@@ -170,6 +170,7 @@ bool MqttClient::initialize() {
         ESP_LOGI(TAG, "Disconnected from endpoint");
         mqtt_event_ = 0;
         // 重新连接
+        Application::GetInstance().HandleNetError();
         xTaskCreate(reconnectTask, "reconnect", 1024 * 4, this, 5, nullptr);
     });
 
@@ -199,7 +200,7 @@ bool MqttClient::initialize() {
         if (message_queue_) {
             xQueueSendToBack(message_queue_, &msg, portMAX_DELAY);
         }
-    })
+    });
 
     ESP_LOGI(TAG, "MQTT 连接参数:");
     ESP_LOGI(TAG, "  URL: %s", endpoint_.c_str());
@@ -235,6 +236,7 @@ bool MqttClient::initialize() {
 
 void MqttClient::reconnectTask(void* arg) {
     MqttClient* client = static_cast<MqttClient*>(arg);
+    client->disconnect();
     vTaskDelay(pdMS_TO_TICKS(1000));
     ESP_LOGI(TAG, "Reconnecting to endpoint");
     client->connect();
