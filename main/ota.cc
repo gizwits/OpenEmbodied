@@ -125,7 +125,7 @@ bool Ota::Upgrade(const std::string& firmware_url) {
     std::string image_header;
 
     auto network = Board::GetInstance().GetNetwork();
-    auto http = network->CreateHttp(2);
+    auto http = network->CreateHttp(11);
     if (!http->Open("GET", firmware_url)) {
         ESP_LOGE(TAG, "Failed to open HTTP connection");
         return false;

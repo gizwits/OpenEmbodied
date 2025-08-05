@@ -94,6 +94,7 @@ private:
     AudioService audio_service_;
     esp_timer_handle_t report_timer_handle_ = nullptr;
     int chat_mode_ = 1;
+    bool has_emotion_ = false;
 
     bool has_server_time_ = false;
     bool aborted_ = false;
@@ -105,7 +106,7 @@ private:
     void ShowActivationCode(const std::string& code, const std::string& message);
     void OnClockTimer();
     void initGizwitsServer();
-    void CheckBatteryLevel();
+    bool CheckBatteryLevel();
     void StartReportTimer();
 
     void SetListeningMode(ListeningMode mode);

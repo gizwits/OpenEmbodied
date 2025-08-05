@@ -127,7 +127,7 @@ private:
                         // 这里可以触发你的摇晃事件
                         if (board->ChannelIsOpen()) {
                             board->display_->SetEmotion("vertigo");
-                            Application::GetInstance().SendMessage("用户正在摇晃你");
+                            Application::GetInstance().SendTextToAI("用户正在摇晃你");
                         } else {
                             ESP_LOGI("LIS2HH12", "Channel is not open");
                         }
@@ -297,7 +297,7 @@ private:
                 }
                 display_->SetEmotion("loving");
                 if (ChannelIsOpen()) {
-                    Application::GetInstance().SendMessage("用户正在抚摸你");
+                    Application::GetInstance().SendTextToAI("用户正在抚摸你");
                 } else {
                     ESP_LOGI("touch", "Channel is not open");
                     Application::GetInstance().ToggleChatState();

@@ -162,7 +162,7 @@ bool MqttClient::initialize() {
     }
 
     auto network = Board::GetInstance().GetNetwork();
-    mqtt_ = network->CreateMqtt(0);
+    mqtt_ = network->CreateMqtt(1);
     mqtt_->SetKeepAlive(10);
 
     mqtt_->OnDisconnected([this]() {

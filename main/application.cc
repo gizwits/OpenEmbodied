@@ -8,6 +8,7 @@
 #include "font_awesome_symbols.h"
 #include "assets/lang_config.h"
 #include "mcp_server.h"
+#include "wifi_station.h"
 
 #include "settings.h"
 #include <cstring>
@@ -343,7 +344,6 @@ void Application::StopListening() {
 }
 
 void Application::Start() {
-    auto& watchdog = Watchdog::GetInstance();
     Settings settings("wifi", true);
     chat_mode_ = settings.GetInt("chat_mode", 1); // 0=按键说话, 1=唤醒词, 2=自然对话
     ESP_LOGI(TAG, "chat_mode_: %d", chat_mode_);
@@ -390,6 +390,7 @@ void Application::Start() {
         return;
     }
 
+    audio_service_.ResetDecoder();
     audio_service_.PlaySound(Lang::Sounds::P3_CONNECT_SUCCESS);
     vTaskDelay(pdMS_TO_TICKS(500));
 
@@ -577,7 +578,7 @@ void Application::Start() {
         display->ShowNotification(message.c_str());
         display->SetChatMessage("system", "");
         // Play the success sound to indicate the device is ready
-        audio_service_.PlaySound(Lang::Sounds::P3_SUCCESS);
+        // audio_service_.PlaySound(Lang::Sounds::P3_SUCCESS);
     }
 
     // Print heap stats
@@ -844,15 +845,6 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     }
 }
 
-void Application::GenerateTraceId() {
-    uint8_t random_bytes[16];
-    esp_fill_random(random_bytes, sizeof(random_bytes));
-    
-    for (int i = 0; i < 16; i++) {
-        sprintf(trace_id_ + i * 2, "%02x", random_bytes[i]);
-    }
-}
-
 bool Application::CanEnterSleepMode() {
     // if (device_state_ != kDeviceStateIdle) {
     //     return false;
@@ -926,6 +918,7 @@ void Application::initGizwitsServer() {
         Alert(Lang::Strings::ERROR, Lang::Strings::ERROR, "sad", Lang::Sounds::P3_EXCLAMATION);
         return;
     }
+    mqtt_client.connect();
 #else
 
 
@@ -1043,6 +1036,7 @@ bool Application::CheckBatteryLevel() {
             return false;
         }
     }
+    return true; // 电池电量正常
 }
 
 
