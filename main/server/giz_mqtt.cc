@@ -170,8 +170,8 @@ bool MqttClient::initialize() {
         ESP_LOGI(TAG, "Disconnected from endpoint");
         mqtt_event_ = 0;
         // 重新连接
-        Application::GetInstance().HandleNetError();
-        xTaskCreate(reconnectTask, "reconnect", 1024 * 4, this, 5, nullptr);
+        // Application::GetInstance().HandleNetError();
+        // xTaskCreate(reconnectTask, "reconnect", 1024 * 4, this, 5, nullptr);
     });
 
     mqtt_->OnMessage([this](const std::string& topic, const std::string& payload) {
