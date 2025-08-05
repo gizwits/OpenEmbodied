@@ -65,7 +65,6 @@ public:
     void WakeWordInvoke(const std::string& wake_word);
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
-    void SetAecMode(AecMode mode);
     void QuitTalking();
     void SetChatMode(int mode);
     int GetChatMode() const { return chat_mode_; }
@@ -73,7 +72,6 @@ public:
     void SendTextToAI(const std::string& text);
     const char* GetTraceId() const { return trace_id_; }
     void PlayMusic(const char* url);
-    AecMode GetAecMode() const { return aec_mode_; }
     AudioService& GetAudioService() { return audio_service_; }
 
 private:
@@ -87,7 +85,6 @@ private:
     esp_timer_handle_t clock_timer_handle_ = nullptr;
     volatile DeviceState device_state_ = kDeviceStateUnknown;
     ListeningMode listening_mode_ = kListeningModeAutoStop;
-    AecMode aec_mode_ = kAecOff;
     std::string last_error_message_;
     AudioService audio_service_;
     esp_timer_handle_t report_timer_handle_ = nullptr;
