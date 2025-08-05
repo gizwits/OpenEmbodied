@@ -1,3 +1,25 @@
+#!/usr/bin/env python3
+"""
+ESP32 固件发布脚本
+
+功能:
+1. 构建固件
+2. 合并固件为 all.bin
+3. 打包发布文件
+4. 上传到腾讯云 COS
+
+使用方法:
+    python release.py                    # 发布当前板子
+    python release.py <board_type>      # 发布指定板子
+    python release.py all               # 发布所有板子
+    python release.py merge             # 仅创建 all.bin 文件
+
+示例:
+    python release.py esp-box-3
+    python release.py all
+    python release.py merge
+"""
+
 import sys
 import os
 import json
@@ -84,6 +106,118 @@ def merge_bin():
     if os.system("idf.py merge-bin") != 0:
         print("merge bin failed")
         sys.exit(1)
+
+def create_all_bin():
+    """创建合并的 all.bin 文件"""
+    print("正在创建 all.bin 文件...")
+    
+    # 检查必要的文件是否存在
+    required_files = [
+        "build/bootloader/bootloader.bin",
+        "build/partition_table/partition-table.bin", 
+        "build/xiaozhi.bin"
+    ]
+    
+    missing_files = []
+    for file_path in required_files:
+        if not os.path.exists(file_path):
+            missing_files.append(file_path)
+    
+    if missing_files:
+        print(f"Error: 缺少必要的文件: {missing_files}")
+        return False
+    
+    # 尝试从 sdkconfig 或环境变量获取芯片类型
+    chip_type = "esp32s3"  # 默认值
+    if os.path.exists("sdkconfig"):
+        with open("sdkconfig", "r") as f:
+            for line in f:
+                if line.startswith("CONFIG_IDF_TARGET="):
+                    chip_type = line.split("=")[1].strip().strip('"')
+                    break
+    
+    # 检查是否使用 4M 分区表
+    using_4m_partition = False
+    if os.path.exists("sdkconfig"):
+        with open("sdkconfig", "r") as f:
+            for line in f:
+                if "partitions_4M.csv" in line:
+                    using_4m_partition = True
+                    break
+    
+    # 根据芯片类型设置 flash 参数
+    flash_mode = "dio"
+    flash_size = "4MB"
+    
+    if chip_type == "esp32":
+        flash_mode = "dio"
+        flash_size = "4MB"
+    elif chip_type == "esp32s3":
+        flash_mode = "dio"
+        flash_size = "4MB"
+    elif chip_type == "esp32c3":
+        flash_mode = "dio"
+        flash_size = "4MB"
+    
+    print(f"检测到芯片类型: {chip_type}")
+    
+    # 使用 esptool 合并固件
+    merge_cmd = [
+        "esptool.py", "--chip", chip_type, "merge_bin", 
+        "-o", "build/all.bin",
+        "--flash_mode", flash_mode, "--flash_size", flash_size,
+        "0x0", "build/bootloader/bootloader.bin",
+        "0x8000", "build/partition_table/partition-table.bin", 
+        "0x10000", "build/xiaozhi.bin"
+    ]
+    
+    # 添加可选的 ota_data_initial.bin 文件
+    if os.path.exists("build/ota_data_initial.bin"):
+        merge_cmd.extend(["0xd000", "build/ota_data_initial.bin"])
+        print("  包含 ota_data_initial.bin")
+    else:
+        print("  跳过 ota_data_initial.bin (文件不存在)")
+    
+    # 添加可选的 srmodels.bin 文件
+    # 注意：srmodels.bin 应该放在 model 分区中，而不是单独的分区
+    # 在默认分区表中，model 分区从 0x10000 开始
+    # 在 4M 分区表中，没有专门的 model 分区，所以跳过 srmodels.bin
+    if os.path.exists("build/srmodels/srmodels.bin"):
+        if using_4m_partition:
+            print("  跳过 srmodels.bin (4M 分区表不支持)")
+        else:
+            # 在默认分区表中，srmodels.bin 应该嵌入到 app 中，而不是单独合并
+            print("  跳过 srmodels.bin (应该嵌入到 app 中)")
+    else:
+        print("  跳过 srmodels.bin (文件不存在)")
+    
+    print(f"执行命令: {' '.join(merge_cmd)}")
+    
+    result = subprocess.run(merge_cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print("合并固件失败")
+        print("STDOUT:", result.stdout)
+        print("STDERR:", result.stderr)
+        return False
+    
+    print("all.bin 文件创建成功")
+    
+    # 验证生成的文件
+    if os.path.exists("build/all.bin"):
+        file_size = os.path.getsize("build/all.bin")
+        print(f"all.bin 文件大小: {file_size} 字节 ({file_size/1024:.1f} KB)")
+        
+        # 尝试获取文件信息
+        try:
+            info_cmd = ["esptool.py", "--chip", chip_type, "image_info", "build/all.bin"]
+            result = subprocess.run(info_cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                print("all.bin 文件信息:")
+                print(result.stdout)
+        except Exception as e:
+            print(f"无法获取文件信息: {e}")
+    
+    return True
 
 def upload_to_cos(file_path, object_name=None):
     """上传文件到腾讯云 COS
@@ -191,7 +325,8 @@ def zip_bin(board_type, project_version, flash_command=None):
         "build/ota_data_initial.bin",
         "build/xiaozhi.bin",
         "build/xiaozhi.elf",
-        "build/xiaozhi.map"
+        "build/xiaozhi.map",
+        "build/all.bin"  # 添加合并的固件文件
     ]
     
     with zipfile.ZipFile(output_path, 'w', compression=zipfile.ZIP_DEFLATED) as zipf:
@@ -243,6 +378,9 @@ def release_current():
         release(board_type, board_config)
     else:
         print(f"未找到 {board_type} 对应的 board_config")
+        # 即使没有找到对应的 board_config，也尝试创建 all.bin
+        print("尝试为当前构建创建 all.bin...")
+        create_all_bin()
 
 def get_all_board_types():
     board_configs = {}
@@ -328,6 +466,11 @@ def release(board_type, board_config):
             if line.strip().startswith('python -m esptool'):
                 flash_command = line.strip()
                 break
+        
+        # 创建合并的固件文件
+        if not create_all_bin():
+            print("Warning: 创建 all.bin 文件失败，继续执行...")
+        
         # Zip bin
         zip_bin(name, project_version, flash_command)
         print("-" * 80)
@@ -336,16 +479,21 @@ def release(board_type, board_config):
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
-        board_configs = get_all_board_types()
-        found = False
-        for board_config, board_type in board_configs.items():
-            if sys.argv[1] == 'all' or board_type == sys.argv[1]:
-                release(board_type, board_config)
-                found = True
-        if not found:
-            print(f"未找到板子类型: {sys.argv[1]}")
-            print("可用的板子类型:")
-            for board_type in board_configs.values():
-                print(f"  {board_type}")
+        if sys.argv[1] == 'merge':
+            # 单独创建 all.bin 文件
+            create_all_bin()
+        else:
+            board_configs = get_all_board_types()
+            found = False
+            for board_config, board_type in board_configs.items():
+                if sys.argv[1] == 'all' or board_type == sys.argv[1]:
+                    release(board_type, board_config)
+                    found = True
+            if not found:
+                print(f"未找到板子类型: {sys.argv[1]}")
+                print("可用的板子类型:")
+                for board_type in board_configs.values():
+                    print(f"  {board_type}")
+                print("  merge - 仅创建 all.bin 文件")
     else:
         release_current()
