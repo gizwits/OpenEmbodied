@@ -69,7 +69,7 @@ struct Player::Impl {
         }
     }
 
-    bool read_chunk(Http* http) {
+    bool read_chunk(std::unique_ptr<Http>& http) {
         // 如果缓冲区已经有足够的数据，等待处理
         if (buffer_pos > (MAX_PACKET_SIZE + 4) * MAX_BUFFERED_PACKETS) {
             ESP_LOGD(TAG, "Buffer has enough data, waiting...");
@@ -110,12 +110,12 @@ struct Player::Impl {
 
     bool processMP3Stream(const char* url) {
         ESP_LOGI(TAG, "processMP3Stream: %s", url);
-        auto& board = Board::GetInstance();
-        auto http = board.CreateHttp();
+        auto network = Board::GetInstance().GetNetwork();
+        auto http = network->CreateHttp(4);
         
         if (!http->Open("GET", url)) {
             ESP_LOGE(TAG, "Failed to open HTTP connection");
-            delete http;
+            
             return false;
         }
 
@@ -123,7 +123,7 @@ struct Player::Impl {
         size_t content_length = http->GetBodyLength();
         if (content_length == 0) {
             ESP_LOGE(TAG, "Failed to get content length");
-            delete http;
+            
             return false;
         }
 
@@ -147,7 +147,7 @@ struct Player::Impl {
         buffer_size = 0;
         packets_processed = 0;
 
-        delete http;
+        
         return true;
     }
 };

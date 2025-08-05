@@ -23,7 +23,7 @@ public:
     bool HasWebsocketConfig() { return false; }
     bool HasActivationCode() { return false; }
     bool HasServerTime() { return false; }
-    void StartUpgrade(std::function<void(int progress, size_t speed)> callback);
+    bool StartUpgrade(std::function<void(int progress, size_t speed)> callback);
     void MarkCurrentVersionValid();
 
     const std::string& GetFirmwareVersion() const { return firmware_version_; }
@@ -51,7 +51,7 @@ private:
     int activation_timeout_ms_ = 30000;
     std::map<std::string, std::string> headers_;
 
-    void Upgrade(const std::string& firmware_url);
+    bool Upgrade(const std::string& firmware_url);
     std::function<void(int progress, size_t speed)> upgrade_callback_;
     std::vector<int> ParseVersion(const std::string& version);
     bool IsNewVersionAvailable(const std::string& currentVersion, const std::string& newVersion);

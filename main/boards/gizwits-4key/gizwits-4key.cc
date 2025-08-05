@@ -1,5 +1,5 @@
 #include "wifi_board.h"
-#include "audio_codecs/es8311_audio_codec.h"
+#include "audio/codecs/es8311_audio_codec.h"
 #include "application.h"
 #include "button.h"
 #include "config.h"
@@ -61,12 +61,10 @@ private:
     }
     void InitializeButtons() {
         static int first_level = gpio_get_level(BOOT_BUTTON_GPIO);
-        boot_button_.OnPressDown([this]() {
-            // 点灯
-            gpio_set_level(BUILTIN_SINGLE_LED_GPIO, 0);
-        });
+        boot_button_.OnClick([this]() {
+            WakeUp();
+        }); 
         boot_button_.OnPressRepeat([this](uint16_t count) {
-
             ESP_LOGI(TAG, "boot_button_.OnPressRepeat");
             if(count >= 5){
                 ResetWifiConfiguration();
@@ -88,15 +86,19 @@ private:
                 first_level = 1;
                 ESP_LOGI(TAG, "首次上电5秒内，忽略长按操作");
             } else {
-              
-                ESP_LOGI(TAG, "执行关机操作");
-                Application::GetInstance().QuitTalking();
-                vTaskDelay(pdMS_TO_TICKS(200));
-                auto codec = GetAudioCodec();
-                gpio_set_level(BUILTIN_SINGLE_LED_GPIO, 1);
-                codec->EnableOutput(true);
-                Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
-                need_power_off_ = true;
+                // 提前播放音频
+                // 非休眠模式才播报
+                if (!is_sleep_) {
+                    ESP_LOGI(TAG, "执行关机操作");
+                    Application::GetInstance().QuitTalking();
+                    vTaskDelay(pdMS_TO_TICKS(200));
+                    auto codec = GetAudioCodec();
+                    gpio_set_level(BUILTIN_SINGLE_LED_GPIO, 1);
+                    codec->EnableOutput(true);
+                    Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
+                    need_power_off_ = true;
+                }
+                
             }
         });
         boot_button_.OnPressUp([this]() {
@@ -113,7 +115,7 @@ private:
                     if (board->isCharging()) {
                         // 关灯
                         board->GetLed()->TurnOff();
-                        is_sleep_ = true;
+                        board->is_sleep_ = true;
                     } else {
                         gpio_set_level(POWER_HOLD_GPIO, 0);
                     }
@@ -127,6 +129,7 @@ private:
 
         if (chat_mode == 0) {
             rec_button_.OnPressDown([this]() {
+                WakeUp();
                 ESP_LOGI(TAG, "rec_button_.OnPressDown");
                 Application::GetInstance().StartListening();
             });
@@ -137,13 +140,13 @@ private:
         } else {
             rec_button_.OnPressDown([this]() {
                 ESP_LOGI(TAG, "rec_button_.OnPressDown");
+                WakeUp();
                 Application::GetInstance().ToggleChatState();
             });
         }
         
         volume_up_button_.OnClick([this]() {
-            // 点灯
-            gpio_set_level(BUILTIN_SINGLE_LED_GPIO, 0);
+            WakeUp();
             ESP_LOGI(TAG, "volume_up_button_.OnClick");
             auto codec = GetAudioCodec();
             auto volume = codec->output_volume() + 10;
@@ -155,8 +158,7 @@ private:
         });
 
         volume_down_button_.OnClick([this]() {
-            // 点灯
-            gpio_set_level(BUILTIN_SINGLE_LED_GPIO, 0);
+            WakeUp();
             ESP_LOGI(TAG, "volume_down_button_.OnClick");
             auto codec = GetAudioCodec();
             auto volume = codec->output_volume() - 10;
@@ -179,6 +181,11 @@ private:
     void InitializePowerManager() {
         power_manager_ =
             new PowerManager(GPIO_NUM_NC, GPIO_NUM_NC, BAT_ADC_UNIT, BAT_ADC_CHANNEL);
+    }
+
+    void WakeUp() {
+        is_sleep_ = false;
+        gpio_set_level(BUILTIN_SINGLE_LED_GPIO, 0);
     }
 
 
