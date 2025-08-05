@@ -111,13 +111,13 @@ void Ota::MarkCurrentVersionValid() {
     }
 }
 
-void Ota::Upgrade(const std::string& firmware_url) {
+bool Ota::Upgrade(const std::string& firmware_url) {
     ESP_LOGI(TAG, "Upgrading firmware from %s", firmware_url.c_str());
     esp_ota_handle_t update_handle = 0;
     auto update_partition = esp_ota_get_next_update_partition(NULL);
     if (update_partition == NULL) {
         ESP_LOGE(TAG, "Failed to get update partition");
-        return;
+        return false;
     }
 
     ESP_LOGI(TAG, "Writing to partition %s at offset 0x%lx", update_partition->label, update_partition->address);
@@ -128,14 +128,14 @@ void Ota::Upgrade(const std::string& firmware_url) {
     if (!http->Open("GET", firmware_url)) {
         ESP_LOGE(TAG, "Failed to open HTTP connection");
         delete http;
-        return;
+        return false;
     }
 
     size_t content_length = http->GetBodyLength();
     if (content_length == 0) {
         ESP_LOGE(TAG, "Failed to get content length");
         delete http;
-        return;
+        return false;
     }
 
     char buffer[512];
@@ -146,7 +146,7 @@ void Ota::Upgrade(const std::string& firmware_url) {
         if (ret < 0) {
             ESP_LOGE(TAG, "Failed to read HTTP data: %s", esp_err_to_name(ret));
             delete http;
-            return;
+            return false;
         }
 
         // Calculate speed and progress every second
@@ -177,14 +177,14 @@ void Ota::Upgrade(const std::string& firmware_url) {
                 if (memcmp(new_app_info.version, current_version, sizeof(new_app_info.version)) == 0) {
                     ESP_LOGE(TAG, "Firmware version is the same, skipping upgrade");
                     delete http;
-                    return;
+                    return false;
                 }
 
                 if (esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &update_handle)) {
                     esp_ota_abort(update_handle);
                     delete http;
                     ESP_LOGE(TAG, "Failed to begin OTA");
-                    return;
+                    return false;
                 }
 
                 image_header_checked = true;
@@ -196,7 +196,7 @@ void Ota::Upgrade(const std::string& firmware_url) {
             ESP_LOGE(TAG, "Failed to write OTA data: %s", esp_err_to_name(err));
             esp_ota_abort(update_handle);
             delete http;
-            return;
+            return false;
         }
     }
     delete http;
@@ -208,23 +208,23 @@ void Ota::Upgrade(const std::string& firmware_url) {
         } else {
             ESP_LOGE(TAG, "Failed to end OTA: %s", esp_err_to_name(err));
         }
-        return;
+        return false;
     }
 
     err = esp_ota_set_boot_partition(update_partition);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to set boot partition: %s", esp_err_to_name(err));
-        return;
+        return false;
     }
 
     ESP_LOGI(TAG, "Firmware upgrade successful, rebooting in 3 seconds...");
     vTaskDelay(pdMS_TO_TICKS(3000));
     esp_restart();
+    return true;
 }
-
-void Ota::StartUpgrade(std::function<void(int progress, size_t speed)> callback) {
+bool Ota::StartUpgrade(std::function<void(int progress, size_t speed)> callback) {
     upgrade_callback_ = callback;
-    Upgrade(firmware_url_);
+    return Upgrade(firmware_url_);
 }
 
 std::vector<int> Ota::ParseVersion(const std::string& version) {

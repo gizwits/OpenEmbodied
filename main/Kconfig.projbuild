@@ -314,19 +314,34 @@ config USE_WECHAT_MESSAGE_STYLE
     help
         使用微信聊天界面风格
 
-config USE_WAKE_WORD_DETECT
-    bool "Enable Wake Word Detection"
-    default y
-    depends on IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4 && SPIRAM
-    help
-        需要 ESP32 S3 与 AFE 支持
 
-config USE_AUDIO_PROCESSOR
-    bool "Enable Audio Noise Reduction"
-    default y
-    depends on IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4 && SPIRAM
+config USE_ESP_WAKE_WORD
+    bool "Enable Wake Word Detection (without AFE)"
+    default n
+    depends on IDF_TARGET_ESP32C3 || IDF_TARGET_ESP32C5 || IDF_TARGET_ESP32C6 || (IDF_TARGET_ESP32 && SPIRAM)
     help
-        需要 ESP32 S3 与 AFE 支持
+        支持 ESP32 C3、ESP32 C5 与 ESP32 C6，增加ESP32支持（需要开启PSRAM）
+
+config USE_AFE_WAKE_WORD
+    bool "Enable Wake Word Detection (AFE)"
+    default y
+    depends on (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4) && SPIRAM
+    help
+        需要 ESP32 S3 与 PSRAM 支持
+
+config USE_CUSTOM_WAKE_WORD
+    bool "Enable Custom Wake Word Detection"
+    default n
+    depends on (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4) && SPIRAM && (!USE_AFE_WAKE_WORD)
+    help
+        需要 ESP32 S3 与 PSRAM 支持
+        
+config CUSTOM_WAKE_WORD
+    string "Custom Wake Word"
+    default "xiao tu dou"
+    depends on USE_CUSTOM_WAKE_WORD
+    help
+        自定义唤醒词，中文用拼音表示，每个字之间用空格隔开
 
 config USE_DEVICE_AEC
     bool "Enable Device-Side AEC"
@@ -340,6 +355,27 @@ config USE_SERVER_AEC
     depends on USE_AUDIO_PROCESSOR
     help
         启用服务器端 AEC，需要服务器支持
+
+
+config USE_AUDIO_DEBUGGER
+    bool "Enable Audio Debugger"
+    default n
+    help
+        启用音频调试功能，通过UDP发送音频数据
+
+
+config AUDIO_DEBUG_UDP_SERVER
+    string "Audio Debug UDP Server Address"
+    default "192.168.2.100:8000"
+    depends on USE_AUDIO_DEBUGGER
+    help
+        UDP服务器地址，格式: IP:PORT，用于接收音频调试数据
+
+config RECEIVE_CUSTOM_MESSAGE
+    bool "Enable Custom Message Reception"
+    default n
+    help
+        启用接收自定义消息功能，允许设备接收来自服务器的自定义消息（最好通过 MQTT 协议）
 
 config USE_AUDIO_CODEC_ENCODE_OPUS
     depends on BOARD_TYPE_GIZWITS_C2_6824_TOY || BOARD_TYPE_GIZWITS_C2_6824 || BOARD_TYPE_DOIT_AI_01_KIT || BOARD_TYPE_DOIT_AI_01_KIT_LCD || BOARD_TYPE_DOIT_AI_01_KIT_NFC || BOARD_TYPE_DOIT_ESP32S3_EYE_6824

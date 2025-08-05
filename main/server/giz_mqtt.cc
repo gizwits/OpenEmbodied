@@ -11,7 +11,6 @@
 #include "application.h"
 #include "settings.h"
 #include <esp_wifi.h>
-#include "audio_codecs/audio_codec.h"
 #include <esp_app_desc.h>
 #include "ntp.h"
 
