@@ -422,19 +422,11 @@ void Application::Start() {
 
     protocol_->OnNetworkError([this](const std::string& message) {
         ESP_LOGE(TAG, "OnNetworkError: %s", message.c_str());
-        if (device_state_ != kDeviceStateSleeping) {
-            SetDeviceState(kDeviceStateIdle);
-        }
-        Alert(Lang::Strings::ERROR, message.c_str(), "sad", Lang::Sounds::P3_EXCLAMATION);
-
         Schedule([this, message]() {
             std::string messageData = "socket 通道错误: " + message;
             MqttClient::getInstance().sendTraceLog("info", messageData.c_str());
         });
         last_error_message_ = message;
-        xEventGroupSetBits(event_group_, MAIN_EVENT_ERROR);
-
-        MqttClient::getInstance().GetRoomInfo(true);
     });
     protocol_->OnIncomingAudio([this](AudioStreamPacket&& packet) {
         if (device_state_ == kDeviceStateSpeaking) {
