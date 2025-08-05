@@ -9,6 +9,7 @@
 #include "assets/lang_config.h"
 #include "mcp_server.h"
 #include "wifi_station.h"
+#include "watchdog.h"
 
 #include "settings.h"
 #include <cstring>
@@ -344,6 +345,7 @@ void Application::StopListening() {
 }
 
 void Application::Start() {
+
     Settings settings("wifi", true);
     chat_mode_ = settings.GetInt("chat_mode", 1); // 0=按键说话, 1=唤醒词, 2=自然对话
     ESP_LOGI(TAG, "chat_mode_: %d", chat_mode_);
@@ -583,6 +585,8 @@ void Application::Start() {
 
     // Print heap stats
     SystemInfo::PrintHeapStats();
+
+    StartReportTimer();
 }
 
 void Application::OnClockTimer() {
@@ -612,15 +616,31 @@ void Application::Schedule(std::function<void()> callback) {
 // If other tasks need to access the websocket or chat state,
 // they should use Schedule to call this function
 void Application::MainEventLoop() {
+    auto& watchdog = Watchdog::GetInstance();
+    const TickType_t timeout = pdMS_TO_TICKS(3000);
     // Raise the priority of the main event loop to avoid being interrupted by background tasks (which has priority 2)
     vTaskPrioritySet(NULL, 3);
 
     while (true) {
+        watchdog.Reset();
+
+        // Process NTP sync
+        auto& ntp_client = NtpClient::GetInstance();
+        ntp_client.ProcessSync();
+
+        // 每分钟检查一次电量
+        auto now = std::chrono::steady_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::minutes>(now - last_battery_check_time_).count();
+        if (duration >= 2) {
+            CheckBatteryLevel();
+            last_battery_check_time_ = now;
+        }
+
         auto bits = xEventGroupWaitBits(event_group_, MAIN_EVENT_SCHEDULE |
             MAIN_EVENT_SEND_AUDIO |
             MAIN_EVENT_WAKE_WORD_DETECTED |
             MAIN_EVENT_VAD_CHANGE |
-            MAIN_EVENT_ERROR, pdTRUE, pdFALSE, portMAX_DELAY);
+            MAIN_EVENT_ERROR, pdTRUE, pdFALSE, timeout);
         if (bits & MAIN_EVENT_ERROR) {
             SetDeviceState(kDeviceStateIdle);
             Alert(Lang::Strings::ERROR, last_error_message_.c_str(), "sad", Lang::Sounds::P3_EXCLAMATION);
@@ -649,6 +669,7 @@ void Application::MainEventLoop() {
             auto tasks = std::move(main_tasks_);
             lock.unlock();
             for (auto& task : tasks) {
+                watchdog.Reset();
                 task();
             }
         }

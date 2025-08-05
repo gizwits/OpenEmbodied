@@ -7,6 +7,7 @@
 
 #include "application.h"
 #include "system_info.h"
+#include "watchdog.h"
 
 #define TAG "main"
 
@@ -27,5 +28,7 @@ extern "C" void app_main(void)
     // Launch the application
     auto& app = Application::GetInstance();
     app.Start();
+    auto& watchdog = Watchdog::GetInstance();
+    watchdog.SubscribeTask(xTaskGetCurrentTaskHandle());
     app.MainEventLoop();
 }

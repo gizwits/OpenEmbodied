@@ -95,6 +95,7 @@ private:
     esp_timer_handle_t report_timer_handle_ = nullptr;
     int chat_mode_ = 1;
     bool has_emotion_ = false;
+    std::chrono::steady_clock::time_point last_battery_check_time_;
 
     bool has_server_time_ = false;
     bool aborted_ = false;

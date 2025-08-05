@@ -60,6 +60,7 @@ void AudioService::Initialize(AudioCodec* codec) {
 #endif
 
     audio_processor_->OnOutput([this](std::vector<int16_t>&& data) {
+        ESP_LOGD(TAG, "Audio processor output: data.size()=%zu", data.size());
         PushTaskToEncodeQueue(kAudioTaskTypeEncodeToSendQueue, std::move(data));
     });
 
@@ -384,6 +385,7 @@ void AudioService::OpusCodecTask() {
             packet->frame_duration = OPUS_FRAME_DURATION_MS;
             packet->sample_rate = 16000;
             packet->timestamp = task->timestamp;
+            ESP_LOGD(TAG, "Opus encode: task->pcm.size()=%zu", task->pcm.size());
             if (!opus_encoder_->Encode(std::move(task->pcm), packet->payload)) {
                 ESP_LOGE(TAG, "Failed to encode audio");
                 continue;

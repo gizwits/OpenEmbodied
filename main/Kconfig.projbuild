@@ -349,6 +349,13 @@ config USE_DEVICE_AEC
     help
         因为性能不够，不建议和微信聊天界面风格同时开启
 
+config USE_AUDIO_PROCESSOR
+    bool "Enable Audio Noise Reduction"
+    default y
+    depends on (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4) && SPIRAM
+    help
+        需要 ESP32 S3 与 PSRAM 支持
+        
 config USE_SERVER_AEC
     bool "Enable Server-Side AEC"
     default n

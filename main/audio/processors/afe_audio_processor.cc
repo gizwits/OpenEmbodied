@@ -117,8 +117,8 @@ void AfeAudioProcessor::OnVadStateChange(std::function<void(bool speaking)> call
 void AfeAudioProcessor::AudioProcessorTask() {
     auto fetch_size = afe_iface_->get_fetch_chunksize(afe_data_);
     auto feed_size = afe_iface_->get_feed_chunksize(afe_data_);
-    ESP_LOGI(TAG, "Audio communication task started, feed size: %d fetch size: %d",
-        feed_size, fetch_size);
+    ESP_LOGI(TAG, "Audio communication task started, feed size: %d fetch size: %d, frame_samples_: %zu",
+        feed_size, fetch_size, frame_samples_);
 
     while (true) {
         xEventGroupWaitBits(event_group_, PROCESSOR_RUNNING, pdFALSE, pdTRUE, pdMS_TO_TICKS(1000));
@@ -147,9 +147,12 @@ void AfeAudioProcessor::AudioProcessorTask() {
 
         if (output_callback_) {
             size_t samples = res->data_size / sizeof(int16_t);
+            ESP_LOGD(TAG, "AFE output: data_size=%d, samples=%zu, frame_samples_=%zu", 
+                     res->data_size, samples, frame_samples_);
             
             // Add data to buffer
             output_buffer_.insert(output_buffer_.end(), res->data, res->data + samples);
+            ESP_LOGD(TAG, "AFE buffer: added %zu samples, buffer size now: %zu", samples, output_buffer_.size());
             
             // Output complete frames when buffer has enough data
             while (output_buffer_.size() >= frame_samples_) {
