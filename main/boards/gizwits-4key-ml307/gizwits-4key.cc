@@ -1,5 +1,5 @@
-#include "wifi_board.h"
-#include "audio/codecs/es8311_audio_codec.h"
+#include "dual_network_board.h"
+#include "audio_codecs/es8311_audio_codec.h"
 #include "application.h"
 #include "button.h"
 #include "config.h"
@@ -17,16 +17,14 @@
 
 #define TAG "GizwitsDev"
 
-class GizwitsDevBoard : public WifiBoard {
+class GizwitsDevBoard : public DualNetworkBoard {
 private:
     i2c_master_bus_handle_t i2c_bus_;
     adc_oneshot_unit_handle_t adc1_handle_;  // ADC句柄
 
     Button boot_button_;
-    Button volume_up_button_;
-    Button volume_down_button_;
     Button rec_button_;
-    PowerManager* power_manager_;
+    // PowerManager* power_manager_;
     
     bool need_power_off_ = false;
     
@@ -67,7 +65,7 @@ private:
         boot_button_.OnPressRepeat([this](uint16_t count) {
             ESP_LOGI(TAG, "boot_button_.OnPressRepeat");
             if(count >= 5){
-                ResetWifiConfiguration();
+                RunResetWifiConfiguration();
             } else {
                 Application::GetInstance().ToggleChatState();
             }
@@ -144,31 +142,6 @@ private:
                 Application::GetInstance().ToggleChatState();
             });
         }
-        
-        volume_up_button_.OnClick([this]() {
-            WakeUp();
-            ESP_LOGI(TAG, "volume_up_button_.OnClick");
-            auto codec = GetAudioCodec();
-            auto volume = codec->output_volume() + 10;
-            codec->SetOutputVolume(volume);
-        });
-        volume_up_button_.OnLongPress([this]() {
-            ESP_LOGI(TAG, "volume_up_button_.OnLongPress");
-            CheckDualLongPress();
-        });
-
-        volume_down_button_.OnClick([this]() {
-            WakeUp();
-            ESP_LOGI(TAG, "volume_down_button_.OnClick");
-            auto codec = GetAudioCodec();
-            auto volume = codec->output_volume() - 10;
-            codec->SetOutputVolume(volume);
-        });
-        volume_down_button_.OnLongPress([this]() {
-            ESP_LOGI(TAG, "volume_down_button_.OnLongPress");
-            CheckDualLongPress();
-        });
-
     }
 
     // 物联网初始化，添加对 AI 可见设备
@@ -178,10 +151,10 @@ private:
     }
 
 
-    void InitializePowerManager() {
-        power_manager_ =
-            new PowerManager(GPIO_NUM_NC, GPIO_NUM_NC, BAT_ADC_UNIT, BAT_ADC_CHANNEL);
-    }
+    // void InitializePowerManager() {
+    //     power_manager_ =
+    //         new PowerManager(GPIO_NUM_NC, GPIO_NUM_NC, BAT_ADC_UNIT, BAT_ADC_CHANNEL);
+    // }
 
     void WakeUp() {
         is_sleep_ = false;
@@ -190,8 +163,7 @@ private:
 
 
 public:
-    GizwitsDevBoard() : boot_button_(BOOT_BUTTON_GPIO),
-    volume_up_button_(VOLUME_UP_BUTTON_GPIO), volume_down_button_(VOLUME_DOWN_BUTTON_GPIO),
+    GizwitsDevBoard() : DualNetworkBoard(ML307_TX_PIN, ML307_RX_PIN), boot_button_(BOOT_BUTTON_GPIO),
     rec_button_(REC_BUTTON_GPIO) {
         // 记录上电时间
         power_on_time_ = esp_timer_get_time() / 1000; // 转换为毫秒
@@ -203,12 +175,12 @@ public:
         InitializeChargingGpio();
         InitializeI2c();
         InitializeIot();
-        InitializePowerManager();
+        // InitializePowerManager();
         
-        if (power_manager_) {
-            power_manager_->CheckBatteryStatusImmediately();
-            ESP_LOGI(TAG, "启动时立即检测电量: %d", power_manager_->GetBatteryLevel());
-        }
+        // if (power_manager_) {
+        //     power_manager_->CheckBatteryStatusImmediately();
+        //     ESP_LOGI(TAG, "启动时立即检测电量: %d", power_manager_->GetBatteryLevel());
+        // }
     }
 
 
@@ -255,51 +227,21 @@ public:
         return chrg == 0 || standby == 0;
     }
     
-    void CheckDualLongPress() {
-        int64_t current_time = esp_timer_get_time() / 1000; // 转换为毫秒
-        
-        // 检查当前哪个按钮被长按
-        if (gpio_get_level(VOLUME_UP_BUTTON_GPIO) == 0) {
-            volume_up_long_pressed_ = true;
-        }
-        if (gpio_get_level(VOLUME_DOWN_BUTTON_GPIO) == 0) {
-            volume_down_long_pressed_ = true;
-        }
-        
-        // 如果两个按钮都被长按
-        if (volume_up_long_pressed_ && volume_down_long_pressed_) {
-            if (dual_long_press_time_ == 0) {
-                dual_long_press_time_ = current_time;
-                ESP_LOGI(TAG, "开始检测双按钮长按");
-            } else {
-                // 检查是否已经长按足够时间（比如2秒）
-                const int64_t DUAL_LONG_PRESS_DURATION = 2000; // 2秒
-                if (current_time - dual_long_press_time_ >= DUAL_LONG_PRESS_DURATION) {
-                    ESP_LOGI(TAG, "双按钮长按触发 - ResetWifiConfiguration");
-                    ResetWifiConfiguration();
-                    // 重置状态
-                    volume_up_long_pressed_ = false;
-                    volume_down_long_pressed_ = false;
-                    dual_long_press_time_ = 0;
-                }
-            }
-        } else {
-            // 如果任一按钮释放，重置状态
-            if (!volume_up_long_pressed_ || !volume_down_long_pressed_) {
-                volume_up_long_pressed_ = false;
-                volume_down_long_pressed_ = false;
-                dual_long_press_time_ = 0;
-            }
+
+    virtual void RunResetWifiConfiguration() {
+        if (GetNetworkType() == NetworkType::WIFI) {
+            auto& wifi_board = static_cast<WifiBoard&>(GetCurrentBoard());
+            wifi_board.ResetWifiConfiguration();
         }
     }
 
-    virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
-        charging = isCharging();
-        discharging = !charging;
-        level = power_manager_->GetBatteryLevel();
-        ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
-        return true;
-    }
+    // virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
+    //     charging = isCharging();
+    //     discharging = !charging;
+    //     level = power_manager_->GetBatteryLevel();
+    //     ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
+    //     return true;
+    // }
 
     virtual Led* GetLed() override {
         static CircularStrip led(BUILTIN_LED_GPIO, 4);

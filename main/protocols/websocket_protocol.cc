@@ -66,14 +66,13 @@ WebsocketProtocol::~WebsocketProtocol() {
         if (close_task_handle_ != nullptr) {
             ESP_LOGW(TAG, "Close task did not complete in time, force cleanup");
             // 强制清理 websocket
-            if (websocket_ != nullptr) {
-                delete websocket_;
-                websocket_ = nullptr;
+            if (websocket_) {
+                websocket_.reset();
             }
         }
-    } else if (websocket_ != nullptr) {
+    } else if (websocket_) {
         // 如果没有关闭任务，直接清理 websocket
-        delete websocket_;
+        websocket_.reset();
     }
     
     vEventGroupDelete(event_group_handle_);
@@ -84,7 +83,7 @@ bool WebsocketProtocol::Start() {
 }
 
 void WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
-    if (websocket_ == nullptr || !websocket_->IsConnected() || packet.payload.empty() || busy_sending_audio_) {
+    if (!websocket_ || !websocket_->IsConnected() || packet.payload.empty() || busy_sending_audio_) {
         return;
     }
     const std::vector<uint8_t>& data = packet.payload;
@@ -128,7 +127,7 @@ void WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
 
 
 bool WebsocketProtocol::SendText(const std::string& text) {
-    if (websocket_ == nullptr) {
+    if (!websocket_) {
         return false;
     }
     websocket_->Send(text);
@@ -136,7 +135,7 @@ bool WebsocketProtocol::SendText(const std::string& text) {
 }
 
 void WebsocketProtocol::SendStopListening() {
-    if (websocket_ == nullptr) {
+    if (!websocket_) {
         return;
     }
 
@@ -161,14 +160,14 @@ void WebsocketProtocol::SendStopListening() {
 
 bool WebsocketProtocol::IsAudioChannelOpened() const {
     if (Application::GetInstance().GetChatMode() == 0) {
-        return websocket_ != nullptr && websocket_->IsConnected() && !error_occurred_;
+        return websocket_ && websocket_->IsConnected() && !error_occurred_;
     }
-    return websocket_ != nullptr && websocket_->IsConnected() && !error_occurred_ && !IsTimeout();
+    return websocket_ && websocket_->IsConnected() && !error_occurred_ && !IsTimeout();
 }
 
 
 void WebsocketProtocol::CloseAudioChannel() {
-    if (websocket_ == nullptr) {
+    if (!websocket_) {
         return;
     }
 
@@ -209,14 +208,13 @@ void WebsocketProtocol::CloseAudioChannelTask(void* param) {
     vTaskDelay(pdMS_TO_TICKS(300));
     
     // 3. 发送关闭帧给服务器
-    if (self->websocket_ != nullptr) {
+    if (self->websocket_) {
         self->websocket_->Close();
     }
     
     // 5. 清理资源
-    if (self->websocket_ != nullptr) {
-        delete self->websocket_;
-        self->websocket_ = nullptr;
+    if (self->websocket_) {
+        self->websocket_.reset();
     }
     
     ESP_LOGI(TAG, "Audio channel closed successfully");
@@ -229,8 +227,8 @@ void WebsocketProtocol::CloseAudioChannelTask(void* param) {
 }
 
 bool WebsocketProtocol::OpenAudioChannel() {
-    if (websocket_ != nullptr) {
-        delete websocket_;
+    if (websocket_) {
+        websocket_.reset();
     }
     if (room_params_.bot_id.empty() || room_params_.access_token.empty() || room_params_.voice_id.empty()) {
         ESP_LOGE(TAG, "Bot ID or access token or voice id is empty");
@@ -246,7 +244,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
     std::string token = "Bearer " + std::string(room_params_.access_token);
 
     message_cache_ = "";
-    websocket_ = Board::GetInstance().CreateWebSocket();
+    auto network = Board::GetInstance().GetNetwork();
+    websocket_ = network->CreateWebSocket(1);
     websocket_->SetHeader("Authorization", token.c_str());
 
     websocket_->OnData([this](const char* data, size_t len, bool binary) {

@@ -25,7 +25,7 @@ public:
     virtual void SendAudio(const AudioStreamPacket& packet) override;
 
 private:
-    WebSocket* websocket_ = nullptr;
+    std::unique_ptr<WebSocket> websocket_;
     EventGroupHandle_t event_group_handle_;
     TaskHandle_t close_task_handle_ = nullptr;
     std::vector<AudioStreamPacket> packet_cache_;

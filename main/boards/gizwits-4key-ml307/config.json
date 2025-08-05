@@ -1,0 +1,12 @@
+{
+    "target": "esp32s3",
+    "builds": [
+        {
+            "name": "gizwits-4key",
+            "sdkconfig_append": [
+                "CONFIG_CODEC_ES8311_SUPPORT=y",
+                "CONFIG_USE_AUDIO_PROCESSOR=y"
+            ]
+        }
+    ]
+}

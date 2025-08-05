@@ -124,17 +124,16 @@ bool Ota::Upgrade(const std::string& firmware_url) {
     bool image_header_checked = false;
     std::string image_header;
 
-    auto http = Board::GetInstance().CreateHttp();
+    auto network = Board::GetInstance().GetNetwork();
+    auto http = network->CreateHttp(2);
     if (!http->Open("GET", firmware_url)) {
         ESP_LOGE(TAG, "Failed to open HTTP connection");
-        delete http;
         return false;
     }
 
     size_t content_length = http->GetBodyLength();
     if (content_length == 0) {
         ESP_LOGE(TAG, "Failed to get content length");
-        delete http;
         return false;
     }
 
@@ -145,7 +144,6 @@ bool Ota::Upgrade(const std::string& firmware_url) {
         int ret = http->Read(buffer, sizeof(buffer));
         if (ret < 0) {
             ESP_LOGE(TAG, "Failed to read HTTP data: %s", esp_err_to_name(ret));
-            delete http;
             return false;
         }
 
@@ -176,13 +174,11 @@ bool Ota::Upgrade(const std::string& firmware_url) {
                 auto current_version = esp_app_get_description()->version;
                 if (memcmp(new_app_info.version, current_version, sizeof(new_app_info.version)) == 0) {
                     ESP_LOGE(TAG, "Firmware version is the same, skipping upgrade");
-                    delete http;
                     return false;
                 }
 
                 if (esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &update_handle)) {
                     esp_ota_abort(update_handle);
-                    delete http;
                     ESP_LOGE(TAG, "Failed to begin OTA");
                     return false;
                 }
@@ -195,11 +191,10 @@ bool Ota::Upgrade(const std::string& firmware_url) {
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Failed to write OTA data: %s", esp_err_to_name(err));
             esp_ota_abort(update_handle);
-            delete http;
             return false;
         }
     }
-    delete http;
+    
 
     esp_err_t err = esp_ota_end(update_handle);
     if (err != ESP_OK) {

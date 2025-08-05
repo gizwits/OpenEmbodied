@@ -2,15 +2,16 @@
 
 #include <string>
 #include <functional>
+#include <mutex>
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "freertos/queue.h"
 #include "freertos/timers.h"
-#include <ml307_mqtt.h>
 #include "cJSON.h"
 #include "protocols/protocol.h"
+#include <mqtt.h>
 
 // 内存优化配置
 // S3 用更大的内存
@@ -116,7 +117,7 @@ public:
     size_t getEstimatedMemoryUsage();
 
 private:
-    Mqtt* mqtt_ = nullptr;
+    std::unique_ptr<Mqtt> mqtt_;
     std::function<void(const RoomParams&)> room_params_updated_callback_;
     std::function<void(const std::string&, const std::string&)> message_callback_;
     QueueHandle_t message_queue_ = nullptr;
