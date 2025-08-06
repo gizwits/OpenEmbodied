@@ -111,7 +111,7 @@ public:
     bool PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> packet, bool wait = false);
     std::unique_ptr<AudioStreamPacket> PopPacketFromSendQueue();
     void PlaySound(const std::string_view& sound);
-#if defined(CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS)
+#if defined(CONFIG_USE_EYE_STYLE_VB6824)
     bool ReadAudioData(std::vector<uint8_t>& opus, int sample_rate, int samples);
 #else
     bool ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples);
@@ -124,13 +124,13 @@ private:
     std::unique_ptr<AudioProcessor> audio_processor_;
     std::unique_ptr<WakeWord> wake_word_;
     std::unique_ptr<AudioDebugger> audio_debugger_;
-#ifndef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+#ifndef CONFIG_USE_EYE_STYLE_VB6824
     std::unique_ptr<OpusEncoderWrapper> opus_encoder_;
 #endif
     std::unique_ptr<OpusDecoderWrapper> opus_decoder_;
 
 
-#ifndef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+#ifndef CONFIG_USE_EYE_STYLE_VB6824
     OpusResampler input_resampler_;
     OpusResampler reference_resampler_;
     OpusResampler output_resampler_;
@@ -151,7 +151,7 @@ private:
     std::deque<std::unique_ptr<AudioStreamPacket>> audio_send_queue_;
     std::deque<std::unique_ptr<AudioStreamPacket>> audio_testing_queue_;
 
-#ifndef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+#ifndef CONFIG_USE_EYE_STYLE_VB6824
     std::deque<std::unique_ptr<AudioTask>> audio_encode_queue_;
 #endif
     std::deque<std::unique_ptr<AudioTask>> audio_playback_queue_;

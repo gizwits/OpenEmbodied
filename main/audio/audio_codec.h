@@ -25,7 +25,7 @@ public:
     virtual void EnableOutput(bool enable);
 
     virtual void OutputData(std::vector<int16_t>& data);
-#if defined(CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS)
+#if defined(CONFIG_USE_EYE_STYLE_VB6824)
     virtual bool InputData(std::vector<uint8_t>& opus);
 #endif
     virtual bool InputData(std::vector<int16_t>& data);
@@ -56,7 +56,7 @@ protected:
     int output_volume_ = 70;
 
     virtual int Read(int16_t* dest, int samples) = 0;
-#ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+#ifdef CONFIG_USE_EYE_STYLE_VB6824
     virtual int Read(uint8_t* dest, int samples) = 0;
 #endif
     virtual int Write(const int16_t* data, int samples) = 0;

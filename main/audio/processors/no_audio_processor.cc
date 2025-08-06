@@ -8,7 +8,7 @@ void NoAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms) {
     frame_samples_ = frame_duration_ms * 16000 / 1000;
 }
 
-#ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+#ifdef CONFIG_USE_EYE_STYLE_VB6824
 void NoAudioProcessor::Feed(std::vector<uint8_t>&& opus) {
     if (!is_running_ || !output_callback_) {
         ESP_LOGE(TAG, "Feed called but not running or no callback, is_running_: %d", is_running_);
@@ -59,7 +59,7 @@ bool NoAudioProcessor::IsRunning() {
     return is_running_;
 }
 
-#ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+#ifdef CONFIG_USE_EYE_STYLE_VB6824
 void NoAudioProcessor::OnOutput(std::function<void(std::vector<uint8_t>&& opus)> callback) {
     output_callback_ = callback;
 }
@@ -77,7 +77,7 @@ size_t NoAudioProcessor::GetFeedSize() {
     if (!codec_) {
         return 0;
     }
-#ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+#ifdef CONFIG_USE_EYE_STYLE_VB6824
     // 当使用 OPUS 编码时，VB6824 每次返回 40 字节的 OPUS 数据
     return 40;
 #else

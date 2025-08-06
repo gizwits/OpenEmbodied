@@ -347,7 +347,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
                             // 创建当前音频包
                             AudioStreamPacket packet;
                             packet.sample_rate = 16000;
-                            packet.frame_duration = 60;
+                            packet.frame_duration = OPUS_FRAME_DURATION_MS;
                             packet.payload.assign(audio_data_buffer_.begin(), audio_data_buffer_.begin() + actual_len);
                             
                             if (cached_packet_count_ < MAX_CACHED_PACKETS) {

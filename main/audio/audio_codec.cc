@@ -18,7 +18,7 @@ void AudioCodec::OutputData(std::vector<int16_t>& data) {
     Write(data.data(), data.size());
 }
 
-#ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+#ifdef CONFIG_USE_EYE_STYLE_VB6824
 bool AudioCodec::InputData(std::vector<uint8_t>& opus) {
     int samples = Read(opus.data(), opus.size());
     if (samples > 0) {
@@ -44,7 +44,7 @@ void AudioCodec::Start() {
         output_volume_ = 10;
     }
 
-#if !defined(CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS)
+#if !defined(CONFIG_USE_EYE_STYLE_VB6824)
     if (tx_handle_ != nullptr) {
         ESP_ERROR_CHECK(i2s_channel_enable(tx_handle_));
     }
