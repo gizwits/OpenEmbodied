@@ -64,7 +64,7 @@ private:
                 Application::GetInstance().Schedule([this]() {
                     Application::GetInstance().QuitTalking();
                     Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
-                });
+                }, "EnterSleepMode_QuitTalking");
 
             } else {
                 // 关闭 wifi，进入待机模式
@@ -423,7 +423,7 @@ private:
         i2c_device_config_t dev_cfg = {
             .dev_addr_length = I2C_ADDR_BIT_LEN_7,
             .device_address = LIS2HH12_I2C_ADDR,
-            .scl_speed_hz = 50000,  // 降低到100kHz，提高稳定性
+            .scl_speed_hz = 400000,  // 降低到100kHz，提高稳定性
         };
         ret = i2c_master_bus_add_device(lis2hh12_i2c_bus_, &dev_cfg, &lis2hh12_dev_);
         if (ret != ESP_OK) {
@@ -560,7 +560,7 @@ public:
         }
         InitializeButtons();
         InitializeIot();
-        xTaskCreate(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 1024 * 4, this, 1, NULL); // 启动检测任务
+        xTaskCreatePinnedToCore(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 1024 * 4, this, 1, NULL, 0); // 启动检测任务
         InitializePowerManager();
         InitializePowerSaveTimer();
         // ESP_LOGI(TAG, "ReadADC2_CH1_Oneshot");

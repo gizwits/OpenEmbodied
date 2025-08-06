@@ -636,7 +636,7 @@ void XunguanDisplay::StartSadAnimation() {
     
     
     // Calculate positions for centered eyes
-    int eye_spacing = screen_width / 3;  // 1/3 of screen width between eyes
+    int eye_spacing = screen_width / 2.4;  // 1/3 of screen width between eyes
     int left_eye_x = (screen_width / 2) - (eye_spacing / 2);
     int right_eye_x = (screen_width / 2) + (eye_spacing / 2);
     int eye_y = (screen_height / 2) - 10;  // Slightly above center

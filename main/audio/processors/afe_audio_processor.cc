@@ -14,6 +14,9 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms) {
     codec_ = codec;
     frame_samples_ = frame_duration_ms * 16000 / 1000;
 
+    // 设置AFE模块的日志级别为ERROR，忽略Ringbuffer empty警告
+    esp_log_level_set("AFE", ESP_LOG_ERROR);
+
     // Pre-allocate output buffer capacity
     output_buffer_.reserve(frame_samples_);
 
