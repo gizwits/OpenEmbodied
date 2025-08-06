@@ -11,13 +11,16 @@ void NoAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms) {
 #ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
 void NoAudioProcessor::Feed(std::vector<uint8_t>&& opus) {
     if (!is_running_ || !output_callback_) {
+        ESP_LOGE(TAG, "Feed called but not running or no callback, is_running_: %d", is_running_);
         return;
     }
 
-    if (opus.size() != frame_samples_) {
-        ESP_LOGE(TAG, "Feed opus size is not equal to frame size, feed size: %u, frame size: %u", opus.size(), frame_samples_);
+    // VB6824 每次返回 40 字节的 OPUS 数据
+    if (opus.size() != 40) {
+        ESP_LOGE(TAG, "Feed opus size is not 40 bytes, feed size: %u", opus.size());
         return;
     }
+    ESP_LOGD(TAG, "NoAudioProcessor feed: opus.size()=%zu", opus.size());
     output_callback_(std::move(opus));
 }
 #else
@@ -74,7 +77,12 @@ size_t NoAudioProcessor::GetFeedSize() {
     if (!codec_) {
         return 0;
     }
+#ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+    // 当使用 OPUS 编码时，VB6824 每次返回 40 字节的 OPUS 数据
+    return 40;
+#else
     return frame_samples_;
+#endif
 }
 
 void NoAudioProcessor::EnableDeviceAec(bool enable) {

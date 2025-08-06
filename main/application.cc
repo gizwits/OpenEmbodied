@@ -353,10 +353,8 @@ void Application::Start() {
 
     auto& board = Board::GetInstance();
     Auth::getInstance().init();
-
     
     SetDeviceState(kDeviceStateStarting);
-
     /* Setup the display */
     auto display = board.GetDisplay();
 
@@ -650,6 +648,7 @@ void Application::MainEventLoop() {
             }
         }
 
+#ifndef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
         if (bits & MAIN_EVENT_WAKE_WORD_DETECTED) {
             OnWakeWordDetected();
         }
@@ -660,6 +659,7 @@ void Application::MainEventLoop() {
                 led->OnStateChanged();
             }
         }
+#endif
 
         if (bits & MAIN_EVENT_SCHEDULE) {
             std::unique_lock<std::mutex> lock(mutex_);

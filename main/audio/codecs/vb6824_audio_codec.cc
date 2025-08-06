@@ -156,14 +156,17 @@ void VbAduioCodec::Start() {
         output_volume_ = 10;
     }
     
+    ESP_LOGI(TAG, "VB6824 starting with output_volume=%d", output_volume_);
     EnableInput(true);
     EnableOutput(true);
 }
 
 #ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
 bool VbAduioCodec::InputData(std::vector<uint8_t>& opus) {
+    // VB6824 每次返回 40 字节的 OPUS 数据
     opus.resize(40);
     int samples = Read((uint8_t *)opus.data(), opus.size());
+    ESP_LOGD(TAG, "VB6824 InputData: samples=%d, input_enabled=%s", samples, input_enabled_ ? "true" : "false");
     if (samples > 0) {
         return true;
     }
@@ -202,6 +205,7 @@ int VbAduioCodec::Read(int16_t* dest, int samples) {
 #ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
 int VbAduioCodec::Read(uint8_t* dest, int samples) {
     int read_len = vb6824_audio_read((uint8_t *)dest, samples);
+    ESP_LOGD(TAG, "VB6824 Read OPUS: requested=%d, actual=%d", samples, read_len);
     return read_len;
 }
 #endif
