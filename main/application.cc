@@ -386,8 +386,6 @@ void Application::Start() {
     /* Wait for the network to be ready */
     board.StartNetwork();
 
-    board.SetPowerSaveMode(false);
-
     bool battery_ok = CheckBatteryLevel();
     if (!battery_ok) {
         vTaskDelay(pdMS_TO_TICKS(3000));
@@ -437,7 +435,7 @@ void Application::Start() {
         }
     });
     protocol_->OnAudioChannelOpened([this, codec, &board]() {
-        // board.SetPowerSaveMode(false);
+        board.SetPowerSaveMode(false);
         if (protocol_->server_sample_rate() != codec->output_sample_rate()) {
             ESP_LOGW(TAG, "Server sample rate %d does not match device output sample rate %d, resampling may cause distortion",
                 protocol_->server_sample_rate(), codec->output_sample_rate());
@@ -447,7 +445,7 @@ void Application::Start() {
         }, "OnAudioChannelOpened");
     });
     protocol_->OnAudioChannelClosed([this, &board]() {
-        // board.SetPowerSaveMode(true);
+        board.SetPowerSaveMode(true);
         Schedule([this]() {
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");

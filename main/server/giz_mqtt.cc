@@ -163,7 +163,7 @@ bool MqttClient::initialize() {
 
     auto network = Board::GetInstance().GetNetwork();
     mqtt_ = network->CreateMqtt(1);
-    mqtt_->SetKeepAlive(8);
+    mqtt_->SetKeepAlive(20);
 
     mqtt_->OnDisconnected([this]() {
         ESP_LOGI(TAG, "Disconnected from endpoint");
