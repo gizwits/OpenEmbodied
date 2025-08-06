@@ -1119,6 +1119,9 @@ void Application::EnterSleepMode() {
         if (backlight) {
             backlight->SetBrightness(0);
         }
+
+        // 启动唤醒词
+        audio_service_.EnableWakeWordDetection(true);
         
     }, "EnterSleepMode_SetStatus");
     
