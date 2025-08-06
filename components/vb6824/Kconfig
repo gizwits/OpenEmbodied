@@ -1,7 +1,7 @@
 menu "VB6824"
 	choice VB6824_TYPE
     prompt "VB6924"
-    default CONFIG_VB6824_TYPE_OPUS_16K_20MS
+    default VB6824_TYPE_OPUS_16K_20MS
     help
         VB6824支持的类型
     config VB6824_TYPE_PCM_16K

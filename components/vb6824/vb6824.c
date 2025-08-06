@@ -536,6 +536,7 @@ void vb6824_shutdown(void){
 }
 
 void vb6824_audio_write(uint8_t *data, uint16_t len){
+    ESP_LOGI(TAG, "vb6824_audio_write: %d", len);
     xRingbufferSend(g_tx_ringbuffer, (void *)data, len, portMAX_DELAY);
 }
 

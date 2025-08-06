@@ -36,8 +36,7 @@ private:
     std::unique_ptr<char[]> base64_buffer_;  // Reuse buffer for base64 encoding
     size_t base64_buffer_size_ = 0;  // Current size of base64 buffer
     std::string message_buffer_;  // Reuse buffer for message construction
-   
-
+    
     void ParseServerHello(const cJSON* root);
     bool SendText(const std::string& text) override;
     std::string GetHelloMessage();

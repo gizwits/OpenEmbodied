@@ -845,13 +845,13 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
         
         ESP_LOGI(TAG, "WakeWordInvoke(kDeviceStateListening)");
         SetDeviceState(kDeviceStateListening);
-        audio_service_.ResetDecoder();
-        audio_service_.PlaySound(Lang::Sounds::P3_SUCCESS);
+        
         Schedule([this]() {
             // 打断AI
             ESP_LOGI(TAG, "WakeWordInvoke(kDeviceStateSpeaking)");
             protocol_->SendAbortSpeaking(kAbortReasonNone);
-            
+            audio_service_.ResetDecoder();
+            audio_service_.PlaySound(Lang::Sounds::P3_SUCCESS);
         });
     } else if (device_state_ == kDeviceStateListening) { 
         // 忽略唤醒词
