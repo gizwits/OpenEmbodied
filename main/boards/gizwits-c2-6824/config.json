@@ -4,7 +4,7 @@
         {
             "name": "gizwits-c2-6824",
             "sdkconfig_append": [
-                "CONFIG_BOARD_TYPE_DOIT_AI_01_KIT=y",
+                "CONFIG_BOARD_TYPE_GIZWITS_C2_6824=y",
                 "CONFIG_MQTT_USE_CUSTOM_CONFIG=y",
                 "CONFIG_MQTT_TASK_STACK_SIZE=3584",
                 "CONFIG_ESPTOOLPY_FLASHSIZE_4MB=n",
