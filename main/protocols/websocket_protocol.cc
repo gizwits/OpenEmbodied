@@ -277,6 +277,21 @@ bool WebsocketProtocol::OpenAudioChannel() {
         //     return;
         // }
         if(event_type == "conversation.audio.delta") {
+            // 检查是否在打断AI说话后的1秒内，如果是则忽略音频
+            if (abort_speaking_recorded_) {
+                auto now = std::chrono::steady_clock::now();
+                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - abort_speaking_timestamp_).count();
+                
+                if (elapsed < 1000) {
+                    ESP_LOGD(TAG, "Ignoring server audio, elapsed: %lld ms since abort speaking", elapsed);
+                    return;
+                } else {
+                    // 超过1秒后，清除记录
+                    abort_speaking_recorded_ = false;
+                    ESP_LOGD(TAG, "Audio ignore period ended, elapsed: %lld ms", elapsed);
+                }
+            }
+            
 
             constexpr std::string_view content_key = "\"content\":\"";
             size_t content_start = str_data.find(content_key);
@@ -414,6 +429,10 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 cached_packet_count_ = 0;
                 packet_cache_.clear();
 
+                // 重置打断记录状态，因为这是新对话的开始
+                abort_speaking_recorded_ = false;
+
+
                 message_cache_.clear();
                 message_buffer_.clear();
                 message_buffer_ = "{";
@@ -431,6 +450,10 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 is_first_packet_ = false;
                 cached_packet_count_ = 0;
                 packet_cache_.clear();
+
+
+                // 重置打断记录状态，因为这是新对话的开始
+                abort_speaking_recorded_ = false;
 
                 std::string messageData = "conversation.chat.completed or conversation.audio.completed";
                 MqttClient::getInstance().sendTraceLog("info", messageData.c_str());
