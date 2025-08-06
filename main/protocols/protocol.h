@@ -101,7 +101,7 @@ protected:
     RoomParams room_params_;
 
     int server_sample_rate_ = 24000;
-    int server_frame_duration_ = 60;
+    int server_frame_duration_ = 40;
     bool error_occurred_ = false;
     bool busy_sending_audio_ = false;
     std::string session_id_;

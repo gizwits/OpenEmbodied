@@ -161,7 +161,7 @@ void VbAduioCodec::Start() {
     EnableOutput(true);
 }
 
-#ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+#ifdef CONFIG_USE_EYE_STYLE_VB6824
 bool VbAduioCodec::InputData(std::vector<uint8_t>& opus) {
     // VB6824 每次返回 40 字节的 OPUS 数据
     opus.resize(40);
@@ -171,6 +171,10 @@ bool VbAduioCodec::InputData(std::vector<uint8_t>& opus) {
         return true;
     }
     return false;
+}
+
+void VbAduioCodec::OutputData(std::vector<uint8_t>& opus) {
+    Write(opus.data(), opus.size());
 }
 #endif
 
@@ -202,7 +206,7 @@ int VbAduioCodec::Read(int16_t* dest, int samples) {
     return read_len / 2;
 }
 
-#ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+#ifdef CONFIG_USE_EYE_STYLE_VB6824
 int VbAduioCodec::Read(uint8_t* dest, int samples) {
     int read_len = vb6824_audio_read((uint8_t *)dest, samples);
     ESP_LOGD(TAG, "VB6824 Read OPUS: requested=%d, actual=%d", samples, read_len);
@@ -219,20 +223,14 @@ int VbAduioCodec::Write(const int16_t* data, int samples) {
     return samples;
 }
 
-#ifdef CONFIG_USE_AUDIO_CODEC_DECODE_OPUS
+#ifdef CONFIG_USE_EYE_STYLE_VB6824
 int VbAduioCodec::Write(uint8_t* opus, int samples) {
     if(frist_volume_is_set == false){
         frist_volume_is_set = true;
         SetOutputVolume(output_volume_);
     }
-    vb6824_audio_write((uint8_t *)data, samples);
+    ESP_LOGD(TAG, "VB6824 Write OPUS: samples=%d", samples);
+    vb6824_audio_write((uint8_t *)opus, samples);
     return samples;
-}
-
-bool ConfigDecode(int sample_rate, int channels, int duration_ms) {
-    input_sample_rate_ = sample_rate;
-    input_channels_ = channels;
-    duration_ms_ = duration_ms;
-    return true;
 }
 #endif

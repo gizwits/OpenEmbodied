@@ -4,7 +4,7 @@
         {
             "name": "doit-esp32s3-eye-6824",
             "sdkconfig_append": [
-                "CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS=y"
+                "CONFIG_USE_EYE_STYLE_VB6824=y"
             ]
         }
     ]

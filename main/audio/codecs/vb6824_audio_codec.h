@@ -14,11 +14,11 @@ private:
     void ready();
     void WakeUp(std::string command);
     virtual int Read(int16_t* dest, int samples) override;
-#ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+#ifdef CONFIG_USE_EYE_STYLE_VB6824
     virtual int Read(uint8_t* dest, int samples) override;
 #endif
     virtual int Write(const int16_t* data, int samples) override;
-#ifdef CONFIG_USE_AUDIO_CODEC_DECODE_OPUS
+#ifdef CONFIG_USE_EYE_STYLE_VB6824
     virtual int Write(uint8_t* opus, int samples) override;
 #endif
     std::function<void(std::string)> on_wake_up_;
@@ -31,8 +31,9 @@ public:
     void OnWakeUp(std::function<void(std::string)> callback);
     void SetOutputVolume(int volume) override;
     virtual void Start();
-#ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+#ifdef CONFIG_USE_EYE_STYLE_VB6824
     virtual bool InputData(std::vector<uint8_t>& opus) override;
+    virtual void OutputData(std::vector<uint8_t>& opus) override;
 #endif
     virtual void EnableInput(bool enable) override; 
     virtual void EnableOutput(bool enable) override; 

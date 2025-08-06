@@ -7,7 +7,7 @@
 #include "websocket_protocol.h"
 #include "font_awesome_symbols.h"
 #include "assets/lang_config.h"
-#include "mcp_server.h"
+// #include "mcp_server.h"
 #include "wifi_station.h"
 #include "watchdog.h"
 
@@ -648,7 +648,7 @@ void Application::MainEventLoop() {
             }
         }
 
-#ifndef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+#ifndef CONFIG_USE_EYE_STYLE_VB6824
         if (bits & MAIN_EVENT_WAKE_WORD_DETECTED) {
             OnWakeWordDetected();
         }
@@ -1182,7 +1182,7 @@ void Application::PlayMusic(const char* url) {
         auto packet = std::make_unique<AudioStreamPacket>();
         packet->payload = data;
         packet->sample_rate = 16000;
-        packet->frame_duration = 60;
+        packet->frame_duration = OPUS_FRAME_DURATION_MS;
         audio_service_.PushPacketToDecodeQueue(std::move(packet));
     });
     auto display = Board::GetInstance().GetDisplay();

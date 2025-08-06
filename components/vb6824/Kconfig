@@ -1,7 +1,7 @@
 menu "VB6824"
 	choice VB6824_TYPE
     prompt "VB6924"
-    default VB6824_TYPE_OPUS_16K_20MS_PCM_16K
+    default CONFIG_VB6824_TYPE_OPUS_16K_20MS
     help
         VB6824支持的类型
     config VB6824_TYPE_PCM_16K
@@ -9,6 +9,8 @@ menu "VB6824"
         bool "PCM 16K"
     config VB6824_TYPE_OPUS_16K_20MS_PCM_16K
         bool "OPUS 16K 20ms(input) + PCM 16K(output)"
+    config VB6824_TYPE_OPUS_16K_20MS
+        bool "OPUS 16K 20ms"
 	endchoice
     config VB6824_OTA_SUPPORT
         bool "6824支持升级"

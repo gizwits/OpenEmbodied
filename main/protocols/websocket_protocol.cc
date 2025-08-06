@@ -347,7 +347,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
                             // 创建当前音频包
                             AudioStreamPacket packet;
                             packet.sample_rate = 16000;
-                            packet.frame_duration = 60;
+                            packet.frame_duration = OPUS_FRAME_DURATION_MS;
                             packet.payload.assign(audio_data_buffer_.begin(), audio_data_buffer_.begin() + actual_len);
                             
                             if (cached_packet_count_ < MAX_CACHED_PACKETS) {
@@ -645,13 +645,13 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "\"opus_config\":{";
     message += "\"sample_rate\":16000,";
     message += "\"use_cbr\":false,";
-    message += "\"frame_size_ms\":60,";
+    message += "\"frame_size_ms\":40,";
     message += "\"limit_config\":{";
     message += "\"period\":1,";
 #if CONFIG_IDF_TARGET_ESP32C2
-    message += "\"max_frame_num\":17";
+    message += "\"max_frame_num\":26";
 #else
-    message += "\"max_frame_num\":20";
+    message += "\"max_frame_num\":35";
 #endif
     message += "}";
     message += "},";

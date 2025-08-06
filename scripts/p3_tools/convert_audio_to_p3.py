@@ -8,7 +8,7 @@ import numpy as np
 import argparse
 import pyloudnorm as pyln
 
-def encode_audio_to_opus(input_file, output_file, target_lufs=None):
+def encode_audio_to_opus(input_file, output_file, target_lufs=None, duration=60):
     # Load audio file using librosa
     audio, sample_rate = librosa.load(input_file, sr=None, mono=False, dtype=np.float32)
     
@@ -40,7 +40,6 @@ def encode_audio_to_opus(input_file, output_file, target_lufs=None):
 
     # Encode and save
     with open(output_file, 'wb') as f:
-        duration = 60  # 60ms per frame
         frame_size = int(sample_rate * duration / 1000)
         for i in tqdm.tqdm(range(0, len(audio) - frame_size, frame_size)):
             frame = audio[i:i + frame_size]
@@ -56,7 +55,9 @@ if __name__ == "__main__":
                        help='Target loudness in LUFS (default: -16)')
     parser.add_argument('-d', '--disable-loudnorm', action='store_true',
                        help='Disable loudness normalization')
+    parser.add_argument('--duration', type=int, default=60,
+                       help='Frame duration in milliseconds (default: 60)')
     args = parser.parse_args()
 
     target_lufs = None if args.disable_loudnorm else args.lufs
-    encode_audio_to_opus(args.input_file, args.output_file, target_lufs)
+    encode_audio_to_opus(args.input_file, args.output_file, target_lufs, args.duration)

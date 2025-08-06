@@ -34,16 +34,22 @@
  * 
  */
 
-#define OPUS_FRAME_DURATION_MS 60
+#define OPUS_FRAME_DURATION_MS 20
+
+#ifdef CONFIG_IDF_TARGET_ESP32S3
 #define MAX_ENCODE_TASKS_IN_QUEUE 2
 #define MAX_PLAYBACK_TASKS_IN_QUEUE 2
+#else
+#define MAX_ENCODE_TASKS_IN_QUEUE 1
+#define MAX_PLAYBACK_TASKS_IN_QUEUE 1
+#endif
 
 #ifdef CONFIG_IDF_TARGET_ESP32S3
 #define MAX_DECODE_PACKETS_IN_QUEUE (10000 / OPUS_FRAME_DURATION_MS)   // 从333减到83
 #define MAX_SEND_PACKETS_IN_QUEUE (5000 / OPUS_FRAME_DURATION_MS)      // 从333减到83
 #else
-#define MAX_DECODE_PACKETS_IN_QUEUE (1200 / OPUS_FRAME_DURATION_MS)    // 从167减到20
-#define MAX_SEND_PACKETS_IN_QUEUE (1200 / OPUS_FRAME_DURATION_MS)      // 从167减到20
+#define MAX_DECODE_PACKETS_IN_QUEUE (2000 / OPUS_FRAME_DURATION_MS)     // 从20减到10
+#define MAX_SEND_PACKETS_IN_QUEUE (500 / OPUS_FRAME_DURATION_MS)       // 从20减到10
 #endif
 
 #define AUDIO_TESTING_MAX_DURATION_MS 10000
@@ -75,6 +81,9 @@ enum AudioTaskType {
 struct AudioTask {
     AudioTaskType type;
     std::vector<int16_t> pcm;
+#ifdef CONFIG_USE_EYE_STYLE_VB6824
+    std::vector<uint8_t> opus;
+#endif
     uint32_t timestamp;
 };
 
@@ -111,7 +120,7 @@ public:
     bool PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> packet, bool wait = false);
     std::unique_ptr<AudioStreamPacket> PopPacketFromSendQueue();
     void PlaySound(const std::string_view& sound);
-#if defined(CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS)
+#if defined(CONFIG_USE_EYE_STYLE_VB6824)
     bool ReadAudioData(std::vector<uint8_t>& opus, int sample_rate, int samples);
 #else
     bool ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples);
@@ -124,19 +133,17 @@ private:
     std::unique_ptr<AudioProcessor> audio_processor_;
     std::unique_ptr<WakeWord> wake_word_;
     std::unique_ptr<AudioDebugger> audio_debugger_;
-#ifndef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+#ifndef CONFIG_USE_EYE_STYLE_VB6824
     std::unique_ptr<OpusEncoderWrapper> opus_encoder_;
-#endif
     std::unique_ptr<OpusDecoderWrapper> opus_decoder_;
+#endif
 
 
-#ifndef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+#ifndef CONFIG_USE_EYE_STYLE_VB6824
     OpusResampler input_resampler_;
     OpusResampler reference_resampler_;
     OpusResampler output_resampler_;
 #endif
-
-
     DebugStatistics debug_statistics_;
 
     EventGroupHandle_t event_group_;
@@ -151,7 +158,7 @@ private:
     std::deque<std::unique_ptr<AudioStreamPacket>> audio_send_queue_;
     std::deque<std::unique_ptr<AudioStreamPacket>> audio_testing_queue_;
 
-#ifndef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+#ifndef CONFIG_USE_EYE_STYLE_VB6824
     std::deque<std::unique_ptr<AudioTask>> audio_encode_queue_;
 #endif
     std::deque<std::unique_ptr<AudioTask>> audio_playback_queue_;
