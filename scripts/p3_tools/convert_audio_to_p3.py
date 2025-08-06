@@ -35,17 +35,25 @@ def encode_audio_to_opus(input_file, output_file, target_lufs=None, duration=60)
     # Convert audio data back to int16 after processing
     audio = (audio * 32767).astype(np.int16)
     
-    # Initialize Opus encoder
+    # Initialize Opus encoder with CBR mode
     encoder = opuslib.Encoder(sample_rate, 1, opuslib.APPLICATION_AUDIO)
+    # Set constant bitrate to 16000 bps and disable VBR for true CBR
+    encoder.bitrate = 16000
+    encoder.vbr = False  # Disable Variable Bit Rate to enable Constant Bit Rate
 
     # Encode and save
     with open(output_file, 'wb') as f:
         frame_size = int(sample_rate * duration / 1000)
+        frame_count = 0
         for i in tqdm.tqdm(range(0, len(audio) - frame_size, frame_size)):
             frame = audio[i:i + frame_size]
             opus_data = encoder.encode(frame.tobytes(), frame_size=frame_size)
             packet = struct.pack('>BBH', 0, 0, len(opus_data)) + opus_data
             f.write(packet)
+            
+            # Print frame length information
+            frame_count += 1
+            print(f"Frame {frame_count}: {len(opus_data)} bytes (target: {16000 * duration / 1000 / 8:.1f} bytes)")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Convert audio to Opus with loudness normalization')

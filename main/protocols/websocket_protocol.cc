@@ -349,7 +349,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
                             packet.sample_rate = 16000;
                             packet.frame_duration = OPUS_FRAME_DURATION_MS;
                             packet.payload.assign(audio_data_buffer_.begin(), audio_data_buffer_.begin() + actual_len);
-                            
+                            // 打印 packet.payload 长度
                             if (cached_packet_count_ < MAX_CACHED_PACKETS) {
                                 // 还在缓存阶段，添加到缓存
                                 packet_cache_.push_back(std::move(packet));
@@ -643,15 +643,21 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "\"output_audio\":{";
     message += "\"codec\":\"" + codec + "\",";
     message += "\"opus_config\":{";
-    message += "\"sample_rate\":16000,";
+    message += "\"bitrate\":16000,";
+#if CONFIG_USE_EYE_STYLE_VB6824
+    message += "\"use_cbr\":true,";
+    message += "\"frame_size_ms\":20,";
+#else
     message += "\"use_cbr\":false,";
-    message += "\"frame_size_ms\":40,";
+    message += "\"frame_size_ms\":60,";
+#endif
+
     message += "\"limit_config\":{";
     message += "\"period\":1,";
-#if CONFIG_IDF_TARGET_ESP32C2
-    message += "\"max_frame_num\":26";
+#if CONFIG_USE_EYE_STYLE_VB6824
+    message += "\"max_frame_num\":54";
 #else
-    message += "\"max_frame_num\":35";
+    message += "\"max_frame_num\":30";
 #endif
     message += "}";
     message += "},";

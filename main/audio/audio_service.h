@@ -48,8 +48,8 @@
 #define MAX_DECODE_PACKETS_IN_QUEUE (10000 / OPUS_FRAME_DURATION_MS)   // 从333减到83
 #define MAX_SEND_PACKETS_IN_QUEUE (5000 / OPUS_FRAME_DURATION_MS)      // 从333减到83
 #else
-#define MAX_DECODE_PACKETS_IN_QUEUE (2000 / OPUS_FRAME_DURATION_MS)     // 从20减到10
-#define MAX_SEND_PACKETS_IN_QUEUE (500 / OPUS_FRAME_DURATION_MS)       // 从20减到10
+#define MAX_DECODE_PACKETS_IN_QUEUE (5000 / OPUS_FRAME_DURATION_MS)     // 从20减到10
+#define MAX_SEND_PACKETS_IN_QUEUE (1000 / OPUS_FRAME_DURATION_MS)       // 从20减到10
 #endif
 
 #define AUDIO_TESTING_MAX_DURATION_MS 10000
@@ -158,9 +158,7 @@ private:
     std::deque<std::unique_ptr<AudioStreamPacket>> audio_send_queue_;
     std::deque<std::unique_ptr<AudioStreamPacket>> audio_testing_queue_;
 
-#ifndef CONFIG_USE_EYE_STYLE_VB6824
     std::deque<std::unique_ptr<AudioTask>> audio_encode_queue_;
-#endif
     std::deque<std::unique_ptr<AudioTask>> audio_playback_queue_;
     // For server AEC
     std::deque<uint32_t> timestamp_queue_;

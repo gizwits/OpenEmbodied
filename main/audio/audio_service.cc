@@ -454,16 +454,6 @@ void AudioService::AudioOutputTask() {
 }
 
 void AudioService::OpusCodecTask() {
-#ifdef CONFIG_USE_EYE_STYLE_VB6824
-    // 在 CONFIG_USE_EYE_STYLE_VB6824 模式下，OpusCodecTask 不需要做任何工作
-    // 因为数据直接放到了播放队列中
-    while (true) {
-        vTaskDelay(pdMS_TO_TICKS(1000)); // 每秒检查一次
-        if (service_stopped_) {
-            break;
-        }
-    }
-#else
     while (true) {
         std::unique_lock<std::mutex> lock(audio_queue_mutex_);
         audio_queue_cv_.wait(lock, [this]() {
@@ -483,6 +473,8 @@ void AudioService::OpusCodecTask() {
             audio_queue_cv_.notify_all();
             lock.unlock();
 
+
+#ifndef CONFIG_USE_EYE_STYLE_VB6824
             auto task = std::make_unique<AudioTask>();
             task->type = kAudioTaskTypeDecodeToPlaybackQueue;
             task->timestamp = packet->timestamp;
@@ -504,8 +496,20 @@ void AudioService::OpusCodecTask() {
                 ESP_LOGE(TAG, "Failed to decode audio");
                 lock.lock();
             }
+#else
+            // 在 CONFIG_USE_EYE_STYLE_VB6824 模式下，直接创建播放任务
+            auto task = std::make_unique<AudioTask>();
+            task->type = kAudioTaskTypeDecodeToPlaybackQueue;
+            task->timestamp = packet->timestamp;
+            task->opus = std::move(packet->payload);
+            audio_playback_queue_.push_back(std::move(task));
+            audio_queue_cv_.notify_all();
+#endif
             debug_statistics_.decode_count++;
         }
+
+
+#ifndef CONFIG_USE_EYE_STYLE_VB6824
         /* Encode the audio to send queue */
         if (!audio_encode_queue_.empty() && audio_send_queue_.size() < MAX_SEND_PACKETS_IN_QUEUE) {
             auto task = std::move(audio_encode_queue_.front());
@@ -538,8 +542,8 @@ void AudioService::OpusCodecTask() {
             debug_statistics_.encode_count++;
             lock.lock();
         }
-    }
 #endif
+    }
     ESP_LOGW(TAG, "Opus codec task stopped");
 }
 
@@ -590,25 +594,6 @@ void AudioService::PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t
 }
 
 bool AudioService::PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> packet, bool wait) {
-#ifdef CONFIG_USE_EYE_STYLE_VB6824
-    // 在 CONFIG_USE_EYE_STYLE_VB6824 模式下，直接创建播放任务
-    auto task = std::make_unique<AudioTask>();
-    task->type = kAudioTaskTypeDecodeToPlaybackQueue;
-    task->timestamp = packet->timestamp;
-    task->opus = std::move(packet->payload);
-    
-    std::unique_lock<std::mutex> lock(audio_queue_mutex_);
-    if (audio_playback_queue_.size() >= MAX_PLAYBACK_TASKS_IN_QUEUE) {
-        if (wait) {
-            audio_queue_cv_.wait(lock, [this]() { return audio_playback_queue_.size() < MAX_PLAYBACK_TASKS_IN_QUEUE; });
-        } else {
-            return false;
-        }
-    }
-    audio_playback_queue_.push_back(std::move(task));
-    audio_queue_cv_.notify_all();
-    return true;
-#else
     std::unique_lock<std::mutex> lock(audio_queue_mutex_);
     if (audio_decode_queue_.size() >= MAX_DECODE_PACKETS_IN_QUEUE) {
         if (wait) {
@@ -620,7 +605,6 @@ bool AudioService::PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> pa
     audio_decode_queue_.push_back(std::move(packet));
     audio_queue_cv_.notify_all();
     return true;
-#endif
 }
 
 std::unique_ptr<AudioStreamPacket> AudioService::PopPacketFromSendQueue() {
@@ -770,7 +754,7 @@ void AudioService::PlaySound(const std::string_view& sound) {
         p += sizeof(BinaryProtocol3);
 
         auto payload_size = ntohs(p3->payload_size);
-        ESP_LOGI(TAG, "PlaySound: payload_size=%u", payload_size);
+        // ESP_LOGI(TAG, "PlaySound: payload_size=%u", payload_size);
         
 #ifdef CONFIG_USE_EYE_STYLE_VB6824
         // 在 CONFIG_USE_EYE_STYLE_VB6824 模式下，直接创建播放任务

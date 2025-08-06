@@ -5,18 +5,23 @@ import numpy as np
 import sounddevice as sd
 import argparse
 
-def play_p3_file(input_file):
+def play_p3_file(input_file, frame_duration_ms=60):
     """
     播放p3格式的音频文件
     p3格式: [1字节类型, 1字节保留, 2字节长度, Opus数据]
+    
+    Args:
+        input_file: 输入的p3文件路径
+        frame_duration_ms: 帧时长(毫秒)，默认20ms
     """
     # 初始化Opus解码器
     sample_rate = 16000  # 采样率固定为16000Hz
     channels = 1  # 单声道
     decoder = opuslib.Decoder(sample_rate, channels)
     
-    # 帧大小 (60ms)
-    frame_size = int(sample_rate * 60 / 1000)
+    # 帧大小 (根据参数计算)
+    frame_size = int(sample_rate * frame_duration_ms / 1000)
+    print(f"帧时长: {frame_duration_ms}ms, 帧大小: {frame_size} 采样点")
     
     # 打开音频流
     stream = sd.OutputStream(
@@ -63,9 +68,11 @@ def play_p3_file(input_file):
 def main():
     parser = argparse.ArgumentParser(description='播放p3格式的音频文件')
     parser.add_argument('input_file', help='输入的p3文件路径')
+    parser.add_argument('-d', '--duration', type=int, default=20,
+                       help='帧时长(毫秒)，默认20ms，与ESP32代码匹配')
     args = parser.parse_args()
     
-    play_p3_file(args.input_file)
+    play_p3_file(args.input_file, args.duration)
 
 if __name__ == "__main__":
     main() 

@@ -827,9 +827,10 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
         return;
     }
     if (device_state_ == kDeviceStateIdle) {
+        audio_service_.ResetDecoder();
+        audio_service_.PlaySound(Lang::Sounds::P3_SUCCESS);
         Schedule([this, wake_word]() {
-            audio_service_.ResetDecoder();
-            audio_service_.PlaySound(Lang::Sounds::P3_SUCCESS);
+            
             ToggleChatState();
             if (protocol_) {
                 protocol_->SendWakeWordDetected(wake_word); 
@@ -841,10 +842,11 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
             }
         }); 
     } else if (device_state_ == kDeviceStateSpeaking) {
-        audio_service_.ResetDecoder();
-        audio_service_.PlaySound(Lang::Sounds::P3_SUCCESS);
+        
         ESP_LOGI(TAG, "WakeWordInvoke(kDeviceStateListening)");
         SetDeviceState(kDeviceStateListening);
+        audio_service_.ResetDecoder();
+        audio_service_.PlaySound(Lang::Sounds::P3_SUCCESS);
         Schedule([this]() {
             // 打断AI
             ESP_LOGI(TAG, "WakeWordInvoke(kDeviceStateSpeaking)");
