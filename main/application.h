@@ -51,7 +51,7 @@ public:
     void GenerateTraceId();
     DeviceState GetDeviceState() const { return device_state_; }
     bool IsVoiceDetected() const { return audio_service_.IsVoiceDetected(); }
-    void Schedule(std::function<void()> callback);
+    void Schedule(std::function<void()> callback, const std::string& task_name = "unknown");
     void SetDeviceState(DeviceState state);
     void Alert(const char* status, const char* message, const char* emotion = "", const std::string_view& sound = "");
     void DismissAlert();
@@ -84,7 +84,7 @@ private:
     Application();
     ~Application();
     std::mutex mutex_;
-    std::deque<std::function<void()>> main_tasks_;
+    std::deque<std::pair<std::string, std::function<void()>>> main_tasks_;
     std::unique_ptr<Protocol> protocol_;
     EventGroupHandle_t event_group_ = nullptr;
     esp_timer_handle_t clock_timer_handle_ = nullptr;

@@ -86,6 +86,23 @@ void WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
     if (!websocket_ || !websocket_->IsConnected() || packet.payload.empty() || busy_sending_audio_) {
         return;
     }
+    
+    // 在chat_mode==1时，检查是否需要忽略音频上传
+    int chat_mode = Application::GetInstance().GetChatMode();
+    if (chat_mode == 1 && speech_stopped_recorded_) {
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - speech_stopped_timestamp_).count();
+        
+        // 如果距离用户说话结束不到1秒，忽略音频上传
+        if (elapsed < 1000) {
+            ESP_LOGI(TAG, "Ignoring audio upload, elapsed: %lld ms since speech stopped", elapsed);
+            return;
+        } else {
+            // 超过1秒后，清除记录
+            speech_stopped_recorded_ = false;
+            ESP_LOGD(TAG, "Audio ignore period ended, elapsed: %lld ms", elapsed);
+        }
+    }
     const std::vector<uint8_t>& data = packet.payload;
     // Calculate required base64 buffer size
     size_t out_len = 4 * ((data.size() + 2) / 3);
@@ -414,6 +431,9 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 cached_packet_count_ = 0;
                 packet_cache_.clear();
 
+                // 重置语音停止记录状态，因为这是新对话的开始
+                speech_stopped_recorded_ = false;
+
                 message_cache_.clear();
                 message_buffer_.clear();
                 message_buffer_ = "{";
@@ -431,6 +451,9 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 is_first_packet_ = false;
                 cached_packet_count_ = 0;
                 packet_cache_.clear();
+
+                // 重置语音停止记录状态，因为对话已完成
+                speech_stopped_recorded_ = false;
 
                 std::string messageData = "conversation.chat.completed or conversation.audio.completed";
                 MqttClient::getInstance().sendTraceLog("info", messageData.c_str());
@@ -458,6 +481,11 @@ bool WebsocketProtocol::OpenAudioChannel() {
             } else if (event_type == "input_audio_buffer.speech_stopped") {
                 MqttClient::getInstance().sendTraceLog("info", "input_audio_buffer.speech_stopped");
                 ESP_LOGI(TAG, "input_audio_buffer.speech_stopped");
+
+                // 记录用户说话结束时间戳，用于chat_mode==1时忽略1秒内的音频上传
+                speech_stopped_timestamp_ = std::chrono::steady_clock::now();
+                speech_stopped_recorded_ = true;
+                ESP_LOGI(TAG, "Speech stopped timestamp recorded for chat_mode==1 audio ignore");
             } else if (event_type == "conversation.message.delta") {
                 auto data_json = cJSON_GetObjectItem(root, "data");
                 auto content_json = cJSON_GetObjectItem(data_json, "content");

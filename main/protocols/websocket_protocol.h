@@ -7,6 +7,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
 #include <optional>
+#include <chrono>
 
 #define WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT (1 << 0)
 
@@ -36,7 +37,10 @@ private:
     std::unique_ptr<char[]> base64_buffer_;  // Reuse buffer for base64 encoding
     size_t base64_buffer_size_ = 0;  // Current size of base64 buffer
     std::string message_buffer_;  // Reuse buffer for message construction
-   
+    
+    // 用户说话结束时间戳，用于chat_mode==1时忽略1秒内的音频上传
+    std::chrono::steady_clock::time_point speech_stopped_timestamp_;
+    bool speech_stopped_recorded_ = false;
 
     void ParseServerHello(const cJSON* root);
     bool SendText(const std::string& text) override;

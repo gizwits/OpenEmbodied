@@ -278,13 +278,13 @@ void Application::ToggleChatState() {
             }
 
             SetListeningMode(chat_mode_ == 2  ? kListeningModeRealtime : kListeningModeAutoStop);
-        });
+        }, "ToggleChatState_StartListening");
     } else if (device_state_ == kDeviceStateSpeaking) {
         Schedule([this]() {
             AbortSpeaking(kAbortReasonNone);
             ESP_LOGI(TAG, "ToggleChatState(kDeviceStateSpeaking)");
             SetDeviceState(kDeviceStateListening);
-        });
+        }, "ToggleChatState_AbortSpeaking");
     } else if (device_state_ == kDeviceStateListening) {
         // Schedule([this]() {
         //     protocol_->CloseAudioChannel();
@@ -316,12 +316,12 @@ void Application::StartListening() {
             }
 
             SetListeningMode(kListeningModeManualStop);
-        });
+        }, "StartListening_OpenChannel");
     } else if (device_state_ == kDeviceStateSpeaking) {
         Schedule([this]() {
             AbortSpeaking(kAbortReasonNone);
             SetListeningMode(kListeningModeManualStop);
-        });
+        }, "StartListening_AbortSpeaking");
     }
 }
 
@@ -341,7 +341,7 @@ void Application::StopListening() {
             protocol_->SendStopListening();
             SetDeviceState(kDeviceStateIdle);
         }
-    });
+    }, "StopListening_SendStop");
 }
 
 void Application::Start() {
@@ -386,6 +386,8 @@ void Application::Start() {
     /* Wait for the network to be ready */
     board.StartNetwork();
 
+    board.SetPowerSaveMode(false);
+
     bool battery_ok = CheckBatteryLevel();
     if (!battery_ok) {
         vTaskDelay(pdMS_TO_TICKS(3000));
@@ -425,7 +427,7 @@ void Application::Start() {
         Schedule([this, message]() {
             std::string messageData = "socket 通道错误: " + message;
             MqttClient::getInstance().sendTraceLog("info", messageData.c_str());
-        });
+        }, "OnNetworkError");
         last_error_message_ = message;
     });
     protocol_->OnIncomingAudio([this](AudioStreamPacket&& packet) {
@@ -435,17 +437,17 @@ void Application::Start() {
         }
     });
     protocol_->OnAudioChannelOpened([this, codec, &board]() {
-        board.SetPowerSaveMode(false);
+        // board.SetPowerSaveMode(false);
         if (protocol_->server_sample_rate() != codec->output_sample_rate()) {
             ESP_LOGW(TAG, "Server sample rate %d does not match device output sample rate %d, resampling may cause distortion",
                 protocol_->server_sample_rate(), codec->output_sample_rate());
         }
         Schedule([this]() {
             MqttClient::getInstance().sendTraceLog("info", "socket 通道打开");
-        });
+        }, "OnAudioChannelOpened");
     });
     protocol_->OnAudioChannelClosed([this, &board]() {
-        board.SetPowerSaveMode(true);
+        // board.SetPowerSaveMode(true);
         Schedule([this]() {
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
@@ -454,7 +456,7 @@ void Application::Start() {
             }
 
             MqttClient::getInstance().sendTraceLog("info", "socket 通道关闭");
-        });
+        }, "OnAudioChannelClosed");
     });
     protocol_->OnIncomingJson([this, display](const cJSON* root) {
         // Parse JSON data
@@ -470,7 +472,7 @@ void Application::Start() {
                         // 没有情绪，则设置为开心
                         display->SetStatus(Lang::Strings::SPEAKING);
                         display->SetEmotion("happy");
-                    });
+                    }, "OnIncomingJson_TTS_Start");
                 }
             } else if (strcmp(state->valuestring, "pre_start") == 0) {
                 aborted_ = false;
@@ -486,7 +488,7 @@ void Application::Start() {
                     }
                     auto display = board.GetDisplay();
                     display->SetEmotion("thinking");
-                });
+                }, "OnIncomingJson_TTS_PreStart");
                 has_emotion_ = false;
                 
             } else if (strcmp(state->valuestring, "stop") == 0) {
@@ -501,14 +503,14 @@ void Application::Start() {
                             SetDeviceState(kDeviceStateListening);
                         }
                     }
-                });
+                }, "OnIncomingJson_TTS_Stop");
             } else if (strcmp(state->valuestring, "sentence_start") == 0) {
                 auto text = cJSON_GetObjectItem(root, "text");
                 if (cJSON_IsString(text)) {
                     ESP_LOGI(TAG, "<< %s", text->valuestring);
                     Schedule([this, display, message = std::string(text->valuestring)]() {
                         display->SetChatMessage("assistant", message.c_str());
-                    });
+                    }, "OnIncomingJson_TTS_SentenceStart");
                 }
             }
         } else if (strcmp(type->valuestring, "stt") == 0) {
@@ -517,7 +519,7 @@ void Application::Start() {
                 // ESP_LOGI(TAG, ">> %s", text->valuestring);
                 Schedule([this, display, message = std::string(text->valuestring)]() {
                     display->SetChatMessage("user", message.c_str());
-                });
+                }, "OnIncomingJson_STT_SentenceStart");
             }
         } else if (strcmp(type->valuestring, "llm") == 0) {
             auto emotion = cJSON_GetObjectItem(root, "emotion");
@@ -525,7 +527,7 @@ void Application::Start() {
                 Schedule([this, display, emotion_str = std::string(emotion->valuestring)]() {
                     display->SetEmotion(emotion_str.c_str());
                     has_emotion_ = true;
-                });
+                }, "OnIncomingJson_LLM_Emotion");
             }
         } else if (strcmp(type->valuestring, "system") == 0) {
             auto command = cJSON_GetObjectItem(root, "command");
@@ -535,7 +537,7 @@ void Application::Start() {
                     // Do a reboot if user requests a OTA update
                     Schedule([this]() {
                         Reboot();
-                    });
+                    }, "OnIncomingJson_System_Reboot");
                 } else {
                     ESP_LOGW(TAG, "Unknown system command: %s", command->valuestring);
                 }
@@ -601,10 +603,10 @@ void Application::OnClockTimer() {
 }
 
 // Add a async task to MainLoop
-void Application::Schedule(std::function<void()> callback) {
+void Application::Schedule(std::function<void()> callback, const std::string& task_name) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        main_tasks_.push_back(std::move(callback));
+        main_tasks_.push_back(std::make_pair(task_name, std::move(callback)));
     }
     xEventGroupSetBits(event_group_, MAIN_EVENT_SCHEDULE);
 }
@@ -619,6 +621,7 @@ void Application::MainEventLoop() {
     vTaskPrioritySet(NULL, 3);
 
     while (true) {
+        auto loop_start = esp_timer_get_time();
         watchdog.Reset();
 
         // Process NTP sync
@@ -644,14 +647,20 @@ void Application::MainEventLoop() {
         }
 
         if (bits & MAIN_EVENT_SEND_AUDIO) {
+            auto send_start = esp_timer_get_time();
             while (auto packet = audio_service_.PopPacketFromSendQueue()) {
                 // TODO 发送错误的时候要处理
                 protocol_->SendAudio(*packet);
             }
+            auto send_end = esp_timer_get_time();
+            ESP_LOGD(TAG, "SendAudio took %lld us", send_end - send_start);
         }
 
         if (bits & MAIN_EVENT_WAKE_WORD_DETECTED) {
+            auto wake_start = esp_timer_get_time();
             OnWakeWordDetected();
+            auto wake_end = esp_timer_get_time();
+            ESP_LOGD(TAG, "WakeWordDetected took %lld us", wake_end - wake_start);
         }
 
         if (bits & MAIN_EVENT_VAD_CHANGE) {
@@ -662,14 +671,22 @@ void Application::MainEventLoop() {
         }
 
         if (bits & MAIN_EVENT_SCHEDULE) {
+            auto schedule_start = esp_timer_get_time();
             std::unique_lock<std::mutex> lock(mutex_);
             auto tasks = std::move(main_tasks_);
             lock.unlock();
             for (auto& task : tasks) {
                 watchdog.Reset();
-                task();
+                ESP_LOGI(TAG, "Executing scheduled task: %s", task.first.c_str());
+                auto task_start = esp_timer_get_time();
+                task.second();
+                auto task_end = esp_timer_get_time();
+                ESP_LOGI(TAG, "Scheduled task completed: %s, took %lld us", task.first.c_str(), task_end - task_start);
             }
         }
+        
+        // 打印整个循环的执行时间
+        auto loop_end = esp_timer_get_time();
     }
 }
 
@@ -746,6 +763,13 @@ void Application::SetDeviceState(DeviceState state) {
     auto display = board.GetDisplay();
     auto led = board.GetLed();
     led->OnStateChanged();
+
+
+    if (state != kDeviceStateIdle) {
+        // 防止黑屏讲话
+        board.GetBacklight()->RestoreBrightness();
+    }
+
     switch (state) {
         case kDeviceStateUnknown:
         case kDeviceStateIdle:
@@ -826,6 +850,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
         // 自然对话模式，聊天中的时候唤醒词不需要工作
         return;
     }
+
     if (device_state_ == kDeviceStateIdle) {
         Schedule([this, wake_word]() {
             audio_service_.ResetDecoder();
@@ -839,7 +864,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
             if (backlight) {
                 backlight->RestoreBrightness();
             }
-        }); 
+        }, "WakeWordInvoke_StartListening");
     } else if (device_state_ == kDeviceStateSpeaking) {
         audio_service_.ResetDecoder();
         audio_service_.PlaySound(Lang::Sounds::P3_SUCCESS);
@@ -850,7 +875,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
             ESP_LOGI(TAG, "WakeWordInvoke(kDeviceStateSpeaking)");
             protocol_->SendAbortSpeaking(kAbortReasonNone);
             
-        });
+        }, "WakeWordInvoke_AbortSpeaking");
     } else if (device_state_ == kDeviceStateListening) { 
         // 忽略唤醒词
         // Schedule([this]() {
@@ -861,7 +886,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     } else if (device_state_ == kDeviceStateSleeping) {
         Schedule([this]() {
             ExitSleepMode();
-        });
+        }, "WakeWordInvoke_ExitSleepMode");
     }
 }
 
@@ -911,7 +936,7 @@ void Application::initGizwitsServer() {
                 if (!is_mutual) {
                     PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
                 }
-            });
+            }, "initGizwitsServer_QuitTalking");
         } else {
             if (!protocol_->GetRoomParams().access_token.empty() && device_state_ != kDeviceStateSleeping) {
                 if (!is_mutual) {
@@ -922,7 +947,7 @@ void Application::initGizwitsServer() {
 
         Schedule([this]() {
             MqttClient::getInstance().sendTraceLog("info", "获取配置智能体成功");
-        });
+        }, "initGizwitsServer_SendTraceLog");
         protocol_->UpdateRoomParams(params);
         if(device_state_ == kDeviceStateSleeping) {
             Schedule([this]() {
@@ -933,7 +958,7 @@ void Application::initGizwitsServer() {
                 }
                 ResetDecoder();
                 SetListeningMode(chat_mode_ == 2  ? kListeningModeRealtime : kListeningModeAutoStop);
-            });
+            }, "initGizwitsServer_OpenAudioChannel");
         }
     });
 
@@ -1095,7 +1120,7 @@ void Application::EnterSleepMode() {
             backlight->SetBrightness(0);
         }
         
-    });
+    }, "EnterSleepMode_SetStatus");
     
 }
 
@@ -1131,7 +1156,7 @@ void Application::ExitSleepMode() {
         auto& mqtt_client = MqttClient::getInstance();
         mqtt_client.connect();
         Board::GetInstance().WakeUpPowerSaveTimer();
-    });
+    }, "ExitSleepMode_RestoreBrightness");
     
 }
 
@@ -1142,7 +1167,7 @@ void Application::HandleNetError() {
         ESP_LOGE(TAG, "HandleNetError2");
         ResetDecoder();
         PlaySound(Lang::Sounds::P3_NET_ERR);
-    });
+    }, "HandleNetError_QuitTalking");
 }
 void Application::SendTextToAI(const std::string& text) {
     if (protocol_) {
