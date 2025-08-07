@@ -371,7 +371,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
                                 // 还在缓存阶段，添加到缓存
                                 packet_cache_.push_back(std::move(packet));
                                 cached_packet_count_++;
-                                ESP_LOGI(TAG, "Caching packet %d/%d", cached_packet_count_, MAX_CACHED_PACKETS);
+                                // ESP_LOGI(TAG, "Caching packet %d/%d", cached_packet_count_, MAX_CACHED_PACKETS);
                             } else {
                                 // 缓存已满，开始推送
                                 if (!packet_cache_.empty()) {
