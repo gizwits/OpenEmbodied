@@ -140,7 +140,7 @@ private:
                 if (shake_count > 0) shake_count -= shake_count_decay;
             }
             last_ax = ax; last_ay = ay; last_az = az;
-            vTaskDelay(pdMS_TO_TICKS(50));
+            vTaskDelay(pdMS_TO_TICKS(100));
         }
     }
 
@@ -457,7 +457,7 @@ private:
     // LIS2HH12 I2C读写成员函数
     uint8_t lis2hh12_read_reg(uint8_t reg) {
         uint8_t data = 0;
-        esp_err_t ret = i2c_master_transmit_receive(lis2hh12_dev_, &reg, 1, &data, 1, pdMS_TO_TICKS(100));
+        esp_err_t ret = i2c_master_transmit_receive(lis2hh12_dev_, &reg, 1, &data, 1, pdMS_TO_TICKS(500));
         if (ret != ESP_OK) {
             // ESP_LOGE(TAG, "LIS2HH12 read reg 0x%02X failed: %s", reg, esp_err_to_name(ret));
             return 0;
@@ -539,6 +539,9 @@ public:
         // 记录上电时间
         power_on_time_ = esp_timer_get_time() / 1000; // 转换为毫秒
         ESP_LOGI(TAG, "设备启动，上电时间戳: %lld ms", power_on_time_);
+
+        // 设置I2C master日志级别为ERROR，忽略I2C事务失败的日志
+        esp_log_level_set("i2c.master", ESP_LOG_ERROR);
         
         InitializeChargingGpio();
 
@@ -560,7 +563,7 @@ public:
         }
         InitializeButtons();
         InitializeIot();
-        xTaskCreatePinnedToCore(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 1024 * 4, this, 1, NULL, 0); // 启动检测任务
+        xTaskCreatePinnedToCore(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 1024 * 3, this, 1, NULL, 0); // 启动检测任务
         InitializePowerManager();
         InitializePowerSaveTimer();
         // ESP_LOGI(TAG, "ReadADC2_CH1_Oneshot");

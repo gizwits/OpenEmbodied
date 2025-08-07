@@ -46,6 +46,7 @@ private:
     bool SendText(const std::string& text) override;
     std::string GetHelloMessage();
     static void CloseAudioChannelTask(void* param);
+    void SwitchToSpeaking();
 };
 
 #endif
