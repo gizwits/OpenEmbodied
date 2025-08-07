@@ -112,6 +112,8 @@ public:
         InitializeButtons();
         InitializeIot();
 
+        InitializeGpio(POWER_GPIO, true);
+
         audio_codec.OnWakeUp([this](const std::string& command) {
             ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());
             if (command == "你好小智" || command.find("小云") != std::string::npos){
@@ -121,6 +123,22 @@ public:
                 ResetWifiConfiguration();
             }
         });
+    }
+
+    void InitializeGpio(gpio_num_t gpio_num_, bool output = false) {
+        gpio_config_t config = {
+            .pin_bit_mask = (1ULL << gpio_num_),
+            .mode = GPIO_MODE_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_ENABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        ESP_ERROR_CHECK(gpio_config(&config));
+        if (output) {
+            gpio_set_level(gpio_num_, 1);
+        } else {
+            gpio_set_level(gpio_num_, 0);
+        }
     }
 
     virtual AudioCodec* GetAudioCodec() override {
