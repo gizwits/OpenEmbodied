@@ -17,6 +17,7 @@
 #include "audio_codecs/audio_codec.h"
 #include "board.h"
 #include <string>
+#include <wifi_station.h>
 
 // 工厂测试音频功能包装函数
 static int ft_start_record_task(int duration_seconds) {
@@ -33,26 +34,6 @@ static const char *TAG = "factory_test";
 static esp_err_t storage_save_factory_test_mode(int mode) {
     Settings settings("wifi", true);
     settings.SetInt("ft_mode", mode);  // 使用更短的键名
-    return ESP_OK;
-}
-
-static bool storage_load_wifi_config(char* ssid, char* password) {
-    Settings settings("wifi", true);
-    std::string ssid_str = settings.GetString("test_ssid", "");
-    std::string password_str = settings.GetString("test_password", "");
-    
-    if (!ssid_str.empty() && !password_str.empty()) {
-        strncpy(ssid, ssid_str.c_str(), 32);
-        strncpy(password, password_str.c_str(), 64);
-        return true;
-    }
-    return false;
-}
-
-static esp_err_t storage_save_wifi_config(const char* ssid, const char* password) {
-    Settings settings("wifi", true);
-    settings.SetString("test_ssid", ssid);
-    settings.SetString("test_password", password);
     return ESP_OK;
 }
 
@@ -201,6 +182,22 @@ static void factory_test_send(const char *data, int len) {
 void factory_test_init(void) {
     Settings settings("wifi", true);
     s_factory_test_mode = settings.GetInt("ft_mode", 0);  // 使用更短的键名
+    ESP_LOGI(TAG, "产测模式: %d", s_factory_test_mode);
+    if (s_factory_test_mode == FACTORY_TEST_MODE_IN_FACTORY) {
+        // 产测模式临时连接产测路由器
+        auto& wifi_station = WifiStation::GetInstance();
+        wifi_station.Start();
+
+        ESP_LOGI(TAG, "产测模式临时连接产测路由器");
+        if (WifiStation::GetInstance().ConnectToWifi(FACTORY_TEST_SSID, FACTORY_TEST_PASSWORD)) {
+            ESP_LOGI(TAG, "产测WiFi连接成功");
+            // if (WifiStation::GetInstance().WaitForConnected(10000)) {
+            //     ESP_LOGI(TAG, "产测WiFi连接成功");
+            // } else {
+            //     ESP_LOGE(TAG, "产测WiFi连接失败");
+            // }
+        }
+    }
 }
 
 void factory_test_start(void) {
@@ -386,7 +383,7 @@ static void handle_at_command(char *cmd) {
         ESP_LOGI(TAG, "Received record command");
         
         // 返回录音成功响应
-        if (ft_start_record_task(1) == 0) {
+        if (ft_start_record_task(3) == 0) {
             ESP_LOGI(TAG, "Record task started");
             factory_test_send("+REC OK\r\n", strlen("+REC OK\r\n"));
         } else {
@@ -398,13 +395,28 @@ static void handle_at_command(char *cmd) {
         // 处理播放命令
         ESP_LOGI(TAG, "Received play command");
         // 返回播放成功响应
-        if (ft_start_play_task(5) == 0) {
+        if (ft_start_play_task(3) == 0) {
             ESP_LOGI(TAG, "Play task started");
             factory_test_send("+PLAY OK\r\n", strlen("+PLAY OK\r\n"));
         } else {
             ESP_LOGE(TAG, "Play task failed to start");
             factory_test_send("+PLAY ERROR\r\n", strlen("+PLAY ERROR\r\n"));
         }
+    }else if (strncmp(cmd, "AT+RSSI?", strlen("AT+RSSI?")) == 0) {
+        ESP_LOGI(TAG, "Received get RSSI command");
+        int32_t rssi = 0;
+        wifi_ap_record_t ap_info;
+        if (WifiStation::GetInstance().IsConnected()) {
+            if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+                rssi = ap_info.rssi; // 获取信号强度
+                ESP_LOGE(TAG,"WiFi Signal RSSI: %ld dBm", rssi);
+            }
+        }
+        char rssi_str[64];
+
+        // 返回RSSI信息
+        snprintf(rssi_str, sizeof(rssi_str), "+RSSI=%ld\r\n", rssi);
+        factory_test_send(rssi_str, strlen(rssi_str));
     }
     else {
         // 未知命令处理
@@ -466,59 +478,6 @@ static void handle_at_command_buffer(uint8_t *data) {
         }
     }
 }
-
-void key_on_rec_break_pressed(void)
-{
-    static int64_t last_event_time = 0;  // 单位：ms
-    static int event_count = 0;
-    
-    // 获取当前时间
-    int64_t now = esp_timer_get_time() / 1000;  // 转换为ms
-    
-    // 如果距离上次事件超过2000ms，则重置计数
-    if (now - last_event_time > 2000) {
-        event_count = 0;
-    }
-    
-    // 更新事件时间和计数
-    last_event_time = now;
-    event_count++;
-    
-    ESP_LOGI(TAG, "Record break event count: %d", event_count);
-    if (event_count == 10) {
-
-        if (s_factory_test_mode != FACTORY_TEST_MODE_AGING) {
-            ESP_LOGI(TAG, "Enter aging test mode");
-            s_factory_test_mode = FACTORY_TEST_MODE_AGING;
-            storage_save_factory_test_mode(FACTORY_TEST_MODE_AGING);
-            Application::GetInstance().PlaySound(Lang::Sounds::P3_TEST_MODE);
-            // audio_tone_play("spiffs://spiffs/enter_aging.mp3");
-        } else {
-            char ssid[32];
-            char password[64];
-            
-            ESP_LOGI(TAG, "Exit aging test mode");
-            s_factory_test_mode = FACTORY_TEST_MODE_NONE;
-            storage_save_factory_test_mode(FACTORY_TEST_MODE_NONE);
-            Application::GetInstance().PlaySound(Lang::Sounds::P3_TEST_MODE);
-            // audio_tone_play("spiffs://spiffs/exit_aging.mp3");
-
-            bool success = storage_load_wifi_config(ssid, password);
-
-            if (!success) {
-                // 如果设备没有配置过wifi，则配置产测模式下的wifi
-                storage_save_wifi_config(FACTORY_TEST_SSID, FACTORY_TEST_PASSWORD);
-                ESP_LOGW(TAG, "=== Save factory test default wifi config");
-            }
-        }
-
-        // 延时重启
-        ESP_LOGI(TAG, "Restarting...");
-        vTaskDelay(2000 / portTICK_PERIOD_MS);
-        esp_restart();
-    }
-}
-
 static void factory_test_aging_task(void *pvParameters) {
     // 设置初始音量
     user_set_volume(80);

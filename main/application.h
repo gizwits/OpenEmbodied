@@ -102,6 +102,11 @@ public:
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
     void SendTextToAI(const std::string& text);
+    
+    // 工厂测试相关方法
+    int StartRecordTest(int duration_seconds);
+    int StartPlayTest(int duration_seconds);
+    void StopRecordTest();
 
 
     const char* GetTraceId() const { return trace_id_; }
@@ -150,6 +155,19 @@ private:
 
     // 新增：用于跟踪上次检查电量的时间
     std::chrono::steady_clock::time_point last_battery_check_time_;
+
+    // 工厂测试录制相关变量
+    bool record_test_active_ = false;
+    int record_test_duration_seconds_ = 0;
+    std::chrono::steady_clock::time_point record_test_start_time_;
+    std::vector<uint8_t> recorded_audio_data_;
+    std::mutex record_test_mutex_;
+    
+    // 工厂测试播放相关变量
+    bool play_test_active_ = false;
+    int play_test_duration_seconds_ = 0;
+    std::chrono::steady_clock::time_point play_test_start_time_;
+    size_t play_test_data_index_ = 0;
 
 
     std::unique_ptr<OpusEncoderWrapper> opus_encoder_;

@@ -20,6 +20,7 @@
 #endif
 
 #include <cstring>
+#include <algorithm>
 
 #include <esp_log.h>
 #include <cJSON.h>
@@ -1132,7 +1133,6 @@ void Application::OnAudioOutput() {
 
 void Application::OnAudioInput() {
 
-    // ESP_LOGI(TAG, "OnAudioInput %d", wake_word_detect_.IsDetectionRunning());
    
 #if CONFIG_USE_WAKE_WORD_DETECT
     if (wake_word_detect_.IsDetectionRunning()) {
@@ -1160,6 +1160,33 @@ void Application::OnAudioInput() {
         }
     }
 #else
+
+    // 检查是否在录制测试模式
+    if (record_test_active_) {
+        // 检查录制时间是否已到
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - record_test_start_time_).count();
+        
+        if (elapsed >= record_test_duration_seconds_) {
+            // 录制时间到，停止录制
+            ESP_LOGI(TAG, "Record test time limit reached");
+            record_test_active_ = false;
+            ESP_LOGI(TAG, "Record test completed");
+            return;
+        }
+        
+        // 读取音频数据并保存
+        std::vector<uint8_t> data;
+        int samples = 16000 * 60 / 1000; // 60ms 的音频数据
+        ReadAudio(data, 16000, samples);
+        
+        if (!data.empty()) {
+            // 保存录制的音频数据
+            recorded_audio_data_.insert(recorded_audio_data_.end(), data.begin(), data.end());
+            ESP_LOGI(TAG, "Recorded %zu samples", data.size());
+        }
+        return;
+    }
 
     bool can_read_audio = false;
     if (chat_mode_ == 2) {
@@ -1562,6 +1589,7 @@ void Application::SetChatMode(int mode) {
     esp_restart();
 }
 
+
 void Application::CheckBatteryLevel() {
     // 检查电量
     int level = 0;
@@ -1576,4 +1604,90 @@ void Application::CheckBatteryLevel() {
             return;
         }
     }
+}
+
+
+// 工厂测试录制相关方法实现
+int Application::StartRecordTest(int duration_seconds) {
+    ESP_LOGI(TAG, "StartRecordTest: duration=%d seconds", duration_seconds);
+    
+    std::lock_guard<std::mutex> lock(record_test_mutex_);
+    
+    if (record_test_active_) {
+        ESP_LOGW(TAG, "Record test already active");
+        return -1;
+    }
+    
+    // 初始化录制参数
+    record_test_active_ = true;
+    record_test_duration_seconds_ = duration_seconds;
+    record_test_start_time_ = std::chrono::steady_clock::now();
+    recorded_audio_data_.clear();
+    
+    ESP_LOGI(TAG, "Record test started, will record for %d seconds", duration_seconds);
+    return 0;
+}
+
+int Application::StartPlayTest(int duration_seconds) {
+    ESP_LOGI(TAG, "StartPlayTest: duration=%d seconds", duration_seconds);
+
+    
+    if (play_test_active_) {
+        ESP_LOGW(TAG, "Play test already active");
+        return -1;
+    }
+    
+    if (recorded_audio_data_.empty()) {
+        ESP_LOGW(TAG, "No recorded audio data to play");
+        return -1;
+    }
+    
+    // 初始化播放参数
+    play_test_active_ = true;
+    play_test_duration_seconds_ = duration_seconds;
+    play_test_start_time_ = std::chrono::steady_clock::now();
+    play_test_data_index_ = 0;
+    
+    // 确保音频输出启用
+    auto codec = Board::GetInstance().GetAudioCodec();
+    codec->EnableOutput(true);
+
+    // 把数据塞进去
+    size_t chunk_size = 16000 * 10 / 1000; // 10ms 的数据块
+    for (size_t i = 0; i < recorded_audio_data_.size(); i += chunk_size) {
+        AudioStreamPacket packet;
+        size_t current_chunk_size = std::min(chunk_size, recorded_audio_data_.size() - i);
+        packet.payload.assign(recorded_audio_data_.begin() + i, recorded_audio_data_.begin() + i + current_chunk_size);
+        packet.timestamp = 0;
+        audio_decode_queue_.emplace_back(std::move(packet));
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    
+    ESP_LOGI(TAG, "Play test started, will play for %d seconds", duration_seconds);
+    ESP_LOGI(TAG, "Total recorded data size: %zu bytes", recorded_audio_data_.size());
+    play_test_active_ = false;
+    return 0;
+}
+
+void Application::StopRecordTest() {
+    ESP_LOGI(TAG, "StopRecordTest");
+    
+    std::lock_guard<std::mutex> lock(record_test_mutex_);
+    
+    if (!record_test_active_) {
+        ESP_LOGW(TAG, "Record test not active");
+        return;
+    }
+    
+    record_test_active_ = false;
+    
+    // 输出录制结果
+    
+    // 计算录制的实际时长
+    auto end_time = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::seconds>(end_time - record_test_start_time_).count();
+    ESP_LOGI(TAG, "Actual recording duration");
+    
+    // 清空录制数据
+    recorded_audio_data_.clear();
 }
