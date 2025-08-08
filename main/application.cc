@@ -487,6 +487,19 @@ void Application::Start() {
     // 播放上电提示音
     PlaySound(Lang::Sounds::P3_SUCCESS);
 
+    ESP_LOGI(TAG, "Factory test init");
+    factory_test_init();
+    ESP_LOGI(TAG, "Factory test start");
+    factory_test_start();
+    ESP_LOGI(TAG, "Factory test is enabled");
+
+    if (factory_test_is_enabled()) {
+        ESP_LOGW(TAG, "Factory test is enabled");
+        PlaySound(Lang::Sounds::P3_TEST_MODE);
+        return;
+    }
+    
+
     CheckBatteryLevel();
 
     /* Wait for the network to be ready */
@@ -1161,7 +1174,6 @@ void Application::OnAudioInput() {
             return;
         }
         
-#ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
         std::vector<uint8_t> opus;
         if (!protocol_->IsAudioChannelBusy()) {
             ReadAudio(opus, 16000, 30 * 16000 / 1000);
@@ -1171,16 +1183,6 @@ void Application::OnAudioInput() {
             last_output_timestamp_ = 0;
             protocol_->SendAudio(packet);
         }
-#else
-        std::vector<int16_t> data;
-        int samples = audio_processor_->GetFeedSize();
-        if (samples > 0) {
-            if (ReadAudio(data, 16000, samples)) {
-                audio_processor_->Feed(data);
-                return;
-            }
-        }
-#endif
         return;
     }
 #endif

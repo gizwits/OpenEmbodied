@@ -6,8 +6,7 @@
 #include <freertos/task.h>
 #include <esp_timer.h>
 #include "player/player.h"
-
-
+#include "factory_test/factory_test.h"
 #include <string>
 #include <mutex>
 #include <list>
@@ -36,6 +35,7 @@
 #define AUDIO_INPUT_READY_EVENT (1 << 1)
 #define AUDIO_OUTPUT_READY_EVENT (1 << 2)
 #define CHECK_NEW_VERSION_DONE_EVENT (1 << 3)
+
 
 enum DeviceState {
     kDeviceStateUnknown,
@@ -85,6 +85,16 @@ public:
     int GetChatMode() const { return chat_mode_; }
     void StopListening();
     void UpdateIotStates();
+
+    void ReadAudio(std::vector<int16_t>& data, int sample_rate, int samples);
+#ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
+    void ReadAudio(std::vector<uint8_t>& opus, int sample_rate, int samples);
+#endif
+
+    void WriteAudio(std::vector<int16_t>& data, int sample_rate);
+#ifdef CONFIG_USE_AUDIO_CODEC_DECODE_OPUS
+    void WriteAudio(std::vector<uint8_t>& opus);
+#endif
     void Reboot();
     void SendMessage(const std::string& message);
     void WakeWordInvoke(const std::string& wake_word);
@@ -92,6 +102,7 @@ public:
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
     void SendTextToAI(const std::string& text);
+
 
     const char* GetTraceId() const { return trace_id_; }
     void GenerateTraceId();
@@ -140,6 +151,7 @@ private:
     // 新增：用于跟踪上次检查电量的时间
     std::chrono::steady_clock::time_point last_battery_check_time_;
 
+
     std::unique_ptr<OpusEncoderWrapper> opus_encoder_;
     std::unique_ptr<OpusDecoderWrapper> opus_decoder_;
 
@@ -150,15 +162,7 @@ private:
     void MainEventLoop();
     void OnAudioInput();
     void OnAudioOutput();
-    void ReadAudio(std::vector<int16_t>& data, int sample_rate, int samples);
-#ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
-    void ReadAudio(std::vector<uint8_t>& opus, int sample_rate, int samples);
-#endif
 
-    void WriteAudio(std::vector<int16_t>& data, int sample_rate);
-#ifdef CONFIG_USE_AUDIO_CODEC_DECODE_OPUS
-    void WriteAudio(std::vector<uint8_t>& opus);
-#endif
     void SetDecodeSampleRate(int sample_rate, int frame_duration);
     void CheckNewVersion();
     void ShowActivationCode();
