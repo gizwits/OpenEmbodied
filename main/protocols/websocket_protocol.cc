@@ -16,7 +16,7 @@
 #define TAG "WS"
 
 #define MAX_AUDIO_PACKET_SIZE 512
-#define MAX_CACHED_PACKETS 4
+#define MAX_CACHED_PACKETS 8
 
 struct Emotion {
     const char* icon;

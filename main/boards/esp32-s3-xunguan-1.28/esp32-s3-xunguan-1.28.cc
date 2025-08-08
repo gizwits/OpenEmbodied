@@ -262,7 +262,7 @@ private:
     }
 
     int MaxBacklightBrightness() {
-        return 50;
+        return 8;
     }
 
     void InitializeChargingGpio() {
@@ -615,7 +615,7 @@ public:
         EyeDisplay* xunguan_display = static_cast<EyeDisplay*>(self->GetDisplay());
         self->GetBacklight()->RestoreBrightness();
 
-        // xunguan_display->StartAutoTest(3000);
+        // xunguan_display->StartAutoTest(1000);
 
         // if (charging) {
         //     // 降低发热            

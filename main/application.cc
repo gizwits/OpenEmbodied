@@ -67,7 +67,9 @@ void Application::CheckNewVersion(Ota& ota) {
     int retry_count = 0;
     int retry_delay = 10; // 初始重试延迟为10秒
 
+
     auto& board = Board::GetInstance();
+
     while (true) {
         SetDeviceState(kDeviceStateActivating);
         auto display = board.GetDisplay();

@@ -376,7 +376,7 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
 
     // 检查眼睛对象是否有效
     ESP_LOGI(TAG, "left_eye_: %p, right_eye_: %p", left_eye_, right_eye_);
-    if (left_eye_ && right_eye_) {
+    if (lv_obj_is_valid(left_eye_) && lv_obj_is_valid(right_eye_)) {
         // 确保眼睛对象可见并重置为默认状态
         lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
@@ -489,10 +489,6 @@ void EyeDisplay::StartIdleAnimation() {
     // 确保眼睛可见
     lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
-    
-    // 先停止可能存在的动画
-    lv_anim_del(left_eye_, nullptr);
-    lv_anim_del(right_eye_, nullptr);
     
     lv_anim_init(&left_anim_);
     lv_anim_set_var(&left_anim_, left_eye_);
@@ -828,6 +824,10 @@ void EyeDisplay::StartThinkingAnimation() {
     // 确保眼睛可见
     lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
+    
+    // 将眼睛向上移动一点 - 通过设置负的顶部margin
+    lv_obj_set_style_margin_top(left_eye_, -20, 0);
+    lv_obj_set_style_margin_top(right_eye_, -20, 0);
     
     // 眼睛动画 - 思考时的眨眼效果
     lv_anim_init(&left_anim_);
@@ -1208,7 +1208,7 @@ void EyeDisplay::LvglTask(void* arg) {
     
     while (1) {
         // 使用锁保护LVGL API调用，但使用更短的超时时间
-        if (self->Lock(10)) {  // 10ms超时
+        if (self->Lock(100)) {  // 10ms超时
             time_till_next_ms = lv_timer_handler();
             self->Unlock();
         } else {
