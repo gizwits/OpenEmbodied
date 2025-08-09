@@ -5,7 +5,6 @@ set(SOURCES "audio/audio_codec.cc"
             "audio/codecs/es8311_audio_codec.cc"
             "audio/codecs/es8374_audio_codec.cc"
             "audio/codecs/es8388_audio_codec.cc"
-            "audio/codecs/es8389_audio_codec.cc"
             "audio/codecs/dummy_audio_codec.cc"
             "audio/processors/audio_debugger.cc"
             "led/single_led.cc"
@@ -227,7 +226,7 @@ if(CONFIG_IDF_TARGET_ESP32)
                              )
 endif()
 
-if(CONFIG_USE_EYE_STYLE_VB6824 OR CONFIG_USE_EYE_STYLE_VB6824)
+if(CONFIG_USE_EYE_STYLE_VB6824)
     list(APPEND SOURCES "audio/codecs/vb6824_audio_codec.cc")
     list(REMOVE_ITEM SOURCES "audio/codecs/box_audio_codec.cc"
                             "audio/codecs/no_audio_codec.cc"

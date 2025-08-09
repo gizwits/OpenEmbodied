@@ -163,7 +163,7 @@ bool MqttClient::initialize() {
 
     auto network = Board::GetInstance().GetNetwork();
     mqtt_ = network->CreateMqtt(1);
-    mqtt_->SetKeepAlive(8);
+    mqtt_->SetKeepAlive(20);
 
     mqtt_->OnDisconnected([this]() {
         ESP_LOGI(TAG, "Disconnected from endpoint");
@@ -223,9 +223,20 @@ bool MqttClient::initialize() {
         return false;
     }
 
+    // Create send queue
+    send_queue_ = xQueueCreate(MQTT_SEND_QUEUE_SIZE, sizeof(mqtt_send_msg_t));
+    if (!send_queue_) {
+        ESP_LOGE(TAG, "Failed to create send queue");
+        vSemaphoreDelete(mqtt_sem_);
+        mqtt_sem_ = nullptr;
+        vQueueDelete(message_queue_);
+        message_queue_ = nullptr;
+        return false;
+    }
+
     // Create tasks
     xTaskCreate(messageReceiveHandler, "mqtt_rcv", MQTT_TASK_STACK_SIZE_RCV, this, 5, nullptr);
-    xTaskCreate(messageResendHandler, "mqtt_resend", MQTT_TASK_STACK_SIZE_RESEND, this, 5, nullptr);
+    xTaskCreate(sendTask, "mqtt_send", MQTT_TASK_STACK_SIZE_RESEND, this, 5, nullptr);
 
     // 打印内存使用情况
     printMemoryUsage();
@@ -311,12 +322,28 @@ bool MqttClient::disconnect() {
 }
 
 bool MqttClient::publish(const std::string& topic, const std::string& payload) {
-    if (!mqtt_) {
-        ESP_LOGE(TAG, "MQTT client not initialized");
+    // 将消息入队，由发送任务异步发送
+    if (!send_queue_) {
+        ESP_LOGE(TAG, "Send queue not initialized");
         return false;
     }
-    // ESP_LOGI(TAG, "publish topic: %s, payload: %s", topic.c_str(), payload.c_str());
-    return mqtt_->Publish(topic, payload);
+    mqtt_send_msg_t msg = {0};
+    msg.topic = strdup(topic.c_str());
+    msg.payload = strdup(payload.c_str());
+    msg.qos = 0;
+    if (!msg.topic || !msg.payload) {
+        if (msg.topic) free(msg.topic);
+        if (msg.payload) free(msg.payload);
+        ESP_LOGE(TAG, "Failed to allocate send message buffers");
+        return false;
+    }
+    if (xQueueSendToBack(send_queue_, &msg, 0) != pdPASS) {
+        ESP_LOGE(TAG, "Send queue full, dropping publish to %s", topic.c_str());
+        free(msg.topic);
+        free(msg.payload);
+        return false;
+    }
+    return true;
 }
 
 bool MqttClient::subscribe(const std::string& topic) {
@@ -481,6 +508,11 @@ void MqttClient::deinit() {
         message_queue_ = nullptr;
     }
 
+    if (send_queue_) {
+        vQueueDelete(send_queue_);
+        send_queue_ = nullptr;
+    }
+
     if (mqtt_) {
         mqtt_.reset();
     }
@@ -502,18 +534,30 @@ void MqttClient::messageReceiveHandler(void* arg) {
     }
 }
 
-void MqttClient::messageResendHandler(void* arg) {
+void MqttClient::sendTask(void* arg) {
     MqttClient* client = static_cast<MqttClient*>(arg);
-
+    mqtt_send_msg_t msg;
     while (1) {
-        if (xSemaphoreTake(client->mqtt_sem_, portMAX_DELAY) == pdTRUE) {
-            if (++client->mqtt_request_failure_count_ > MQTT_REQUEST_FAILURE_COUNT) {
-                if (client->timer_) {
-                    xTimerDelete(client->timer_, 0);
-                    client->timer_ = nullptr;
+        if (xQueueReceive(client->send_queue_, &msg, portMAX_DELAY) == pdTRUE) {
+            if (msg.qos == MQTT_SEND_CONTROL_ROOMINFO) {
+                // 处理房间信息请求的超时重试
+                if (++client->mqtt_request_failure_count_ > MQTT_REQUEST_FAILURE_COUNT) {
+                    if (client->timer_) {
+                        xTimerDelete(client->timer_, 0);
+                        client->timer_ = nullptr;
+                    }
+                } else {
+                    client->GetRoomInfo();
                 }
             } else {
-                client->GetRoomInfo();
+                // 正常发送MQTT消息
+                if (client->mqtt_) {
+                    std::string topic_str = msg.topic ? msg.topic : "";
+                    std::string payload_str = msg.payload ? msg.payload : "";
+                    client->mqtt_->Publish(topic_str, payload_str);
+                }
+                if (msg.topic) free(msg.topic);
+                if (msg.payload) free(msg.payload);
             }
         }
     }
@@ -521,7 +565,13 @@ void MqttClient::messageResendHandler(void* arg) {
 
 void MqttClient::timerCallback(TimerHandle_t xTimer) {
     MqttClient* client = static_cast<MqttClient*>(pvTimerGetTimerID(xTimer));
-    xSemaphoreGive(client->mqtt_sem_);
+    if (client && client->send_queue_) {
+        mqtt_send_msg_t ctrl = {0};
+        ctrl.topic = nullptr;
+        ctrl.payload = nullptr;
+        ctrl.qos = MQTT_SEND_CONTROL_ROOMINFO;
+        xQueueSendToBack(client->send_queue_, &ctrl, 0);
+    }
 }
 
 bool MqttClient::parseRealtimeAgent(const char* in_str, int in_len, room_params_t* params) {
@@ -662,7 +712,12 @@ bool MqttClient::parseM2MCtrlMsg(const char* in_str, int in_len) {
     if (method && method->valuestring) {
         if (strcmp(method->valuestring, "rtc.room.join") == 0) {
             // Handle room join
-            xSemaphoreGive(mqtt_sem_);
+            // 改为通过发送队列触发一次控制检查
+            if (send_queue_) {
+                mqtt_send_msg_t ctrl = {0};
+                ctrl.qos = MQTT_SEND_CONTROL_ROOMINFO;
+                xQueueSendToBack(send_queue_, &ctrl, 0);
+            }
 
         } else if (strcmp(method->valuestring, "rtc.room.leave") == 0) {
             // Handle room leave
@@ -896,9 +951,8 @@ bool MqttClient::uploadP0Data(const void* data, size_t data_len) {
         return false;
     }
     std::string topic = "dev2app/" + client_id_;
-    // Publish binary data (assume mqtt_->Publish can take std::string with binary data)
-    // If not, this should be adapted to the actual API
-    bool result = mqtt_->Publish(topic, std::string(static_cast<const char*>(data), data_len));
+    // Publish binary data via queued publish
+    bool result = publish(topic, std::string(static_cast<const char*>(data), data_len));
     if (!result) {
         ESP_LOGE(TAG, "Failed to publish p0 data to %s", topic.c_str());
     }

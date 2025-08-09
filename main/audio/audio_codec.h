@@ -13,6 +13,7 @@
 
 #define AUDIO_CODEC_DMA_DESC_NUM 6
 #define AUDIO_CODEC_DMA_FRAME_NUM 240
+
 #define AUDIO_CODEC_DEFAULT_MIC_GAIN 30.0
 
 class AudioCodec {
@@ -55,7 +56,6 @@ protected:
     int input_channels_ = 1;
     int output_channels_ = 1;
     int output_volume_ = 70;
-
 
 #ifdef CONFIG_USE_EYE_STYLE_VB6824
     virtual int Read(uint8_t* dest, int samples) = 0;

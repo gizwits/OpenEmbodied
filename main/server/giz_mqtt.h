@@ -26,12 +26,17 @@
 #define MQTT_TOPIC_BUFFER_SIZE       48      // 主题缓冲区大小
 #define MQTT_PAYLOAD_BUFFER_SIZE     256     // 负载缓冲区大小
 #define MQTT_TOKEN_REPORT_BUFFER_SIZE 128    // Token报告缓冲区大小
+#define MQTT_SEND_QUEUE_SIZE        6     // 发送队列大小
 
+// 协议常量（供app2dev解析等使用）
 #define GAGENT_PROTOCOL_VERSION     (0x00000003)
 #define HI_CMD_PAYLOAD93            0x0093
 #define HI_CMD_UPLOADACK94          0x0094
 #define HI_CMD_MQTT_RESET           0x021E
-#define MQTT_REQUEST_FAILURE_COUNT 10
+#define MQTT_REQUEST_FAILURE_COUNT  10
+
+// 发送队列控制消息标识（使用qos字段传递特殊控制）
+#define MQTT_SEND_CONTROL_ROOMINFO  (-1)
 
 
 struct Attr {
@@ -67,6 +72,13 @@ typedef struct {
     int data_len;
     int qos;
 } mqtt_msg_t;
+
+// Outgoing publish message structure
+typedef struct {
+    char* topic;
+    char* payload;
+    int qos; // reserved for QoS or control (e.g. MQTT_SEND_CONTROL_ROOMINFO)
+} mqtt_send_msg_t;
 
 // RTC parameters structure
 typedef struct {
@@ -123,6 +135,7 @@ private:
     std::function<void(const RoomParams&, bool is_mutual)> room_params_updated_callback_;
     std::function<void(const std::string&, const std::string&)> message_callback_;
     QueueHandle_t message_queue_ = nullptr;
+    QueueHandle_t send_queue_ = nullptr; // 新增：发送消息队列
     SemaphoreHandle_t mqtt_sem_ = nullptr;
     TimerHandle_t timer_ = nullptr;
     int mqtt_event_ = 0;
@@ -138,7 +151,7 @@ private:
     static int attr_size_;
 
     static void messageReceiveHandler(void* arg);
-    static void messageResendHandler(void* arg);
+    static void sendTask(void* arg);
     void app2devMsgHandler(const uint8_t *data, int32_t len);
     static void timerCallback(TimerHandle_t xTimer);
     static void reconnectTask(void* arg);

@@ -144,14 +144,14 @@ void AudioService::Start() {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->AudioInputTask();
         vTaskDelete(NULL);
-    }, "audio_input", 2048 * 2, this, 8, &audio_input_task_handle_);
+    }, "audio_input", 1024, this, 8, &audio_input_task_handle_);
 
     /* Start the audio output task */
     xTaskCreate([](void* arg) {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->AudioOutputTask();
         vTaskDelete(NULL);
-    }, "audio_output", 2048 * 2, this, 3, &audio_output_task_handle_);
+    }, "audio_output", 2048 + 768, this, 3, &audio_output_task_handle_);
 #endif
 
     /* Start the opus codec task */
@@ -522,10 +522,9 @@ void AudioService::OpusCodecTask() {
             packet->sample_rate = 16000;
             packet->timestamp = task->timestamp;
             ESP_LOGD(TAG, "Opus encode: task->pcm.size()=%zu", task->pcm.size());
-            if (!opus_encoder_->Encode(std::move(task->pcm), packet->payload)) {
-                ESP_LOGE(TAG, "Failed to encode audio");
-                continue;
-            }
+            opus_encoder_->Encode(std::move(task->pcm), [packet = packet.get()](std::vector<uint8_t>&& opus) {
+                packet->payload = std::move(opus);
+            });
 
             if (task->type == kAudioTaskTypeEncodeToSendQueue) {
                 {

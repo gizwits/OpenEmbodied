@@ -38,7 +38,6 @@ void Protocol::SendAbortSpeaking(AbortReason reason) {
     abort_speaking_timestamp_ = std::chrono::steady_clock::now();
     abort_speaking_recorded_ = true;
     ESP_LOGI(TAG, "Abort speaking timestamp recorded, will ignore server audio for 1s");
-
     char event_id[32];
     uint32_t random_value = esp_random();
     snprintf(event_id, sizeof(event_id), "%lu", random_value);
