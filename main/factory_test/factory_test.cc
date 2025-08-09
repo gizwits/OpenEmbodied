@@ -142,7 +142,7 @@ void factory_test_uart_init(void) {
 
     // 配置串口参数
     uart_config_t uart_config = {
-        .baud_rate = 115200,  // 使用标准波特率
+        .baud_rate = 74880,  // 使用标准波特率
         .data_bits = UART_DATA_8_BITS,
         .parity = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
