@@ -16,7 +16,12 @@
 #define TAG "WS"
 
 #define MAX_AUDIO_PACKET_SIZE 512
+
+#if CONFIG_IDF_TARGET_ESP32S3
+#define MAX_CACHED_PACKETS 10
+#else
 #define MAX_CACHED_PACKETS 8
+#endif
 
 struct Emotion {
     const char* icon;
@@ -34,14 +39,14 @@ static const std::vector<Emotion> emotions = {
     {"😳", "embarrassed"},
     {"😯", "surprised"},
     {"😱", "shocked"},
-    {"🤔", "thinking"},
+    // {"🤔", "thinking"}, //动画有冲突
     {"😉", "winking"},
     {"😎", "cool"},
     {"😌", "relaxed"},
     {"🤤", "delicious"},
     {"😘", "kissy"},
     {"😏", "confident"},
-    {"😴", "sleepy"},
+    // {"😴", "sleepy"}, //动画有冲突
     {"😜", "silly"},
     {"🙄", "confused"},
     {"🤡", "vertigo"}
@@ -466,7 +471,11 @@ bool WebsocketProtocol::OpenAudioChannel() {
 
                 auto& app = Application::GetInstance();
                 ESP_LOGI(TAG, "input_audio_buffer.speech_started");
-                app.AbortSpeaking(kAbortReasonNone);
+                // 自然对话才要打断
+                int chat_mode = Application::GetInstance().GetChatMode();
+                if (chat_mode == 2) {
+                    app.AbortSpeaking(kAbortReasonNone);
+                }
             } else if (event_type == "input_audio_buffer.speech_stopped") {
                 MqttClient::getInstance().sendTraceLog("info", "input_audio_buffer.speech_stopped");
                 ESP_LOGI(TAG, "input_audio_buffer.speech_stopped");

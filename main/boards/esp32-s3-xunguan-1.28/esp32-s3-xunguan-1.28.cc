@@ -326,7 +326,7 @@ private:
             }
             auto& app = Application::GetInstance();
             // if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
-            //     ResetWifiConfiguration();
+            //     InnerResetWifiConfiguration();
             // }
             app.ToggleChatState();
             // display_->TestNextEmotion();
@@ -355,6 +355,8 @@ private:
             }
         });
         boot_button_.OnPressUp([this]() {
+            // InnerResetWifiConfiguration();
+
             first_level = 1;
             ESP_LOGI(TAG, "boot_button_.OnPressUp");
             if (need_power_off_) {
@@ -379,7 +381,7 @@ private:
         });
 
         boot_button_.OnMultipleClick([this]() {
-            ResetWifiConfiguration();
+            InnerResetWifiConfiguration();
         }, 3);
     }
 
@@ -406,6 +408,13 @@ private:
     }
     int MaxVolume() {
         return 80;
+    }
+
+    void InnerResetWifiConfiguration() {
+        // 强制拉低背光 io
+        // gpio_set_level(DISPLAY_BACKLIGHT_PIN, 0);
+        // vTaskDelay(pdMS_TO_TICKS(10));
+        ResetWifiConfiguration();
     }
 
     bool ChannelIsOpen() {

@@ -2240,6 +2240,32 @@ void XunguanDisplay::EnterWifiConfig() {
     
 }
 
+void XunguanDisplay::ClearScreen() {
+    DisplayLockGuard lock(this);
+
+    auto screen = lv_screen_active();
+    if (!screen) {
+        ESP_LOGE(TAG, "No active screen found!");
+        return;
+    }
+
+    // Stop animations and clear tracked UI elements without taking the lock again
+    ClearUIElementsNoLock();
+
+    // Ensure all remaining objects on the screen are removed
+    lv_obj_clean(screen);
+
+    // Reset background to black and fully opaque
+    lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
+
+    // Force refresh
+    lv_obj_invalidate(screen);
+    if (lvgl_display_) {
+        lv_refr_now(lvgl_display_);
+    }
+}
+
 void XunguanDisplay::blink_anim_cb(void* var, int32_t v) {
     lv_obj_t* left_eye = (lv_obj_t*)var;
     

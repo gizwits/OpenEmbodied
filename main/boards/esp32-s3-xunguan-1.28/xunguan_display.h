@@ -222,6 +222,9 @@ public:
     // WiFi config method
     void EnterWifiConfig();
     
+    // Clear screen implementation
+    void ClearScreen() override;
+    
     // Power management methods
 
 private:

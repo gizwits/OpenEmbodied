@@ -31,6 +31,7 @@ public:
     virtual void UpdateStatusBar(bool update_all = false);
     virtual void EnterWifiConfig() {}
     virtual void EnterOTAMode() {}
+    virtual void ClearScreen() {}
     virtual void SetOTAProgress(int progress) {}
 
     inline int width() const { return width_; }
