@@ -17,7 +17,8 @@ void DeviceStateEventManager::PostStateChangeEvent(DeviceState previous_state, D
         .previous_state = previous_state,
         .current_state = current_state
     };
-    esp_event_post(XIAOZHI_STATE_EVENTS, XIAOZHI_STATE_CHANGED_EVENT, &event_data, sizeof(event_data), portMAX_DELAY);
+    // 使用 0 超时而不是 portMAX_DELAY，避免阻塞
+    esp_event_post(XIAOZHI_STATE_EVENTS, XIAOZHI_STATE_CHANGED_EVENT, &event_data, sizeof(event_data), 0);
 }
 
 std::vector<std::function<void(DeviceState, DeviceState)>> DeviceStateEventManager::GetCallbacks() {

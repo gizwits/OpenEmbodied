@@ -31,6 +31,7 @@ public:
     virtual void UpdateStatusBar(bool update_all = false);
     virtual void EnterWifiConfig() {}
     virtual void EnterOTAMode() {}
+    virtual void ClearScreen() {}
     virtual void SetOTAProgress(int progress) {}
 
     inline int width() const { return width_; }
@@ -68,17 +69,21 @@ protected:
 
 class DisplayLockGuard {
 public:
-    DisplayLockGuard(Display *display) : display_(display) {
-        if (!display_->Lock(30000)) {
+    DisplayLockGuard(Display *display) : display_(display), locked_(false) {
+        locked_ = display_->Lock(30000);
+        if (!locked_) {
             ESP_LOGE("Display", "Failed to lock display");
         }
     }
     ~DisplayLockGuard() {
-        display_->Unlock();
+        if (locked_) {
+            display_->Unlock();
+        }
     }
 
 private:
     Display *display_;
+    bool locked_;
 };
 
 class NoDisplay : public Display {

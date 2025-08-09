@@ -67,7 +67,9 @@ void Application::CheckNewVersion(Ota& ota) {
     int retry_count = 0;
     int retry_delay = 10; // 初始重试延迟为10秒
 
+
     auto& board = Board::GetInstance();
+
     while (true) {
         SetDeviceState(kDeviceStateActivating);
         auto display = board.GetDisplay();
@@ -345,7 +347,6 @@ void Application::StopListening() {
 }
 
 void Application::Start() {
-
     Settings settings("wifi", true);
     chat_mode_ = settings.GetInt("chat_mode", 1); // 0=按键说话, 1=唤醒词, 2=自然对话
     // chat_mode_ = 2; // 0=按键说话, 1=唤醒词, 2=自然对话
@@ -383,8 +384,6 @@ void Application::Start() {
 
     /* Wait for the network to be ready */
     board.StartNetwork();
-
-    board.SetPowerSaveMode(false);
 
     bool battery_ok = CheckBatteryLevel();
     if (!battery_ok) {
@@ -435,7 +434,7 @@ void Application::Start() {
         }
     });
     protocol_->OnAudioChannelOpened([this, codec, &board]() {
-        // board.SetPowerSaveMode(false);
+        board.SetPowerSaveMode(false);
         if (protocol_->server_sample_rate() != codec->output_sample_rate()) {
             ESP_LOGW(TAG, "Server sample rate %d does not match device output sample rate %d, resampling may cause distortion",
                 protocol_->server_sample_rate(), codec->output_sample_rate());
@@ -445,7 +444,7 @@ void Application::Start() {
         }, "OnAudioChannelOpened");
     });
     protocol_->OnAudioChannelClosed([this, &board]() {
-        // board.SetPowerSaveMode(true);
+        board.SetPowerSaveMode(true);
         Schedule([this]() {
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
@@ -474,11 +473,11 @@ void Application::Start() {
                 }
             } else if (strcmp(state->valuestring, "pre_start") == 0) {
                 aborted_ = false;
+                if (device_state_ == kDeviceStateIdle || device_state_ == kDeviceStateListening) {
+                    SetDeviceState(kDeviceStateSpeaking);
+                }
                 Schedule([this]() {
                     auto& board = Board::GetInstance();
-                    if (device_state_ == kDeviceStateIdle || device_state_ == kDeviceStateListening) {
-                        SetDeviceState(kDeviceStateSpeaking);
-                    }
                     if (board.NeedPlayProcessVoice() && chat_mode_ != 2) {
                         // 自然对话不要 biu
                         ResetDecoder();
@@ -505,10 +504,10 @@ void Application::Start() {
             } else if (strcmp(state->valuestring, "sentence_start") == 0) {
                 auto text = cJSON_GetObjectItem(root, "text");
                 if (cJSON_IsString(text)) {
-                    ESP_LOGI(TAG, "<< %s", text->valuestring);
-                    Schedule([this, display, message = std::string(text->valuestring)]() {
-                        display->SetChatMessage("assistant", message.c_str());
-                    }, "OnIncomingJson_TTS_SentenceStart");
+                    // ESP_LOGI(TAG, "<< %s", text->valuestring);
+                    // Schedule([this, display, message = std::string(text->valuestring)]() {
+                    //     display->SetChatMessage("assistant", message.c_str());
+                    // }, "OnIncomingJson_TTS_SentenceStart");
                 }
             }
         } else if (strcmp(type->valuestring, "stt") == 0) {
@@ -785,13 +784,18 @@ void Application::SetDeviceState(DeviceState state) {
             break;
         case kDeviceStateListening:
             display->SetStatus(Lang::Strings::LISTENING);
+            ESP_LOGW(TAG, "start send start listening");
             display->SetEmotion("neutral");
+            ESP_LOGW(TAG, "start enable voice processing");
 
             // Make sure the audio processor is running
             if (!audio_service_.IsAudioProcessorRunning()) {
                 // Send the start listening command
+                ESP_LOGW(TAG, "start send start listening");
                 protocol_->SendStartListening(listening_mode_);
+                ESP_LOGW(TAG, "start enable voice processing");
                 audio_service_.EnableVoiceProcessing(true, false);
+                ESP_LOGW(TAG, "start enable wake word detection");
                 audio_service_.EnableWakeWordDetection(false);
             }
             break;
@@ -1120,6 +1124,9 @@ void Application::EnterSleepMode() {
         if (backlight) {
             backlight->SetBrightness(0);
         }
+
+        // 启动唤醒词
+        audio_service_.EnableWakeWordDetection(true);
         
     }, "EnterSleepMode_SetStatus");
     

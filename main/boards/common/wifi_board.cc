@@ -173,7 +173,7 @@ void WifiBoard::ResetWifiConfiguration() {
         settings.SetInt("force_ap", 1);
     }
     GetDisplay()->ShowNotification(Lang::Strings::ENTERING_WIFI_CONFIG_MODE);
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    vTaskDelay(pdMS_TO_TICKS(10));
     // Reboot the device
     esp_restart();
 }

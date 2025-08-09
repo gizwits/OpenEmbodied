@@ -6,9 +6,12 @@
 #include "audio/codecs/box_audio_codec.h"
 #include "power_manager.h"
 #include "assets/lang_config.h"
+#include "font_awesome_symbols.h"
 
 #include "led/single_led.h"
 #include "xunguan_display.h"
+// #include "display/eye_display.h"
+#include "display/display.h"
 
 #include <wifi_station.h>
 #include "power_save_timer.h"
@@ -140,7 +143,7 @@ private:
                 if (shake_count > 0) shake_count -= shake_count_decay;
             }
             last_ax = ax; last_ay = ay; last_az = az;
-            vTaskDelay(pdMS_TO_TICKS(50));
+            vTaskDelay(pdMS_TO_TICKS(100));
         }
     }
 
@@ -243,7 +246,15 @@ private:
             return;
         }
         
-        // Create and initialize XunguanDisplay with the initialized panel
+        // display_ = new XunguanDisplay(panel_io, panel,
+        //     DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
+        //     DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y,
+        //     &qrcode_img,
+        //     {
+        //         .text_font = &font_puhui_20_4,
+        //         .icon_font = &font_awesome_20_4,
+        //         .emoji_font = font_emoji_64_init(),
+        //     });
         display_ = new XunguanDisplay();
         if (!display_->Initialize(panel_io, panel)) {
             ESP_LOGE(TAG, "Failed to initialize XunguanDisplay");
@@ -251,7 +262,7 @@ private:
     }
 
     int MaxBacklightBrightness() {
-        return 50;
+        return 8;
     }
 
     void InitializeChargingGpio() {
@@ -315,7 +326,7 @@ private:
             }
             auto& app = Application::GetInstance();
             // if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
-            //     ResetWifiConfiguration();
+            //     InnerResetWifiConfiguration();
             // }
             app.ToggleChatState();
             // display_->TestNextEmotion();
@@ -344,6 +355,8 @@ private:
             }
         });
         boot_button_.OnPressUp([this]() {
+            // InnerResetWifiConfiguration();
+
             first_level = 1;
             ESP_LOGI(TAG, "boot_button_.OnPressUp");
             if (need_power_off_) {
@@ -368,7 +381,7 @@ private:
         });
 
         boot_button_.OnMultipleClick([this]() {
-            ResetWifiConfiguration();
+            InnerResetWifiConfiguration();
         }, 3);
     }
 
@@ -395,6 +408,13 @@ private:
     }
     int MaxVolume() {
         return 80;
+    }
+
+    void InnerResetWifiConfiguration() {
+        // 强制拉低背光 io
+        // gpio_set_level(DISPLAY_BACKLIGHT_PIN, 0);
+        // vTaskDelay(pdMS_TO_TICKS(10));
+        ResetWifiConfiguration();
     }
 
     bool ChannelIsOpen() {
@@ -457,9 +477,9 @@ private:
     // LIS2HH12 I2C读写成员函数
     uint8_t lis2hh12_read_reg(uint8_t reg) {
         uint8_t data = 0;
-        esp_err_t ret = i2c_master_transmit_receive(lis2hh12_dev_, &reg, 1, &data, 1, pdMS_TO_TICKS(100));
+        esp_err_t ret = i2c_master_transmit_receive(lis2hh12_dev_, &reg, 1, &data, 1, pdMS_TO_TICKS(500));
         if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "LIS2HH12 read reg 0x%02X failed: %s", reg, esp_err_to_name(ret));
+            // ESP_LOGE(TAG, "LIS2HH12 read reg 0x%02X failed: %s", reg, esp_err_to_name(ret));
             return 0;
         }
         return data;
@@ -496,7 +516,8 @@ private:
                 // 设置充电时的自定义帧率：100-125Hz (8-10ms延迟)
                 // 需要强制转换成 XunguanDisplay 类型
                 if (xunguan_display) {
-                    if (xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::POWER_SAVE)) {
+                    if (xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL)) {
+                    // if (xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::POWER_SAVE)) {
                         ESP_LOGI(TAG, "充电帧率设置成功");
                     } else {
                         ESP_LOGE(TAG, "充电帧率设置失败");
@@ -539,6 +560,9 @@ public:
         // 记录上电时间
         power_on_time_ = esp_timer_get_time() / 1000; // 转换为毫秒
         ESP_LOGI(TAG, "设备启动，上电时间戳: %lld ms", power_on_time_);
+
+        // 设置I2C master日志级别为ERROR，忽略I2C事务失败的日志
+        esp_log_level_set("i2c.master", ESP_LOG_ERROR);
         
         InitializeChargingGpio();
 
@@ -560,7 +584,7 @@ public:
         }
         InitializeButtons();
         InitializeIot();
-        xTaskCreatePinnedToCore(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 1024 * 4, this, 1, NULL, 0); // 启动检测任务
+        xTaskCreatePinnedToCore(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 1024 * 3, this, 1, NULL, 0); // 启动检测任务
         InitializePowerManager();
         InitializePowerSaveTimer();
         // ESP_LOGI(TAG, "ReadADC2_CH1_Oneshot");
@@ -601,9 +625,12 @@ public:
         XunguanDisplay* xunguan_display = static_cast<XunguanDisplay*>(self->GetDisplay());
         self->GetBacklight()->RestoreBrightness();
 
+        // xunguan_display->StartAutoTest(1000);
+
         if (charging) {
             // 降低发热            
-            xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::POWER_SAVE);
+            // xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::POWER_SAVE);
+            xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL);
         } else {
             xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL);
         }

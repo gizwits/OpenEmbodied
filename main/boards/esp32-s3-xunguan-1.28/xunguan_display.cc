@@ -11,6 +11,7 @@
 #include <sys/param.h>
 #include <unistd.h>
 #include <cstring>
+#include <mutex>
 #include <lvgl.h>
 #include "application.h"
 
@@ -1256,87 +1257,31 @@ void XunguanDisplay::ClearUIElementsNoLock() {
         return;
     }
     
+    // Delete all animations globally - simpler and safer
+    lv_anim_delete_all();
     
-    // Stop all animations first
-    if (left_eye_) {
-        lv_anim_del(left_eye_, (lv_anim_exec_xcb_t)lv_obj_set_height);
-        lv_anim_del(left_eye_, (lv_anim_exec_xcb_t)lv_obj_set_width);
-        lv_anim_del(left_eye_, (lv_anim_exec_xcb_t)lv_obj_set_y);
-        lv_anim_del(left_eye_, simple_color_anim_cb);
-        lv_anim_del(left_eye_, heart_zoom_anim_cb);
-        lv_anim_del(left_eye_, blink_anim_cb);
-        lv_anim_del(left_eye_, thinking_float_anim_cb);
-        lv_anim_del(left_eye_, eye_scaling_anim_cb);
-        
-        // 清理眨眼动画的用户数据
-        lv_anim_t* anim = lv_anim_get(left_eye_, (lv_anim_exec_xcb_t)blink_anim_cb);
-        if (anim) {
-            BlinkUserData* user_data = (BlinkUserData*)lv_anim_get_user_data(anim);
-            if (user_data) {
-                delete user_data;
-            }
-        }
-        
-        // 清理思考浮动动画的用户数据
-        anim = lv_anim_get(left_eye_, (lv_anim_exec_xcb_t)thinking_float_anim_cb);
-        if (anim) {
-            BlinkUserData* user_data = (BlinkUserData*)lv_anim_get_user_data(anim);
-            if (user_data) {
-                delete user_data;
-            }
-        }
-        
-        // 清理眼睛缩放动画的用户数据
-        anim = lv_anim_get(left_eye_, (lv_anim_exec_xcb_t)eye_scaling_anim_cb);
-        if (anim) {
-            BlinkUserData* user_data = (BlinkUserData*)lv_anim_get_user_data(anim);
-            if (user_data) {
-                delete user_data;
-            }
-        }
-    }
-    if (right_eye_) {
-        lv_anim_del(right_eye_, (lv_anim_exec_xcb_t)lv_obj_set_height);
-        lv_anim_del(right_eye_, (lv_anim_exec_xcb_t)lv_obj_set_width);
-        lv_anim_del(right_eye_, (lv_anim_exec_xcb_t)lv_obj_set_y);
-        lv_anim_del(right_eye_, simple_color_anim_cb);
-        lv_anim_del(right_eye_, heart_zoom_anim_cb);
-        lv_anim_del(right_eye_, blink_anim_cb);
-        lv_anim_del(right_eye_, thinking_float_anim_cb);
-        lv_anim_del(right_eye_, eye_scaling_anim_cb);
-    }
-    if (mouth_) {
-        lv_anim_del(mouth_, (lv_anim_exec_xcb_t)lv_obj_set_y);
-    }
-    if (left_hand_) {
-        lv_anim_del(left_hand_, (lv_anim_exec_xcb_t)lv_obj_set_x);
-    }
-    if (right_hand_) {
-        lv_anim_del(right_hand_, (lv_anim_exec_xcb_t)lv_obj_set_x);
-    }
-    
-    // Clear existing objects
-    if (left_eye_) {
+    // Clear existing objects with safety checks
+    if (left_eye_ && lv_obj_is_valid(left_eye_)) {
         lv_obj_del(left_eye_);
         left_eye_ = nullptr;
     }
-    if (right_eye_) {
+    if (right_eye_ && lv_obj_is_valid(right_eye_)) {
         lv_obj_del(right_eye_);
         right_eye_ = nullptr;
     }
-    if (container_) {
+    if (container_ && lv_obj_is_valid(container_)) {
         lv_obj_del(container_);
         container_ = nullptr;
     }
-    if (mouth_) {
+    if (mouth_ && lv_obj_is_valid(mouth_)) {
         lv_obj_del(mouth_);
         mouth_ = nullptr;
     }
-    if (left_hand_) {
+    if (left_hand_ && lv_obj_is_valid(left_hand_)) {
         lv_obj_del(left_hand_);
         left_hand_ = nullptr;
     }
-    if (right_hand_) {
+    if (right_hand_ && lv_obj_is_valid(right_hand_)) {
         lv_obj_del(right_hand_);
         right_hand_ = nullptr;
     }
@@ -1594,6 +1539,7 @@ void XunguanDisplay::heart_zoom_anim_cb(void* var, int32_t v) {
 }
 
 void XunguanDisplay::QueueAnimation(AnimationType type) {
+    std::lock_guard<std::mutex> lock(animation_mutex_);
     
     // If same animation is already pending, ignore
     if (pending_animation_.is_pending && pending_animation_.type == type) {
@@ -2292,6 +2238,32 @@ void XunguanDisplay::EnterWifiConfig() {
     lv_obj_invalidate(screen);
     
     
+}
+
+void XunguanDisplay::ClearScreen() {
+    DisplayLockGuard lock(this);
+
+    auto screen = lv_screen_active();
+    if (!screen) {
+        ESP_LOGE(TAG, "No active screen found!");
+        return;
+    }
+
+    // Stop animations and clear tracked UI elements without taking the lock again
+    ClearUIElementsNoLock();
+
+    // Ensure all remaining objects on the screen are removed
+    lv_obj_clean(screen);
+
+    // Reset background to black and fully opaque
+    lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
+
+    // Force refresh
+    lv_obj_invalidate(screen);
+    if (lvgl_display_) {
+        lv_refr_now(lvgl_display_);
+    }
 }
 
 void XunguanDisplay::blink_anim_cb(void* var, int32_t v) {

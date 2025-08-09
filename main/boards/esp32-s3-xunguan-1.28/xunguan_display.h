@@ -10,6 +10,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/queue.h>
+#include <mutex>
 #include "assert.h"
 
 class XunguanDisplay : public Display {
@@ -162,6 +163,9 @@ private:
     
     // Power management
     bool power_save_mode_enabled_;
+    
+    // Thread safety
+    mutable std::mutex animation_mutex_;
 
     // Blink animation user data structure
     struct BlinkUserData {
@@ -217,6 +221,9 @@ public:
 
     // WiFi config method
     void EnterWifiConfig();
+    
+    // Clear screen implementation
+    void ClearScreen() override;
     
     // Power management methods
 

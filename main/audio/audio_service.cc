@@ -500,10 +500,9 @@ void AudioService::OpusCodecTask() {
             packet->sample_rate = 16000;
             packet->timestamp = task->timestamp;
             ESP_LOGD(TAG, "Opus encode: task->pcm.size()=%zu", task->pcm.size());
-            if (!opus_encoder_->Encode(std::move(task->pcm), packet->payload)) {
-                ESP_LOGE(TAG, "Failed to encode audio");
-                continue;
-            }
+            opus_encoder_->Encode(std::move(task->pcm), [packet = packet.get()](std::vector<uint8_t>&& opus) {
+                packet->payload = std::move(opus);
+            });
 
             if (task->type == kAudioTaskTypeEncodeToSendQueue) {
                 {
