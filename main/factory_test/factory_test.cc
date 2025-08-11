@@ -173,8 +173,12 @@ static void factory_test_send(const char *data, int len) {
     // ESP_LOGI(TAG, "TX[%d]: %s", len, data);
     if (len > 0) {
         // 通过print发送数据，这样可以在串口上看到
-        // 使用特殊前缀，便于识别产测数据
-        printf("\n%.*s\n", len, data);
+        // 发送三次确保对方能收到
+        for (int i = 0; i < 3; i++) {
+            printf("\n%.*s\n", len, data);
+            // 短暂延迟，避免数据重叠
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
     }
 }
 
