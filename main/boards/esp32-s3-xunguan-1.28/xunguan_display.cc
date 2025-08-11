@@ -238,9 +238,9 @@ bool XunguanDisplay::CreateLvglTask() {
     BaseType_t ret = xTaskCreate(
         lvgl_task,
         "LVGL",
-        4 * 1024,
+        5 * 1024,
         this,
-        5,     // 提高优先级到2
+        5,
         &lvgl_task_handle_
     );
     
