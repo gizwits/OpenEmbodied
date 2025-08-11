@@ -411,13 +411,14 @@ void Application::Start() {
     display->UpdateStatusBar(true);
     protocol_ = std::make_unique<WebsocketProtocol>();
 
+    initGizwitsServer();
+
     // Check for new firmware version or get the MQTT broker address
     Ota ota;
     CheckNewVersion(ota);
 
     // Initialize the protocol
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
-    initGizwitsServer();
 
     protocol_ = std::make_unique<WebsocketProtocol>();
 
