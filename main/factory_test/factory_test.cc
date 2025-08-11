@@ -175,7 +175,7 @@ static void factory_test_send(const char *data, int len) {
         // 通过print发送数据，这样可以在串口上看到
         // 发送三次确保对方能收到
         for (int i = 0; i < 3; i++) {
-            printf("\n%.*s\n", len, data);
+            printf("\r\n%.*s\r\n", len, data);
             // 短暂延迟，避免数据重叠
             vTaskDelay(pdMS_TO_TICKS(10));
         }
@@ -220,7 +220,7 @@ void factory_test_start(void) {
     if (s_factory_test_mode == FACTORY_TEST_MODE_IN_FACTORY) {
         // 发送产测命令
         ESP_LOGI(TAG, "Sending factory test entry confirmation");
-        factory_test_send("+ENTER_TEST OK\r\n", strlen("+ENTER_TEST OK\r\n"));
+        factory_test_send("+ENTER_TEST OK", strlen("+ENTER_TEST OK"));
     }
 }
 
@@ -309,16 +309,16 @@ static void save_factory_test_mode_task(void *arg) {
     if (mode == 0) {
         // 退出产测
         if (ret == ESP_OK) {
-            factory_test_send("+EXIT_TEST OK\r\n", strlen("+EXIT_TEST OK\r\n"));
+            factory_test_send("+EXIT_TEST OK", strlen("+EXIT_TEST OK"));
         } else {
-            factory_test_send("+EXIT_TEST ERROR\r\n", strlen("+EXIT_TEST ERROR\r\n"));
+            factory_test_send("+EXIT_TEST ERROR", strlen("+EXIT_TEST ERROR"));
         }
     } else {
         // 进入产测
         if (ret == ESP_OK) {
-            factory_test_send("+ENTER_TEST OK\r\n", strlen("+ENTER_TEST OK\r\n"));
+            factory_test_send("+ENTER_TEST OK", strlen("+ENTER_TEST OK"));
         } else {
-            factory_test_send("+ENTER_TEST ERROR\r\n", strlen("+ENTER_TEST ERROR\r\n"));
+            factory_test_send("+ENTER_TEST ERROR", strlen("+ENTER_TEST ERROR"));
         }
     }
     
@@ -355,7 +355,7 @@ static void handle_at_command(char *cmd) {
         std::string hw_version = get_hardware_version();
         std::string sw_version = get_software_version();
         
-        snprintf(version_str, sizeof(version_str), "+VER %s,%s,%s\r\n", 
+        snprintf(version_str, sizeof(version_str), "+VER %s,%s,%s", 
                  hw_version.c_str(), sw_version.c_str(),
                  auth_valid ? "auth ok" : "auth failed");
         ESP_LOGI(TAG, "Version query - HW: %s, SW: %s, auth: %s", 
@@ -370,16 +370,16 @@ static void handle_at_command(char *cmd) {
         ret = init_io_test(cmd);
         // 返回OK响应
         if (ret == ESP_OK) {
-            factory_test_send("OK\r\n", strlen("OK\r\n"));
+            factory_test_send("OK", strlen("OK"));
         } else {
-            factory_test_send("ERROR\r\n", strlen("ERROR\r\n"));
+            factory_test_send("ERROR", strlen("ERROR"));
         }
     }
     else if (strcmp(cmd, "AT+IOTEST?") == 0) {
         char result_str[64];
         // 查询IO测试结果
         ESP_LOGI(TAG, "Received IO test query command");
-        snprintf(result_str, sizeof(result_str), "+IOTEST=%d\r\n", s_io_cnt);
+        snprintf(result_str, sizeof(result_str), "+IOTEST=%d", s_io_cnt);
         factory_test_send(result_str, strlen(result_str));
     }
     else if (strncmp(cmd, "AT+REC=0", strlen("AT+REC=0")) == 0) {
@@ -389,10 +389,10 @@ static void handle_at_command(char *cmd) {
         // 返回录音成功响应
         if (ft_start_record_task(3) == 0) {
             ESP_LOGI(TAG, "Record task started");
-            factory_test_send("+REC OK\r\n", strlen("+REC OK\r\n"));
+            factory_test_send("+REC OK", strlen("+REC OK"));
         } else {
             ESP_LOGE(TAG, "Record task failed to start");
-            factory_test_send("+REC ERROR\r\n", strlen("+REC ERROR\r\n"));
+            factory_test_send("+REC ERROR", strlen("+REC ERROR"));
         }
     }
     else if (strncmp(cmd, "AT+PLAY=0", strlen("AT+PLAY=0")) == 0) {
@@ -401,10 +401,10 @@ static void handle_at_command(char *cmd) {
         // 返回播放成功响应
         if (ft_start_play_task(3) == 0) {
             ESP_LOGI(TAG, "Play task started");
-            factory_test_send("+PLAY OK\r\n", strlen("+PLAY OK\r\n"));
+            factory_test_send("+PLAY OK", strlen("+PLAY OK"));
         } else {
             ESP_LOGE(TAG, "Play task failed to start");
-            factory_test_send("+PLAY ERROR\r\n", strlen("+PLAY ERROR\r\n"));
+            factory_test_send("+PLAY ERROR", strlen("+PLAY ERROR"));
         }
     }else if (strncmp(cmd, "AT+RSSI?", strlen("AT+RSSI?")) == 0) {
         ESP_LOGI(TAG, "Received get RSSI command");
@@ -419,13 +419,13 @@ static void handle_at_command(char *cmd) {
         char rssi_str[64];
 
         // 返回RSSI信息
-        snprintf(rssi_str, sizeof(rssi_str), "+RSSI=%ld\r\n", rssi);
+        snprintf(rssi_str, sizeof(rssi_str), "+RSSI=%ld", rssi);
         factory_test_send(rssi_str, strlen(rssi_str));
     }
     else {
         // 未知命令处理
         ESP_LOGW(TAG, "Unknown AT command[%d]: %s", strlen(cmd), cmd);
-        factory_test_send("+ERROR\r\n", strlen("+ERROR\r\n"));
+        factory_test_send("+ERROR", strlen("+ERROR"));
     }
 }
 // 处理接收到的数据
@@ -457,7 +457,7 @@ static void handle_at_command_buffer(uint8_t *data) {
 
         // 处理缓冲区中的完整命令
         while (1) {
-            char *line_end = strstr(at_buffer, "\r\n");
+            char *line_end = strstr(at_buffer, "");
             if (line_end == nullptr) {
                 // 没有完整行，检查是否需要清空缓冲区
                 if (at_buffer_len >= sizeof(at_buffer) - 1) {
