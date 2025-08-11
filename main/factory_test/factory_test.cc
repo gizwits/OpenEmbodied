@@ -170,11 +170,11 @@ static void factory_test_send(const char *data, int len) {
         return;
     }
 
-    ESP_LOGI(TAG, "TX[%d]: %s", len, data);
+    // ESP_LOGI(TAG, "TX[%d]: %s", len, data);
     if (len > 0) {
-        // 通过错误日志发送数据，这样可以在串口上看到
+        // 通过print发送数据，这样可以在串口上看到
         // 使用特殊前缀，便于识别产测数据
-        ESP_LOGE(TAG, "FT_DATA: %.*s", len, data);
+        printf("\n%.*s\n", len, data);
     }
 }
 
