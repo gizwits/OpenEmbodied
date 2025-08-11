@@ -4,7 +4,7 @@ ESP32 固件发布脚本
 
 功能:
 1. 构建固件
-2. 合并固件为 all.bin
+2. 合并固件为 merged-binary.bin
 3. 打包发布文件
 4. 上传到腾讯云 COS
 
@@ -12,7 +12,7 @@ ESP32 固件发布脚本
     python release.py                    # 发布当前板子
     python release.py <board_type>      # 发布指定板子
     python release.py all               # 发布所有板子
-    python release.py merge             # 仅创建 all.bin 文件
+    python release.py merge             # 仅创建 merged-binary.bin 文件
 
 示例:
     python release.py esp-box-3
@@ -108,8 +108,8 @@ def merge_bin():
         sys.exit(1)
 
 def create_all_bin():
-    """创建合并的 all.bin 文件"""
-    print("正在创建 all.bin 文件...")
+    """创建合并的 merged-binary.bin 文件"""
+    print("正在创建 merged-binary.bin 文件...")
     
     # 检查必要的文件是否存在
     required_files = [
@@ -163,12 +163,7 @@ def create_all_bin():
     
     # 使用 esptool 合并固件
     merge_cmd = [
-        "esptool.py", "--chip", chip_type, "merge_bin", 
-        "-o", "build/all.bin",
-        "--flash_mode", flash_mode, "--flash_size", flash_size,
-        "0x0", "build/bootloader/bootloader.bin",
-        "0x8000", "build/partition_table/partition-table.bin", 
-        "0x10000", "build/xiaozhi.bin"
+        "esptool.py", "--chip", chip_type, "merge_bin"
     ]
     
     # 添加可选的 ota_data_initial.bin 文件
@@ -200,19 +195,19 @@ def create_all_bin():
         print("STDERR:", result.stderr)
         return False
     
-    print("all.bin 文件创建成功")
+    print("merged-binary.bin 文件创建成功")
     
     # 验证生成的文件
-    if os.path.exists("build/all.bin"):
-        file_size = os.path.getsize("build/all.bin")
-        print(f"all.bin 文件大小: {file_size} 字节 ({file_size/1024:.1f} KB)")
+    if os.path.exists("build/merged-binary.bin"):
+        file_size = os.path.getsize("build/merged-binary.bin")
+        print(f"merged-binary.bin 文件大小: {file_size} 字节 ({file_size/1024:.1f} KB)")
         
         # 尝试获取文件信息
         try:
-            info_cmd = ["esptool.py", "--chip", chip_type, "image_info", "build/all.bin"]
+            info_cmd = ["esptool.py", "--chip", chip_type, "image_info", "build/merged-binary.bin"]
             result = subprocess.run(info_cmd, capture_output=True, text=True)
             if result.returncode == 0:
-                print("all.bin 文件信息:")
+                print("merged-binary.bin 文件信息:")
                 print(result.stdout)
         except Exception as e:
             print(f"无法获取文件信息: {e}")
@@ -326,7 +321,7 @@ def zip_bin(board_type, project_version, flash_command=None):
         "build/xiaozhi.bin",
         "build/xiaozhi.elf",
         "build/xiaozhi.map",
-        "build/all.bin"  # 添加合并的固件文件
+        "build/merged-binary.bin"  # 添加合并的固件文件
     ]
     
     with zipfile.ZipFile(output_path, 'w', compression=zipfile.ZIP_DEFLATED) as zipf:
@@ -378,8 +373,8 @@ def release_current():
         release(board_type, board_config)
     else:
         print(f"未找到 {board_type} 对应的 board_config")
-        # 即使没有找到对应的 board_config，也尝试创建 all.bin
-        print("尝试为当前构建创建 all.bin...")
+        # 即使没有找到对应的 board_config，也尝试创建 merged-binary.bin
+        print("尝试为当前构建创建 merged-binary.bin...")
         create_all_bin()
 
 def get_all_board_types():
@@ -469,7 +464,7 @@ def release(board_type, board_config):
         
         # 创建合并的固件文件
         if not create_all_bin():
-            print("Warning: 创建 all.bin 文件失败，继续执行...")
+            print("Warning: 创建 merged-binary.bin 文件失败，继续执行...")
         
         # Zip bin
         zip_bin(name, project_version, flash_command)
@@ -480,7 +475,7 @@ def release(board_type, board_config):
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         if sys.argv[1] == 'merge':
-            # 单独创建 all.bin 文件
+            # 单独创建 merged-binary.bin 文件
             create_all_bin()
         else:
             board_configs = get_all_board_types()
@@ -494,6 +489,6 @@ if __name__ == "__main__":
                 print("可用的板子类型:")
                 for board_type in board_configs.values():
                     print(f"  {board_type}")
-                print("  merge - 仅创建 all.bin 文件")
+                print("  merge - 仅创建 merged-binary.bin 文件")
     else:
         release_current()
