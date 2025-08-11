@@ -108,6 +108,8 @@ static void factory_test_task(void *arg)
         if (len > 0) {
             data[len] = '\0';
             ESP_LOGI(TAG, "RX[%d]: %s", len, reinterpret_cast<const char*>(data));
+            hexdump("FT RX",data, len);
+
             // 处理AT命令
             handle_at_command_buffer(data);
         } else if (len < 0) {
@@ -182,27 +184,47 @@ static void factory_test_send(const char *data, int len) {
     }
 }
 
+// WiFi连接任务
+static void wifi_connect_task(void *arg) {
+    ESP_LOGI(TAG, "WiFi连接任务启动");
+    
+    // 产测模式临时连接产测路由器
+    auto& wifi_station = WifiStation::GetInstance();
+    wifi_station.Start();
+
+    ESP_LOGI(TAG, "产测模式临时连接产测路由器");
+    if (WifiStation::GetInstance().ConnectToWifi(FACTORY_TEST_SSID, FACTORY_TEST_PASSWORD)) {
+        ESP_LOGI(TAG, "产测WiFi连接成功");
+        // if (WifiStation::GetInstance().WaitForConnected(10000)) {
+        //     ESP_LOGI(TAG, "产测WiFi连接成功");
+        // } else {
+        //     ESP_LOGE(TAG, "产测WiFi连接失败");
+        // }
+    } else {
+        ESP_LOGE(TAG, "产测WiFi连接失败");
+    }
+    
+    // 任务完成后自动删除
+    vTaskDelete(NULL);
+}
 // 初始化产测
 void factory_test_init(void) {
     Settings settings("wifi", true);
     s_factory_test_mode = settings.GetInt("ft_mode", 0);  // 使用更短的键名
     ESP_LOGI(TAG, "产测模式: %d", s_factory_test_mode);
     if (s_factory_test_mode == FACTORY_TEST_MODE_IN_FACTORY) {
-        // 产测模式临时连接产测路由器
-        auto& wifi_station = WifiStation::GetInstance();
-        wifi_station.Start();
-
-        ESP_LOGI(TAG, "产测模式临时连接产测路由器");
-        if (WifiStation::GetInstance().ConnectToWifi(FACTORY_TEST_SSID, FACTORY_TEST_PASSWORD)) {
-            ESP_LOGI(TAG, "产测WiFi连接成功");
-            // if (WifiStation::GetInstance().WaitForConnected(10000)) {
-            //     ESP_LOGI(TAG, "产测WiFi连接成功");
-            // } else {
-            //     ESP_LOGE(TAG, "产测WiFi连接失败");
-            // }
-        }
+        // 创建WiFi连接任务，不阻塞主线程
+        xTaskCreate(
+            wifi_connect_task,           // 任务函数
+            "wifi_connect",              // 任务名称
+            4096,                        // 堆栈大小
+            NULL,                        // 任务参数
+            5,                           // 任务优先级
+            NULL                         // 任务句柄
+        );
     }
 }
+
 
 void factory_test_start(void) {
     ESP_LOGI(TAG, "Starting factory test, mode: %d", s_factory_test_mode);
@@ -457,7 +479,7 @@ static void handle_at_command_buffer(uint8_t *data) {
 
         // 处理缓冲区中的完整命令
         while (1) {
-            char *line_end = strstr(at_buffer, "");
+            char *line_end = strstr(at_buffer, "\r\n");
             if (line_end == nullptr) {
                 // 没有完整行，检查是否需要清空缓冲区
                 if (at_buffer_len >= sizeof(at_buffer) - 1) {
