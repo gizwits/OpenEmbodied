@@ -766,7 +766,9 @@ void Application::SetDeviceState(DeviceState state) {
 
     if (state != kDeviceStateIdle) {
         // 防止黑屏讲话
-        board.GetBacklight()->RestoreBrightness();
+        if (board.GetBacklight()) {
+            board.GetBacklight()->RestoreBrightness();
+        }
     }
 
     switch (state) {
