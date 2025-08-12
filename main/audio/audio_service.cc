@@ -111,10 +111,9 @@ void AudioService::Initialize(AudioCodec* codec) {
         // 预分配解码缓冲区：60ms @ 16kHz = 960 samples
         size_t decode_buffer_size = OPUS_FRAME_DURATION_MS * 16000 / 1000;
         decode_pcm_buffer_.reserve(decode_buffer_size);
-        resample_buffer_.reserve(decode_buffer_size * 2);  // 为重采样预留更大空间
-        
-        ESP_LOGI(TAG, "Pre-allocated audio buffers - decode: %zu, resample: %zu", 
-                 decode_pcm_buffer_.size(), resample_buffer_.size());
+#ifndef CONFIG_USE_EYE_STYLE_VB6824
+        resample_buffer_.reserve(decode_buffer_size * 2);
+#endif
         buffers_initialized_ = true;
     }
 
@@ -579,7 +578,12 @@ void AudioService::PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t
         ESP_LOGW(TAG, "Encode queue full (%u/%d), dropping audio data to prevent memory issues", 
                  (unsigned int)audio_encode_queue_.size(), MAX_ENCODE_TASKS_IN_QUEUE);
         // 丢弃数据，释放内存
+        if (task) {
+            task->pcm.clear();        // 清空PCM数据
+            task->pcm.shrink_to_fit(); // 释放向量占用的内存
+        }
         task.reset();
+        audio_queue_cv_.notify_all();
         return;
     }
     
@@ -602,17 +606,17 @@ bool AudioService::PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> pa
         } else {
             ESP_LOGW(TAG, "Decode queue full (%u/%d), dropping packet to prevent memory issues", 
                      (unsigned int)audio_decode_queue_.size(), MAX_DECODE_PACKETS_IN_QUEUE);
-            // 丢弃数据包，释放内存
-            packet.reset();
+            // 队列满时，显式释放数据包内存
+            // 确保 payload 向量被清空，释放音频数据内存
+            if (packet && !packet->payload.empty()) {
+                ESP_LOGD(TAG, "Dropping packet with payload size: %u bytes", (unsigned int)packet->payload.size());
+                packet->payload.clear();  // 清空音频数据
+                packet->payload.shrink_to_fit();  // 释放向量占用的内存
+            }
+            audio_queue_cv_.notify_all();
             return false;
         }
     }
-    
-    // 添加队列状态日志（仅在队列接近满时）
-    // if (audio_decode_queue_.size() >= MAX_DECODE_PACKETS_IN_QUEUE * 0.8) {
-    //     ESP_LOGW(TAG, "Decode queue warning: %u/%d (80%% full)", 
-    //              (unsigned int)audio_decode_queue_.size(), MAX_DECODE_PACKETS_IN_QUEUE);
-    // }
     
     audio_decode_queue_.push_back(std::move(packet));
     audio_queue_cv_.notify_all();

@@ -910,9 +910,9 @@ bool Application::CanEnterSleepMode() {
         return false;
     }
 
-    // if (!audio_service_.IsIdle()) {
-    //     return false;
-    // }
+    if (!audio_service_.IsIdle()) {
+        return false;
+    }
 
     // Now it is safe to enter sleep mode
     return true;
