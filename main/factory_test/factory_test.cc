@@ -161,7 +161,7 @@ void factory_test_uart_init(void) {
     // 标记已接管串口
     s_uart_taken_over = true;
 
-    xTaskCreate(factory_test_task, "factory_test", 4 * 1024, nullptr, 5, nullptr);
+    xTaskCreate(factory_test_task, "factory_test", 10 * 1024, nullptr, 8, nullptr);
 
     ESP_LOGW(TAG, "Factory Test UART initialized successfully");
 }
@@ -413,7 +413,7 @@ static void handle_at_command(char *cmd) {
         ESP_LOGI(TAG, "Received record command");
         
         // 返回录音成功响应
-        if (ft_start_record_task(3) == 0) {
+        if (ft_start_record_task(2) == 0) {
             ESP_LOGI(TAG, "Record task started");
             factory_test_send("+REC OK", strlen("+REC OK"));
         } else {
@@ -425,7 +425,7 @@ static void handle_at_command(char *cmd) {
         // 处理播放命令
         ESP_LOGI(TAG, "Received play command");
         // 返回播放成功响应
-        if (ft_start_play_task(3) == 0) {
+        if (ft_start_play_task(2) == 0) {
             ESP_LOGI(TAG, "Play task started");
             factory_test_send("+PLAY OK", strlen("+PLAY OK"));
         } else {

@@ -11,6 +11,7 @@
 #include "watchdog.h"
 #include "assets/lang_config.h"
 #include "server/giz_mqtt.h"
+#include "ssid_manager.h"
 #include "auth.h"
 #include "mcp_server.h"
 #include "settings.h"
@@ -488,18 +489,23 @@ void Application::Start() {
     // 播放上电提示音
     PlaySound(Lang::Sounds::P3_SUCCESS);
 
-    ESP_LOGI(TAG, "Factory test init");
-    factory_test_init();
-    ESP_LOGI(TAG, "Factory test start");
-    factory_test_start();
-    ESP_LOGI(TAG, "Factory test is enabled");
+    bool wifi_config_mode_ = board.IsWifiConfigMode();
+    auto& ssid_manager = SsidManager::GetInstance();
+    auto ssid_list = ssid_manager.GetSsidList();
 
-    if (factory_test_is_enabled()) {
-        ESP_LOGW(TAG, "Factory test is enabled");
-        PlaySound(Lang::Sounds::P3_TEST_MODE);
-        return;
-    }
+    if (wifi_config_mode_ || ssid_list.empty()) {
+        ESP_LOGI(TAG, "Factory test init");
+        factory_test_init();
+        ESP_LOGI(TAG, "Factory test start");
+        factory_test_start();
+        ESP_LOGI(TAG, "Factory test is enabled");
     
+        if (factory_test_is_enabled()) {
+            ESP_LOGW(TAG, "Factory test is enabled");
+            PlaySound(Lang::Sounds::P3_TEST_MODE);
+            return;
+        }
+    }
 
     CheckBatteryLevel();
 
@@ -1166,7 +1172,6 @@ void Application::OnAudioInput() {
         // 检查录制时间是否已到
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - record_test_start_time_).count();
-        
         if (elapsed >= record_test_duration_seconds_) {
             // 录制时间到，停止录制
             ESP_LOGI(TAG, "Record test time limit reached");
@@ -1176,16 +1181,12 @@ void Application::OnAudioInput() {
         }
         
         // 读取音频数据并保存
-        std::vector<uint8_t> data;
-        int samples = 16000 * 60 / 1000; // 60ms 的音频数据
-        ReadAudio(data, 16000, samples);
-        
-        if (!data.empty()) {
-            // 保存录制的音频数据
-            recorded_audio_data_.insert(recorded_audio_data_.end(), data.begin(), data.end());
-            // ESP_LOGI(TAG, "Recorded %zu samples", data.size());
-            printf(".");
-        }
+        std::vector<uint8_t> opus;
+        ReadAudio(opus, 16000, 30 * 16000 / 1000);
+        // 保存录制的音频数据
+        recorded_audio_data_.insert(recorded_audio_data_.end(), opus.begin(), opus.end());
+        ESP_LOGI(TAG, "Recorded opus packet: %d bytes, total: %d bytes", (int)opus.size(), (int)recorded_audio_data_.size());
+        printf(".");
         return;
     }
 
@@ -1654,19 +1655,40 @@ int Application::StartPlayTest(int duration_seconds) {
     auto codec = Board::GetInstance().GetAudioCodec();
     codec->EnableOutput(true);
 
-    // 把数据塞进去
-    size_t chunk_size = 16000 * 10 / 1000; // 10ms 的数据块
-    for (size_t i = 0; i < recorded_audio_data_.size(); i += chunk_size) {
-        AudioStreamPacket packet;
-        size_t current_chunk_size = std::min(chunk_size, recorded_audio_data_.size() - i);
-        packet.payload.assign(recorded_audio_data_.begin() + i, recorded_audio_data_.begin() + i + current_chunk_size);
-        packet.timestamp = 0;
-        audio_decode_queue_.emplace_back(std::move(packet));
-        vTaskDelay(pdMS_TO_TICKS(10));
+    // 把数据塞进去 - 先解码opus数据，再写入音频
+    // 录制的数据是20ms一包的opus数据
+    opus_decoder_->Config(16000, 1, 20);
+    
+    ESP_LOGI(TAG, "Total recorded data size: %zu bytes", recorded_audio_data_.size());
+    
+    // 从录制的数据推断opus包大小
+    // 根据日志分析，每包40字节，对应20ms
+    size_t opus_packet_size = 40; // 20ms opus包大小
+    size_t expected_packets = recorded_audio_data_.size() / opus_packet_size;
+    
+    ESP_LOGI(TAG, "Using opus packet size: %d bytes, total packets: %d", (int)opus_packet_size, (int)expected_packets);
+    
+    size_t packets_processed = 0;
+    for (size_t i = 0; i < recorded_audio_data_.size() && i + opus_packet_size <= recorded_audio_data_.size(); i += opus_packet_size) {
+        // 提取opus包
+        // ESP_LOGI(TAG, "Play test packet %d/%d at offset %d", (int)(packets_processed + 1), (int)expected_packets, (int)i);
+        std::vector<uint8_t> opus_packet(recorded_audio_data_.begin() + i, 
+                                        recorded_audio_data_.begin() + i + opus_packet_size);
+        
+        // 解码opus数据
+        std::vector<int16_t> pcm;
+        // ESP_LOGI(TAG, "Attempting to decode opus packet: size=%d bytes", (int)opus_packet.size());
+        
+        if (opus_decoder_ && opus_decoder_->Decode(std::move(opus_packet), pcm)) {
+            // 解码成功，直接写入音频
+            // ESP_LOGI(TAG, "Successfully decoded opus packet to %d PCM samples", (int)pcm.size());
+            WriteAudio(pcm, opus_decoder_->sample_rate());
+        } else {
+            ESP_LOGW(TAG, "Failed to decode opus packet at offset %d, packet size: %d", (int)i, (int)opus_packet.size());
+        }
+        
     }
     
-    ESP_LOGI(TAG, "Play test started, will play for %d seconds", duration_seconds);
-    ESP_LOGI(TAG, "Total recorded data size: %zu bytes", recorded_audio_data_.size());
     play_test_active_ = false;
     return 0;
 }
