@@ -112,6 +112,7 @@ static void factory_test_task(void *arg)
 
             // 处理AT命令
             handle_at_command_buffer(data);
+            ESP_LOGI(TAG, "RX[%d] done", len);
         } else if (len < 0) {
             ESP_LOGE(TAG, "UART read error: %d", len);
         }
@@ -174,9 +175,22 @@ static void factory_test_send(const char *data, int len) {
 
     // ESP_LOGI(TAG, "TX[%d]: %s", len, data);
     if (len > 0) {
-        // 通过print发送数据，这样可以在串口上看到
-        // 发送三次确保对方能收到
-        for (int i = 0; i < 3; i++) {
+        // 如果以+ENTER_TEST开头，直接返回OK
+        if (strncmp(data, "+ENTER_TEST", strlen("+ENTER_TEST")) == 0
+            || strncmp(data, "+EXIT_TEST", strlen("+EXIT_TEST")) == 0
+            || strncmp(data, "+REC", strlen("+REC")) == 0) {
+            // 通过print发送数据，这样可以在串口上看到
+            // 发送三次确保对方能收到
+            for (int i = 0; i < 3; i++) {
+                printf("\r\n%.*s\r\n", len, data);
+                // 短暂延迟，避免数据重叠
+                vTaskDelay(pdMS_TO_TICKS(30));
+            }
+            if (strncmp(data, "+EXIT_TEST", strlen("+EXIT_TEST")) == 0) {
+                ESP_LOGI(TAG, "Exit factory test, delay 2 seconds");
+                vTaskDelay(pdMS_TO_TICKS(2000));
+            }
+        } else {
             printf("\r\n%.*s\r\n", len, data);
             // 短暂延迟，避免数据重叠
             vTaskDelay(pdMS_TO_TICKS(10));
@@ -184,47 +198,27 @@ static void factory_test_send(const char *data, int len) {
     }
 }
 
-// WiFi连接任务
-static void wifi_connect_task(void *arg) {
-    ESP_LOGI(TAG, "WiFi连接任务启动");
-    
-    // 产测模式临时连接产测路由器
-    auto& wifi_station = WifiStation::GetInstance();
-    wifi_station.Start();
-
-    ESP_LOGI(TAG, "产测模式临时连接产测路由器");
-    if (WifiStation::GetInstance().ConnectToWifi(FACTORY_TEST_SSID, FACTORY_TEST_PASSWORD)) {
-        ESP_LOGI(TAG, "产测WiFi连接成功");
-        // if (WifiStation::GetInstance().WaitForConnected(10000)) {
-        //     ESP_LOGI(TAG, "产测WiFi连接成功");
-        // } else {
-        //     ESP_LOGE(TAG, "产测WiFi连接失败");
-        // }
-    } else {
-        ESP_LOGE(TAG, "产测WiFi连接失败");
-    }
-    
-    // 任务完成后自动删除
-    vTaskDelete(NULL);
-}
 // 初始化产测
 void factory_test_init(void) {
     Settings settings("wifi", true);
     s_factory_test_mode = settings.GetInt("ft_mode", 0);  // 使用更短的键名
     ESP_LOGI(TAG, "产测模式: %d", s_factory_test_mode);
     if (s_factory_test_mode == FACTORY_TEST_MODE_IN_FACTORY) {
-        // 创建WiFi连接任务，不阻塞主线程
-        xTaskCreate(
-            wifi_connect_task,           // 任务函数
-            "wifi_connect",              // 任务名称
-            4096,                        // 堆栈大小
-            NULL,                        // 任务参数
-            5,                           // 任务优先级
-            NULL                         // 任务句柄
-        );
+        // 产测模式临时连接产测路由器
+        auto& wifi_station = WifiStation::GetInstance();
+        wifi_station.Start();
+
+        ESP_LOGI(TAG, "产测模式临时连接产测路由器");
+        if (WifiStation::GetInstance().ConnectToWifi(FACTORY_TEST_SSID, FACTORY_TEST_PASSWORD)) {
+            ESP_LOGI(TAG, "产测WiFi连接成功");
+            // if (WifiStation::GetInstance().WaitForConnected(10000)) {
+            //     ESP_LOGI(TAG, "产测WiFi连接成功");
+            // } else {
+            //     ESP_LOGE(TAG, "产测WiFi连接失败");
+            // }
+        }
     }
 }
-
 
 void factory_test_start(void) {
     ESP_LOGI(TAG, "Starting factory test, mode: %d", s_factory_test_mode);
@@ -243,6 +237,10 @@ void factory_test_start(void) {
         // 发送产测命令
         ESP_LOGI(TAG, "Sending factory test entry confirmation");
         factory_test_send("+ENTER_TEST OK", strlen("+ENTER_TEST OK"));
+    } else if (s_factory_test_mode == FACTORY_TEST_MODE_NONE) {
+        // 发送产测命令
+        ESP_LOGI(TAG, "Sending factory test exit confirmation");
+        factory_test_send("+EXIT_TEST OK", strlen("+EXIT_TEST OK"));
     }
 }
 
@@ -323,10 +321,16 @@ static int at_buffer_len = 0;
 
 static void save_factory_test_mode_task(void *arg) {
     int mode = static_cast<int>(reinterpret_cast<intptr_t>(arg));
-    
+    // esp_err_t ret = ESP_OK;
+
     // 保存产测模式
     s_factory_test_mode = mode;
     esp_err_t ret = storage_save_factory_test_mode(mode);
+    // if (mode != 0) {
+    //     ESP_LOGI(TAG, "Save factory test mode: %d", mode);
+    //     ret = storage_save_factory_test_mode(mode);
+    //     ESP_LOGI(TAG, "Save factory test mode: %d, ret: %d", mode, ret);
+    // }
 
     if (mode == 0) {
         // 退出产测
@@ -348,7 +352,7 @@ static void save_factory_test_mode_task(void *arg) {
     ESP_LOGI(TAG, "Restarting in 2 seconds...");
     vTaskDelay(2000 / portTICK_PERIOD_MS);
     
-    esp_restart();
+    // esp_restart();
 }
 
 // 处理AT命令
@@ -495,6 +499,7 @@ static void handle_at_command_buffer(uint8_t *data) {
             ESP_LOGI(TAG, "Processing AT command[%d]: %s", strlen(at_buffer), at_buffer);
             // AT指令处理逻辑
             handle_at_command(at_buffer);
+            ESP_LOGI(TAG, "Processing AT command[%d] done", strlen(at_buffer));
 
             // 移除已处理的数据
             int remaining_len = at_buffer_len - (line_end - at_buffer + 2);

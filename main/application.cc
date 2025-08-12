@@ -167,7 +167,7 @@ void Application::CheckNewVersion() {
 
             ota_.StartUpgrade([display](int progress, size_t speed) {
                 char buffer[64];
-                snprintf(buffer, sizeof(buffer), "%d%% %dKB/s", progress, (int)(speed / 1024));
+                snprintf(buffer, sizeof(buffer), "%d%% %zuKB/s", progress, speed / 1024);
                 display->SetChatMessage("system", buffer);
                 display->SetOTAProgress(progress);
 
@@ -280,8 +280,6 @@ void Application::DismissAlert() {
 }
 
 void Application::PlaySound(const std::string_view& sound) {
-    ESP_LOGI(TAG, "PlaySound: starting to play sound, size: %d bytes", (int)sound.size());
-    
     // Wait for the previous sound to finish
     {
         std::unique_lock<std::mutex> lock(mutex_);
@@ -308,17 +306,6 @@ void Application::PlaySound(const std::string_view& sound) {
         std::lock_guard<std::mutex> lock(mutex_);
         audio_decode_queue_.emplace_back(std::move(packet));
     }
-    
-    // 计算并记录添加的音频包数量
-    int packet_count = 0;
-    for (const char* p = data; p < data + size; ) {
-        p += sizeof(BinaryProtocol3);
-        auto p3 = (BinaryProtocol3*)(p - sizeof(BinaryProtocol3));
-        auto payload_size = ntohs(p3->payload_size);
-        p += payload_size;
-        packet_count++;
-    }
-    ESP_LOGI(TAG, "PlaySound: added %d audio packets to decode queue", packet_count);
 }
 
 void Application::ToggleChatState() {
@@ -1095,13 +1082,10 @@ void Application::OnAudioOutput() {
 
     std::unique_lock<std::mutex> lock(mutex_);
     if (audio_decode_queue_.empty()) {
-        // 音频播放队列为空，记录日志
-        
         // Disable the output if there is no audio data for a long time
         if (device_state_ == kDeviceStateIdle) {
             auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - last_output_time_).count();
             if (duration > max_silence_seconds) {
-                ESP_LOGI(TAG, "Disabling audio output after %lld seconds of silence", duration);
                 codec->EnableOutput(false);
             }
         }
@@ -1125,7 +1109,7 @@ void Application::OnAudioOutput() {
     }
 
     // 打印管道还剩余多少数据
-    ESP_LOGI(TAG, "Audio decode queue size: %d, processing audio packet", (int)audio_decode_queue_.size());
+    // ESP_LOGI(TAG, "Audio decode queue size: %d", audio_decode_queue_.size());
 
 
     busy_decoding_audio_ = true;
@@ -1199,7 +1183,8 @@ void Application::OnAudioInput() {
         if (!data.empty()) {
             // 保存录制的音频数据
             recorded_audio_data_.insert(recorded_audio_data_.end(), data.begin(), data.end());
-            ESP_LOGI(TAG, "Recorded %d samples", (int)data.size());
+            // ESP_LOGI(TAG, "Recorded %zu samples", data.size());
+            printf(".");
         }
         return;
     }
@@ -1472,6 +1457,7 @@ void Application::UpdateIotStates() {
 
 void Application::Reboot() {
     ESP_LOGI(TAG, "Rebooting...");
+    vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
 }
 
@@ -1680,7 +1666,7 @@ int Application::StartPlayTest(int duration_seconds) {
     }
     
     ESP_LOGI(TAG, "Play test started, will play for %d seconds", duration_seconds);
-    ESP_LOGI(TAG, "Total recorded data size: %d bytes", (int)recorded_audio_data_.size());
+    ESP_LOGI(TAG, "Total recorded data size: %zu bytes", recorded_audio_data_.size());
     play_test_active_ = false;
     return 0;
 }
