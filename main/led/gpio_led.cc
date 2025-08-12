@@ -21,7 +21,7 @@
 #define LEDC_LS_CH0_CHANNEL    LEDC_CHANNEL_0
 
 #define LEDC_DUTY              (8191)
-#define LEDC_FADE_TIME    (1000)
+#define LEDC_FADE_TIME    (0)
 // GPIO_LED
 
 GpioLed::GpioLed(gpio_num_t gpio)
@@ -82,6 +82,7 @@ GpioLed::GpioLed(gpio_num_t gpio, int output_invert, ledc_timer_t timer_num, led
     ESP_ERROR_CHECK(esp_timer_create(&blink_timer_args, &blink_timer_));
 
     ledc_initialized_ = true;
+    ESP_LOGI(TAG, "ledc_initialized_: %d", ledc_initialized_);
 }
 
 GpioLed::~GpioLed() {

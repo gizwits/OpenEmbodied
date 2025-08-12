@@ -315,7 +315,7 @@ void Application::ToggleChatState() {
         return;
     }
 
-    ESP_LOGI(TAG, "ToggleChatState, device_state_: %d", device_state_);
+    ESP_LOGI(TAG, "ToggleChatState, device_state_:[%d][%s]", device_state_, STATE_STRINGS[device_state_]);
     if (device_state_ == kDeviceStateActivating) {
         ESP_LOGI(TAG, "ToggleChatState(kDeviceStateActivating)");
         SetDeviceState(kDeviceStateIdle);
@@ -422,7 +422,7 @@ void Application::Start() {
 
     Settings settings("wifi", true);
     // 获取当前对话模式
-    chat_mode_ = settings.GetInt("chat_mode", 1); // 0=按键说话, 1=唤醒词, 2=自然对话
+    chat_mode_ = settings.GetInt("chat_mode", 0); // 0=按键说话, 1=唤醒词, 2=自然对话
     ESP_LOGI(TAG, "chat_mode_: %d", chat_mode_);
 
     auto& board = Board::GetInstance();

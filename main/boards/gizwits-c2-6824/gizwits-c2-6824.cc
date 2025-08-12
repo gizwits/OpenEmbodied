@@ -21,12 +21,15 @@
 #include "servo.h"
 #include <vector>
 #include <string>
+#include "driver/ledc.h"
+#include "custom/led_signal.h"
 
 #define TAG "CustomBoard"
 
 class CustomBoard : public WifiBoard {
 private:
     Button boot_button_;
+    LedSignal* led_signal_ = nullptr;
     Button* rec_button_ = nullptr;
     PowerSaveTimer* power_save_timer_;
     VbAduioCodec audio_codec;
@@ -94,6 +97,11 @@ private:
         });
     }
 
+    void InitializeLedSignal() {
+        led_signal_ = new LedSignal(GPIO_NUM_2, LEDC_CHANNEL_0, GPIO_NUM_4, LEDC_CHANNEL_1, GPIO_NUM_5, LEDC_CHANNEL_2);
+        led_signal_->CycleColorsWithFade(300, 100);
+    }
+
     // 检查命令是否在列表中
     bool IsCommandInList(const std::string& command, const std::vector<std::string>& command_list) {
         return std::find(command_list.begin(), command_list.end(), command) != command_list.end();
@@ -119,6 +127,7 @@ public:
         InitializePowerSaveTimer();       
         InitializeButtons();
         InitializeIot();
+        InitializeLedSignal();
 
         audio_codec.OnWakeUp([this](const std::string& command) {
             ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());
