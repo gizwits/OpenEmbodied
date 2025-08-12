@@ -39,11 +39,11 @@
 #define MAX_PLAYBACK_TASKS_IN_QUEUE 2
 
 #ifdef CONFIG_IDF_TARGET_ESP32S3
-#define MAX_DECODE_PACKETS_IN_QUEUE (10000 / OPUS_FRAME_DURATION_MS)   // 从333减到83
-#define MAX_SEND_PACKETS_IN_QUEUE (5000 / OPUS_FRAME_DURATION_MS)      // 从333减到83
+#define MAX_DECODE_PACKETS_IN_QUEUE (10000 / OPUS_FRAME_DURATION_MS)  
+#define MAX_SEND_PACKETS_IN_QUEUE (5000 / OPUS_FRAME_DURATION_MS)    
 #else
-#define MAX_DECODE_PACKETS_IN_QUEUE (1200 / OPUS_FRAME_DURATION_MS)    // 从167减到20
-#define MAX_SEND_PACKETS_IN_QUEUE (1200 / OPUS_FRAME_DURATION_MS)      // 从167减到20
+#define MAX_DECODE_PACKETS_IN_QUEUE (4000 / OPUS_FRAME_DURATION_MS) 
+#define MAX_SEND_PACKETS_IN_QUEUE (600 / OPUS_FRAME_DURATION_MS)  
 #endif
 
 #define AUDIO_TESTING_MAX_DURATION_MS 10000
@@ -129,6 +129,11 @@ private:
 #endif
     std::unique_ptr<OpusDecoderWrapper> opus_decoder_;
 
+    // 内存优化：使用预分配的缓冲区减少内存碎片
+    std::vector<int16_t> decode_pcm_buffer_;      // 预分配的解码PCM缓冲区
+    std::vector<int16_t> resample_buffer_;        // 预分配的重采样缓冲区
+    bool buffers_initialized_ = false;            // 缓冲区是否已初始化
+
 
 #ifndef CONFIG_USE_EYE_STYLE_VB6824
     OpusResampler input_resampler_;
@@ -154,7 +159,7 @@ private:
 #ifndef CONFIG_USE_EYE_STYLE_VB6824
     std::deque<std::unique_ptr<AudioTask>> audio_encode_queue_;
 #endif
-    std::deque<std::unique_ptr<AudioTask>> audio_playback_queue_;
+    // std::deque<std::unique_ptr<AudioTask>> audio_playback_queue_;
     // For server AEC
     std::deque<uint32_t> timestamp_queue_;
 
@@ -175,6 +180,8 @@ private:
     void PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t>&& pcm);
     void SetDecodeSampleRate(int sample_rate, int frame_duration);
     void CheckAndUpdateAudioPowerState();
+    void CheckMemoryStatus();
+    
 };
 
 #endif

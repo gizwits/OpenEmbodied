@@ -1,5 +1,6 @@
 #include "audio_service.h"
 #include <esp_log.h>
+#include <esp_heap_caps.h>
 
 #if CONFIG_USE_AUDIO_PROCESSOR
 #include "processors/afe_audio_processor.h"
@@ -66,7 +67,7 @@ void AudioService::Initialize(AudioCodec* codec) {
 
 #ifdef CONFIG_USE_EYE_STYLE_VB6824
     audio_processor_->OnOutput([this](std::vector<uint8_t>&& opus) {
-        ESP_LOGD(TAG, "Audio processor output: opus.size()=%zu", opus.size());
+        ESP_LOGD(TAG, "Audio processor output: opus.size()=%u", (unsigned int)opus.size());
         // 直接推送到管道
         auto packet = std::make_unique<AudioStreamPacket>();
         packet->payload = std::move(opus);
@@ -83,7 +84,7 @@ void AudioService::Initialize(AudioCodec* codec) {
     });
 #else
     audio_processor_->OnOutput([this](std::vector<int16_t>&& data) {
-        ESP_LOGD(TAG, "Audio processor output: data.size()=%zu", data.size());
+        ESP_LOGD(TAG, "Audio processor output: data.size()=%u", (unsigned int)data.size());
         PushTaskToEncodeQueue(kAudioTaskTypeEncodeToSendQueue, std::move(data));
     });
 #endif
@@ -105,10 +106,23 @@ void AudioService::Initialize(AudioCodec* codec) {
         });
     }
 
+    // 内存优化：预分配音频缓冲区减少内存碎片
+    if (!buffers_initialized_) {
+        // 预分配解码缓冲区：60ms @ 16kHz = 960 samples
+        size_t decode_buffer_size = OPUS_FRAME_DURATION_MS * 16000 / 1000;
+        decode_pcm_buffer_.reserve(decode_buffer_size);
+        resample_buffer_.reserve(decode_buffer_size * 2);  // 为重采样预留更大空间
+        
+        ESP_LOGI(TAG, "Pre-allocated audio buffers - decode: %zu, resample: %zu", 
+                 decode_pcm_buffer_.size(), resample_buffer_.size());
+        buffers_initialized_ = true;
+    }
+
     esp_timer_create_args_t audio_power_timer_args = {
         .callback = [](void* arg) {
             AudioService* audio_service = (AudioService*)arg;
             audio_service->CheckAndUpdateAudioPowerState();
+            // audio_service->CheckMemoryStatus();  // 添加内存状态检查
         },
         .arg = this,
         .dispatch_method = ESP_TIMER_TASK,
@@ -133,11 +147,11 @@ void AudioService::Start() {
     }, "audio_input", 2048 * 3, this, 8, &audio_input_task_handle_, 1);
 
     /* Start the audio output task */
-    xTaskCreate([](void* arg) {
-        AudioService* audio_service = (AudioService*)arg;
-        audio_service->AudioOutputTask();
-        vTaskDelete(NULL);
-    }, "audio_output", 2048 * 2, this, 3, &audio_output_task_handle_);
+    // xTaskCreate([](void* arg) {
+    //     AudioService* audio_service = (AudioService*)arg;
+    //     audio_service->AudioOutputTask();
+    //     vTaskDelete(NULL);
+    // }, "audio_output", 2048 * 2, this, 3, &audio_output_task_handle_);
 #else
     /* Start the audio input task */
     xTaskCreate([](void* arg) {
@@ -147,17 +161,17 @@ void AudioService::Start() {
     }, "audio_input", 1024, this, 8, &audio_input_task_handle_);
 
     /* Start the audio output task */
-    xTaskCreate([](void* arg) {
-        AudioService* audio_service = (AudioService*)arg;
-        audio_service->AudioOutputTask();
-        vTaskDelete(NULL);
-    }, "audio_output", 2048 + 768, this, 3, &audio_output_task_handle_);
+    // xTaskCreate([](void* arg) {
+    //     AudioService* audio_service = (AudioService*)arg;
+    //     audio_service->AudioOutputTask();
+    //     vTaskDelete(NULL);
+    // }, "audio_output", 2048 + 768, this, 3, &audio_output_task_handle_);
 #endif
 
     /* Start the opus codec task */
     int task_size = 2048 * 13;
 #ifdef CONFIG_USE_EYE_STYLE_VB6824
-    task_size = 2048 * 4;  // 减少栈大小，因为不需要编码逻辑
+    task_size = 1024 * 8;  // 减少栈大小，因为不需要编码逻辑
 #endif
     xTaskCreate([](void* arg) {
         AudioService* audio_service = (AudioService*)arg;
@@ -178,7 +192,6 @@ void AudioService::Stop() {
     audio_encode_queue_.clear();
 #endif
     audio_decode_queue_.clear();
-    audio_playback_queue_.clear();
     audio_testing_queue_.clear();
     audio_queue_cv_.notify_all();
 }
@@ -294,7 +307,7 @@ void AudioService::AudioInputTask() {
             int samples = audio_processor_->GetFeedSize();
             if (samples > 0) {
                 if (ReadAudioData(data, 16000, samples)) {
-                    ESP_LOGD(TAG, "Audio processor feed: opus.size()=%zu", data.size());
+                    ESP_LOGD(TAG, "Audio processor feed: opus.size()=%u", (unsigned int)data.size());
                     audio_processor_->Feed(std::move(data));
                     continue;
                 } else {
@@ -383,68 +396,12 @@ void AudioService::AudioInputTask() {
 }
 #endif
 
-void AudioService::AudioOutputTask() {
-    while (true) {
-        std::unique_lock<std::mutex> lock(audio_queue_mutex_);
-        audio_queue_cv_.wait(lock, [this]() { return !audio_playback_queue_.empty() || service_stopped_; });
-        if (service_stopped_) {
-            break;
-        }
-
-        auto task = std::move(audio_playback_queue_.front());
-        audio_playback_queue_.pop_front();
-        audio_queue_cv_.notify_all();
-        lock.unlock();
-
-        if (!codec_->output_enabled()) {
-            codec_->EnableOutput(true);
-            esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
-        }
-        codec_->OutputData(task->pcm);
-
-        /* Update the last output time */
-        last_output_time_ = std::chrono::steady_clock::now();
-        debug_statistics_.playback_count++;
-
-        // 检查是否需要启动语音处理（等待播放完成）
-        if (pending_voice_processing_start_) {
-            bool should_start_voice_processing = false;
-            {
-                std::lock_guard<std::mutex> guard(audio_queue_mutex_);
-                if (audio_playback_queue_.empty() && audio_decode_queue_.empty()) {
-                    // 播放队列为空，可以安全启动语音处理
-                    ESP_LOGD(TAG, "Audio playback completed, enabling voice processing");
-                    pending_voice_processing_start_ = false;
-                    should_start_voice_processing = true;
-                }
-            }
-            
-            if (should_start_voice_processing) {
-                ResetDecoder();
-                audio_input_need_warmup_ = true;
-                audio_processor_->Start();
-                xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_PROCESSOR_RUNNING);
-            }
-        }
-
-#if CONFIG_USE_SERVER_AEC
-        /* Record the timestamp for server AEC */
-        if (task->timestamp > 0) {
-            std::lock_guard<std::mutex> guard(audio_queue_mutex_);
-            timestamp_queue_.push_back(task->timestamp);
-        }
-#endif
-    }
-
-    ESP_LOGW(TAG, "Audio output task stopped");
-}
-
 void AudioService::OpusCodecTask() {
     while (true) {
         std::unique_lock<std::mutex> lock(audio_queue_mutex_);
         audio_queue_cv_.wait(lock, [this]() {
             return service_stopped_ ||
-                (!audio_decode_queue_.empty() && audio_playback_queue_.size() < MAX_PLAYBACK_TASKS_IN_QUEUE)
+                !audio_decode_queue_.empty()
 #ifndef CONFIG_USE_EYE_STYLE_VB6824
                 || (!audio_encode_queue_.empty() && audio_send_queue_.size() < MAX_SEND_PACKETS_IN_QUEUE)
 #endif
@@ -454,37 +411,83 @@ void AudioService::OpusCodecTask() {
             break;
         }
 
-        /* Decode the audio from decode queue */
-        if (!audio_decode_queue_.empty() && audio_playback_queue_.size() < MAX_PLAYBACK_TASKS_IN_QUEUE) {
+        /* Decode the audio from decode queue and output directly */
+        if (!audio_decode_queue_.empty()) {
             auto packet = std::move(audio_decode_queue_.front());
             audio_decode_queue_.pop_front();
             audio_queue_cv_.notify_all();
             lock.unlock();
-
-            auto task = std::make_unique<AudioTask>();
-            task->type = kAudioTaskTypeDecodeToPlaybackQueue;
-            task->timestamp = packet->timestamp;
-
+            decode_pcm_buffer_.clear();  // 清空但保留容量
             SetDecodeSampleRate(packet->sample_rate, packet->frame_duration);
-            if (opus_decoder_->Decode(std::move(packet->payload), task->pcm)) {
-                // Resample if the sample rate is different
+            if (opus_decoder_->Decode(std::move(packet->payload), decode_pcm_buffer_)) {
+                // 重采样（如果需要）
 #ifndef CONFIG_USE_EYE_STYLE_VB6824
                 if (opus_decoder_->sample_rate() != codec_->output_sample_rate()) {
-                    int target_size = output_resampler_.GetOutputSamples(task->pcm.size());
-                    std::vector<int16_t> resampled(target_size);
-                    output_resampler_.Process(task->pcm.data(), task->pcm.size(), resampled.data());
-                    task->pcm = std::move(resampled);
+                    int target_size = output_resampler_.GetOutputSamples(decode_pcm_buffer_.size());
+                    resample_buffer_.clear();  // 清空但保留容量
+                    resample_buffer_.resize(target_size);
+                    output_resampler_.Process(decode_pcm_buffer_.data(), decode_pcm_buffer_.size(), resample_buffer_.data());
+                    
+                    // 直接输出重采样后的数据
+                    if (!codec_->output_enabled()) {
+                        codec_->EnableOutput(true);
+                        esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
+                    }
+                    codec_->OutputData(resample_buffer_);
+                } else {
+                    // 不需要重采样，直接输出解码后的数据
+                    if (!codec_->output_enabled()) {
+                        codec_->EnableOutput(true);
+                        esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
+                    }
+                    codec_->OutputData(decode_pcm_buffer_);
+                }
+#else
+                // VB6824模式：直接输出解码后的数据
+                if (!codec_->output_enabled()) {
+                    codec_->EnableOutput(true);
+                    esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
+                }
+                codec_->OutputData(decode_pcm_buffer_);
+#endif
+                
+                // 更新最后输出时间
+                last_output_time_ = std::chrono::steady_clock::now();
+                debug_statistics_.playback_count++;
+                
+                // 检查是否需要启动语音处理
+                if (pending_voice_processing_start_) {
+                    bool should_start_voice_processing = false;
+                    {
+                        std::lock_guard<std::mutex> guard(audio_queue_mutex_);
+                        if (audio_decode_queue_.empty()) {
+                            // 解码队列为空，可以安全启动语音处理
+                            ESP_LOGD(TAG, "Audio playback completed, enabling voice processing");
+                            pending_voice_processing_start_ = false;
+                            should_start_voice_processing = true;
+                        }
+                    }
+                    
+                    if (should_start_voice_processing) {
+                        ResetDecoder();
+                        audio_input_need_warmup_ = true;
+                        audio_processor_->Start();
+                        xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_PROCESSOR_RUNNING);
+                    }
+                }
+
+#if CONFIG_USE_SERVER_AEC
+                /* Record the timestamp for server AEC */
+                if (packet->timestamp > 0) {
+                    std::lock_guard<std::mutex> guard(audio_queue_mutex_);
+                    timestamp_queue_.push_back(packet->timestamp);
                 }
 #endif
-
-                lock.lock();
-                audio_playback_queue_.push_back(std::move(task));
-                audio_queue_cv_.notify_all();
             } else {
                 ESP_LOGE(TAG, "Failed to decode audio");
-                lock.lock();
             }
             debug_statistics_.decode_count++;
+            lock.lock();
         }
         
 #ifndef CONFIG_USE_EYE_STYLE_VB6824
@@ -499,9 +502,14 @@ void AudioService::OpusCodecTask() {
             packet->frame_duration = OPUS_FRAME_DURATION_MS;
             packet->sample_rate = 16000;
             packet->timestamp = task->timestamp;
-            ESP_LOGD(TAG, "Opus encode: task->pcm.size()=%zu", task->pcm.size());
-            opus_encoder_->Encode(std::move(task->pcm), [packet = packet.get()](std::vector<uint8_t>&& opus) {
-                packet->payload = std::move(opus);
+            ESP_LOGD(TAG, "Opus encode: task->pcm.size()=%u", (unsigned int)task->pcm.size());
+            
+            // 修复内存泄漏：使用shared_ptr确保内存安全
+            auto packet_ptr = packet.get();
+            opus_encoder_->Encode(std::move(task->pcm), [packet_ptr](std::vector<uint8_t>&& opus) {
+                if (packet_ptr) {
+                    packet_ptr->payload = std::move(opus);
+                }
             });
 
             if (task->type == kAudioTaskTypeEncodeToSendQueue) {
@@ -545,7 +553,7 @@ void AudioService::SetDecodeSampleRate(int sample_rate, int frame_duration) {
 
 void AudioService::PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t>&& pcm) {
 #ifdef CONFIG_USE_EYE_STYLE_VB6824
-    // 在 CONFIG_USE_EYE_STYLE_VB6824 模式下，不需要编码队列
+    // 在 CONFIG_USE_EYE_STYLE_VB68204 模式下，不需要编码队列
     ESP_LOGW(TAG, "PushTaskToEncodeQueue called in CONFIG_USE_EYE_STYLE_VB6824 mode, ignoring");
     return;
 #else
@@ -566,7 +574,15 @@ void AudioService::PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t
         timestamp_queue_.pop_front();
     }
 
-    audio_queue_cv_.wait(lock, [this]() { return audio_encode_queue_.size() < MAX_ENCODE_TASKS_IN_QUEUE; });
+    // 检查编码队列是否已满，如果满了就丢弃数据而不是无限等待
+    if (audio_encode_queue_.size() >= MAX_ENCODE_TASKS_IN_QUEUE) {
+        ESP_LOGW(TAG, "Encode queue full (%u/%d), dropping audio data to prevent memory issues", 
+                 (unsigned int)audio_encode_queue_.size(), MAX_ENCODE_TASKS_IN_QUEUE);
+        // 丢弃数据，释放内存
+        task.reset();
+        return;
+    }
+    
     audio_encode_queue_.push_back(std::move(task));
     audio_queue_cv_.notify_all();
 #endif
@@ -574,13 +590,30 @@ void AudioService::PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t
 
 bool AudioService::PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> packet, bool wait) {
     std::unique_lock<std::mutex> lock(audio_queue_mutex_);
+    
+    // 检查队列是否已满
     if (audio_decode_queue_.size() >= MAX_DECODE_PACKETS_IN_QUEUE) {
         if (wait) {
-            audio_queue_cv_.wait(lock, [this]() { return audio_decode_queue_.size() < MAX_DECODE_PACKETS_IN_QUEUE; });
+            ESP_LOGW(TAG, "Decode queue full (%u/%d), waiting for space...", 
+                     (unsigned int)audio_decode_queue_.size(), MAX_DECODE_PACKETS_IN_QUEUE);
+            audio_queue_cv_.wait(lock, [this]() { 
+                return audio_decode_queue_.size() < MAX_DECODE_PACKETS_IN_QUEUE; 
+            });
         } else {
+            ESP_LOGW(TAG, "Decode queue full (%u/%d), dropping packet to prevent memory issues", 
+                     (unsigned int)audio_decode_queue_.size(), MAX_DECODE_PACKETS_IN_QUEUE);
+            // 丢弃数据包，释放内存
+            packet.reset();
             return false;
         }
     }
+    
+    // 添加队列状态日志（仅在队列接近满时）
+    // if (audio_decode_queue_.size() >= MAX_DECODE_PACKETS_IN_QUEUE * 0.8) {
+    //     ESP_LOGW(TAG, "Decode queue warning: %u/%d (80%% full)", 
+    //              (unsigned int)audio_decode_queue_.size(), MAX_DECODE_PACKETS_IN_QUEUE);
+    // }
+    
     audio_decode_queue_.push_back(std::move(packet));
     audio_queue_cv_.notify_all();
     return true;
@@ -657,7 +690,7 @@ void AudioService::EnableVoiceProcessing(bool enable, bool force_stop) {
             bool should_start_immediately = false;
             {
                 std::lock_guard<std::mutex> guard(audio_queue_mutex_);
-                if (audio_playback_queue_.empty() && audio_decode_queue_.empty()) {
+                if (audio_decode_queue_.empty()) {
                     // 没有音频在播放，立即进入聆听模式
                     should_start_immediately = true;
                 } else {
@@ -731,9 +764,9 @@ void AudioService::PlaySound(const std::string_view& sound) {
 bool AudioService::IsIdle() {
     std::lock_guard<std::mutex> lock(audio_queue_mutex_);
 #ifndef CONFIG_USE_EYE_STYLE_VB6824
-    return audio_encode_queue_.empty() && audio_decode_queue_.empty() && audio_playback_queue_.empty() && audio_testing_queue_.empty();
+    return audio_encode_queue_.empty() && audio_decode_queue_.empty() && audio_testing_queue_.empty();
 #else
-    return audio_decode_queue_.empty() && audio_playback_queue_.empty() && audio_testing_queue_.empty();
+    return audio_decode_queue_.empty() && audio_testing_queue_.empty();
 #endif
 }
 
@@ -745,7 +778,6 @@ void AudioService::ResetDecoder() {
     audio_encode_queue_.clear();
 #endif
     audio_decode_queue_.clear();
-    audio_playback_queue_.clear();
     audio_testing_queue_.clear();
     audio_queue_cv_.notify_all();
 }
@@ -762,5 +794,69 @@ void AudioService::CheckAndUpdateAudioPowerState() {
     }
     if (!codec_->input_enabled() && !codec_->output_enabled()) {
         esp_timer_stop(audio_power_timer_);
+    }
+}
+
+void AudioService::CheckMemoryStatus() {
+    size_t free_heap = esp_get_free_heap_size();
+    size_t min_free_heap = esp_get_minimum_free_heap_size();
+    
+    // 只在内存不足时记录警告
+    if (free_heap < 15000) {  // 少于15KB时警告
+        ESP_LOGW(TAG, "Low memory warning! Free: %u, Min: %u", (unsigned int)free_heap, (unsigned int)min_free_heap);
+        
+        // 如果内存严重不足，强制清理一些队列
+        if (free_heap < 10000) {
+            ESP_LOGW(TAG, "Critical memory shortage, forcing queue cleanup");
+            std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+            
+            // 清理一些队列以释放内存
+            if (audio_decode_queue_.size() > MAX_DECODE_PACKETS_IN_QUEUE / 2) {
+                size_t old_size = audio_decode_queue_.size();
+                audio_decode_queue_.clear();
+                ESP_LOGW(TAG, "Cleared decode queue: %u -> 0", (unsigned int)old_size);
+            }
+            
+#ifndef CONFIG_USE_EYE_STYLE_VB6824
+            if (audio_encode_queue_.size() > MAX_ENCODE_TASKS_IN_QUEUE / 2) {
+                size_t old_size = audio_encode_queue_.size();
+                audio_encode_queue_.clear();
+                ESP_LOGW(TAG, "Cleared encode queue: %u -> 0", (unsigned int)old_size);
+            }
+#endif
+            
+            // 清理其他队列
+            if (audio_testing_queue_.size() > 0) {
+                size_t old_size = audio_testing_queue_.size();
+                audio_testing_queue_.clear();
+                ESP_LOGW(TAG, "Cleared testing queue: %u -> 0", (unsigned int)old_size);
+            }
+            
+            if (audio_send_queue_.size() > MAX_SEND_PACKETS_IN_QUEUE / 2) {
+                size_t old_size = audio_send_queue_.size();
+                audio_send_queue_.clear();
+                ESP_LOGW(TAG, "Cleared send queue: %u -> 0", (unsigned int)old_size);
+            }
+            
+            audio_queue_cv_.notify_all();
+        }
+    }
+    
+    // 记录队列状态
+    static uint32_t last_log_time = 0;
+    uint32_t current_time = esp_timer_get_time() / 1000000;  // 转换为秒
+    
+    if (current_time - last_log_time >= 30) {  // 每30秒记录一次
+        std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+        ESP_LOGI(TAG, "Queue status - Decode: %u/%d, Encode: %u/%d, Testing: %u, Send: %u/%d", 
+                 (unsigned int)audio_decode_queue_.size(), MAX_DECODE_PACKETS_IN_QUEUE,
+#ifndef CONFIG_USE_EYE_STYLE_VB6824
+                 (unsigned int)audio_encode_queue_.size(), MAX_ENCODE_TASKS_IN_QUEUE,
+#else
+                 0, 0,
+#endif
+                 (unsigned int)audio_testing_queue_.size(),
+                 (unsigned int)audio_send_queue_.size(), MAX_SEND_PACKETS_IN_QUEUE);
+        last_log_time = current_time;
     }
 }

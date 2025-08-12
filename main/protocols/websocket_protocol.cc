@@ -20,7 +20,7 @@
 #if CONFIG_IDF_TARGET_ESP32S3
 #define MAX_CACHED_PACKETS 10
 #else
-#define MAX_CACHED_PACKETS 8
+#define MAX_CACHED_PACKETS 4
 #endif
 
 struct Emotion {
@@ -681,15 +681,16 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "\"output_audio\":{";
     message += "\"codec\":\"" + codec + "\",";
     message += "\"opus_config\":{";
+    message += "\"bitrate\":16000,";
     message += "\"sample_rate\":16000,";
     message += "\"use_cbr\":false,";
     message += "\"frame_size_ms\":60,";
     message += "\"limit_config\":{";
-    message += "\"period\":1,";
-#if CONFIG_IDF_TARGET_ESP32C2
-    message += "\"max_frame_num\":17";
+    message += "\"period\":3,";
+#ifdef CONFIG_IDF_TARGET_ESP32C2
+    message += "\"max_frame_num\":50";
 #else
-    message += "\"max_frame_num\":20";
+    message += "\"max_frame_num\":60";
 #endif
     message += "}";
     message += "},";

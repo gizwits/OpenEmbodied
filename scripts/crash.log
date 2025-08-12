@@ -1,0 +1,74 @@
+abort() was called at PC 0x420c24d3 on core 0
+--- 0x420c24d3: __cxxabiv1::__terminate(void (*)()) at /builds/idf/crosstool-NG/.build/riscv32-esp-elf/src/gcc/libstdc++-v3/libsupc++/eh_terminate.cc:45
+
+--- Stack dump detected
+Core  0 register dump:
+MEPC    : 0x40380776  RA      : 0x40384cfe  SP      : 0x3fcd8860  GP      : 0x3fcac130  
+--- 0x40380776: panic_abort at /Users/Kylewang/Documents/myProject/esp-idf/components/esp_system/panic.c:482
+--- 0x40384cfe: __ubsan_include at /Users/Kylewang/Documents/myProject/esp-idf/components/esp_system/ubsan.c:311
+
+TP      : 0x3fcd8a80  T0      : 0x37363534  T1      : 0x7271706f  T2      : 0x33323130  
+S0/FP   : 0x3fcd889c  S1      : 0x3fcd889c  A0      : 0x3fcd889c  A1      : 0x3fcd887e  
+A2      : 0x00000000  A3      : 0x3fcd88c9  A4      : 0x00000001  A5      : 0x3fcb6000  
+A6      : 0x00000000  A7      : 0x76757473  S2      : 0x3fcd8880  S3      : 0x00000000  
+S4      : 0x3fcd999c  S5      : 0x00000000  S6      : 0x00000000  S7      : 0x00000000  
+S8      : 0x00000000  S9      : 0x00000000  S10     : 0x00000000  S11     : 0x00000000  
+T3      : 0x6e6d6c6b  T4      : 0x6a696867  T5      : 0x66656463  T6      : 0x62613938  
+MSTATUS : 0x00001881  MTVEC   : 0x40380001  MCAUSE  : 0x00000002  MTVAL   : 0x00000000  
+MHARTID : 0x00000000  
+
+--- Warning: Failed to run gdb_panic_server.py script: Command '['riscv32-esp-elf-gdb', '--batch', '-n', '/Users/Kylewang/Documents/myProject/xiaozhi-esp32/build/xiaozhi.elf', '-ex', 'target remote | "/Users/Kylewang/.espressif/python_env/idf5.4_py3.13_env/bin/python" -m esp_idf_panic_decoder --target esp32c2 "/var/folders/5w/_2j6rsb14391mxh66y56np4c0000gn/T/tmpidmtqjqy"', '-ex', 'bt']' returned non-zero exit status 1.
+--- Warning: b'Traceback (most recent call last):\n  File "<frozen runpy>", line 198, in _run_module_as_main\n  File "<frozen runpy>", line 88, in _run_code\n  File "/Users/Kylewang/.espressif/python_env/idf5.4_py3.13_env/lib/python3.13/site-packages/esp_idf_panic_decoder/__main__.py", line 4, in <module>\n    main()\n    ~~~~^^\n  File "/Users/Kylewang/.espressif/python_env/idf5.4_py3.13_env/lib/python3.13/site-packages/esp_idf_panic_decoder/gdb_panic_server.py", line 289, in main\n    panic_info = PANIC_OUTPUT_PARSERS[args.target](args.input_file.read())\n  File "/Users/Kylewang/.espressif/python_env/idf5.4_py3.13_env/lib/python3.13/site-packages/esp_idf_panic_decoder/gdb_panic_server.py", line 138, in parse_idf_riscv_panic_output\n    raise ValueError("Couldn\'t parse panic handler output")\nValueError: Couldn\'t parse panic handler output\nRemote connection closed\nNo stack.\n'
+
+
+Stack memory:
+3fcd8860: 0x6e6d6c6b 0x6a696867 0x66656463 0x40387362 0x00000000 0x00000000 0x3fcb6f58 0x420f0030
+3fcd8880: 0x63303234 0x33643432 0x00000000 0x3fcade5c 0x3fcd8880 0x3fcade78 0x3fcd887c 0x726f6261
+3fcd88a0: 0x20292874 0x20736177 0x6c6c6163 0x61206465 0x43502074 0x34783020 0x32633032 0x20336434
+3fcd88c0: 0x63206e6f 0x2065726f 0x00000030 0x420c0000 0x000005dc 0x3fcd40a0 0x3fcd4794 0x420c24d6
+3fcd88e0: 0x000005dc 0x3fcd40a0 0x3fcd4794 0x420c2522 0x3fcd4794 0x3fcd40a0 0x3fcd4794 0x420c2644
+3fcd8900: 0x000005dc 0x3fcd40a0 0x420dc98e 0x3c156280 0x000005dc 0x3fcd40a0 0x00000ba9 0x420c2728
+3fcd8920: 0x3fce0000 0x00000000 0x00000000 0x4200dba6 0x00000000 0x00000000 0x3fccc488 0x00000ba8
+3fcd8940: 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000 0x000005dc 0x3fcd40a0 0x4200ea46
+3fcd8960: 0x00000000 0x00000000 0x000005dc 0x3fcd999c 0x00000000 0x3fcd408c 0x3fcd2424 0x4203ee58
+3fcd8980: 0x3fcd8a80 0x3fcd40a0 0x3fcb1b18 0x4206df58 0x00000000 0x00000000 0x00000010 0x000005dc
+3fcd89a0: 0x000005dc 0x00000000 0x3fcb1b18 0x4206f1a6 0x00000004 0x6d786a31 0x3fcd89c0 0x3fcd999c
+3fcd89c0: 0x3fccbe00 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000
+3fcd89e0: 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000
+3fcd8a00: 0x00000000 0x00000000 0x3fcd2424 0x4203d5ae 0x00000000 0x00000000 0x00000000 0x00000000
+3fcd8a20: 0x00000000 0x00000000 0x3fcd999c 0x000005dc 0x000005dc 0x00000000 0x00000000 0x00000000
+3fcd8a40: 0x00000000 0x00000000 0x3fcd2424 0x4203d5bc 0x00000000 0x00000000 0x00000000 0x00000000
+3fcd8a60: 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000 0xa5a5a5a5 0xa5a5a5a5 0xa5a5a5a5
+3fcd8a80: 0xa5a5a5a5 0xa5a5a5a5 0xa5a5a5a5 0xa5a5a5a5 0x00000780 0x00090005 0x000a000a 0x00080009
+3fcd8aa0: 0x00060008 0x00050002 0xfffe0001 0xfffa0001 0xfffbfff9 0x0001fffa 0x00050002 0x000a000c
+3fcd8ac0: 0x00050009 0x00020002 0x00000001 0x0000ffff 0xffff0000 0xfffcfffc 0xfff5fff4 0xfff7fff3
+3fcd8ae0: 0xfffffffe 0xfffe0000 0xfffa0001 0xfff8fffb 0xfff1fff3 0xfff8fff4 0xfff0fff2 0xfff5fff3
+3fcd8b00: 0xfffdfff8 0x0001fffa 0xffff0004 0xfff9fff6 0xfffdfffe 0x0002fffd 0x00010001 0xfff6fffe
+3fcd8b20: 0xfff5fff8 0xfffffffa 0xfffdfffb 0xfffefffc 0xfffefffc 0x0002fffe 0x00070004 0x00050009
+3fcd8b40: 0x00020003 0xfffd0000 0x00000000 0x00020001 0x00030002 0x00030005 0x00020003 0xfffefffc
+3fcd8b60: 0xfffafffb 0xfff8fffb 0xfffffffc 0x00070001 0x00070007 0x000d0006 0x000c000b 0x00050008
+3fcd8b80: 0x00070007 0x00090004 0xfffd0008 0x0000fffe 0x00060002 0x00090008 0x000e000d 0x0000000a
+3fcd8ba0: 0xffff0000 0xfffcffff 0xfffffffe 0x00070006 0x000a0006 0x00070009 0x00020004 0x00050005
+07 0x00020001
+3fcd8be0: 0x00000002 0x00070005 0x000f000d 0x000e0012 0x000d000a 0xffff0005 0xfffefffc 0x00090002
+3fcd8c00: 0x00110009 0x000b000e 0x00140010 0x00160012 0x000f0013 0x0008000b 0x00020008 0x00010002
+3fcd8c20: 0x00020000 0x00040001 0x000a0007 0x00070009 0x0003000b 0x00060005 0x00060005 0xfffd0000
+3fcd8c40: 0xfffcfffd 0x00060000 0x00090009 0x00050007 0x00030005 0x00020003 0x00070007 0x00050003
+
+
+
+ELF file SHA256: 3f4a5d222
+
+Rebooting...
+ESP-ROM:esp32c2-eco4-20240515
+Build:May 15 2024
+rst:0xc (RTC_SW_CPU_RST),boot:0xc (SPI_FAST_FLASH_BOOT)
+Saved PC:0x40380762
+--- 0x40380762: esp_restart_noos at /Users/Kylewang/Documents/myProject/esp-idf/components/esp_system/port/soc/esp32c2/system_internal.c:99
+
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fcd5c80,len:0x3bc
+load:0x403acb70,len:0x954
+load:0x403aeb70,len:0x24c4
+entry 0x403acb70
