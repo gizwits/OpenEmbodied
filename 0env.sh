@@ -1,0 +1,1 @@
+python scripts/release/release.py

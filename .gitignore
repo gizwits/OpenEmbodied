@@ -13,3 +13,5 @@ main/assets/lang_config.h
 .cache
 scripts/auth.py
 scripts/.env
+target/
+sdkconfig_peter
