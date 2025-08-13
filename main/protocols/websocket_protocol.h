@@ -7,9 +7,6 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
 #include <optional>
-#define MAX_AUDIO_PACKET_SIZE 512
-#define MAX_CACHED_PACKETS 10
-
 
 #define WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT (1 << 0)
 

@@ -720,23 +720,7 @@ void Application::Start() {
                         if (listening_mode_ == kListeningModeManualStop) {
                             SetDeviceState(kDeviceStateIdle);
                         } else {
-                            // 根据播放管道的数量计算延时，每个数据包是60ms的音频
-                            size_t remaining_packets = audio_decode_queue_.size();
-                            if (remaining_packets > 0) {
-                                // 计算延时：剩余数据包数量 * 60ms
-                                int delay_ms = remaining_packets * OPUS_FRAME_DURATION_MS;
-                                ESP_LOGI(TAG, "Audio pipeline has %zu remaining packets, adding %dms delay before entering listening state", 
-                                         remaining_packets, delay_ms);
-                                
-                                // 使用延时任务来设置状态
-                                Schedule([this, delay_ms]() {
-                                    vTaskDelay(pdMS_TO_TICKS(delay_ms));
-                                    SetDeviceState(kDeviceStateListening);
-                                });
-                            } else {
-                                // 没有剩余数据包，直接进入监听状态
-                                SetDeviceState(kDeviceStateListening);
-                            }
+                            SetDeviceState(kDeviceStateListening);
                         }
                     }
                 });
