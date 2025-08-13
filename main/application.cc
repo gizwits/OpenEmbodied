@@ -1183,7 +1183,8 @@ void Application::OnAudioInput() {
         if (!data.empty()) {
             // 保存录制的音频数据
             recorded_audio_data_.insert(recorded_audio_data_.end(), data.begin(), data.end());
-            ESP_LOGI(TAG, "Recorded %zu samples", data.size());
+            // ESP_LOGI(TAG, "Recorded %zu samples", data.size());
+            printf(".");
         }
         return;
     }
@@ -1456,6 +1457,7 @@ void Application::UpdateIotStates() {
 
 void Application::Reboot() {
     ESP_LOGI(TAG, "Rebooting...");
+    vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
 }
 

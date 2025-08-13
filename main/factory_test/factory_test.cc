@@ -108,8 +108,11 @@ static void factory_test_task(void *arg)
         if (len > 0) {
             data[len] = '\0';
             ESP_LOGI(TAG, "RX[%d]: %s", len, reinterpret_cast<const char*>(data));
+            hexdump("FT RX",data, len);
+
             // 处理AT命令
             handle_at_command_buffer(data);
+            ESP_LOGI(TAG, "RX[%d] done", len);
         } else if (len < 0) {
             ESP_LOGE(TAG, "UART read error: %d", len);
         }
@@ -172,9 +175,22 @@ static void factory_test_send(const char *data, int len) {
 
     // ESP_LOGI(TAG, "TX[%d]: %s", len, data);
     if (len > 0) {
-        // 通过print发送数据，这样可以在串口上看到
-        // 发送三次确保对方能收到
-        for (int i = 0; i < 3; i++) {
+        // 如果以+ENTER_TEST开头，直接返回OK
+        if (strncmp(data, "+ENTER_TEST", strlen("+ENTER_TEST")) == 0
+            || strncmp(data, "+EXIT_TEST", strlen("+EXIT_TEST")) == 0
+            || strncmp(data, "+REC", strlen("+REC")) == 0) {
+            // 通过print发送数据，这样可以在串口上看到
+            // 发送三次确保对方能收到
+            for (int i = 0; i < 3; i++) {
+                printf("\r\n%.*s\r\n", len, data);
+                // 短暂延迟，避免数据重叠
+                vTaskDelay(pdMS_TO_TICKS(30));
+            }
+            if (strncmp(data, "+EXIT_TEST", strlen("+EXIT_TEST")) == 0) {
+                ESP_LOGI(TAG, "Exit factory test, delay 2 seconds");
+                vTaskDelay(pdMS_TO_TICKS(2000));
+            }
+        } else {
             printf("\r\n%.*s\r\n", len, data);
             // 短暂延迟，避免数据重叠
             vTaskDelay(pdMS_TO_TICKS(10));
@@ -221,6 +237,10 @@ void factory_test_start(void) {
         // 发送产测命令
         ESP_LOGI(TAG, "Sending factory test entry confirmation");
         factory_test_send("+ENTER_TEST OK", strlen("+ENTER_TEST OK"));
+    } else if (s_factory_test_mode == FACTORY_TEST_MODE_NONE) {
+        // 发送产测命令
+        ESP_LOGI(TAG, "Sending factory test exit confirmation");
+        factory_test_send("+EXIT_TEST OK", strlen("+EXIT_TEST OK"));
     }
 }
 
@@ -301,10 +321,18 @@ static int at_buffer_len = 0;
 
 static void save_factory_test_mode_task(void *arg) {
     int mode = static_cast<int>(reinterpret_cast<intptr_t>(arg));
-    
+    // esp_err_t ret = ESP_OK;
+
+    ESP_LOGI(TAG, "free memory: %d", (int)heap_caps_get_free_size(MALLOC_CAP_8BIT));
+
     // 保存产测模式
     s_factory_test_mode = mode;
     esp_err_t ret = storage_save_factory_test_mode(mode);
+    // if (mode != 0) {
+    //     ESP_LOGI(TAG, "Save factory test mode: %d", mode);
+    //     ret = storage_save_factory_test_mode(mode);
+    //     ESP_LOGI(TAG, "Save factory test mode: %d, ret: %d", mode, ret);
+    // }
 
     if (mode == 0) {
         // 退出产测
@@ -324,9 +352,11 @@ static void save_factory_test_mode_task(void *arg) {
     
     // 延时后重启
     ESP_LOGI(TAG, "Restarting in 2 seconds...");
+    auto& wifi_station = WifiStation::GetInstance();
+    wifi_station.Stop();
     vTaskDelay(2000 / portTICK_PERIOD_MS);
     
-    esp_restart();
+    // esp_restart();
 }
 
 // 处理AT命令
@@ -336,13 +366,13 @@ static void handle_at_command(char *cmd) {
     if (strcmp(cmd, "AT+ENTER_TEST") == 0) {
         // 处理进入产测命令
         ESP_LOGI(TAG, "Received enter factory test command");
-        xTaskCreate(save_factory_test_mode_task, "save_factory_test_mode", 1024*4,
+        xTaskCreate(save_factory_test_mode_task, "save_factory_test_mode", 1024*8,
                     reinterpret_cast<void*>(static_cast<intptr_t>(FACTORY_TEST_MODE_IN_FACTORY)), 5, nullptr);
     }
     else if (strcmp(cmd, "AT+EXIT_TEST") == 0) {
         // 处理退出产测命令
         ESP_LOGI(TAG, "Received exit factory test command");
-        xTaskCreate(save_factory_test_mode_task, "save_factory_test_mode", 1024*4,
+        xTaskCreate(save_factory_test_mode_task, "save_factory_test_mode", 1024*8,
                     reinterpret_cast<void*>(static_cast<intptr_t>(FACTORY_TEST_MODE_NONE)), 5, nullptr);
     }
     else if (strcmp(cmd, "AT+VER") == 0) {
@@ -457,7 +487,7 @@ static void handle_at_command_buffer(uint8_t *data) {
 
         // 处理缓冲区中的完整命令
         while (1) {
-            char *line_end = strstr(at_buffer, "");
+            char *line_end = strstr(at_buffer, "\r\n");
             if (line_end == nullptr) {
                 // 没有完整行，检查是否需要清空缓冲区
                 if (at_buffer_len >= sizeof(at_buffer) - 1) {
@@ -473,6 +503,7 @@ static void handle_at_command_buffer(uint8_t *data) {
             ESP_LOGI(TAG, "Processing AT command[%d]: %s", strlen(at_buffer), at_buffer);
             // AT指令处理逻辑
             handle_at_command(at_buffer);
+            ESP_LOGI(TAG, "Processing AT command[%d] done", strlen(at_buffer));
 
             // 移除已处理的数据
             int remaining_len = at_buffer_len - (line_end - at_buffer + 2);
