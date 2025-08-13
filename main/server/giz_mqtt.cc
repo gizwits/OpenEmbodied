@@ -14,6 +14,7 @@
 #include "audio_codecs/audio_codec.h"
 #include <esp_app_desc.h>
 #include "ntp.h"
+#include "power_manager.h"
 
 #define TAG "GIZ_MQTT"
 
@@ -915,6 +916,64 @@ void MqttClient::ReportTimer() {
     }
 
 }
+
+
+
+void MqttClient::ReportTimer_const() {
+    uint8_t binary_data[18] = {
+        0x00, 0x00, 0x00, 0x03,  // 固定头部
+        0x0b, 0x00, 0x00, 0x93,  // 命令标识
+        0x00, 0x00, 0x00, 0x02,  // 数据长度
+        0x04, // 定长上报
+        0x00, // 0b00010111 
+        /*
+switch，类型为bool，值为true：字段bit0，字段值为0b1；
+wakeup_word，类型为bool，值为true：字段bit1，字段值为0b1；
+alert_tone_language，类型为enum，值为1：字段bit2 ~ bit2，字段值为0b1；
+chat_mode，类型为enum，值为2：字段bit4 ~ bit3，字段值为0b10；
+        */
+        0x64, // volume_set，类型为uint8，字段值为100；
+        0x01, // charge_status，类型为enum，值为2：字段bit1 ~ bit0，字段值为0b10；
+        0x0a, // battery_percentage，类型为uint8，字段值为100；
+        0x00, // rssi，类型为uint8，字段值为100；实际值计算公式y=1.000000*x+(-100.000000)
+    };
+
+    int chat_mode = Application::GetInstance().GetChatMode();
+    // 使用实际的chat_mode值
+    uint8_t status = 0;
+    status |= (1 << 0); // switch
+    status |= (1 << 1); // wakeup_word
+    status |= (0 << 2); // alert_tone_language[chinese_simplified,english]
+    status |= (chat_mode << 3); // chat_mode
+
+    binary_data[13] = status;
+    ESP_LOGI(TAG, "Status: %d", status);
+    ESP_LOGI(TAG, "Chat mode: %d", chat_mode);
+
+
+    auto codec = Board::GetInstance().GetAudioCodec();
+    int volume = codec->output_volume();
+    ESP_LOGI(TAG, "Volume: %d", volume);
+    binary_data[14] = volume;
+
+    binary_data[15] = PowerManager::GetInstance().IsCharging() ? 1 : 0;    // 本设备无法判断充满电
+    ESP_LOGI(TAG, "is_charging: %d", binary_data[15]);
+
+    binary_data[16] = PowerManager::GetInstance().GetBatteryLevel();
+    ESP_LOGI(TAG, "Battery Level: %d", binary_data[15]);
+
+    wifi_ap_record_t ap_info;
+    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+        ESP_LOGI(TAG, "WiFi RSSI: %d dBm", ap_info.rssi);
+        binary_data[17] = 100 - (uint8_t)abs(ap_info.rssi);
+    }
+
+    if (mqtt_) {
+        uploadP0Data(binary_data, sizeof(binary_data));
+    }
+
+}
+
 
 
 // const int MqttClient::attr_size_ = (8 + 8 - 1) / 8;

@@ -1565,10 +1565,10 @@ void Application::StartReportTimer() {
 #if CONFIG_USE_GIZWITS_MQTT
     // 先上报一次
     auto& mqtt_client = MqttClient::getInstance();
-    mqtt_client.ReportTimer();
+    mqtt_client.ReportTimer_const();
     esp_timer_create_args_t report_timer_args = {
         .callback = [](void* arg) {
-            MqttClient::getInstance().ReportTimer();
+            MqttClient::getInstance().ReportTimer_const();
         },
         .arg = this,
         .dispatch_method = ESP_TIMER_TASK,
