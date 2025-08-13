@@ -111,6 +111,8 @@ public:
 
     const char* GetTraceId() const { return trace_id_; }
     void GenerateTraceId();
+    bool IsWebsocketWorking() const { return protocol_ ? protocol_->IsAudioChannelOpened() : false; }
+
 private:
     Application();
     ~Application();

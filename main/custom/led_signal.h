@@ -3,6 +3,7 @@
 
 #include "led/gpio_led.h"
 #include "led/circular_strip.h"
+#include "application.h"
 
 class LedSignal {
 
@@ -14,12 +15,17 @@ public:
     void SetBrightness(uint8_t brightness);
 
     void CycleColorsWithFade(uint32_t interval_ms, uint8_t max_brightness);
+    void MonitorAndUpdateLedState();
+
 
 private:
     void InitializeLeds();
     GpioLed* red_led_;
     GpioLed* green_led_;
     GpioLed* blue_led_;
+    bool CheckIfWorking(); // 检查设备是否处于工作状态
+    bool CheckIfCharging(); // 检查设备是否正在充电
+    bool CheckIfBatteryLow(); // 检查设备电量是否低
 };
 
 #endif

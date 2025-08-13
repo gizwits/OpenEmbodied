@@ -42,7 +42,7 @@ private:
     std::vector<std::string> network_config_words_ = {"开始配网"};
 
     void InitializePowerSaveTimer() {
-        power_save_timer_ = new PowerSaveTimer(-1, 60 * 2, portMAX_DELAY);
+        power_save_timer_ = new PowerSaveTimer(-1, 60 * 3, portMAX_DELAY);  // peter mark 休眠时间
         power_save_timer_->OnEnterSleepMode([this]() {
             ESP_LOGI(TAG, "Enabling sleep mode");
         });
@@ -64,6 +64,17 @@ private:
             ESP_LOGI(TAG, "Sleep mode");
         }
         application.QuitTalking();
+
+        // 不在充电就真休眠
+        if(PowerManager::GetInstance().IsCharging() == 0){
+            vb6824_shutdown();
+            vTaskDelay(pdMS_TO_TICKS(200));
+            // 配置唤醒源
+            uint64_t wakeup_pins = (1ULL << BOOT_BUTTON_GPIO) | (1ULL << GPIO_NUM_1);
+            esp_deep_sleep_enable_gpio_wakeup(wakeup_pins, ESP_GPIO_WAKEUP_GPIO_LOW);
+            
+            esp_deep_sleep_start();
+        }
     }
 
     void InitializeButtons() {
@@ -101,7 +112,8 @@ private:
 
     void InitializeLedSignal() {
         led_signal_ = new LedSignal(GPIO_NUM_2, LEDC_CHANNEL_0, GPIO_NUM_4, LEDC_CHANNEL_1, GPIO_NUM_5, LEDC_CHANNEL_2);
-        led_signal_->CycleColorsWithFade(300, 100);
+        // led_signal_->CycleColorsWithFade(300, 100);
+        led_signal_->MonitorAndUpdateLedState();
     }
 
     // 检查命令是否在列表中

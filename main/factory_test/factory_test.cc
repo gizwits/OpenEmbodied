@@ -101,7 +101,7 @@ static void factory_test_task(void *arg)
         // 添加调试信息
         static int debug_counter = 0;
         debug_counter++;
-        if (debug_counter % 100 == 0) {  // 每100次循环打印一次
+        if (debug_counter % 100 == 0 && len) {  // 每100次循环打印一次
             ESP_LOGI(TAG, "UART read loop, counter: %d, last read len: %d", debug_counter, len);
         }
         
