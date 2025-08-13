@@ -651,6 +651,10 @@ void Application::Start() {
         std::lock_guard<std::mutex> lock(mutex_);
         if (audio_decode_queue_.size() < max_packets_in_queue) {
             audio_decode_queue_.emplace_back(std::move(packet));
+        } else {
+            // 释放数据
+            packet.payload.clear();
+            packet.payload.shrink_to_fit();
         }
     });
     protocol_->OnAudioChannelOpened([this, codec, &board]() {
@@ -717,7 +721,6 @@ void Application::Start() {
                             SetDeviceState(kDeviceStateIdle);
                         } else {
                             // 根据播放管道的数量计算延时，每个数据包是60ms的音频
-                            std::lock_guard<std::mutex> lock(mutex_);
                             size_t remaining_packets = audio_decode_queue_.size();
                             if (remaining_packets > 0) {
                                 // 计算延时：剩余数据包数量 * 60ms
