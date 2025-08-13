@@ -23,7 +23,7 @@
 #include <wifi_configuration.h>
 
 #include <ssid_manager.h>
-
+#include "power_manager.h"
 static const char *TAG = "WifiBoard";
 
 WifiBoard::WifiBoard() {
@@ -196,4 +196,12 @@ void WifiBoard::ResetWifiConfiguration() {
 
 std::string WifiBoard::GetDeviceStatusJson() {
     return "{}";
+}
+
+bool WifiBoard::IsCharging() {
+    return PowerManager::GetInstance().IsCharging();
+}
+
+uint8_t WifiBoard::GetBatteryLevel() {
+    return PowerManager::GetInstance().GetBatteryLevel();
 }

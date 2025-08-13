@@ -8,6 +8,7 @@
 #include <esp_ota_ops.h>
 #include <esp_chip_info.h>
 #include <esp_random.h>
+#include "power_manager.h"
 
 #define TAG "Board"
 
@@ -49,7 +50,18 @@ std::string Board::GenerateUuid() {
 }
 
 bool Board::GetBatteryLevel(int &level, bool& charging, bool& discharging) {
-    return false;
+    level = PowerManager::GetInstance().GetBatteryLevel();
+    charging = PowerManager::GetInstance().IsCharging();
+    discharging = !charging;
+    return true;
+}
+
+bool Board::IsCharging() {
+    return PowerManager::GetInstance().IsCharging();
+}
+
+uint8_t Board::GetBatteryLevel() {
+    return PowerManager::GetInstance().GetBatteryLevel();
 }
 
 bool Board::IsWifiConfigMode() {

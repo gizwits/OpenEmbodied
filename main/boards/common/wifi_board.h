@@ -23,6 +23,8 @@ public:
     virtual bool IsWifiConfigMode() override;
     virtual AudioCodec* GetAudioCodec() override { return nullptr; }
     virtual std::string GetDeviceStatusJson() override;
+    virtual bool IsCharging() override;
+    virtual uint8_t GetBatteryLevel() override;
 };
 
 #endif // WIFI_BOARD_H

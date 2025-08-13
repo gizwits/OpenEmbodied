@@ -23,6 +23,7 @@
 #include <string>
 #include "driver/ledc.h"
 #include "custom/led_signal.h"
+#include "power_manager.h"
 
 #define TAG "CustomBoard"
 
@@ -34,6 +35,7 @@ private:
     PowerSaveTimer* power_save_timer_;
     VbAduioCodec audio_codec;
     bool sleep_flag_ = false;
+    // PowerManager* power_manager_;
     
     // 唤醒词列表
     std::vector<std::string> wake_words_ = {"你好小智", "你好小云", "合养精灵", "嗨小火人"};
@@ -113,6 +115,10 @@ private:
         thing_manager.AddThing(iot::CreateThing("Speaker"));
     }
 
+    void InitializePowerManager() {
+        PowerManager::GetInstance();
+    }
+
 public:
     CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO){      
         gpio_config_t io_conf = {};
@@ -128,6 +134,8 @@ public:
         InitializeButtons();
         InitializeIot();
         InitializeLedSignal();
+        InitializePowerManager();
+
 
         audio_codec.OnWakeUp([this](const std::string& command) {
             ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());
@@ -140,6 +148,18 @@ public:
                 ResetWifiConfiguration();
             }
         });
+
+        PowerManager::GetInstance().CheckBatteryStatusImmediately();
+        ESP_LOGI(TAG, "Immediately check the battery level upon startup: %d", PowerManager::GetInstance().GetBatteryLevel());
+
+    }
+
+    uint8_t GetBatteryLevel() override {
+        return PowerManager::GetInstance().GetBatteryLevel();
+    }
+
+    bool IsCharging() override {
+        return PowerManager::GetInstance().IsCharging();
     }
 
     virtual AudioCodec* GetAudioCodec() override {
