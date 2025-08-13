@@ -434,10 +434,9 @@ void UdpBroadcaster::process_command_thread() {
             vTaskDelay(pdMS_TO_TICKS(3000)); // 等待3秒
             ESP_LOGI(TAG, "Recording and playback finished");
         } else if (cmd->cmd == "stop") {
-            Settings settings("wifi", true);
-            settings.SetInt("test_passed", 1);
-            vTaskDelay(pdMS_TO_TICKS(1000));
-            esp_restart();
+            ESP_LOGI(TAG, "Received exit factory test command");
+            xTaskCreate(save_factory_test_mode_task, "save_factory_test_mode", 1024*8,
+                        reinterpret_cast<void*>(static_cast<intptr_t>(FACTORY_TEST_MODE_NONE)), 5, nullptr);
         } else if (cmd->cmd == "reboot") {
             ESP_LOGI(TAG, "Processing reboot command");
             esp_restart();

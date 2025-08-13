@@ -319,7 +319,7 @@ static esp_err_t init_io_test(const char *cmd) {
 static char at_buffer[MAX_AT_CMD_LEN+10] = {0};
 static int at_buffer_len = 0;
 
-static void save_factory_test_mode_task(void *arg) {
+void save_factory_test_mode_task(void *arg) {
     int mode = static_cast<int>(reinterpret_cast<intptr_t>(arg));
     // esp_err_t ret = ESP_OK;
 
@@ -352,11 +352,9 @@ static void save_factory_test_mode_task(void *arg) {
     
     // 延时后重启
     ESP_LOGI(TAG, "Restarting in 2 seconds...");
-    auto& wifi_station = WifiStation::GetInstance();
-    wifi_station.Stop();
     vTaskDelay(2000 / portTICK_PERIOD_MS);
     
-    // esp_restart();
+    esp_restart();
 }
 
 // 处理AT命令
@@ -460,9 +458,14 @@ static void handle_at_command(char *cmd) {
 }
 // 处理接收到的数据
 static void handle_at_command_buffer(uint8_t *data) {
-    static int64_t last_receive_time = 0;  // 上次接收时间
-    int64_t now = esp_timer_get_time() / 1000;  // 当前时间，单位ms
-    
+    if (data == nullptr) {
+        ESP_LOGE(TAG, "Invalid input data");
+        return;
+    }
+
+    static int64_t last_receive_time = 0;
+    int64_t now = esp_timer_get_time() / 1000;
+
     // 如果距离上次接收超过1s，清空缓冲区
     if (now - last_receive_time > 1000) {
         ESP_LOGW(TAG, "Receive interval exceeds 1s, clearing buffer");
@@ -471,45 +474,75 @@ static void handle_at_command_buffer(uint8_t *data) {
     }
     last_receive_time = now;
 
-    int data_len = strlen(reinterpret_cast<char*>(data));
-    int processed_len = 0;
+    // 安全计算数据长度
+    size_t data_len = strnlen(reinterpret_cast<char*>(data), AT_BUF_SIZE);
+    size_t processed_len = 0;
 
     while (processed_len < data_len) {
-        // 计算本次可处理的长度
-        int available_space = sizeof(at_buffer) - at_buffer_len - 1;
-        int copy_len = (data_len - processed_len) < available_space ? 
-                      (data_len - processed_len) : available_space;
+        // 确保缓冲区有足够空间
+        if (at_buffer_len >= sizeof(at_buffer) - 1) {
+            ESP_LOGW(TAG, "Buffer full, clearing");
+            at_buffer_len = 0;
+            memset(at_buffer, 0, sizeof(at_buffer));
+            break;
+        }
 
-        // 将数据追加到缓冲区
-        memcpy(at_buffer + at_buffer_len, data + processed_len, copy_len);
-        at_buffer_len += copy_len;
-        processed_len += copy_len;
+        // 安全计算可用空间和复制长度
+        size_t available_space = sizeof(at_buffer) - at_buffer_len - 1;
+        size_t remaining_data = data_len - processed_len;
+        size_t copy_len = (remaining_data < available_space) ? remaining_data : available_space;
 
-        // 处理缓冲区中的完整命令
-        while (1) {
+        // 复制数据到缓冲区
+        if (copy_len > 0) {
+            memcpy(at_buffer + at_buffer_len, data + processed_len, copy_len);
+            at_buffer_len += copy_len;
+            processed_len += copy_len;
+            at_buffer[at_buffer_len] = '\0';  // 确保字符串结束
+        }
+
+        // 处理完整命令
+        while (at_buffer_len > 0) {
             char *line_end = strstr(at_buffer, "\r\n");
-            if (line_end == nullptr) {
-                // 没有完整行，检查是否需要清空缓冲区
-                if (at_buffer_len >= sizeof(at_buffer) - 1) {
-                    ESP_LOGW(TAG, "AT buffer too long, clearing buffer");
-                    at_buffer_len = 0;
-                    memset(at_buffer, 0, sizeof(at_buffer));
-                }
+            if (!line_end) {
                 break;
             }
 
-            // 处理完整行
-            *line_end = '\0';
-            ESP_LOGI(TAG, "Processing AT command[%d]: %s", strlen(at_buffer), at_buffer);
-            // AT指令处理逻辑
-            handle_at_command(at_buffer);
-            ESP_LOGI(TAG, "Processing AT command[%d] done", strlen(at_buffer));
+            // 计算命令长度并验证
+            ptrdiff_t cmd_len = line_end - at_buffer;
+            if (cmd_len < 0 || cmd_len >= static_cast<ptrdiff_t>(sizeof(at_buffer))) {
+                ESP_LOGE(TAG, "Invalid command length");
+                at_buffer_len = 0;
+                memset(at_buffer, 0, sizeof(at_buffer));
+                break;
+            }
 
-            // 移除已处理的数据
-            int remaining_len = at_buffer_len - (line_end - at_buffer + 2);
-            memmove(at_buffer, line_end + 2, remaining_len);
-            at_buffer_len = remaining_len;
-            memset(at_buffer + at_buffer_len, 0, sizeof(at_buffer) - at_buffer_len);
+            // 暂存命令并处理
+            *line_end = '\0';
+            ESP_LOGI(TAG, "Processing AT command[%d]: %s", (int)cmd_len, at_buffer);
+            
+            // 处理命令前记录状态
+            size_t original_buffer_len = at_buffer_len;
+            handle_at_command(at_buffer);
+            ESP_LOGI(TAG, "Command processing complete");
+
+            // 安全移除已处理的命令
+            size_t cmd_total_len = cmd_len + 2;  // 包含 \r\n
+            if (cmd_total_len <= original_buffer_len) {
+                size_t remaining_len = original_buffer_len - cmd_total_len;
+                if (remaining_len > 0) {
+                    memmove(at_buffer, line_end + 2, remaining_len);
+                    at_buffer_len = remaining_len;
+                    at_buffer[at_buffer_len] = '\0';
+                } else {
+                    at_buffer_len = 0;
+                    at_buffer[0] = '\0';
+                }
+            } else {
+                ESP_LOGE(TAG, "Buffer length mismatch");
+                at_buffer_len = 0;
+                memset(at_buffer, 0, sizeof(at_buffer));
+                break;
+            }
         }
     }
 }
