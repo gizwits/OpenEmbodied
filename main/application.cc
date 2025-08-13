@@ -493,9 +493,9 @@ void Application::Start() {
     auto& ssid_manager = SsidManager::GetInstance();
     auto ssid_list = ssid_manager.GetSsidList();
 
-    if (wifi_config_mode_ || ssid_list.empty()) {
-        ESP_LOGI(TAG, "Factory test init");
-        factory_test_init();
+    ESP_LOGI(TAG, "Factory test init");
+    factory_test_init();
+    if (wifi_config_mode_ || ssid_list.empty() || factory_test_is_enabled()) {
         ESP_LOGI(TAG, "Factory test start");
         factory_test_start();
         ESP_LOGI(TAG, "Factory test is enabled");
