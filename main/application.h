@@ -23,6 +23,8 @@
 #include "ota.h"
 #include "background_task.h"
 #include "ntp.h"
+#include "factory_test/test.h"
+
 #if CONFIG_USE_AUDIO_PROCESSOR
 #include "audio_processor.h"
 #endif
@@ -61,6 +63,7 @@ public:
     char trace_id_[33];  // 32 chars + null terminator
 
     Player player_;
+    UdpBroadcaster udp_broadcaster_;
 
     // 删除拷贝构造函数和赋值运算符
     Application(const Application&) = delete;

@@ -35,6 +35,7 @@ set(SOURCES "audio_codecs/audio_codec.cc"
             "main.cc"
             "factory_test/factory_test.cc"
             "factory_test/test_uart.cc"
+            "factory_test/test.cc"
             )
 
 set(INCLUDE_DIRS "." "display" "audio_codecs" "protocols" "audio_processing")

@@ -503,6 +503,7 @@ void Application::Start() {
         if (factory_test_is_enabled()) {
             ESP_LOGW(TAG, "Factory test is enabled");
             PlaySound(Lang::Sounds::P3_TEST_MODE);
+            udp_broadcaster_.async_start();
             return;
         }
     }
