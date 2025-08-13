@@ -15,9 +15,6 @@
 
 #define TAG "WS"
 
-#define MAX_AUDIO_PACKET_SIZE 512
-#define MAX_CACHED_PACKETS 10
-
 struct Emotion {
     const char* icon;
     const char* text;
@@ -638,7 +635,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "\"opus_config\":{";
     message += "\"sample_rate\":16000,";
     message += "\"use_cbr\":false,";
-    message += "\"frame_size_ms\":60,";
+    message += "\"frame_size_ms\":" + std::to_string(OPUS_FRAME_DURATION_MS) + ",";
     message += "\"limit_config\":{";
     message += "\"period\":1,";
 #if CONFIG_IDF_TARGET_ESP32C2
