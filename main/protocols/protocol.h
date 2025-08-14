@@ -87,6 +87,7 @@ public:
     virtual void SendIotStates(const std::string& states);
     virtual void UpdateRoomParams(const RoomParams& params);
     virtual const RoomParams& GetRoomParams() const { return room_params_; }
+    virtual bool HasErrorOccurred() const { return error_occurred_; }
     // virtual void SendMcpMessage(const std::string& message);
 
 protected:

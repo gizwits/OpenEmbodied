@@ -166,6 +166,9 @@ bool WebsocketProtocol::IsAudioChannelOpened() const {
     return websocket_ != nullptr && websocket_->IsConnected() && !error_occurred_ && !IsTimeout();
 }
 
+bool WebsocketProtocol::HasErrorOccurred() const {
+    return error_occurred_;
+}
 
 void WebsocketProtocol::CloseAudioChannel() {
     if (websocket_ == nullptr) {

@@ -844,6 +844,10 @@ void MqttClient::processAttrValue(std::string attr_name, int value) {
     if (attr_name == "chat_mode") {
         Application::GetInstance().SetChatMode(value);
     }
+    else if (attr_name == "volume_set") {
+        Board::GetInstance().GetAudioCodec()->SetOutputVolume(value);
+        ESP_LOGI(TAG, "Volume: %d", value);
+    }
 }
 
 // Upload binary p0 data to dev2app/<client_id_>
@@ -863,8 +867,6 @@ bool MqttClient::uploadP0Data(const void* data, size_t data_len) {
 }
 
 
-
-
 void MqttClient::ReportTimer() {
     uint8_t binary_data[18] = {
         0x00, 0x00, 0x00, 0x03,  // 固定头部
@@ -882,23 +884,18 @@ void MqttClient::ReportTimer() {
     uint8_t status = 0;
     status |= (1 << 0); // switch
     status |= (1 << 1); // wakeup_word
+    status |= (PowerManager::GetInstance().IsCharging() ? 1 : 0) << 2; // charge_status
+    ESP_LOGI(TAG, "IsCharging: %d", PowerManager::GetInstance().IsCharging());
     status |= (1 << 4); // alert_tone_language
     status |= (chat_mode << 5); // chat_mode
 
-
-    auto& board = Board::GetInstance();
-    int level = 0;
-    bool charging = false;
-    bool discharging = false;
-    if (board.GetBatteryLevel(level, charging, discharging)) {
-        ESP_LOGI(TAG, "Battery level: %d, charging: %d, discharging: %d", level, charging, discharging);
-        binary_data[15] = level;
-        status |= (charging ? 1 : 0) << 2; // charge_status
-        // charging = true 的时候 charge_status = 1
-    }
+    // 本设备无法判断充满电
     binary_data[14] = status;
     ESP_LOGI(TAG, "Status: %d", status);
     ESP_LOGI(TAG, "Chat mode: %d", chat_mode);
+
+    binary_data[15] = PowerManager::GetInstance().GetBatteryLevel();
+    ESP_LOGI(TAG, "Battery Level: %d", binary_data[15]);
 
     auto codec = Board::GetInstance().GetAudioCodec();
     int volume = codec->output_volume();

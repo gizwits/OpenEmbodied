@@ -23,6 +23,7 @@ public:
     virtual void CloseAudioChannel() override;
     virtual bool IsAudioChannelOpened() const override;
     virtual void SendAudio(const AudioStreamPacket& packet) override;
+    virtual bool HasErrorOccurred() const override;
 
 private:
     WebSocket* websocket_ = nullptr;

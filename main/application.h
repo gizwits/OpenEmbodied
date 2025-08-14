@@ -23,6 +23,7 @@
 #include "ota.h"
 #include "background_task.h"
 #include "ntp.h"
+#include "protocols/websocket_protocol.h"
 #if CONFIG_USE_AUDIO_PROCESSOR
 #include "audio_processor.h"
 #endif
@@ -112,6 +113,7 @@ public:
     const char* GetTraceId() const { return trace_id_; }
     void GenerateTraceId();
     bool IsWebsocketWorking() const { return protocol_ ? protocol_->IsAudioChannelOpened() : false; }
+    bool HasWebsocketError() const { return protocol_ ? protocol_->HasErrorOccurred() : false; }
 
 private:
     Application();
@@ -126,7 +128,7 @@ private:
     Ota ota_;
     std::mutex mutex_;
     std::list<std::function<void()>> main_tasks_;
-    std::unique_ptr<Protocol> protocol_;
+    std::unique_ptr<WebsocketProtocol> protocol_;
 
     int chat_mode_ = 1;
     bool realtime_chat_is_start_ = false;
