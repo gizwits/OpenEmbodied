@@ -397,14 +397,14 @@ void Application::Start() {
     vTaskDelay(pdMS_TO_TICKS(500));
 
     // Initialize NTP client
-    auto& ntp_client = NtpClient::GetInstance();
-    esp_err_t ntp_ret = ntp_client.Init();
-    if (ntp_ret == ESP_OK) {
-        ntp_client.StartSync();
-        ESP_LOGI(TAG, "NTP client initialized and started");
-    } else {
-        ESP_LOGE(TAG, "Failed to initialize NTP client: %s", esp_err_to_name(ntp_ret));
-    }
+    // auto& ntp_client = NtpClient::GetInstance();
+    // esp_err_t ntp_ret = ntp_client.Init();
+    // if (ntp_ret == ESP_OK) {
+    //     ntp_client.StartSync();
+    //     ESP_LOGI(TAG, "NTP client initialized and started");
+    // } else {
+    //     ESP_LOGE(TAG, "Failed to initialize NTP client: %s", esp_err_to_name(ntp_ret));
+    // }
     // Update the status bar immediately to show the network state
     display->UpdateStatusBar(true);
     protocol_ = std::make_unique<WebsocketProtocol>();

@@ -101,7 +101,8 @@ bool MqttClient::initialize() {
             ESP_LOGI(TAG, "need_activation is true");
             // 调用注册
             GServer::activationDevice([this, config_sem, &settings](mqtt_config_t* config) {
-                endpoint_ = config->mqtt_address;
+                // endpoint_ = config->mqtt_address;
+                endpoint_ = "agent-m2m-4e1aa8f3.gizwitsapi.com";
                 port_ = std::stoi(config->mqtt_port);
                 ESP_LOGI(TAG, "MQTT endpoint: %s, port: %d", endpoint_.c_str(), port_);
                 xSemaphoreGive(config_sem);
@@ -112,7 +113,8 @@ bool MqttClient::initialize() {
             ESP_LOGI(TAG, "need_activation is false");
             // 调用Provision 获取相关信息
             GServer::getProvision([this, config_sem](mqtt_config_t* config) {
-                endpoint_ = config->mqtt_address;
+                // endpoint_ = config->mqtt_address;
+                endpoint_ = "agent-m2m-4e1aa8f3.gizwitsapi.com";
                 port_ = std::stoi(config->mqtt_port);
                 ESP_LOGI(TAG, "MQTT endpoint: %s, port: %d", endpoint_.c_str(), port_);
                 xSemaphoreGive(config_sem);
@@ -162,7 +164,7 @@ bool MqttClient::initialize() {
     }
 
     auto network = Board::GetInstance().GetNetwork();
-    mqtt_ = network->CreateMqtt(1);
+    mqtt_ = network->CreateMqtt(0);
     mqtt_->SetKeepAlive(20);
 
     mqtt_->OnDisconnected([this]() {

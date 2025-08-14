@@ -268,7 +268,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
 
     message_cache_ = "";
     auto network = Board::GetInstance().GetNetwork();
-    websocket_ = network->CreateWebSocket(2);
+    websocket_ = network->CreateWebSocket(1);
     websocket_->SetHeader("Authorization", token.c_str());
 
     websocket_->OnData([this](const char* data, size_t len, bool binary) {
