@@ -60,11 +60,13 @@ void Thing::Invoke(const cJSON* command) {
     try {
         auto& method = methods_[method_name->valuestring];
         for (auto& param : method.parameters()) {
+            ESP_LOGI(TAG, "param: %s", param.GetDescriptorJson().c_str());
             auto input_param = cJSON_GetObjectItem(input_params, param.name().c_str());
             if (param.required() && input_param == nullptr) {
                 throw std::runtime_error("Parameter " + param.name() + " is required");
             }
             if (param.type() == kValueTypeNumber) {
+                ESP_LOGI(TAG, "input_param->valueint: %d", input_param->valueint);
                 param.set_number(input_param->valueint);
             } else if (param.type() == kValueTypeString) {
                 param.set_string(input_param->valuestring);
@@ -74,6 +76,7 @@ void Thing::Invoke(const cJSON* command) {
         }
 
         Application::GetInstance().Schedule([&method]() {
+            ESP_LOGI(TAG, "Invoke Method: %s", method.name().c_str());
             method.Invoke();
         });
     } catch (const std::runtime_error& e) {

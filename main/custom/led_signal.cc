@@ -50,6 +50,7 @@ void LedSignal::SetBrightness(uint8_t brightness) {
     if (red_led_) red_led_->SetBrightness(brightness);
     if (green_led_) green_led_->SetBrightness(brightness);
     if (blue_led_) blue_led_->SetBrightness(brightness);
+    ESP_LOGI(TAG, "SetBrightness: %d", brightness_);
 }
 
 uint8_t LedSignal::GetBrightness() const {
@@ -136,6 +137,10 @@ void LedSignal::MonitorAndUpdateLedState() {
         bool was_charging = false;
         bool was_fully_charged = false;
         auto last_non_working_time = std::chrono::steady_clock::now();
+        uint8_t last_brightness = 0;
+        uint8_t last_red = 0;
+        uint8_t last_green = 0;
+        uint8_t last_blue = 0;
 
         while (true) {
             bool is_working = CheckIfWorking();
@@ -143,7 +148,9 @@ void LedSignal::MonitorAndUpdateLedState() {
             bool is_battery_low = CheckIfBatteryLow();
 
             uint8_t red = 0, green = 0, blue = 0;
-            uint8_t rgb_value = (brightness_ * 255) / 100; // 增加亮度权重变量，命名为rgb_value
+            
+            uint8_t rgb_value = brightness_; // 增加亮度权重变量，命名为rgb_value
+            // uint8_t rgb_value = (brightness_ * 255) / 100; // 增加亮度权重变量，命名为rgb_value
 
             bool need_blink = false;
 
@@ -187,8 +194,14 @@ void LedSignal::MonitorAndUpdateLedState() {
             } else {
                 SetColor(red, green, blue);
             }
-            
-            // ESP_LOGI(TAG, "Current RGB values: R=%d, G=%d, B=%d, Brightness=%d", red, green, blue, brightness_);
+
+            if(last_brightness != brightness_ || last_red != red || last_green != green || last_blue != blue) {
+                last_brightness = brightness_;
+                last_red = red;
+                last_green = green;
+                last_blue = blue;
+                ESP_LOGI(TAG, "Current RGB values: R=%d, G=%d, B=%d, Brightness=%d", red, green, blue, brightness_);
+            }
             
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }

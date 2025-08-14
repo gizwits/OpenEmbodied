@@ -153,7 +153,7 @@ void CozeMCPParser::handle_mcp(std::string_view data) {
         cJSON *brightness = cJSON_GetObjectItem(args_json, "brightness");
         if (brightness && cJSON_IsNumber(brightness)) {
             cJSON_AddStringToObject(mcp_data, "method", "set_brightness");
-            cJSON_AddStringToObject(mcp_data, "name", "Screen");
+            cJSON_AddStringToObject(mcp_data, "name", "Led");
             cJSON_AddNumberToObject(params_data, "brightness", brightness->valueint);
         }
     }
