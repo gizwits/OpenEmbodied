@@ -1576,7 +1576,7 @@ void Application::StartReportTimer() {
         .skip_unhandled_events = true
     };
     esp_timer_create(&report_timer_args, &report_timer_handle_);
-    esp_timer_start_periodic(report_timer_handle_, 60000000); // 1分钟
+    esp_timer_start_periodic(report_timer_handle_, 2000000); // 3秒
 #endif
 }
 

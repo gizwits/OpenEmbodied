@@ -144,7 +144,7 @@ public:
         gpio_config(&io_conf);
         gpio_set_level(BUILTIN_LED_GPIO, 0);
 
-        InitializePowerSaveTimer();       
+        InitializePowerSaveTimer();
         InitializeButtons();
         InitializeIot();
         InitializeLedSignal();

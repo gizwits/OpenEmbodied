@@ -885,36 +885,44 @@ void MqttClient::ReportTimer() {
     status |= (1 << 0); // switch
     status |= (1 << 1); // wakeup_word
     status |= (PowerManager::GetInstance().IsCharging() ? 1 : 0) << 2; // charge_status
-    ESP_LOGI(TAG, "IsCharging: %d", PowerManager::GetInstance().IsCharging());
     status |= (1 << 4); // alert_tone_language
     status |= (chat_mode << 5); // chat_mode
 
     // 本设备无法判断充满电
     binary_data[14] = status;
-    ESP_LOGI(TAG, "Status: %d", status);
-    ESP_LOGI(TAG, "Chat mode: %d", chat_mode);
 
     binary_data[15] = PowerManager::GetInstance().GetBatteryLevel();
-    ESP_LOGI(TAG, "Battery Level: %d", binary_data[15]);
 
     auto codec = Board::GetInstance().GetAudioCodec();
     int volume = codec->output_volume();
-    ESP_LOGI(TAG, "Volume: %d", volume);
     binary_data[16] = volume;
 
     wifi_ap_record_t ap_info;
     if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
-        ESP_LOGI(TAG, "WiFi RSSI: %d dBm", ap_info.rssi);
         binary_data[17] = 100 - (uint8_t)abs(ap_info.rssi);
     }
 
-    if (mqtt_) {
-        uploadP0Data(binary_data, sizeof(binary_data));
+    // 每分钟上报一次 或者关键数据变化也报
+    static uint8_t last_binary_data[3] = {0x00, 0x00, 0x00};
+    static auto last_report_time = std::chrono::steady_clock::now();
+    auto current_time = std::chrono::steady_clock::now();
+    auto duration_since_last_report = std::chrono::duration_cast<std::chrono::minutes>(current_time - last_report_time).count();
+    if (memcmp(&binary_data[14], last_binary_data, 3) != 0 || 
+        duration_since_last_report >= 1) {
+        ESP_LOGI(TAG, "IsCharging: %d", PowerManager::GetInstance().IsCharging());
+        ESP_LOGI(TAG, "Status: %d", status);
+        ESP_LOGI(TAG, "Chat mode: %d", chat_mode);
+        ESP_LOGI(TAG, "Battery Level: %d", binary_data[15]);
+        ESP_LOGI(TAG, "Volume: %d", volume);
+        ESP_LOGI(TAG, "WiFi RSSI: %d dBm", ap_info.rssi);
+        if (mqtt_) {
+            uploadP0Data(binary_data, sizeof(binary_data));
+        }
+        memcpy(last_binary_data, &binary_data[14], 3);
+        last_report_time = current_time;
     }
 
 }
-
-
 
 void MqttClient::ReportTimer_const() {
     uint8_t binary_data[18] = {
