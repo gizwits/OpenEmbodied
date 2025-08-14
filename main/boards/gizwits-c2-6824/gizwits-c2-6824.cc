@@ -44,6 +44,7 @@ private:
         power_save_timer_ = new PowerSaveTimer(-1, 60 * 3, portMAX_DELAY);  // peter mark 休眠时间
         power_save_timer_->OnEnterSleepMode([this]() {
             ESP_LOGI(TAG, "Enabling sleep mode");
+            run_sleep_mode(true);
         });
         power_save_timer_->OnExitSleepMode([this]() {
             ESP_LOGI(TAG, "Shutting down");
@@ -68,9 +69,11 @@ private:
         if(PowerManager::GetInstance().IsCharging() == 0){
             vb6824_shutdown();
             vTaskDelay(pdMS_TO_TICKS(200));
-            // 配置唤醒源
-            uint64_t wakeup_pins = (1ULL << BOOT_BUTTON_GPIO) | (1ULL << GPIO_NUM_1);
+            // 配置唤醒源 只有电源域是VDD3P3_RTC的才能唤醒深睡
+            uint64_t wakeup_pins = ( BIT(GPIO_NUM_1));
             esp_deep_sleep_enable_gpio_wakeup(wakeup_pins, ESP_GPIO_WAKEUP_GPIO_LOW);
+            ESP_LOGI(TAG, "ready to esp_deep_sleep_start");
+            vTaskDelay(pdMS_TO_TICKS(10));
             
             esp_deep_sleep_start();
         }
