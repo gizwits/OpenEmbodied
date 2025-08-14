@@ -1,12 +1,13 @@
 #!/bin/bash
 
 if [ "$USER" == "martin" ]; then
-    IDF_VERSION="v5.4.2"
+    IDF_VERSION="v5.3.2"
 
     # export ADF_PATH="$HOME/esp32/esp-adf-newest"
     export ADF_PATH="$HOME/esp32/esp-adf-gizwits"
     # export ADF_PATH="$HOME/giz_adf/esp-adf"
-    export IDF_PATH="$HOME/esp32/esp-idf-$IDF_VERSION"
+    # export IDF_PATH="$HOME/esp32/esp-idf-$IDF_VERSION"
+    export IDF_PATH="$HOME/esp32/esp-adf-gizwits/esp-idf"
     ESP_INSTALL_DIR="$HOME/.espressif-$IDF_VERSION"
 
     export PATH=${PATH}:${IDF_PATH}/tools/

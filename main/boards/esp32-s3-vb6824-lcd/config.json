@@ -1,0 +1,14 @@
+{
+    "target": "esp32s3",
+    "builds": [
+        {
+            "name": "esp32-s3-xunguan-1.28",
+            "sdkconfig_append": [
+                "CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y",
+                "CONFIG_USE_AUDIO_PROCESSOR=y",
+                "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions.csv\"",
+                "CONFIG_LOG_DEFAULT_LEVEL_NONE=y"
+            ]
+        }
+    ]
+}
