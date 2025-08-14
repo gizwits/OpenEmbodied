@@ -407,6 +407,8 @@ void Application::Start() {
     // }
     // Update the status bar immediately to show the network state
     display->UpdateStatusBar(true);
+    
+    // 先创建protocol_，确保MQTT回调中能安全访问
     protocol_ = std::make_unique<WebsocketProtocol>();
 
     initGizwitsServer();
@@ -418,7 +420,7 @@ void Application::Start() {
     // Initialize the protocol
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
 
-    protocol_ = std::make_unique<WebsocketProtocol>();
+    // protocol_已经在上面创建过了，不需要重复创建
 
     protocol_->OnNetworkError([this](const std::string& message) {
         ESP_LOGE(TAG, "OnNetworkError: %s", message.c_str());

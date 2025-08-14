@@ -5,7 +5,9 @@
             "name": "gizwits-4key-ml307",
             "sdkconfig_append": [
                 "CONFIG_CODEC_ES8311_SUPPORT=y",
-                "CONFIG_USE_AUDIO_PROCESSOR=y"
+                "CONFIG_USE_AUDIO_PROCESSOR=y",
+                "CONFIG_CONSOLE_UART_NONE=y",
+                "CONFIG_ESP_CONSOLE_UART_NONE=y"
             ]
         }
     ]
