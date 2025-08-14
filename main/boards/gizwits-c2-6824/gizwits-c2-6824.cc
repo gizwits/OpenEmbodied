@@ -30,7 +30,6 @@
 class CustomBoard : public WifiBoard {
 private:
     Button boot_button_;
-    LedSignal* led_signal_ = nullptr;
     Button* rec_button_ = nullptr;
     PowerSaveTimer* power_save_timer_;
     VbAduioCodec audio_codec;
@@ -111,9 +110,11 @@ private:
     }
 
     void InitializeLedSignal() {
-        led_signal_ = new LedSignal(GPIO_NUM_2, LEDC_CHANNEL_0, GPIO_NUM_4, LEDC_CHANNEL_1, GPIO_NUM_5, LEDC_CHANNEL_2);
-        // led_signal_->CycleColorsWithFade(300, 100);
-        led_signal_->MonitorAndUpdateLedState();
+        LedSignal::GetInstance().MonitorAndUpdateLedState();
+    }
+
+    void SetLedBrightness(uint8_t brightness) {
+        LedSignal::GetInstance().SetBrightness(brightness);
     }
 
     // 检查命令是否在列表中

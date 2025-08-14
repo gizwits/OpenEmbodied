@@ -16,12 +16,15 @@
 优先级：优先显示工作状态，离开工作状态并且处于充电状态后 2 分钟才显示充电状态
 */
 
+
+// Start of Selection
+
 LedSignal::LedSignal(gpio_num_t red_gpio, ledc_channel_t red_channel, 
                     gpio_num_t green_gpio, ledc_channel_t green_channel, 
-                    gpio_num_t blue_gpio, ledc_channel_t blue_channel) {
-    red_led_ = new GpioLed(red_gpio, 1, LEDC_TIMER_0,  red_channel);
-    green_led_ = new GpioLed(green_gpio, 1, LEDC_TIMER_1, green_channel);
-    blue_led_ = new GpioLed(blue_gpio, 1, LEDC_TIMER_2, blue_channel);
+                    gpio_num_t blue_gpio, ledc_channel_t blue_channel) 
+    : red_led_(new GpioLed(red_gpio, 1, LEDC_TIMER_0, red_channel)),
+      green_led_(new GpioLed(green_gpio, 1, LEDC_TIMER_1, green_channel)),
+      blue_led_(new GpioLed(blue_gpio, 1, LEDC_TIMER_2, blue_channel)) {
     InitializeLeds();
 }
 
@@ -43,22 +46,27 @@ void LedSignal::SetColor(uint8_t red, uint8_t green, uint8_t blue) {
 }
 
 void LedSignal::SetBrightness(uint8_t brightness) {
+    brightness_ = brightness;
     if (red_led_) red_led_->SetBrightness(brightness);
     if (green_led_) green_led_->SetBrightness(brightness);
     if (blue_led_) blue_led_->SetBrightness(brightness);
 }
 
+uint8_t LedSignal::GetBrightness() const {
+    return brightness_;
+}
+
 void LedSignal::InitializeLeds() {
     if (red_led_) {
-        red_led_->SetBrightness(DEFAULT_BRIGHTNESS);
+        red_led_->SetBrightness(brightness_);
         red_led_->TurnOff();
     }
     if (green_led_) {
-        green_led_->SetBrightness(DEFAULT_BRIGHTNESS);
+        green_led_->SetBrightness(brightness_);
         green_led_->TurnOff();
     }
     if (blue_led_) {
-        blue_led_->SetBrightness(DEFAULT_BRIGHTNESS);
+        blue_led_->SetBrightness(brightness_);
         blue_led_->TurnOff();
     }
 }
@@ -69,7 +77,6 @@ LedSignal::~LedSignal() {
     delete blue_led_;
 }
 
-// driver test unit
 void LedSignal::CycleColorsWithFade(uint32_t interval_ms, uint8_t max_brightness) {
 
     if (red_led_ == nullptr && green_led_ == nullptr && blue_led_ == nullptr) {
@@ -87,14 +94,12 @@ void LedSignal::CycleColorsWithFade(uint32_t interval_ms, uint8_t max_brightness
         int8_t fade_direction = 1;
 
         while (true) {
-            // Adjust brightness
             brightness += fade_direction * 5; // 调整步长
             if (brightness >= max_brightness) {
                 brightness = 0;
                 current_color = (current_color + 1) % 3;
             }
 
-            // Set color based on current_color
             const char* color_names[] = {"Red", "Green", "Blue"};
             uint8_t red = 0, green = 0, blue = 0;
 
@@ -110,7 +115,6 @@ void LedSignal::CycleColorsWithFade(uint32_t interval_ms, uint8_t max_brightness
                     break;
             }
 
-            // Implement blinking logic
             auto now = std::chrono::steady_clock::now();
             auto ms_since_epoch = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
             if (ms_since_epoch % 500 < 250) { // 每500ms闪烁一次
@@ -139,37 +143,33 @@ void LedSignal::MonitorAndUpdateLedState() {
             bool is_battery_low = CheckIfBatteryLow();
 
             uint8_t red = 0, green = 0, blue = 0;
+            uint8_t rgb_value = (brightness_ * 255) / 100; // 增加亮度权重变量，命名为rgb_value
 
             bool need_blink = false;
 
             if (is_working) {
                 if (!was_working) {
-                    // ESP_LOGI(TAG, "LED State: Working (Blue)");
                     was_working = true;
                 }
-                blue = 255; // 蓝色代表处于工作状态
+                blue = rgb_value; // 蓝色代表处于工作状态
                 last_non_working_time = std::chrono::steady_clock::now();
             } else {
                 auto now = std::chrono::steady_clock::now();
                 auto duration_since_non_working = std::chrono::duration_cast<std::chrono::minutes>(now - last_non_working_time).count();
                 
                 if (duration_since_non_working < LEVEL_WORK_TIME_MIN) {
-                    // ESP_LOGI(TAG, "LED State: Non-working (Blue Blinking)");
-                    blue = 255; // 蓝色闪烁代表非工作状态
+                    blue = rgb_value; // 蓝色闪烁代表非工作状态
                     need_blink = true;
                 } else {
                     if (is_battery_low) {
-                        // ESP_LOGI(TAG, "LED State: Battery Low (Red Blinking)");
-                        red = 255; // 红色代表电量低
+                        red = rgb_value; // 红色代表电量低
                         need_blink = true; // 低电量需要闪烁
                     } else if (is_charging) {
                         if (!was_charging) {
-                            // ESP_LOGI(TAG, "LED State: Charging (Red)");
                             was_charging = true;
                         }
-                        red = 255; // 红色代表充电中
+                        red = rgb_value; // 红色代表充电中
                     } else {
-                        // ESP_LOGI(TAG, "LED State: Off");
                         was_working = was_charging = was_fully_charged = false;
                         red = green = blue = 0; // 关闭所有LED
                     }
@@ -187,23 +187,26 @@ void LedSignal::MonitorAndUpdateLedState() {
             } else {
                 SetColor(red, green, blue);
             }
-
+            
+            // ESP_LOGI(TAG, "Current RGB values: R=%d, G=%d, B=%d, Brightness=%d", red, green, blue, brightness_);
+            
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }).detach();
 }
 
 bool LedSignal::CheckIfWorking() {
-
-    return Application::GetInstance().IsWebsocketWorking() && WifiStation::GetInstance().IsConnected();
+    // 按wifi状态判断，如果ws连不上报非工作状态
+    bool error_occurred = Application::GetInstance().HasWebsocketError();
+    bool wifi_connected = WifiStation::GetInstance().IsConnected();
+    // ESP_LOGI(TAG, "Websocket working: %s, WiFi connected: %s", error_occurred ? "false" : "true", wifi_connected ? "true" : "false");
+    return !error_occurred && wifi_connected;
 }
 
 bool LedSignal::CheckIfCharging() {
-    // 使用PowerManager检查设备是否正在充电
     return PowerManager::GetInstance().IsCharging();
 }
 
 bool LedSignal::CheckIfBatteryLow() {
-    // 使用PowerManager检查设备是否充满电
     return PowerManager::GetInstance().GetBatteryLevel() < 10;
 }
