@@ -385,6 +385,9 @@ void Application::Start() {
     /* Wait for the network to be ready */
     board.StartNetwork();
 
+    auto json = board.GetJson();
+    ESP_LOGI(TAG, "json: %s", json.c_str());
+
     bool battery_ok = CheckBatteryLevel();
     if (!battery_ok) {
         vTaskDelay(pdMS_TO_TICKS(3000));
@@ -933,6 +936,7 @@ void Application::PlaySound(const std::string_view& sound) {
 }
 
 void Application::initGizwitsServer() {
+    Settings settings("wifi", true);
 #if CONFIG_USE_GIZWITS_MQTT
     auto& mqtt_client = MqttClient::getInstance();
     mqtt_client.OnRoomParamsUpdated([this](const RoomParams& params, bool is_mutual) {

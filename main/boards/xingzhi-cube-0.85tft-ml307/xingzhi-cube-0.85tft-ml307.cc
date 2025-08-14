@@ -1,12 +1,11 @@
-#include "ml307_board.h"
-#include "audio_codecs/no_audio_codec.h"
+#include "dual_network_board.h"
+#include "codecs/no_audio_codec.h"
 #include "display/lcd_display.h"
 #include "system_reset.h"
 #include "application.h"
 #include "button.h"
 #include "config.h"
 #include "power_save_timer.h"
-#include "iot/thing_manager.h"
 #include "led/single_led.h"
 #include "assets/lang_config.h"
 #include "../xingzhi-cube-1.54tft-wifi/power_manager.h"
@@ -84,27 +83,27 @@ static const nv3023_lcd_init_cmd_t lcd_init_cmds[] = {
     {0x29, (uint8_t[]){0x00}, 0, 10}
 };
 
-class XINGZHI_CUBE_0_85TFT_ML307 : public Ml307Board {
+class XINGZHI_CUBE_0_85TFT_ML307 : public DualNetworkBoard {
 private:
     Button boot_button_;
     Button volume_up_button_;
     Button volume_down_button_;
-    SpiLcdDisplay* display_;
+    // SpiLcdDisplay* display_;
     PowerSaveTimer* power_save_timer_;
-    PowerManager* power_manager_;
+    // PowerManager* power_manager_;
     esp_lcd_panel_io_handle_t panel_io_ = nullptr;
     esp_lcd_panel_handle_t panel_ = nullptr;
 
-    void InitializePowerManager() {
-        power_manager_ = new PowerManager(GPIO_NUM_38);
-        power_manager_->OnChargingStatusChanged([this](bool is_charging) {
-            if (is_charging) {
-                power_save_timer_->SetEnabled(false);
-            } else {
-                power_save_timer_->SetEnabled(true);
-            }
-        });
-    }
+    // void InitializePowerManager() {
+    //     power_manager_ = new PowerManager(GPIO_NUM_38);
+    //     power_manager_->OnChargingStatusChanged([this](bool is_charging) {
+    //         if (is_charging) {
+    //             power_save_timer_->SetEnabled(false);
+    //         } else {
+    //             power_save_timer_->SetEnabled(true);
+    //         }
+    //     });
+    // }
 
     void InitializePowerSaveTimer() {
         rtc_gpio_init(GPIO_NUM_21);
@@ -113,14 +112,11 @@ private:
         
         power_save_timer_ = new PowerSaveTimer(-1, 60, 300);
         power_save_timer_->OnEnterSleepMode([this]() {
-            ESP_LOGI(TAG, "Enabling sleep mode");
-            display_->SetChatMessage("system", "");
-            display_->SetEmotion("sleepy");
+            // GetDisplay()->SetPowerSaveMode(true);
             GetBacklight()->SetBrightness(1);
         });
         power_save_timer_->OnExitSleepMode([this]() {
-            display_->SetChatMessage("system", "");
-            display_->SetEmotion("neutral");
+            // GetDisplay()->SetPowerSaveMode(false);
             GetBacklight()->RestoreBrightness();
         });
         power_save_timer_->OnShutdownRequest([this]() {
@@ -153,45 +149,38 @@ private:
         });
     } 
 
-    void InitializeNv3023Display() {
-        ESP_LOGD(TAG, "Install panel IO");
-        esp_lcd_panel_io_spi_config_t io_config = NV3023_PANEL_IO_SPI_CONFIG(DISPLAY_CS, DISPLAY_DC, NULL, NULL);
-        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI3_HOST, &io_config, &panel_io_));
+    // void InitializeNv3023Display() {
+    //     ESP_LOGD(TAG, "Install panel IO");
+    //     esp_lcd_panel_io_spi_config_t io_config = NV3023_PANEL_IO_SPI_CONFIG(DISPLAY_CS, DISPLAY_DC, NULL, NULL);
+    //     ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI3_HOST, &io_config, &panel_io_));
 
-        ESP_LOGD(TAG, "Install LCD driver");
-        esp_lcd_panel_dev_config_t panel_config = {};
-        nv3023_vendor_config_t vendor_config = {  // Uncomment these lines if use custom initialization commands
-            .init_cmds = lcd_init_cmds,
-            .init_cmds_size = sizeof(lcd_init_cmds) / sizeof(nv3023_lcd_init_cmd_t),
-        };
-        panel_config.reset_gpio_num = DISPLAY_RES;
-        panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR;
-        panel_config.bits_per_pixel = 16;
-        panel_config.vendor_config = &vendor_config;
+    //     ESP_LOGD(TAG, "Install LCD driver");
+    //     esp_lcd_panel_dev_config_t panel_config = {};
+    //     nv3023_vendor_config_t vendor_config = {  // Uncomment these lines if use custom initialization commands
+    //         .init_cmds = lcd_init_cmds,
+    //         .init_cmds_size = sizeof(lcd_init_cmds) / sizeof(nv3023_lcd_init_cmd_t),
+    //     };
+    //     panel_config.reset_gpio_num = DISPLAY_RES;
+    //     panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR;
+    //     panel_config.bits_per_pixel = 16;
+    //     panel_config.vendor_config = &vendor_config;
 
-        ESP_ERROR_CHECK(esp_lcd_new_panel_nv3023(panel_io_, &panel_config, &panel_));
-        ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_));
-        ESP_ERROR_CHECK(esp_lcd_panel_init(panel_));
-        ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(panel_, DISPLAY_SWAP_XY));
-        ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y));
-        ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel_, false));
-        ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_, true));
+    //     ESP_ERROR_CHECK(esp_lcd_new_panel_nv3023(panel_io_, &panel_config, &panel_));
+    //     ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_));
+    //     ESP_ERROR_CHECK(esp_lcd_panel_init(panel_));
+    //     ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(panel_, DISPLAY_SWAP_XY));
+    //     ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y));
+    //     ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel_, false));
+    //     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_, true));
 
-        display_ = new SpiLcdDisplay(panel_io_, panel_, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
-            DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY, 
-        {
-            .text_font = &font_puhui_16_4,
-            .icon_font = &font_awesome_16_4,
-            .emoji_font = font_emoji_32_init(),
-        });
-    }
-
-    void InitializeIot() {
-        auto& thing_manager = iot::ThingManager::GetInstance();
-        thing_manager.AddThing(iot::CreateThing("Speaker"));
-        thing_manager.AddThing(iot::CreateThing("Screen"));
-        thing_manager.AddThing(iot::CreateThing("Battery"));
-    }
+    //     display_ = new SpiLcdDisplay(panel_io_, panel_, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
+    //         DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY, 
+    //     {
+    //         .text_font = &font_puhui_16_4,
+    //         .icon_font = &font_awesome_16_4,
+    //         .emoji_font = font_emoji_32_init(),
+    //     });
+    // }
 
     void Initializegpio21_45() {
         rtc_gpio_init(GPIO_NUM_21);
@@ -210,18 +199,17 @@ private:
     }
 
 public:
-    XINGZHI_CUBE_0_85TFT_ML307(): Ml307Board(ML307_TX_PIN, ML307_RX_PIN, 4096),
+    XINGZHI_CUBE_0_85TFT_ML307(): DualNetworkBoard(ML307_TX_PIN, ML307_RX_PIN),
         boot_button_(BOOT_BUTTON_GPIO),
         volume_up_button_(VOLUME_UP_BUTTON_GPIO),
         volume_down_button_(VOLUME_DOWN_BUTTON_GPIO) {
         Initializegpio21_45(); // 初始时，拉高21引脚，保证4g模块正常工作
-        InitializePowerManager();
-        InitializePowerSaveTimer();
-        InitializeSpi();
+        // InitializePowerManager();
+        // InitializePowerSaveTimer();
+        // InitializeSpi();
         InitializeButtons();
-        InitializeNv3023Display();  
-        InitializeIot();
-        GetBacklight()->RestoreBrightness();
+        // InitializeNv3023Display();
+        // GetBacklight()->RestoreBrightness();
     }
 
     virtual AudioCodec* GetAudioCodec() override {
@@ -230,32 +218,32 @@ public:
         return &audio_codec;
     }
 
-    virtual Display* GetDisplay() override {
-        return display_;
-    }
+    // virtual Display* GetDisplay() override {
+    //     return display_;
+    // }
     
-    virtual Backlight* GetBacklight() override {
-        static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
-        return &backlight;
-    }
+    // virtual Backlight* GetBacklight() override {
+    //     static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
+    //     return &backlight;
+    // }
 
-    virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
-        static bool last_discharging = false;
-        charging = power_manager_->IsCharging();
-        discharging = power_manager_->IsDischarging();
-        if (discharging != last_discharging) {
-            power_save_timer_->SetEnabled(discharging);
-            last_discharging = discharging;
-        }
-        level = power_manager_->GetBatteryLevel();
-        return true;
-    }
+    // virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
+    //     static bool last_discharging = false;
+    //     charging = power_manager_->IsCharging();
+    //     discharging = power_manager_->IsDischarging();
+    //     if (discharging != last_discharging) {
+    //         power_save_timer_->SetEnabled(discharging);
+    //         last_discharging = discharging;
+    //     }
+    //     level = power_manager_->GetBatteryLevel();
+    //     return true;
+    // }
 
     virtual void SetPowerSaveMode(bool enabled) override {
         if (!enabled) {
             power_save_timer_->WakeUp();
         }
-        Ml307Board::SetPowerSaveMode(enabled);
+        DualNetworkBoard::SetPowerSaveMode(enabled);
     }
 };
 
