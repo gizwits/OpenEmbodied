@@ -41,11 +41,4 @@ else
 idf.py build
 fi
 
-
-# 逻辑：在USE_SDK_LIB=1时复制库文件
-if [ "$USE_SDK_LIB" != "1" ]; then
-    echo "Copying libsocket_sdk.a to lib directory..."
-    cp build/esp-idf/socket_sdk/libsocket_sdk.a lib/
-fi
-
 ./2flash.sh
