@@ -223,3 +223,89 @@ bool LedSignal::CheckIfCharging() {
 bool LedSignal::CheckIfBatteryLow() {
     return PowerManager::GetInstance().GetBatteryLevel() < 10;
 }
+
+
+void LedSignal::MonitorAndUpdateLedState_timer() {
+    esp_timer_create_args_t timer_args = {
+        .callback = [](void* arg) {
+            auto led_signal = static_cast<LedSignal*>(arg);
+            led_signal->UpdateLedState();
+        },
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "led_update_timer",
+        .skip_unhandled_events = false,
+    };
+
+    esp_timer_handle_t timer_handle;
+    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &timer_handle));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(timer_handle, 100 * 1000)); // 每100ms更新一次LED状态
+}
+
+void LedSignal::UpdateLedState() {
+    bool was_working = false;
+    bool was_charging = false;
+    bool was_fully_charged = false;
+    auto last_non_working_time = std::chrono::steady_clock::now();
+    static uint8_t last_brightness = 0;
+    static uint8_t last_red = 0;
+    static uint8_t last_green = 0;
+    static uint8_t last_blue = 0;
+
+    bool is_working = CheckIfWorking();
+    bool is_charging = CheckIfCharging();
+    bool is_battery_low = CheckIfBatteryLow();
+
+    uint8_t red = 0, green = 0, blue = 0;
+    uint8_t rgb_value = brightness_; // 增加亮度权重变量，命名为rgb_value
+    bool need_blink = false;
+
+    if (is_working) {
+        if (!was_working) {
+            was_working = true;
+        }
+        blue = rgb_value; // 蓝色代表处于工作状态
+        last_non_working_time = std::chrono::steady_clock::now();
+    } else {
+        auto now = std::chrono::steady_clock::now();
+        auto duration_since_non_working = std::chrono::duration_cast<std::chrono::minutes>(now - last_non_working_time).count();
+
+        if (duration_since_non_working < LEVEL_WORK_TIME_MIN) {
+            blue = rgb_value; // 蓝色闪烁代表非工作状态
+            need_blink = true;
+        } else {
+            if (is_battery_low) {
+                red = rgb_value; // 红色代表电量低
+                need_blink = true; // 低电量需要闪烁
+            } else if (is_charging) {
+                if (!was_charging) {
+                    was_charging = true;
+                }
+                red = rgb_value; // 红色代表充电中
+            } else {
+                was_working = was_charging = was_fully_charged = false;
+                red = green = blue = 0; // 关闭所有LED
+            }
+        }
+    }
+
+    if (need_blink) {
+        auto now = std::chrono::steady_clock::now();
+        auto ms_since_epoch = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+        if (ms_since_epoch % 1000 < 500) { // 每1000ms闪烁一次
+            SetColor(0, 0, 0); // 关闭所有LED
+        } else {
+            SetColor(red, green, blue);
+        }
+    } else {
+        SetColor(red, green, blue);
+    }
+
+    if (last_brightness != brightness_ || last_red != red || last_green != green || last_blue != blue) {
+        last_brightness = brightness_;
+        last_red = red;
+        last_green = green;
+        last_blue = blue;
+        ESP_LOGI(TAG, "Current RGB values: R=%d, G=%d, B=%d, Brightness=%d", red, green, blue, brightness_);
+    }
+}

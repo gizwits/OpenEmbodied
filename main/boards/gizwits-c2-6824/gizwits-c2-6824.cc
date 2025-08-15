@@ -122,7 +122,7 @@ private:
     }
 
     void InitializeLedSignal() {
-        LedSignal::GetInstance().MonitorAndUpdateLedState();
+        LedSignal::GetInstance().MonitorAndUpdateLedState_timer();
     }
 
     void SetLedBrightness(uint8_t brightness) {

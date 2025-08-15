@@ -20,7 +20,8 @@ public:
     bool CheckIfWorking();
     bool CheckIfCharging();
     bool CheckIfBatteryLow();
-
+    void MonitorAndUpdateLedState_timer();
+    void UpdateLedState();
 private:
 
     LedSignal(gpio_num_t red_gpio = GPIO_NUM_2, ledc_channel_t red_channel = LEDC_CHANNEL_0, 
