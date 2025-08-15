@@ -14,6 +14,11 @@
 #define BOOT_BUTTON_GPIO        GPIO_NUM_46
 #define SLEEP_GOIO              GPIO_NUM_14
 
+// 使用单独串口 UART_NUM_2
+#define FACTORY_TEST_UART_NUM       UART_NUM_2
+#define FACTORY_TEST_UART_TX_PIN    GPIO_NUM_0
+#define FACTORY_TEST_UART_RX_PIN    GPIO_NUM_44
+
 #define DISPLAY_WIDTH   240
 #define DISPLAY_HEIGHT  240
 #define DISPLAY_MIRROR_X false

@@ -87,7 +87,7 @@ private:
         static int first_level = gpio_get_level(BOOT_BUTTON_GPIO);
 
         const int chat_mode = Application::GetInstance().GetChatMode();
-        ESP_LOGI(TAG, "chat_modechat_modechat_mode: %d", chat_mode);
+        ESP_LOGI(TAG, "chat_mode: %d", chat_mode);
         if (chat_mode == 0) {
             // rec_button_ = new Button(BUILTIN_REC_BUTTON_GPIO);
             // rec_button_->OnPressUp([this]() {

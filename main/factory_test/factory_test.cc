@@ -18,6 +18,7 @@
 #include "board.h"
 #include <string>
 #include <wifi_station.h>
+#include "config.h"
 
 // 工厂测试音频功能包装函数
 static int ft_start_record_task(int duration_seconds) {
@@ -66,11 +67,6 @@ static std::string get_software_version() {
 
 #ifdef CONFIG_FACTORY_TEST_MODE_ENABLE
 
-// 使用日志串口 UART_NUM_0
-#define FACTORY_TEST_UART_NUM UART_NUM_0
-#define FACTORY_TEST_UART_TX_PIN    GPIO_NUM_20
-#define FACTORY_TEST_UART_RX_PIN    GPIO_NUM_19
-
 #define MAX_AT_CMD_LEN 256
 #define AT_BUF_SIZE (MAX_AT_CMD_LEN*2)
 
@@ -102,7 +98,8 @@ static void factory_test_task(void *arg)
         static int debug_counter = 0;
         debug_counter++;
         if (debug_counter % 100 == 0) {  // 每100次循环打印一次
-            ESP_LOGI(TAG, "UART read loop, counter: %d, last read len: %d", debug_counter, len);
+            // ESP_LOGI(TAG, "UART read loop, counter: %d, last read len: %d", debug_counter, len);
+            printf("#");
         }
         
         if (len > 0) {
@@ -145,7 +142,7 @@ void factory_test_uart_init(void) {
 
     // 配置串口参数
     uart_config_t uart_config = {
-        .baud_rate = 74880,  // 使用标准波特率
+        .baud_rate = CONFIG_ESP_CONSOLE_UART_BAUDRATE,  // 使用标准波特率
         .data_bits = UART_DATA_8_BITS,
         .parity = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
