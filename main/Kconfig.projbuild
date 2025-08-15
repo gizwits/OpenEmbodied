@@ -91,6 +91,8 @@ choice BOARD_TYPE
         bool "Doit 小智眼"
     config BOARD_TYPE_DOIT_ESP32S3_EYE_6824
         bool "Doit 小智眼 6824"
+    config BOARD_TYPE_GIZWITS_S3_VB6824_LCD
+        bool "机智云ESP32-S3 6824 LCD"
     config BOARD_TYPE_MAGICLICK_2P4
         bool "神奇按钮 Magiclick_2.4"
     config BOARD_TYPE_MAGICLICK_2P5
