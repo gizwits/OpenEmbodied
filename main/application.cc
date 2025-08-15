@@ -1599,7 +1599,7 @@ void Application::CheckBatteryLevel() {
     bool discharging = false;
     if (Board::GetInstance().GetBatteryLevel(level, charging, discharging)) {
         ESP_LOGI(TAG, "current Battery level: %d, charging: %d, discharging: %d", level, charging, discharging);
-        if (level <= 10) {
+        if (level <= 20) {  // 3.6伏需要关机
             // 提示电量不足
             // SetDeviceState(kDeviceStateIdle);
             Alert(Lang::Strings::ERROR, Lang::Strings::ERROR, "sad", Lang::Sounds::P3_BATTLE_LOW);
