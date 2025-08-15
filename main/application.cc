@@ -1287,7 +1287,9 @@ void Application::WriteAudio(std::vector<uint8_t>& opus) {
 void Application::AbortSpeaking(AbortReason reason) {
     ESP_LOGI(TAG, "Abort speaking");
     aborted_ = true;
-    protocol_->SendAbortSpeaking(reason);
+    if(protocol_){
+        protocol_->SendAbortSpeaking(reason);
+    }
 }
 
 void Application::SetListeningMode(ListeningMode mode) {
