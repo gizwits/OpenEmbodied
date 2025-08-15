@@ -27,6 +27,8 @@
 
 #define TAG "CustomBoard"
 
+#define RESET_WIFI_CONFIGURATION_COUNT 10
+
 class CustomBoard : public WifiBoard {
 private:
     Button boot_button_;
@@ -106,7 +108,14 @@ private:
         }
 
         boot_button_.OnPressRepeat([this](uint16_t count) {
-            if(count >= 3){
+            ESP_LOGI(TAG, "boot_button_.OnPressRepeat: %d", count);
+            if(count >= RESET_WIFI_CONFIGURATION_COUNT){
+                ResetWifiConfiguration();
+            }
+        });
+        rec_button_->OnPressRepeat([this](uint16_t count) {
+            ESP_LOGI(TAG, "rec_button_.OnPressRepeat: %d", count);
+            if(count >= RESET_WIFI_CONFIGURATION_COUNT){
                 ResetWifiConfiguration();
             }
         });
