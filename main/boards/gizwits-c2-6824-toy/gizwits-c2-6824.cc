@@ -3,9 +3,7 @@
 #include "application.h"
 #include "button.h"
 #include "config.h"
-#include "led/circular_strip.h"
 #include "led/gpio_led.h"
-#include "led/single_led.h"
 #include "iot/thing_manager.h"
 #include <esp_sleep.h>
 #include "power_save_timer.h"
@@ -113,6 +111,7 @@ public:
         InitializeIot();
 
         InitializeGpio(POWER_GPIO, true);
+        InitializeGpio(POWER_GPIO, true);
 
         audio_codec.OnWakeUp([this](const std::string& command) {
             ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());
@@ -139,6 +138,11 @@ public:
         } else {
             gpio_set_level(gpio_num_, 0);
         }
+    }
+
+    virtual Led* GetLed() override {
+        static GpioLed led(LED_GPIO);
+        return &led;
     }
 
     virtual AudioCodec* GetAudioCodec() override {
