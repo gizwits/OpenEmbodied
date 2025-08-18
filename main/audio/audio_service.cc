@@ -84,7 +84,7 @@ void AudioService::Initialize(AudioCodec* codec) {
     });
 #else
     audio_processor_->OnOutput([this](std::vector<int16_t>&& data) {
-        ESP_LOGD(TAG, "Audio processor output: data.size()=%u", (unsigned int)data.size());
+        // ESP_LOGW(TAG, "Audio processor output: data.size()=%u", (unsigned int)data.size());
         PushTaskToEncodeQueue(kAudioTaskTypeEncodeToSendQueue, std::move(data));
     });
 #endif

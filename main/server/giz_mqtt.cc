@@ -1061,7 +1061,7 @@ void MqttClient::ReportTimer() {
     }
     
     if (mqtt_) {
-        // uploadP0Data(binary_data, sizeof(binary_data));
+        uploadP0Data(binary_data, sizeof(binary_data));
     }
 
 }

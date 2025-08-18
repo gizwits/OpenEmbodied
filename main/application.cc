@@ -340,8 +340,8 @@ void Application::StopListening() {
 
     Schedule([this]() {
         if (device_state_ == kDeviceStateListening) {
-            protocol_->SendStopListening();
             SetDeviceState(kDeviceStateIdle);
+            protocol_->SendStopListening();
         }
     }, "StopListening_SendStop");
 }
