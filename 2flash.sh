@@ -1,6 +1,7 @@
 # 创建target目录并复制烧录文件
 echo "Creating target directory and copying flash files..."
 mkdir -p target
+cp scripts/auth/auth.py target/
 cp build/bootloader/bootloader.bin target/
 cp build/partition_table/partition-table.bin target/
 cp build/ota_data_initial.bin target/
