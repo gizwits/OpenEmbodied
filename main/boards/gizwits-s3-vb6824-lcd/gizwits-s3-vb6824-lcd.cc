@@ -1,7 +1,7 @@
 #include "wifi_board.h"
 #include "audio_codecs/no_audio_codec.h"
 #include "audio_codecs/vb6824_audio_codec.h"
-#include "display/eye_toy_single_display.h"
+#include "xunguan_display.h"
 #include "system_reset.h"
 #include "application.h"
 #include "button.h"
@@ -21,7 +21,6 @@
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_ops.h>
 #include <driver/spi_common.h>
-#include "display/eye_display.h"
 #include <esp_lcd_gc9a01.h>
 
 #include "driver/gpio.h"
@@ -41,7 +40,7 @@ LV_FONT_DECLARE(font_awesome_20_4);
 class MovecallMojiESP32S3 : public WifiBoard {
 private:
     Button boot_button_;
-    EyeDisplay* display_;
+    XunguanDisplay* display_;
     bool need_power_off_ = false;
     // LIS2HH12专用I2C
     // i2c_master_bus_handle_t lis2hh12_i2c_bus_;
