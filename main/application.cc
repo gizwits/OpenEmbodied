@@ -696,6 +696,10 @@ void Application::MainEventLoop() {
 }
 
 void Application::OnWakeWordDetected() {
+    if (chat_mode_ == 0) {
+        ESP_LOGI(TAG, "OnWakeWordDetected: chat_mode_ == 0");
+        return;
+    }
     ESP_LOGI(TAG, "OnWakeWordDetected");
     if (!protocol_) {
         return;

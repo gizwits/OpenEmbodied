@@ -172,6 +172,11 @@ bool MqttClient::initialize() {
         ESP_LOGI(TAG, "Disconnected from endpoint");
         mqtt_event_ = 0;
         // 重新连接
+        // 如果是 4G 模组 则不需要
+        // if (Board::GetInstance().GetBoardType() != "wifi") {
+        //     ESP_LOGI(TAG, "Disconnected from endpoint, but board type is not wifi");
+        //     return;
+        // }
         Application::GetInstance().HandleNetError();
         xTaskCreate(reconnectTask, "reconnect", 1024 * 4, this, 5, nullptr);
     });
