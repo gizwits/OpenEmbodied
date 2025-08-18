@@ -28,7 +28,8 @@
 #define TAG "CustomBoard"
 
 #define RESET_WIFI_CONFIGURATION_COUNT 10
-
+#define SLEEP_TIME_SEC 60 * 3
+// #define SLEEP_TIME_SEC 30
 class CustomBoard : public WifiBoard {
 private:
     Button boot_button_;
@@ -43,7 +44,7 @@ private:
     std::vector<std::string> network_config_words_ = {"开始配网"};
 
     void InitializePowerSaveTimer() {
-        power_save_timer_ = new PowerSaveTimer(-1, 60 * 3, portMAX_DELAY);  // peter mark 休眠时间
+        power_save_timer_ = new PowerSaveTimer(-1, SLEEP_TIME_SEC, portMAX_DELAY);  // peter mark 休眠时间
         power_save_timer_->OnEnterSleepMode([this]() {
             ESP_LOGI(TAG, "Enabling sleep mode");
             run_sleep_mode(true);
@@ -67,18 +68,8 @@ private:
         }
         application.QuitTalking();
 
-        // 不在充电就真休眠
-        if(PowerManager::GetInstance().IsCharging() == 0){
-            vb6824_shutdown();
-            vTaskDelay(pdMS_TO_TICKS(200));
-            // 配置唤醒源 只有电源域是VDD3P3_RTC的才能唤醒深睡
-            uint64_t wakeup_pins = ( BIT(GPIO_NUM_1));
-            esp_deep_sleep_enable_gpio_wakeup(wakeup_pins, ESP_GPIO_WAKEUP_GPIO_LOW);
-            ESP_LOGI(TAG, "ready to esp_deep_sleep_start");
-            vTaskDelay(pdMS_TO_TICKS(10));
-            
-            esp_deep_sleep_start();
-        }
+        // 检查不在充电就真休眠
+        PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
     }
 
     void InitializeButtons() {

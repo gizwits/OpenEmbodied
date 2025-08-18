@@ -5,6 +5,11 @@
 #include <esp_adc/adc_oneshot.h>
 #include <esp_log.h>
 #include <esp_timer.h>
+#include "vb6824.h"
+#include <esp_sleep.h>
+#include <driver/rtc_io.h>
+#include "driver/gpio.h"
+
 // Battery ADC configuration
 #define BAT_ADC_CHANNEL  ADC_CHANNEL_3  // Battery voltage ADC channel
 #define BAT_ADC_ATTEN    ADC_ATTEN_DB_11 // ADC attenuation
@@ -214,5 +219,22 @@ public:
         static PowerManager instance; // 使用默认构造函数初始化对象
         return instance;
     }
+
+    void EnterDeepSleepIfNotCharging() {
+        // 不在充电就真休眠
+        if (is_charging_ == 0) {
+            vb6824_shutdown();
+            vTaskDelay(pdMS_TO_TICKS(200));
+            // 配置唤醒源 只有电源域是VDD3P3_RTC的才能唤醒深睡
+            uint64_t wakeup_pins = (BIT(GPIO_NUM_1));
+            esp_deep_sleep_enable_gpio_wakeup(wakeup_pins, ESP_GPIO_WAKEUP_GPIO_LOW);
+            ESP_LOGI("PowerMgr", "ready to esp_deep_sleep_start");
+            vTaskDelay(pdMS_TO_TICKS(10));
+            
+            esp_deep_sleep_start();
+        }
+}
+
+    
 };
 #endif  // __POWER_MANAGER_H__

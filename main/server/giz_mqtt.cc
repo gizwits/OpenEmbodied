@@ -15,6 +15,7 @@
 #include <esp_app_desc.h>
 #include "ntp.h"
 #include "power_manager.h"
+#include "led_signal.h"
 
 #define TAG "GIZ_MQTT"
 
@@ -843,10 +844,15 @@ void MqttClient::processAttrValue(std::string attr_name, int value) {
     ESP_LOGI(TAG, "processAttrValue: %s = %d", attr_name.c_str(), value);
     if (attr_name == "chat_mode") {
         Application::GetInstance().SetChatMode(value);
+        ESP_LOGI(TAG, "chat_mode: %d", value);
     }
     else if (attr_name == "volume_set") {
         Board::GetInstance().GetAudioCodec()->SetOutputVolume(value);
-        ESP_LOGI(TAG, "Volume: %d", value);
+        ESP_LOGI(TAG, "volume_set: %d", value);
+    }
+    else if (attr_name == "brightness") {
+        LedSignal::GetInstance().SetBrightness(value);
+        ESP_LOGI(TAG, "brightness: %d", value);
     }
 }
 
@@ -868,15 +874,16 @@ bool MqttClient::uploadP0Data(const void* data, size_t data_len) {
 
 
 void MqttClient::ReportTimer() {
-    uint8_t binary_data[18] = {
+    uint8_t binary_data[20] = {
         0x00, 0x00, 0x00, 0x03,  // 固定头部
         0x0b, 0x00, 0x00, 0x93,  // 命令标识
         0x00, 0x00, 0x00, 0x02,  // 数据长度
-        0x14, 0xff,              // 数据类型
+        0x14, 0x01, 0xff,        // 数据类型
         0x00, // 0b01011011 switch，类型为bool，值为true：字段bit0，字段值为0b1；wakeup_word，类型为bool，值为true：字段bit1，字段值为0b1；charge_status，类型为enum，值为2：字段bit3 ~ bit2，字段值为0b10；alert_tone_language，类型为enum，值为1：字段bit4 ~ bit4，字段值为0b1；chat_mode，类型为enum，值为2：字段bit6 ~ bit5，字段值为0b10；          
         0x64, // 电量
         0x0a, // 音量
         0x00, // rssi
+        0x00, // brightness
     };
 
     int chat_mode = Application::GetInstance().GetChatMode();
@@ -902,12 +909,16 @@ void MqttClient::ReportTimer() {
         binary_data[17] = 100 - (uint8_t)abs(ap_info.rssi);
     }
 
+    binary_data[18] = LedSignal::GetInstance().GetBrightness();
+
     // 每分钟上报一次 或者关键数据变化也报
     static uint8_t last_binary_data[3] = {0x00, 0x00, 0x00};
+    static uint8_t last_brightness = 0;
     static auto last_report_time = std::chrono::steady_clock::now();
     auto current_time = std::chrono::steady_clock::now();
     auto duration_since_last_report = std::chrono::duration_cast<std::chrono::minutes>(current_time - last_report_time).count();
     if (memcmp(&binary_data[14], last_binary_data, 3) != 0 || 
+        binary_data[18] != last_brightness ||
         duration_since_last_report >= 1) {
         ESP_LOGI(TAG, "IsCharging: %d", PowerManager::GetInstance().IsCharging());
         ESP_LOGI(TAG, "Status: %d", status);
@@ -919,6 +930,7 @@ void MqttClient::ReportTimer() {
             uploadP0Data(binary_data, sizeof(binary_data));
         }
         memcpy(last_binary_data, &binary_data[14], 3);
+        last_brightness = binary_data[18];
         last_report_time = current_time;
     }
 
@@ -982,167 +994,185 @@ chat_mode，类型为enum，值为2：字段bit4 ~ bit3，字段值为0b10；
 
 
 // const int MqttClient::attr_size_ = (8 + 8 - 1) / 8;
-
 const char* MqttClient::kGizwitsProtocolJson = R"json(
 {
-    "name": "GF381",
-    "packetVersion": "0x00000004",
-    "protocolType": "standard",
-    "product_key": "e1e1c010f6154280b5c01c69e224bdda",
-    "entities": [
+  "name": "绿林魔方",
+  "packetVersion": "0x00000004",
+  "protocolType": "var_len",
+  "product_key": "73e57262afa74d6294476c595e42f30f",
+  "entities": [
+    {
+      "display_name": "机智云开发套件",
+      "attrs": [
         {
-            "display_name": "机智云开发套件",
-            "attrs": [
-                {
-                    "display_name": "开关",
-                    "name": "switch",
-                    "data_type": "bool",
-                    "position": {
-                        "byte_offset": 0,
-                        "unit": "bit",
-                        "len": 1,
-                        "bit_offset": 0
-                    },
-                    "type": "status_writable",
-                    "id": 0,
-                    "desc": "1"
-                },
-                {
-                    "display_name": "唤醒词",
-                    "name": "wakeup_word",
-                    "data_type": "bool",
-                    "position": {
-                        "byte_offset": 0,
-                        "unit": "bit",
-                        "len": 1,
-                        "bit_offset": 1
-                    },
-                    "type": "status_writable",
-                    "id": 1,
-                    "desc": ""
-                },
-                {
-                    "display_name": "充电状态",
-                    "name": "charge_status",
-                    "data_type": "enum",
-                    "enum": [
-                        "none",
-                        " charging",
-                        "charge_done"
-                    ],
-                    "position": {
-                        "byte_offset": 2,
-                        "unit": "bit",
-                        "len": 2,
-                        "bit_offset": 0
-                    },
-                    "type": "status_readonly",
-                    "id": 5,
-                    "desc": ""
-                },
-                {
-                    "display_name": "提示音语言",
-                    "name": "alert_tone_language",
-                    "data_type": "enum",
-                    "enum": [
-                        "chinese_simplified",
-                        "english"
-                    ],
-                    "position": {
-                        "byte_offset": 0,
-                        "unit": "bit",
-                        "len": 1,
-                        "bit_offset": 2
-                    },
-                    "type": "status_writable",
-                    "id": 2,
-                    "desc": ""
-                },
-                {
-                    "display_name": "chat_mode",
-                    "name": "chat_mode",
-                    "data_type": "enum",
-                    "enum": [
-                        "0",
-                        "1",
-                        "2"
-                    ],
-                    "position": {
-                        "byte_offset": 0,
-                        "unit": "bit",
-                        "len": 2,
-                        "bit_offset": 3
-                    },
-                    "type": "status_writable",
-                    "id": 3,
-                    "desc": "0 按钮\n1 唤醒词\n2 自然对话"
-                },
-                
-                {
-                    "display_name": "电量",
-                    "name": "battery_percentage",
-                    "data_type": "uint8",
-                    "position": {
-                        "byte_offset": 3,
-                        "unit": "byte",
-                        "len": 1,
-                        "bit_offset": 0
-                    },
-                    "uint_spec": {
-                        "addition": 0,
-                        "max": 100,
-                        "ratio": 1,
-                        "min": 0
-                    },
-                    "type": "status_readonly",
-                    "id": 6,
-                    "desc": ""
-                },
-                {
-                    "display_name": "音量",
-                    "name": "volume_set",
-                    "data_type": "uint8",
-                    "position": {
-                        "byte_offset": 1,
-                        "unit": "byte",
-                        "len": 1,
-                        "bit_offset": 0
-                    },
-                    "uint_spec": {
-                        "addition": 0,
-                        "max": 100,
-                        "ratio": 1,
-                        "min": 0
-                    },
-                    "type": "status_writable",
-                    "id": 4,
-                    "desc": ""
-                },
-                {
-                    "display_name": "rssi",
-                    "name": "rssi",
-                    "data_type": "uint8",
-                    "position": {
-                        "byte_offset": 4,
-                        "unit": "byte",
-                        "len": 1,
-                        "bit_offset": 0
-                    },
-                    "uint_spec": {
-                        "addition": -100,
-                        "max": 100,
-                        "ratio": 1,
-                        "min": 0
-                    },
-                    "type": "status_readonly",
-                    "id": 7,
-                    "desc": ""
-                }
-            ],
-            "name": "entity0",
-            "id": 0
+          "display_name": "开关",
+          "name": "switch",
+          "data_type": "bool",
+          "position": {
+            "byte_offset": 0,
+            "unit": "bit",
+            "len": 1,
+            "bit_offset": 0
+          },
+          "type": "status_writable",
+          "id": 0,
+          "desc": "1"
+        },
+        {
+          "display_name": "唤醒词",
+          "name": "wakeup_word",
+          "data_type": "bool",
+          "position": {
+            "byte_offset": 0,
+            "unit": "bit",
+            "len": 1,
+            "bit_offset": 0
+          },
+          "type": "status_writable",
+          "id": 1,
+          "desc": ""
+        },
+        {
+          "display_name": "充电状态",
+          "name": "charge_status",
+          "data_type": "enum",
+          "enum": [
+            "none",
+            " charging",
+            "charge_done"
+          ],
+          "position": {
+            "byte_offset": 0,
+            "unit": "bit",
+            "len": 2,
+            "bit_offset": 0
+          },
+          "type": "status_readonly",
+          "id": 2,
+          "desc": ""
+        },
+        {
+          "display_name": "提示音语言",
+          "name": "alert_tone_language",
+          "data_type": "enum",
+          "enum": [
+            "chinese_simplified",
+            "english"
+          ],
+          "position": {
+            "byte_offset": 0,
+            "unit": "bit",
+            "len": 1,
+            "bit_offset": 0
+          },
+          "type": "status_writable",
+          "id": 3,
+          "desc": ""
+        },
+        {
+          "display_name": "chat_mode",
+          "name": "chat_mode",
+          "data_type": "enum",
+          "enum": [
+            "0",
+            "1",
+            "2"
+          ],
+          "position": {
+            "byte_offset": 0,
+            "unit": "bit",
+            "len": 2,
+            "bit_offset": 0
+          },
+          "type": "status_writable",
+          "id": 4,
+          "desc": "0 按钮\n1 唤醒词\n2 自然对话"
+        },
+        {
+          "display_name": "电量",
+          "name": "battery_percentage",
+          "data_type": "uint8",
+          "position": {
+            "byte_offset": 0,
+            "unit": "byte",
+            "len": 1,
+            "bit_offset": 0
+          },
+          "uint_spec": {
+            "addition": 0,
+            "max": 100,
+            "ratio": 1,
+            "min": 0
+          },
+          "type": "status_readonly",
+          "id": 5,
+          "desc": ""
+        },
+        {
+          "display_name": "音量",
+          "name": "volume_set",
+          "data_type": "uint8",
+          "position": {
+            "byte_offset": 0,
+            "unit": "byte",
+            "len": 1,
+            "bit_offset": 0
+          },
+          "uint_spec": {
+            "addition": 0,
+            "max": 100,
+            "ratio": 1,
+            "min": 0
+          },
+          "type": "status_writable",
+          "id": 6,
+          "desc": ""
+        },
+        {
+          "display_name": "rssi",
+          "name": "rssi",
+          "data_type": "uint8",
+          "position": {
+            "byte_offset": 0,
+            "unit": "byte",
+            "len": 1,
+            "bit_offset": 0
+          },
+          "uint_spec": {
+            "addition": -100,
+            "max": 100,
+            "ratio": 1,
+            "min": 0
+          },
+          "type": "status_readonly",
+          "id": 7,
+          "desc": "无 1"
+        },
+        {
+          "display_name": "亮度",
+          "name": "brightness",
+          "data_type": "uint8",
+          "position": {
+            "byte_offset": 0,
+            "unit": "byte",
+            "len": 1,
+            "bit_offset": 0
+          },
+          "uint_spec": {
+            "addition": 0,
+            "max": 100,
+            "ratio": 1,
+            "min": 0
+          },
+          "type": "status_writable",
+          "id": 8,
+          "desc": ""
         }
-    ]
+      ],
+      "name": "entity0",
+      "id": 0
+    }
+  ]
 }
 )json";
 
