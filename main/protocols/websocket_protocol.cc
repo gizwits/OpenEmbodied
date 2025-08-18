@@ -144,7 +144,7 @@ void WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
     message_buffer_ += "}";
     message_buffer_ += "}";
 
-    // ESP_LOGI(TAG, "SendAudio: %d", message_buffer_.size());
+    ESP_LOGI(TAG, "SendAudio: %d", message_buffer_.size());
     // 复制并发送
     websocket_->Send(message_buffer_.data(), message_buffer_.size(), true);
 }
@@ -295,7 +295,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
         if (event_type.empty() || event_type.length() >= 64) {
             return;
         }
-        // ESP_LOGI(TAG, "event_type: %.*s", (int)event_type.length(), event_type.data());
+        ESP_LOGI(TAG, "event_type: %.*s", (int)event_type.length(), event_type.data());
 
         // if(event_type != "chat.created") {
         //     return;
