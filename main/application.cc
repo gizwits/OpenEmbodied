@@ -652,6 +652,10 @@ void Application::Start() {
         std::lock_guard<std::mutex> lock(mutex_);
         if (audio_decode_queue_.size() < max_packets_in_queue) {
             audio_decode_queue_.emplace_back(std::move(packet));
+        } else {
+            // 释放数据
+            packet.payload.clear();
+            packet.payload.shrink_to_fit();
         }
     });
     protocol_->OnAudioChannelOpened([this, codec, &board]() {
