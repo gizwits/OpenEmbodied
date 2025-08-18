@@ -5,6 +5,7 @@
 #include "protocol/iot_protocol.h"
 #include "protocol/ota_protocol.h"
 #include <cstring>
+#include <algorithm>
 #include "auth.h"
 #include <arpa/inet.h>
 #include "application.h"
@@ -329,22 +330,44 @@ bool MqttClient::publish(const std::string& topic, const std::string& payload) {
         ESP_LOGE(TAG, "Send queue not initialized");
         return false;
     }
+    
+    ESP_LOGI(TAG, "publish: topic='%s', payload length=%zu", topic.c_str(), payload.length());
+    
     mqtt_send_msg_t msg = {0};
     msg.topic = strdup(topic.c_str());
-    msg.payload = strdup(payload.c_str());
+    
+    // 对于二进制数据，不能使用 strdup，需要使用 memcpy 来保持数据完整性
+    if (payload.length() > 0) {
+        msg.payload = static_cast<char*>(malloc(payload.length()));
+        if (msg.payload) {
+            memcpy(msg.payload, payload.data(), payload.length());
+            msg.payload_len = payload.length(); // 设置 payload 长度
+            ESP_LOGI(TAG, "publish: msg.topic='%s', msg.payload allocated with length=%zu", msg.topic, payload.length());
+        } else {
+            ESP_LOGE(TAG, "Failed to allocate payload buffer");
+            if (msg.topic) free(msg.topic);
+            return false;
+        }
+    } else {
+        msg.payload = nullptr;
+        msg.payload_len = 0;
+    }
+    
     msg.qos = 0;
-    if (!msg.topic || !msg.payload) {
-        if (msg.topic) free(msg.topic);
+    if (!msg.topic) {
         if (msg.payload) free(msg.payload);
-        ESP_LOGE(TAG, "Failed to allocate send message buffers");
+        ESP_LOGE(TAG, "Failed to allocate topic buffer");
         return false;
     }
+    
     if (xQueueSendToBack(send_queue_, &msg, 0) != pdPASS) {
         ESP_LOGE(TAG, "Send queue full, dropping publish to %s", topic.c_str());
         free(msg.topic);
-        free(msg.payload);
+        if (msg.payload) free(msg.payload);
         return false;
     }
+    
+    ESP_LOGI(TAG, "publish: message queued successfully");
     return true;
 }
 
@@ -555,7 +578,22 @@ void MqttClient::sendTask(void* arg) {
                 // 正常发送MQTT消息
                 if (client->mqtt_) {
                     std::string topic_str = msg.topic ? msg.topic : "";
-                    std::string payload_str = msg.payload ? msg.payload : "";
+                    // 使用 payload_len 而不是依赖字符串的 \0 终止符
+                    std::string payload_str = msg.payload ? std::string(msg.payload, msg.payload_len) : "";
+                    ESP_LOGI(TAG, "sendTask: topic='%s', payload length=%zu", topic_str.c_str(), payload_str.length());
+                    
+                    // 对于二进制数据，显示前几个字节的十六进制值
+                    // if (payload_str.length() > 0) {
+                    //     ESP_LOGI(TAG, "sendTask: payload first 16 bytes (hex):");
+                    //     size_t show_len = std::min(payload_str.length(), (size_t)16);
+                    //     for (size_t i = 0; i < show_len; i++) {
+                    //         if (i % 8 == 0) ESP_LOGI(TAG, "  %02zu: ", i);
+                    //         ESP_LOGI(TAG, "%02x ", (uint8_t)payload_str[i]);
+                    //         if (i % 8 == 7) ESP_LOGI(TAG, "");
+                    //     }
+                    //     if (show_len % 8 != 0) ESP_LOGI(TAG, "");
+                    // }
+                    
                     client->mqtt_->Publish(topic_str, payload_str);
                 }
                 if (msg.topic) free(msg.topic);
@@ -571,6 +609,7 @@ void MqttClient::timerCallback(TimerHandle_t xTimer) {
         mqtt_send_msg_t ctrl = {0};
         ctrl.topic = nullptr;
         ctrl.payload = nullptr;
+        ctrl.payload_len = 0;
         ctrl.qos = MQTT_SEND_CONTROL_ROOMINFO;
         xQueueSendToBack(client->send_queue_, &ctrl, 0);
     }
@@ -952,9 +991,20 @@ bool MqttClient::uploadP0Data(const void* data, size_t data_len) {
         ESP_LOGE(TAG, "MQTT client not initialized for uploadP0Data");
         return false;
     }
+    if (!data || data_len == 0) {
+        ESP_LOGE(TAG, "Invalid data parameters: data=%p, data_len=%zu", data, data_len);
+        return false;
+    }
+    
     std::string topic = "dev2app/" + client_id_;
+    ESP_LOGI(TAG, "Uploading p0 data: topic=%s, data_len=%zu", topic.c_str(), data_len);
+    
+    // Create payload string with explicit length to handle binary data properly
+    std::string payload(static_cast<const char*>(data), data_len);
+    ESP_LOGI(TAG, "Payload created with length: %zu", payload.length());
+    
     // Publish binary data via queued publish
-    bool result = publish(topic, std::string(static_cast<const char*>(data), data_len));
+    bool result = publish(topic, payload);
     if (!result) {
         ESP_LOGE(TAG, "Failed to publish p0 data to %s", topic.c_str());
     }
@@ -1009,9 +1059,9 @@ void MqttClient::ReportTimer() {
         ESP_LOGI(TAG, "WiFi RSSI: %d dBm", ap_info.rssi);
         binary_data[17] = 100 - (uint8_t)abs(ap_info.rssi);
     }
-
+    
     if (mqtt_) {
-        uploadP0Data(binary_data, sizeof(binary_data));
+        // uploadP0Data(binary_data, sizeof(binary_data));
     }
 
 }

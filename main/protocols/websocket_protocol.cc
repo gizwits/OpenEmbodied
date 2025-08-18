@@ -108,7 +108,8 @@ void WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
             ESP_LOGD(TAG, "Audio ignore period ended, elapsed: %lld ms", elapsed);
         }
     }
-    const std::vector<uint8_t>& data = packet.payload;
+    // 提取前面一半的数据
+    std::vector<uint8_t> data = packet.payload;
     // Calculate required base64 buffer size
     size_t out_len = 4 * ((data.size() + 2) / 3);
     
@@ -143,8 +144,9 @@ void WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
     message_buffer_ += "}";
     message_buffer_ += "}";
 
-    // Send message
-    websocket_->Send(message_buffer_);
+    // ESP_LOGI(TAG, "SendAudio: %d", message_buffer_.size());
+    // 复制并发送
+    websocket_->Send(message_buffer_.data(), message_buffer_.size(), true);
 }
 
 

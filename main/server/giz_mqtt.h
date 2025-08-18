@@ -77,6 +77,7 @@ typedef struct {
 typedef struct {
     char* topic;
     char* payload;
+    size_t payload_len; // 添加 payload 长度字段
     int qos; // reserved for QoS or control (e.g. MQTT_SEND_CONTROL_ROOMINFO)
 } mqtt_send_msg_t;
 

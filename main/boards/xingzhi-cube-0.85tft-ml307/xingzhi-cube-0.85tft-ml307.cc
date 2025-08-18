@@ -88,47 +88,47 @@ private:
     Button boot_button_;
     Button volume_up_button_;
     Button volume_down_button_;
-    // SpiLcdDisplay* display_;
-    PowerSaveTimer* power_save_timer_;
-    // PowerManager* power_manager_;
+    SpiLcdDisplay* display_;
+    // PowerSaveTimer* power_save_timer_;
+    PowerManager* power_manager_;
     esp_lcd_panel_io_handle_t panel_io_ = nullptr;
     esp_lcd_panel_handle_t panel_ = nullptr;
 
-    // void InitializePowerManager() {
-    //     power_manager_ = new PowerManager(GPIO_NUM_38);
-    //     power_manager_->OnChargingStatusChanged([this](bool is_charging) {
-    //         if (is_charging) {
-    //             power_save_timer_->SetEnabled(false);
-    //         } else {
-    //             power_save_timer_->SetEnabled(true);
-    //         }
-    //     });
-    // }
-
-    void InitializePowerSaveTimer() {
-        rtc_gpio_init(GPIO_NUM_21);
-        rtc_gpio_set_direction(GPIO_NUM_21, RTC_GPIO_MODE_OUTPUT_ONLY);
-        rtc_gpio_set_level(GPIO_NUM_21, 1);
-        
-        power_save_timer_ = new PowerSaveTimer(-1, 60, 300);
-        power_save_timer_->OnEnterSleepMode([this]() {
-            // GetDisplay()->SetPowerSaveMode(true);
-            GetBacklight()->SetBrightness(1);
+    void InitializePowerManager() {
+        power_manager_ = new PowerManager(GPIO_NUM_38);
+        power_manager_->OnChargingStatusChanged([this](bool is_charging) {
+            // if (is_charging) {
+            //     power_save_timer_->SetEnabled(false);
+            // } else {
+            //     power_save_timer_->SetEnabled(true);
+            // }
         });
-        power_save_timer_->OnExitSleepMode([this]() {
-            // GetDisplay()->SetPowerSaveMode(false);
-            GetBacklight()->RestoreBrightness();
-        });
-        power_save_timer_->OnShutdownRequest([this]() {
-            ESP_LOGI(TAG, "Shutting down");
-            rtc_gpio_set_level(GPIO_NUM_21, 0);
-            // 启用保持功能，确保睡眠期间电平不变
-            rtc_gpio_hold_en(GPIO_NUM_21);
-            esp_lcd_panel_disp_on_off(panel_, false); //关闭显示
-            esp_deep_sleep_start();
-        });
-        power_save_timer_->SetEnabled(true);
     }
+
+    // void InitializePowerSaveTimer() {
+    //     rtc_gpio_init(GPIO_NUM_21);
+    //     rtc_gpio_set_direction(GPIO_NUM_21, RTC_GPIO_MODE_OUTPUT_ONLY);
+    //     rtc_gpio_set_level(GPIO_NUM_21, 1);
+        
+    //     power_save_timer_ = new PowerSaveTimer(-1, 60, 300);
+    //     power_save_timer_->OnEnterSleepMode([this]() {
+    //         // GetDisplay()->SetPowerSaveMode(true);
+    //         GetBacklight()->SetBrightness(1);
+    //     });
+    //     power_save_timer_->OnExitSleepMode([this]() {
+    //         // GetDisplay()->SetPowerSaveMode(false);
+    //         GetBacklight()->RestoreBrightness();
+    //     });
+    //     power_save_timer_->OnShutdownRequest([this]() {
+    //         ESP_LOGI(TAG, "Shutting down");
+    //         rtc_gpio_set_level(GPIO_NUM_21, 0);
+    //         // 启用保持功能，确保睡眠期间电平不变
+    //         rtc_gpio_hold_en(GPIO_NUM_21);
+    //         esp_lcd_panel_disp_on_off(panel_, false); //关闭显示
+    //         esp_deep_sleep_start();
+    //     });
+    //     power_save_timer_->SetEnabled(true);
+    // }
 
     void InitializeSpi() {
         spi_bus_config_t buscfg = {};
@@ -149,38 +149,38 @@ private:
         });
     } 
 
-    // void InitializeNv3023Display() {
-    //     ESP_LOGD(TAG, "Install panel IO");
-    //     esp_lcd_panel_io_spi_config_t io_config = NV3023_PANEL_IO_SPI_CONFIG(DISPLAY_CS, DISPLAY_DC, NULL, NULL);
-    //     ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI3_HOST, &io_config, &panel_io_));
+    void InitializeNv3023Display() {
+        ESP_LOGD(TAG, "Install panel IO");
+        esp_lcd_panel_io_spi_config_t io_config = NV3023_PANEL_IO_SPI_CONFIG(DISPLAY_CS, DISPLAY_DC, NULL, NULL);
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI3_HOST, &io_config, &panel_io_));
 
-    //     ESP_LOGD(TAG, "Install LCD driver");
-    //     esp_lcd_panel_dev_config_t panel_config = {};
-    //     nv3023_vendor_config_t vendor_config = {  // Uncomment these lines if use custom initialization commands
-    //         .init_cmds = lcd_init_cmds,
-    //         .init_cmds_size = sizeof(lcd_init_cmds) / sizeof(nv3023_lcd_init_cmd_t),
-    //     };
-    //     panel_config.reset_gpio_num = DISPLAY_RES;
-    //     panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR;
-    //     panel_config.bits_per_pixel = 16;
-    //     panel_config.vendor_config = &vendor_config;
+        ESP_LOGD(TAG, "Install LCD driver");
+        esp_lcd_panel_dev_config_t panel_config = {};
+        nv3023_vendor_config_t vendor_config = {  // Uncomment these lines if use custom initialization commands
+            .init_cmds = lcd_init_cmds,
+            .init_cmds_size = sizeof(lcd_init_cmds) / sizeof(nv3023_lcd_init_cmd_t),
+        };
+        panel_config.reset_gpio_num = DISPLAY_RES;
+        panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR;
+        panel_config.bits_per_pixel = 16;
+        panel_config.vendor_config = &vendor_config;
 
-    //     ESP_ERROR_CHECK(esp_lcd_new_panel_nv3023(panel_io_, &panel_config, &panel_));
-    //     ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_));
-    //     ESP_ERROR_CHECK(esp_lcd_panel_init(panel_));
-    //     ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(panel_, DISPLAY_SWAP_XY));
-    //     ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y));
-    //     ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel_, false));
-    //     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_, true));
+        ESP_ERROR_CHECK(esp_lcd_new_panel_nv3023(panel_io_, &panel_config, &panel_));
+        ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_));
+        ESP_ERROR_CHECK(esp_lcd_panel_init(panel_));
+        ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(panel_, DISPLAY_SWAP_XY));
+        ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y));
+        ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel_, false));
+        ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_, true));
 
-    //     display_ = new SpiLcdDisplay(panel_io_, panel_, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
-    //         DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY, 
-    //     {
-    //         .text_font = &font_puhui_16_4,
-    //         .icon_font = &font_awesome_16_4,
-    //         .emoji_font = font_emoji_32_init(),
-    //     });
-    // }
+        display_ = new SpiLcdDisplay(panel_io_, panel_, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
+            DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY, 
+        {
+            .text_font = &font_puhui_16_4,
+            .icon_font = &font_awesome_16_4,
+            .emoji_font = font_emoji_32_init(),
+        });
+    }
 
     void Initializegpio21_45() {
         rtc_gpio_init(GPIO_NUM_21);
@@ -222,28 +222,28 @@ public:
     //     return display_;
     // }
     
-    // virtual Backlight* GetBacklight() override {
-    //     static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
-    //     return &backlight;
-    // }
+    virtual Backlight* GetBacklight() override {
+        static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
+        return &backlight;
+    }
 
-    // virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
-    //     static bool last_discharging = false;
-    //     charging = power_manager_->IsCharging();
-    //     discharging = power_manager_->IsDischarging();
-    //     if (discharging != last_discharging) {
-    //         power_save_timer_->SetEnabled(discharging);
-    //         last_discharging = discharging;
-    //     }
-    //     level = power_manager_->GetBatteryLevel();
-    //     return true;
-    // }
+    virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
+        static bool last_discharging = false;
+        // charging = power_manager_->IsCharging();
+        // discharging = power_manager_->IsDischarging();
+        // if (discharging != last_discharging) {
+        //     // power_save_timer_->SetEnabled(discharging);
+        //     last_discharging = discharging;
+        // }
+        // level = power_manager_->GetBatteryLevel();
+        return true;
+    }
 
     virtual void SetPowerSaveMode(bool enabled) override {
-        if (!enabled) {
-            power_save_timer_->WakeUp();
-        }
-        DualNetworkBoard::SetPowerSaveMode(enabled);
+        // if (!enabled) {
+        //     power_save_timer_->WakeUp();
+        // }
+        // DualNetworkBoard::SetPowerSaveMode(enabled);
     }
 };
 

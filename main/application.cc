@@ -264,7 +264,7 @@ void Application::ToggleChatState() {
         return;
     }
 
-    if (device_state_ == kDeviceStateIdle) {
+    if (device_state_ == kDeviceStateIdle || device_state_ == kDeviceStateSleeping) {
         Schedule([this]() {
             auto& board = Board::GetInstance();
             // 还原屏幕亮度
@@ -418,7 +418,7 @@ void Application::Start() {
 
     // Check for new firmware version or get the MQTT broker address
     Ota ota;
-    CheckNewVersion(ota);
+    // CheckNewVersion(ota);
 
     // Initialize the protocol
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);

@@ -586,7 +586,7 @@ int32_t GServer::getFirmwareUpdate(const char* hw_version, const char* sw_versio
     // 使用Board的HTTP客户端
     auto& board = Board::GetInstance();
     auto network = board.GetNetwork();
-    auto http = network->CreateHttp(5);
+    auto http = network->CreateHttp(4);
     
     // 设置请求头
     http->SetHeader("X-Sign-Method", "sha256");
