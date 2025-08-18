@@ -745,6 +745,7 @@ void MqttClient::app2devMsgHandler(const uint8_t *data, int32_t len)
 
     // 解析Flag
     uint8_t flag = data[4 + var_len];
+    ESP_LOGI(TAG, "flag: %d", flag);
 
     // 解析命令字
     uint16_t command = (data[5 + var_len] << 8) | data[6 + var_len];
@@ -756,6 +757,7 @@ void MqttClient::app2devMsgHandler(const uint8_t *data, int32_t len)
 
     // 解析包序号
     uint32_t sn = (data[7 + var_len] << 24) | (data[8 + var_len] << 16) | (data[9 + var_len] << 8) | data[10 + var_len];
+    ESP_LOGI(TAG, "sn: %ld", sn);
 
     // 解析业务指令
     const uint8_t *business_instruction = data + 11 + var_len;
@@ -896,20 +898,21 @@ void MqttClient::ReportTimer() {
     status |= (chat_mode << 5); // chat_mode
 
     // 本设备无法判断充满电
-    binary_data[14] = status;
+    int pos = 15;
+    binary_data[pos++] = status;
 
-    binary_data[15] = PowerManager::GetInstance().GetBatteryLevel();
+    binary_data[pos++] = PowerManager::GetInstance().GetBatteryLevel();
 
     auto codec = Board::GetInstance().GetAudioCodec();
     int volume = codec->output_volume();
-    binary_data[16] = volume;
+    binary_data[pos++] = volume;
 
     wifi_ap_record_t ap_info;
     if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
-        binary_data[17] = 100 - (uint8_t)abs(ap_info.rssi);
+        binary_data[pos++] = 100 - (uint8_t)abs(ap_info.rssi);
     }
 
-    binary_data[18] = LedSignal::GetInstance().GetBrightness();
+    binary_data[pos++] = LedSignal::GetInstance().GetBrightness();
 
     // 每分钟上报一次 或者关键数据变化也报
     static uint8_t last_binary_data[3] = {0x00, 0x00, 0x00};
@@ -917,8 +920,8 @@ void MqttClient::ReportTimer() {
     static auto last_report_time = std::chrono::steady_clock::now();
     auto current_time = std::chrono::steady_clock::now();
     auto duration_since_last_report = std::chrono::duration_cast<std::chrono::minutes>(current_time - last_report_time).count();
-    if (memcmp(&binary_data[14], last_binary_data, 3) != 0 || 
-        binary_data[18] != last_brightness ||
+    if (memcmp(&binary_data[15], last_binary_data, 3) != 0 || 
+        binary_data[19] != last_brightness ||
         duration_since_last_report >= 1) {
         ESP_LOGI(TAG, "IsCharging: %d", PowerManager::GetInstance().IsCharging());
         ESP_LOGI(TAG, "Status: %d", status);
@@ -929,8 +932,8 @@ void MqttClient::ReportTimer() {
         if (mqtt_) {
             uploadP0Data(binary_data, sizeof(binary_data));
         }
-        memcpy(last_binary_data, &binary_data[14], 3);
-        last_brightness = binary_data[18];
+        memcpy(last_binary_data, &binary_data[15], 3);
+        last_brightness = binary_data[19];
         last_report_time = current_time;
     }
 
