@@ -281,6 +281,7 @@ void Application::DismissAlert() {
 }
 
 void Application::PlaySound(const std::string_view& sound) {
+    ESP_LOGI(TAG, "PlaySound: size=%d, data=%p", sound.size(), sound.data());
     // Wait for the previous sound to finish
     {
         std::unique_lock<std::mutex> lock(mutex_);
@@ -1225,6 +1226,7 @@ void Application::OnAudioInput() {
 #endif
 }
 
+#ifndef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
 void Application::ReadAudio(std::vector<int16_t>& data, int sample_rate, int samples) {
     auto codec = Board::GetInstance().GetAudioCodec();
     if (codec->input_sample_rate() != sample_rate) {
@@ -1260,7 +1262,7 @@ void Application::ReadAudio(std::vector<int16_t>& data, int sample_rate, int sam
         }
     }
 }
-
+#endif
 
 #ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
 void Application::ReadAudio(std::vector<uint8_t>& opus, int sample_rate, int samples) {
@@ -1272,6 +1274,7 @@ void Application::ReadAudio(std::vector<uint8_t>& opus, int sample_rate, int sam
 }
 #endif
 
+#ifndef CONFIG_USE_AUDIO_CODEC_DECODE_OPUS
 void Application::WriteAudio(std::vector<int16_t>& data, int sample_rate) {
     auto codec = Board::GetInstance().GetAudioCodec();
     // Resample if the sample rate is different
@@ -1283,6 +1286,7 @@ void Application::WriteAudio(std::vector<int16_t>& data, int sample_rate) {
     }
     codec->OutputData(data);
 }
+#endif
 
 #ifdef CONFIG_USE_AUDIO_CODEC_DECODE_OPUS
 void Application::WriteAudio(std::vector<uint8_t>& opus) {

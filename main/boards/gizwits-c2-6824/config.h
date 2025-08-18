@@ -13,5 +13,10 @@
 #define BUILTIN_LED_GPIO        GPIO_NUM_6
 #define BUILTIN_LED_NUM         1
 
+// 使用日志串口 UART_NUM_0
+#define FACTORY_TEST_UART_NUM UART_NUM_0
+#define FACTORY_TEST_UART_TX_PIN    GPIO_NUM_20
+#define FACTORY_TEST_UART_RX_PIN    GPIO_NUM_19
+
 
 #endif // _BOARD_CONFIG_H_
