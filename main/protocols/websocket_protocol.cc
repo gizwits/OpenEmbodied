@@ -144,9 +144,10 @@ void WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
     message_buffer_ += "}";
     message_buffer_ += "}";
 
-    ESP_LOGI(TAG, "SendAudio: %d", message_buffer_.size());
     // 复制并发送
-    websocket_->Send(message_buffer_.data(), message_buffer_.size(), true);
+    websocket_->Send(message_buffer_.data(), message_buffer_.size(), false);
+    ESP_LOGI(TAG, "SendAudio success: %d", message_buffer_.size());
+
 }
 
 
