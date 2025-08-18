@@ -1,26 +1,25 @@
 #include "wifi_board.h"
-#include "audio_codecs/no_audio_codec.h"
-#include "audio_codecs/vb6824_audio_codec.h"
-#include "xunguan_display.h"
-#include "system_reset.h"
 #include "application.h"
 #include "button.h"
 #include "config.h"
 #include "iot/thing_manager.h"
+#include "audio_codecs/vb6824_audio_codec.h"
 #include "power_manager.h"
 #include "assets/lang_config.h"
+#include "font_awesome_symbols.h"
 
 #include "led/single_led.h"
-#include "power_save_timer.h"
+#include "xunguan_display.h"
+#include "display/display.h"
 
 #include <wifi_station.h>
+#include "power_save_timer.h"
 #include <esp_log.h>
 #include <esp_efuse_table.h>
 #include <driver/i2c_master.h>
-#include <esp_lcd_panel_vendor.h>
+
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_ops.h>
-#include <driver/spi_common.h>
 #include <esp_lcd_gc9a01.h>
 
 #include "driver/gpio.h"
@@ -28,7 +27,6 @@
 #include "esp_timer.h"
 
 #include <math.h>
-
 #define TAG "MovecallMojiESP32S3"
 
 LV_FONT_DECLARE(font_puhui_20_4);
@@ -145,48 +143,95 @@ private:
         // thing_manager.AddThing(iot::CreateThing("Lamp"));
     }
 
+    
     // SPI初始化
     void InitializeSpi() {
-        ESP_LOGI(TAG, "Initialize SPI bus");
-        spi_bus_config_t buscfg = GC9A01_PANEL_BUS_SPI_CONFIG(DISPLAY_SPI_SCLK_PIN, DISPLAY_SPI_MOSI_PIN, 
-                                    DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(uint16_t));
-        ESP_ERROR_CHECK(spi_bus_initialize(SPI3_HOST, &buscfg, SPI_DMA_CH_AUTO));
+        spi_bus_config_t buscfg = {
+            .mosi_io_num = DISPLAY_SPI_MOSI_PIN,
+            .miso_io_num = -1,  // No MISO for this display
+            .sclk_io_num = DISPLAY_SPI_SCLK_PIN,
+            .quadwp_io_num = -1,
+            .quadhd_io_num = -1,
+            .max_transfer_sz = DISPLAY_WIDTH * 40 * sizeof(uint16_t),  // Reduced for power saving
+        };
+        
+        esp_err_t ret = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "SPI bus initialization failed: %s", esp_err_to_name(ret));
+        }
     }
 
     // GC9A01初始化
     void InitializeGc9a01Display() {
-        ESP_LOGI(TAG, "Init GC9A01 display");
-
-        ESP_LOGI(TAG, "Install panel IO");
-        esp_lcd_panel_io_handle_t io_handle = NULL;
-        esp_lcd_panel_io_spi_config_t io_config = GC9A01_PANEL_IO_SPI_CONFIG(DISPLAY_SPI_CS_PIN, DISPLAY_SPI_DC_PIN, NULL, NULL);
-        io_config.pclk_hz = DISPLAY_SPI_SCLK_HZ;
-        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI3_HOST, &io_config, &io_handle));
-    
-        ESP_LOGI(TAG, "Install GC9A01 panel driver");
-        esp_lcd_panel_handle_t panel_handle = NULL;
-        esp_lcd_panel_dev_config_t panel_config = {};
-        panel_config.reset_gpio_num = DISPLAY_SPI_RESET_PIN;    // Set to -1 if not use
-        panel_config.rgb_endian = LCD_RGB_ENDIAN_RGB;           //LCD_RGB_ENDIAN_RGB;
-        panel_config.bits_per_pixel = 16;                       // Implemented by LCD command `3Ah` (16/18)
-
-        ESP_ERROR_CHECK(esp_lcd_new_panel_gc9a01(io_handle, &panel_config, &panel_handle));
-        ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));
-        ESP_ERROR_CHECK(esp_lcd_panel_init(panel_handle));
-        ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel_handle, true));
-        ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_handle, true, false));
-        ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true)); 
-
-        display_ = new EyeDisplay(io_handle, panel_handle,
-                                DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
-                                DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y,
-                                &qrcode_img,
-                                {
-                                    .text_font = &font_puhui_20_4,
-                                    .icon_font = &font_awesome_20_4,
-                                    .emoji_font = font_emoji_64_init(),
-                                });
+        esp_lcd_panel_io_spi_config_t io_config = {
+            .cs_gpio_num = DISPLAY_SPI_CS_PIN,
+            .dc_gpio_num = DISPLAY_SPI_DC_PIN,
+            .spi_mode = 0,
+            .pclk_hz = DISPLAY_SPI_SCLK_HZ,
+            .trans_queue_depth = 10,
+            .lcd_cmd_bits = 8,
+            .lcd_param_bits = 8,
+        };
+        
+        esp_lcd_panel_io_handle_t panel_io = nullptr;
+        esp_err_t ret = esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_config, &panel_io);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Panel IO creation failed: %s", esp_err_to_name(ret));
+            return;
+        }
+        
+        esp_lcd_panel_dev_config_t panel_config = {
+            .reset_gpio_num = DISPLAY_SPI_RESET_PIN,
+            .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR,
+            .bits_per_pixel = 16,
+        };
+        
+        esp_lcd_panel_handle_t panel = nullptr;
+        ret = esp_lcd_new_panel_gc9a01(panel_io, &panel_config, &panel);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Panel creation failed: %s", esp_err_to_name(ret));
+            return;
+        }
+        
+        ret = esp_lcd_panel_reset(panel);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Panel reset failed: %s", esp_err_to_name(ret));
+            return;
+        }
+        
+        ret = esp_lcd_panel_init(panel);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Panel init failed: %s", esp_err_to_name(ret));
+            return;
+        }
+        
+        // Invert colors for GC9A01
+        ret = esp_lcd_panel_invert_color(panel, true);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Panel color invert failed: %s", esp_err_to_name(ret));
+            return;
+        }
+        
+        // Mirror display
+        ret = esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Panel mirror failed: %s", esp_err_to_name(ret));
+            return;
+        }
+        
+        // Turn on display
+        ret = esp_lcd_panel_disp_on_off(panel, true);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Panel display on failed: %s", esp_err_to_name(ret));
+            return;
+        }
+        
+        display_ = new XunguanDisplay();
+        if (!display_->Initialize(panel_io, panel)) {
+            ESP_LOGE(TAG, "Failed to initialize XunguanDisplay");
+        }
     }
+
 
     void InitializeGpio(gpio_num_t gpio_num_, bool output = false) {
         gpio_config_t config = {

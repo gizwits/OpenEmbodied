@@ -40,7 +40,7 @@
 
 #define DISPLAY_SPI_SCLK_HZ     (20 * 1000 * 1000)
 
-#define BAT_ADC_CHANNEL  ADC_CHANNEL_1  // Battery voltage ADC channel
+#define BAT_ADC_CHANNEL  ADC_CHANNEL_2  // Battery voltage ADC channel
 #define BAT_ADC_ATTEN    ADC_ATTEN_DB_11 // ADC attenuation
 #define BAT_ADC_UNIT     ADC_UNIT_2
 #define POWER_CHARGE_LED_PIN GPIO_NUM_NC

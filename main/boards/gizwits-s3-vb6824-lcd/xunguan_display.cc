@@ -823,7 +823,7 @@ void XunguanDisplay::StartLovingAnimation() {
                 // Stop current animation and start idle animation
                 const auto& app = Application::GetInstance();
                 auto state = app.GetDeviceState();
-                if (state == kDeviceStateSleeping || state == kDeviceStateIdle) {
+                if (state == kDeviceStateIdle) {
                     self->StartSleepingAnimation();
                 } else {
                     self->StartIdleAnimation(0);
@@ -1910,7 +1910,7 @@ void XunguanDisplay::StartVertigoRotationAnimation(lv_obj_t* left_spiral, lv_obj
                 // Stop current animation and start idle animation
                 const auto& app = Application::GetInstance();
                 auto state = app.GetDeviceState();
-                if (state == kDeviceStateSleeping || state == kDeviceStateIdle) {
+                if (state == kDeviceStateIdle) {
                     self->StartSleepingAnimation();
                 } else {
                     self->StartIdleAnimation(0);
@@ -2240,31 +2240,31 @@ void XunguanDisplay::EnterWifiConfig() {
     
 }
 
-void XunguanDisplay::ClearScreen() {
-    DisplayLockGuard lock(this);
+// void XunguanDisplay::ClearScreen() {
+//     DisplayLockGuard lock(this);
 
-    auto screen = lv_screen_active();
-    if (!screen) {
-        ESP_LOGE(TAG, "No active screen found!");
-        return;
-    }
+//     auto screen = lv_screen_active();
+//     if (!screen) {
+//         ESP_LOGE(TAG, "No active screen found!");
+//         return;
+//     }
 
-    // Stop animations and clear tracked UI elements without taking the lock again
-    ClearUIElementsNoLock();
+//     // Stop animations and clear tracked UI elements without taking the lock again
+//     ClearUIElementsNoLock();
 
-    // Ensure all remaining objects on the screen are removed
-    lv_obj_clean(screen);
+//     // Ensure all remaining objects on the screen are removed
+//     lv_obj_clean(screen);
 
-    // Reset background to black and fully opaque
-    lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
+//     // Reset background to black and fully opaque
+//     lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
+//     lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
 
-    // Force refresh
-    lv_obj_invalidate(screen);
-    if (lvgl_display_) {
-        lv_refr_now(lvgl_display_);
-    }
-}
+//     // Force refresh
+//     lv_obj_invalidate(screen);
+//     if (lvgl_display_) {
+//         lv_refr_now(lvgl_display_);
+//     }
+// }
 
 void XunguanDisplay::blink_anim_cb(void* var, int32_t v) {
     lv_obj_t* left_eye = (lv_obj_t*)var;
