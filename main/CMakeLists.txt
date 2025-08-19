@@ -34,6 +34,7 @@ set(SOURCES
             "ntp.cc"
             "main.cc"
             "factory_test/factory_test.cc"
+            "factory_test/test.cc"
             "factory_test/test_uart.cc"
             )
 
