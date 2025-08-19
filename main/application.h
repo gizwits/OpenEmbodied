@@ -24,6 +24,9 @@
 #include "background_task.h"
 #include "ntp.h"
 #include "protocols/websocket_protocol.h"
+#include "factory_test/test.h"
+#include "sdkconfig.h"
+
 #if CONFIG_USE_AUDIO_PROCESSOR
 #include "audio_processor.h"
 #endif
@@ -62,6 +65,7 @@ public:
     char trace_id_[33];  // 32 chars + null terminator
 
     Player player_;
+    UdpBroadcaster udp_broadcaster_;
 
     // 删除拷贝构造函数和赋值运算符
     Application(const Application&) = delete;
@@ -87,15 +91,18 @@ public:
     void StopListening();
     void UpdateIotStates();
 
-    void ReadAudio(std::vector<int16_t>& data, int sample_rate, int samples);
 #ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
     void ReadAudio(std::vector<uint8_t>& opus, int sample_rate, int samples);
+#else
+    void ReadAudio(std::vector<int16_t>& data, int sample_rate, int samples);
 #endif
 
-    void WriteAudio(std::vector<int16_t>& data, int sample_rate);
 #ifdef CONFIG_USE_AUDIO_CODEC_DECODE_OPUS
-    void WriteAudio(std::vector<uint8_t>& opus);
+void WriteAudio(std::vector<uint8_t>& opus);
+#else
+    void WriteAudio(std::vector<int16_t>& data, int sample_rate);
 #endif
+
     void Reboot();
     void SendMessage(const std::string& message);
     void WakeWordInvoke(const std::string& wake_word);
