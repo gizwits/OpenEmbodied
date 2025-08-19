@@ -1,4 +1,5 @@
 #include "test.h"
+#include "factory_test.h"
 #include <iostream>
 #include <unistd.h>
 #include "settings.h"

@@ -14,7 +14,7 @@
 #include <cstdio>
 #include "assets/lang_config.h"
 #include "application.h"
-#include "audio_codecs/audio_codec.h"
+#include "audio/audio_codec.h"
 #include "board.h"
 #include <string>
 #include <wifi_station.h>
@@ -85,6 +85,7 @@ static void handle_at_command_buffer(uint8_t *data);
 
 static void factory_test_task(void *arg)
 {
+#if defined(FACTORY_TEST_UART_RX_PIN)
     // Configure a temporary buffer for the incoming data
     uint8_t *data = static_cast<uint8_t*>(malloc(AT_BUF_SIZE+1));
     
@@ -117,6 +118,7 @@ static void factory_test_task(void *arg)
         // 短暂延时，避免CPU占用过高
         vTaskDelay(pdMS_TO_TICKS(10));
     }
+#endif
 }
 
 // 初始化产测串口
@@ -126,6 +128,8 @@ void factory_test_uart_init(void) {
         ESP_LOGI(TAG, "UART already taken over, skipping initialization");
         return;
     }
+
+#if defined(FACTORY_TEST_UART_RX_PIN)
 
     ESP_LOGI(TAG, "Initializing factory test UART on UART_NUM_0");
     ESP_LOGI(TAG, "TX Pin: %d, RX Pin: %d", FACTORY_TEST_UART_TX_PIN, FACTORY_TEST_UART_RX_PIN);
@@ -161,6 +165,7 @@ void factory_test_uart_init(void) {
     xTaskCreate(factory_test_task, "factory_test", 10 * 1024, nullptr, 8, nullptr);
 
     ESP_LOGW(TAG, "Factory Test UART initialized successfully");
+#endif
 }
 
 // 发送数据到串口 - 通过错误日志发送
