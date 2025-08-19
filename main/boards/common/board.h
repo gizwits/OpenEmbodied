@@ -77,6 +77,7 @@ public:
     virtual void SetBrightness(uint8_t brightness) { }
     virtual uint8_t GetDefaultBrightness() { return 0; }
     virtual void EnterDeepSleepIfNotCharging() { }
+    virtual void WakeUpPowerSaveTimer() { }
     
     // 设备模式相关方法
     virtual DeviceMode GetDeviceMode() const { return device_mode_; }
