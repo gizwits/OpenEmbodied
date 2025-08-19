@@ -160,9 +160,9 @@ void WebsocketProtocol::SendStopListening() {
 }
 
 bool WebsocketProtocol::IsAudioChannelOpened() const {
-    if (Application::GetInstance().GetChatMode() == 0) {
-        return websocket_ != nullptr && websocket_->IsConnected() && !error_occurred_;
-    }
+    // if (Application::GetInstance().GetChatMode() == 0) {
+    //     return websocket_ != nullptr && websocket_->IsConnected() && !error_occurred_;
+    // }
     return websocket_ != nullptr && websocket_->IsConnected() && !error_occurred_ && !IsTimeout();
 }
 

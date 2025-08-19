@@ -54,11 +54,19 @@ void PowerSaveTimer::OnShutdownRequest(std::function<void()> callback) {
 
 void PowerSaveTimer::PowerSaveCheck() {
     auto& app = Application::GetInstance();
-    if (!in_sleep_mode_ && !app.CanEnterSleepMode()) {
+
+    if (in_sleep_mode_) {
         ticks_ = 0;
         return;
     }
 
+    if(!app.CanEnterSleepMode()) {
+        ticks_ = 0;
+        return;
+    }
+    
+    ESP_LOGE(TAG, "[pt %d][sleep %d]", ticks_, in_sleep_mode_);
+    
     ticks_++;
     if (seconds_to_sleep_ != -1 && ticks_ >= seconds_to_sleep_) {
         if (!in_sleep_mode_) {
