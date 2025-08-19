@@ -311,6 +311,7 @@ void Application::PlaySound(const std::string_view& sound) {
 }
 
 void Application::ToggleChatState() {
+    Board::GetInstance().WakeUpPowerSaveTimer();
 
     if (player_.IsDownloading()) {
         CancelPlayMusic();
@@ -359,6 +360,7 @@ void Application::ToggleChatState() {
 }
 
 void Application::StartListening() {
+    Board::GetInstance().WakeUpPowerSaveTimer();
     CancelPlayMusic();
     if (device_state_ == kDeviceStateActivating) {
         ESP_LOGI(TAG, "StartListening(kDeviceStateActivating)");

@@ -171,6 +171,12 @@ public:
 
     }
 
+    virtual void WakeUpPowerSaveTimer() {
+        if (power_save_timer_) {
+            power_save_timer_->WakeUp();
+        }
+    };
+
     uint8_t GetBatteryLevel() override {
         return PowerManager::GetInstance().GetBatteryLevel();
     }
