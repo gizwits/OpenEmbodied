@@ -23,7 +23,6 @@
 #include <wifi_configuration.h>
 
 #include <ssid_manager.h>
-#include "power_manager.h"
 static const char *TAG = "WifiBoard";
 
 WifiBoard::WifiBoard() {
@@ -199,9 +198,23 @@ std::string WifiBoard::GetDeviceStatusJson() {
 }
 
 bool WifiBoard::IsCharging() {
-    return PowerManager::GetInstance().IsCharging();
+    return false;
 }
 
 uint8_t WifiBoard::GetBatteryLevel() {
-    return PowerManager::GetInstance().GetBatteryLevel();
+    return 0;
+}
+
+uint8_t WifiBoard::GetBrightness() {
+    return 0;
+}
+
+void WifiBoard::SetBrightness(uint8_t brightness) {
+}
+
+uint8_t WifiBoard::GetDefaultBrightness() {
+    return 0;
+}
+
+void WifiBoard::EnterDeepSleepIfNotCharging() {
 }

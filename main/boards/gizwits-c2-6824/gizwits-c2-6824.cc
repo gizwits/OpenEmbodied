@@ -22,7 +22,7 @@
 #include <vector>
 #include <string>
 #include "driver/ledc.h"
-#include "custom/led_signal.h"
+#include "led_signal.h"
 #include "power_manager.h"
 
 #define TAG "CustomBoard"
@@ -127,9 +127,13 @@ private:
 
     // 物联网初始化，添加对 AI 可见设备
     void InitializeIot() {
+        ESP_LOGI(TAG, "Initializing IoT components...");
         auto& thing_manager = iot::ThingManager::GetInstance();
         thing_manager.AddThing(iot::CreateThing("Speaker"));
+        ESP_LOGI(TAG, "Added IoT component: Speaker");
         thing_manager.AddThing(iot::CreateThing("Led"));
+        ESP_LOGI(TAG, "Added IoT component: Led");
+        ESP_LOGI(TAG, "IoT components initialization complete.");
     }
 
     void InitializePowerManager() {
@@ -147,11 +151,21 @@ public:
         gpio_config(&io_conf);
         gpio_set_level(BUILTIN_LED_GPIO, 0);
 
+        ESP_LOGI(TAG, "Initializing Power Save Timer...");
         InitializePowerSaveTimer();
+
+        ESP_LOGI(TAG, "Initializing Buttons...");
         InitializeButtons();
+
+        ESP_LOGI(TAG, "Initializing IoT components...");
         InitializeIot();
+
+        ESP_LOGI(TAG, "Initializing LED Signal...");
         InitializeLedSignal();
+
+        ESP_LOGI(TAG, "Initializing Power Manager...");
         InitializePowerManager();
+        ESP_LOGI(TAG, "Power Manager initialized.");
 
 
         audio_codec.OnWakeUp([this](const std::string& command) {
@@ -179,6 +193,10 @@ public:
         return PowerManager::GetInstance().IsCharging();
     }
 
+    void EnterDeepSleepIfNotCharging() {
+        PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
+    }
+
     virtual AudioCodec* GetAudioCodec() override {
         return &audio_codec;
     }
@@ -186,6 +204,19 @@ public:
     void SetPowerSaveTimer(bool enable) {
         power_save_timer_->SetEnabled(enable);
     }
+
+    uint8_t GetBrightness() {
+        return LedSignal::GetInstance().GetBrightness();
+    }
+    
+    void SetBrightness(uint8_t brightness) {
+        LedSignal::GetInstance().SetBrightness(brightness);
+    }
+
+    uint8_t GetDefaultBrightness() {
+        return LedSignal::GetInstance().GetDefaultBrightness();
+    }
+
 };
 
 DECLARE_BOARD(CustomBoard);

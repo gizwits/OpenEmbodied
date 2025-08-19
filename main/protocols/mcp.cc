@@ -8,7 +8,6 @@
 #include "esp_err.h"
 #include "iot/thing_manager.h"
 #include "application.h"
-#include "power_manager.h"
 
 
 const char* CozeMCPParser::TAG = "VolcRTCApp";
@@ -152,7 +151,7 @@ void CozeMCPParser::handle_mcp(std::string_view data) {
 
 
         // 检查不在充电就真休眠
-        PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
+        Board::GetInstance().EnterDeepSleepIfNotCharging();
 
     } else if (strcmp(name->valuestring, "brightness") == 0) {
         cJSON *brightness = cJSON_GetObjectItem(args_json, "brightness");

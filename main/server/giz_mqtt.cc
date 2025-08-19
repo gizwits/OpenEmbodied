@@ -14,8 +14,6 @@
 #include "audio_codecs/audio_codec.h"
 #include <esp_app_desc.h>
 #include "ntp.h"
-#include "power_manager.h"
-#include "led_signal.h"
 
 #define TAG "GIZ_MQTT"
 
@@ -853,7 +851,7 @@ void MqttClient::processAttrValue(std::string attr_name, int value) {
         ESP_LOGI(TAG, "volume_set: %d", value);
     }
     else if (attr_name == "brightness") {
-        LedSignal::GetInstance().SetBrightness(value);
+        Board::GetInstance().SetBrightness(value);
         ESP_LOGI(TAG, "brightness: %d", value);
     }
 }
@@ -893,7 +891,7 @@ void MqttClient::ReportTimer() {
     uint8_t status = 0;
     status |= (1 << 0); // switch
     status |= (1 << 1); // wakeup_word
-    status |= (PowerManager::GetInstance().IsCharging() ? 1 : 0) << 2; // charge_status
+    status |= (Board::GetInstance().IsCharging() ? 1 : 0) << 2; // charge_status
     status |= (1 << 4); // alert_tone_language
     status |= (chat_mode << 5); // chat_mode
 
@@ -901,7 +899,7 @@ void MqttClient::ReportTimer() {
     int pos = 15;
     binary_data[pos++] = status;
 
-    binary_data[pos++] = PowerManager::GetInstance().GetBatteryLevel();
+    binary_data[pos++] = Board::GetInstance().GetBatteryLevel();
 
     auto codec = Board::GetInstance().GetAudioCodec();
     int volume = codec->output_volume();
@@ -912,7 +910,7 @@ void MqttClient::ReportTimer() {
         binary_data[pos++] = 100 - (uint8_t)abs(ap_info.rssi);
     }
 
-    binary_data[pos++] = LedSignal::GetInstance().GetBrightness();
+    binary_data[pos++] = Board::GetInstance().GetBrightness();
 
     // 每分钟上报一次 或者关键数据变化也报
     static uint8_t last_binary_data[3] = {0x00, 0x00, 0x00};
@@ -923,7 +921,7 @@ void MqttClient::ReportTimer() {
     if (memcmp(&binary_data[15], last_binary_data, 3) != 0 || 
         binary_data[19] != last_brightness ||
         duration_since_last_report >= 1) {
-        ESP_LOGI(TAG, "IsCharging: %d", PowerManager::GetInstance().IsCharging());
+        ESP_LOGI(TAG, "IsCharging: %d", Board::GetInstance().IsCharging());
         ESP_LOGI(TAG, "Status: %d", status);
         ESP_LOGI(TAG, "Chat mode: %d", chat_mode);
         ESP_LOGI(TAG, "Battery Level: %d", binary_data[15]);
@@ -976,10 +974,10 @@ chat_mode，类型为enum，值为2：字段bit4 ~ bit3，字段值为0b10；
     ESP_LOGI(TAG, "Volume: %d", volume);
     binary_data[14] = volume;
 
-    binary_data[15] = PowerManager::GetInstance().IsCharging() ? 1 : 0;    // 本设备无法判断充满电
+    binary_data[15] = Board::GetInstance().IsCharging() ? 1 : 0;    // 本设备无法判断充满电
     ESP_LOGI(TAG, "is_charging: %d", binary_data[15]);
 
-    binary_data[16] = PowerManager::GetInstance().GetBatteryLevel();
+    binary_data[16] = Board::GetInstance().GetBatteryLevel();
     ESP_LOGI(TAG, "Battery Level: %d", binary_data[15]);
 
     wifi_ap_record_t ap_info;

@@ -1,4 +1,5 @@
-set(SOURCES "audio_codecs/audio_codec.cc"
+set(SOURCES 
+            "audio_codecs/audio_codec.cc"
             "audio_codecs/no_audio_codec.cc"
             "audio_codecs/box_audio_codec.cc"
             "audio_codecs/es8311_audio_codec.cc"
@@ -35,10 +36,9 @@ set(SOURCES "audio_codecs/audio_codec.cc"
             "main.cc"
             "factory_test/factory_test.cc"
             "factory_test/test_uart.cc"
-            "custom/led_signal.cc"
             )
 
-set(INCLUDE_DIRS "." "display" "audio_codecs" "protocols" "audio_processing" "custom")
+set(INCLUDE_DIRS "." "display" "audio_codecs" "protocols" "audio_processing" )
 
 # 添加 IOT 相关文件
 file(GLOB IOT_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/iot/things/*.cc)

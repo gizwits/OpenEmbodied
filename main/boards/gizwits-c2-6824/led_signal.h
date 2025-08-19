@@ -11,6 +11,7 @@ public:
         static LedSignal instance; // 使用默认构造函数初始化对象
         return instance;
     }
+    #define LED_DEFAULT_BRIGHTNESS 100 // Default brightness level
 
     void SetColor(uint8_t red, uint8_t green, uint8_t blue);
     void SetBrightness(uint8_t brightness);
@@ -22,6 +23,7 @@ public:
     bool CheckIfBatteryLow();
     void MonitorAndUpdateLedState_timer();
     void UpdateLedState();
+    uint8_t GetDefaultBrightness() const { return LED_DEFAULT_BRIGHTNESS; }
 private:
 
     LedSignal(gpio_num_t red_gpio = GPIO_NUM_2, ledc_channel_t red_channel = LEDC_CHANNEL_0, 
@@ -34,7 +36,6 @@ private:
     GpioLed* red_led_;
     GpioLed* green_led_;
     GpioLed* blue_led_;
-    #define LED_DEFAULT_BRIGHTNESS 100 // Default brightness level
     uint8_t brightness_ = LED_DEFAULT_BRIGHTNESS; // Brightness level for the LED
 };
 

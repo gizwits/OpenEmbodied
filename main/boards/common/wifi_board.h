@@ -25,6 +25,10 @@ public:
     virtual std::string GetDeviceStatusJson() override;
     virtual bool IsCharging() override;
     virtual uint8_t GetBatteryLevel() override;
+    virtual uint8_t GetBrightness() override;
+    virtual void SetBrightness(uint8_t brightness) override;
+    virtual uint8_t GetDefaultBrightness() override;
+    virtual void EnterDeepSleepIfNotCharging() override;
 };
 
 #endif // WIFI_BOARD_H

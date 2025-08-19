@@ -211,11 +211,11 @@ bool LedSignal::CheckIfWorking() {
 }
 
 bool LedSignal::CheckIfCharging() {
-    return PowerManager::GetInstance().IsCharging();
+    return Board::GetInstance().IsCharging();
 }
 
 bool LedSignal::CheckIfBatteryLow() {
-    return PowerManager::GetInstance().GetBatteryLevel() < 10;
+    return Board::GetInstance().GetBatteryLevel() < 10;
 }
 
 

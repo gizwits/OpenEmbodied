@@ -73,6 +73,10 @@ public:
     virtual std::string GetBoardJson() = 0;
     virtual std::string GetDeviceStatusJson() = 0;
     virtual int MaxVolume() { return 100; }
+    virtual uint8_t GetBrightness() { return 0; }
+    virtual void SetBrightness(uint8_t brightness) { }
+    virtual uint8_t GetDefaultBrightness() { return 0; }
+    virtual void EnterDeepSleepIfNotCharging() { }
     
     // 设备模式相关方法
     virtual DeviceMode GetDeviceMode() const { return device_mode_; }
