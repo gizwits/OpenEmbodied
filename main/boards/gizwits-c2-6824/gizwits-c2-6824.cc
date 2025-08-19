@@ -182,6 +182,10 @@ public:
     virtual AudioCodec* GetAudioCodec() override {
         return &audio_codec;
     }
+
+    void SetPowerSaveTimer(bool enable) {
+        power_save_timer_->SetEnabled(enable);
+    }
 };
 
 DECLARE_BOARD(CustomBoard);
