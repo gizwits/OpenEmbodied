@@ -3,6 +3,7 @@
 #include "esp_log.h"
 #include <string.h>
 #include "settings.h"
+#include "server/giz_mqtt.h"
 
 static const char *TAG = "Auth";
 
@@ -29,6 +30,10 @@ static esp_err_t read_nvs_data(const char* partition_name, size_t offset,
         ESP_LOGE(TAG, "Partition %s not found", partition_name);
         return ESP_ERR_NOT_FOUND;
     }
+    // 打印分区信息
+    ESP_LOGI(TAG, "Partition name: %s", partition->label);
+    ESP_LOGI(TAG, "Type: 0x%x, Subtype: 0x%x", partition->type, partition->subtype);
+    ESP_LOGI(TAG, "Address: 0x%08lx, Size: 0x%lx", partition->address, partition->size);
     
     return esp_partition_read(partition, offset, buffer, size);
 }
@@ -39,6 +44,15 @@ void Auth::init() {
     
     // 从auth分区读取数据
     err = read_nvs_data("auth", 0, buffer, sizeof(buffer));
+
+    // // 查找 0xFF FF FF FF，并替换为0x00
+    // for (size_t i = 0; i + 3 < sizeof(buffer); ++i) {
+    //     if (buffer[i] == 0xFF && buffer[i+1] == 0xFF && buffer[i+2] == 0xFF && buffer[i+3] == 0xFF) {
+    //         buffer[i] = buffer[i+1] = buffer[i+2] = buffer[i+3] = 0x00;
+    //     }
+    // }
+    // ESP_LOGI(TAG, "auth data: %d: %s", sizeof(buffer), buffer);
+    // hexdump("auth data", buffer, sizeof(buffer));
 
     Settings settings("wifi", true);
 

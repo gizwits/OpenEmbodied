@@ -488,11 +488,11 @@ bool WebsocketProtocol::OpenAudioChannel() {
             } else if (event_type == "input_audio_buffer.speech_started") {
 
                 MqttClient::getInstance().sendTraceLog("info", "input_audio_buffer.speech_started");
-
                 auto& app = Application::GetInstance();
+
                 ESP_LOGI(TAG, "input_audio_buffer.speech_started");
                 // 自然对话才要打断
-                int chat_mode = Application::GetInstance().GetChatMode();
+                int chat_mode = app.GetChatMode();
                 if (chat_mode == 2) {
                     app.AbortSpeaking(kAbortReasonNone);
                 }

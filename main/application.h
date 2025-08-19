@@ -70,6 +70,12 @@ public:
     int GetChatMode() const { return chat_mode_; }
     void CancelPlayMusic();
     void SendTextToAI(const std::string& text);
+    
+    // 工厂测试相关方法
+    int StartRecordTest(int duration_seconds);
+    int StartPlayTest(int duration_seconds);
+    void StopRecordTest();
+
 
     // 关闭 wifi 的休眠
     void EnterSleepMode();

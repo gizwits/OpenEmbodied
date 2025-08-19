@@ -846,6 +846,7 @@ void Application::SetDeviceState(DeviceState state) {
 
 void Application::Reboot() {
     ESP_LOGI(TAG, "Rebooting...");
+    vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
 }
 
