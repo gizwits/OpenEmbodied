@@ -488,7 +488,7 @@ void Application::Start() {
 
     // 播放上电提示音
     PlaySound(Lang::Sounds::P3_SUCCESS);
-
+#if 0
     bool wifi_config_mode_ = board.IsWifiConfigMode();
     auto& ssid_manager = SsidManager::GetInstance();
     auto ssid_list = ssid_manager.GetSsidList();
@@ -506,6 +506,7 @@ void Application::Start() {
             return;
         }
     }
+#endif
 
     CheckBatteryLevel();
 
@@ -821,8 +822,8 @@ void Application::Start() {
                 } else {
                     voice_detected_ = false;
                 }
-                auto led = Board::GetInstance().GetLed();
-                led->OnStateChanged();
+                // auto led = Board::GetInstance().GetLed();
+                // led->OnStateChanged();
             });
         }
     });
@@ -1203,13 +1204,13 @@ void Application::OnAudioInput() {
     if (can_read_audio) {
         int free_sram = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
         if(free_sram < 10000){
-            ESP_LOGE(TAG, "内存不足");
+            ESP_LOGE(TAG, "low ram %d < 10000Bytes", free_sram);
             return;
         }
         
         std::vector<uint8_t> opus;
         if (!protocol_->IsAudioChannelBusy()) {
-            ReadAudio(opus, 16000, 30 * 16000 / 1000);
+            ReadAudio(opus, 16000, 20 * 16000 / 1000);
             AudioStreamPacket packet;
             packet.payload = std::move(opus);
             packet.timestamp = last_output_timestamp_;
@@ -1322,8 +1323,8 @@ void Application::SetDeviceState(DeviceState state) {
 
     auto& board = Board::GetInstance();
     auto display = board.GetDisplay();
-    auto led = board.GetLed();
-    led->OnStateChanged();
+    // auto led = board.GetLed();
+    // led->OnStateChanged();
     switch (state) {
         case kDeviceStateUnknown:
         case kDeviceStateIdle:
@@ -1543,14 +1544,17 @@ void Application::GenerateTraceId() {
 
 bool Application::CanEnterSleepMode() {
     if (device_state_ != kDeviceStateIdle) {
+        // ESP_LOGI(TAG, "CanEnterSleepMode: device_state_ != kDeviceStateIdle, device_state_:[%d][%s]", device_state_, STATE_STRINGS[device_state_]);
         return false;
     }
 
     if (protocol_ && protocol_->IsAudioChannelOpened()) {
+        // ESP_LOGI(TAG, "Can`t EnterSleepMode: protocol_->IsAudioChannelOpened(), device_state_:[%d][%s]", device_state_, STATE_STRINGS[device_state_]);
         return false;
     }
 
     if (player_.IsDownloading()) {
+        // ESP_LOGI(TAG, "Can`t EnterSleepMode: player_.IsDownloading()");
         return false;
     }
 
