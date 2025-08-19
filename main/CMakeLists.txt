@@ -11,7 +11,6 @@ set(SOURCES "audio_codecs/audio_codec.cc"
             "display/display.cc"
             "display/lcd_display.cc"
             "display/oled_display.cc"
-            "display/eye_display.cc"
             "display/eye_toy_single_display.cc"
             "display/eye_toy_display.cc"
             "protocols/protocol.cc"
@@ -36,6 +35,7 @@ set(SOURCES "audio_codecs/audio_codec.cc"
             "factory_test/factory_test.cc"
             "factory_test/test_uart.cc"
             "custom/led_signal.cc"
+            "factory_test/test.cc"
             )
 
 set(INCLUDE_DIRS "." "display" "audio_codecs" "protocols" "audio_processing" "custom")
@@ -66,6 +66,8 @@ elseif(CONFIG_BOARD_TYPE_DOIT_ESP32S3_EYE)
     set(BOARD_TYPE "doit-esp32s3-eye")
 elseif(CONFIG_BOARD_TYPE_DOIT_ESP32S3_EYE_6824)
     set(BOARD_TYPE "doit-esp32s3-eye-6824")
+elseif(CONFIG_BOARD_TYPE_GIZWITS_S3_VB6824_LCD)
+    set(BOARD_TYPE "gizwits-s3-vb6824-lcd")
 elseif(CONFIG_BOARD_TYPE_ESP_BOX_3)
     set(BOARD_TYPE "esp-box-3")
 elseif(CONFIG_BOARD_TYPE_ESP_BOX)
@@ -183,6 +185,10 @@ elseif(CONFIG_BOARD_TYPE_ZHENGCHEN_1_54TFT_ML307)
 elseif(CONFIG_BOARD_TYPE_ESP32_S3_1_54_MUMA)
     set(BOARD_TYPE "sp-esp32-s3-1.54-muma")
 endif()
+
+# Include board specific directory
+list(APPEND INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE})
+
 file(GLOB BOARD_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.c

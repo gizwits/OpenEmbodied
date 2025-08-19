@@ -281,6 +281,7 @@ void Application::DismissAlert() {
 }
 
 void Application::PlaySound(const std::string_view& sound) {
+    ESP_LOGI(TAG, "PlaySound: size=%d, data=%p", sound.size(), sound.data());
     // Wait for the previous sound to finish
     {
         std::unique_lock<std::mutex> lock(mutex_);
@@ -493,9 +494,9 @@ void Application::Start() {
     auto& ssid_manager = SsidManager::GetInstance();
     auto ssid_list = ssid_manager.GetSsidList();
 
-    if (wifi_config_mode_ || ssid_list.empty()) {
-        ESP_LOGI(TAG, "Factory test init");
-        factory_test_init();
+    ESP_LOGI(TAG, "Factory test init");
+    factory_test_init();
+    if (wifi_config_mode_ || ssid_list.empty() || factory_test_is_enabled()) {
         ESP_LOGI(TAG, "Factory test start");
         factory_test_start();
         ESP_LOGI(TAG, "Factory test is enabled");
@@ -503,6 +504,7 @@ void Application::Start() {
         if (factory_test_is_enabled()) {
             ESP_LOGW(TAG, "Factory test is enabled");
             PlaySound(Lang::Sounds::P3_TEST_MODE);
+            udp_broadcaster_.async_start();
             return;
         }
     }
@@ -1189,7 +1191,7 @@ void Application::OnAudioInput() {
         ReadAudio(opus, 16000, 30 * 16000 / 1000);
         // 保存录制的音频数据
         recorded_audio_data_.insert(recorded_audio_data_.end(), opus.begin(), opus.end());
-        ESP_LOGI(TAG, "Recorded opus packet: %d bytes, total: %d bytes", (int)opus.size(), (int)recorded_audio_data_.size());
+        // ESP_LOGI(TAG, "Recorded opus packet: %d bytes, total: %d bytes", (int)opus.size(), (int)recorded_audio_data_.size());
         printf(".");
         return;
     }
@@ -1224,6 +1226,7 @@ void Application::OnAudioInput() {
 #endif
 }
 
+#ifndef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
 void Application::ReadAudio(std::vector<int16_t>& data, int sample_rate, int samples) {
     auto codec = Board::GetInstance().GetAudioCodec();
     if (codec->input_sample_rate() != sample_rate) {
@@ -1259,7 +1262,7 @@ void Application::ReadAudio(std::vector<int16_t>& data, int sample_rate, int sam
         }
     }
 }
-
+#endif
 
 #ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
 void Application::ReadAudio(std::vector<uint8_t>& opus, int sample_rate, int samples) {
@@ -1271,6 +1274,7 @@ void Application::ReadAudio(std::vector<uint8_t>& opus, int sample_rate, int sam
 }
 #endif
 
+#ifndef CONFIG_USE_AUDIO_CODEC_DECODE_OPUS
 void Application::WriteAudio(std::vector<int16_t>& data, int sample_rate) {
     auto codec = Board::GetInstance().GetAudioCodec();
     // Resample if the sample rate is different
@@ -1282,6 +1286,7 @@ void Application::WriteAudio(std::vector<int16_t>& data, int sample_rate) {
     }
     codec->OutputData(data);
 }
+#endif
 
 #ifdef CONFIG_USE_AUDIO_CODEC_DECODE_OPUS
 void Application::WriteAudio(std::vector<uint8_t>& opus) {

@@ -35,6 +35,8 @@ void test_at_commands(void);
 bool factory_test_is_enabled(void);
 bool factory_test_is_aging(void);
 
+void save_factory_test_mode_task(void *arg);
+
 #else
 
 #define factory_test_init(mode)
