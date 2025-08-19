@@ -1517,14 +1517,16 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
             ToggleChatState();
         });
     } else if (device_state_ == kDeviceStateSpeaking) {
-        ResetDecoder();
-        PlaySound(Lang::Sounds::P3_SUCCESS);
-        ESP_LOGI(TAG, "WakeWordInvoke(kDeviceStateListening)");
-        SetDeviceState(kDeviceStateListening);
+       
         Schedule([this]() {
             // 打断AI
             ESP_LOGI(TAG, "WakeWordInvoke(kDeviceStateSpeaking)");
             protocol_->SendAbortSpeaking(kAbortReasonNone);
+
+            ResetDecoder();
+            PlaySound(Lang::Sounds::P3_SUCCESS);
+            ESP_LOGI(TAG, "WakeWordInvoke(kDeviceStateListening)");
+            SetDeviceState(kDeviceStateListening);
             
         });
     } else if (device_state_ == kDeviceStateListening) { 
