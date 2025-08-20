@@ -50,6 +50,12 @@ private:
     PowerSaveTimer* power_save_timer_;
 
 
+    // 唤醒词列表
+    std::vector<std::string> wake_words_ = {"你好小智", "你好小云", "合养精灵", "嗨小火人"};
+    std::vector<std::string> network_config_words_ = {"开始配网"};
+
+
+
     void InitializePowerSaveTimer() {
         power_save_timer_ = new PowerSaveTimer(-1, 60, 300);
         power_save_timer_->OnEnterSleepMode([this]() {
@@ -313,16 +319,23 @@ public:
 
         audio_codec.OnWakeUp([this](const std::string& command) {
             ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());
-            if (command == "你好小智" || command.find("小云") != std::string::npos){
+            if (IsCommandInList(command, wake_words_)){
                 ESP_LOGE(TAG, "vb6824 recv cmd: %d", Application::GetInstance().GetDeviceState());
                 // if(Application::GetInstance().GetDeviceState() != kDeviceStateListening){
                 // }
                 Application::GetInstance().WakeWordInvoke("你好小智");
-            } else if (command == "开始配网") {
+            } else if (IsCommandInList(command, network_config_words_)) {
                 ResetWifiConfiguration();
             }
         });
     }
+
+
+    // 检查命令是否在列表中
+    bool IsCommandInList(const std::string& command, const std::vector<std::string>& command_list) {
+        return std::find(command_list.begin(), command_list.end(), command) != command_list.end();
+    }
+
 
     static void RestoreBacklightTask(void* arg) {
         auto* self = static_cast<MovecallMojiESP32S3*>(arg);

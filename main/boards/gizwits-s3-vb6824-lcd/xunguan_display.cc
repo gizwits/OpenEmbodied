@@ -2206,7 +2206,10 @@ void XunguanDisplay::SetOTAProgress(int progress) {
 }
 
 void XunguanDisplay::EnterWifiConfig() {
+    ESP_LOGI(TAG, "EnterWifiConfig");
+
     DisplayLockGuard lock(this);
+
     
     // Clear existing UI elements (without lock since we already have it)
     ClearUIElementsNoLock();

@@ -897,10 +897,10 @@ void EyeDisplay::TestNextEmotion() {
     current_index = (current_index + 1) % emotion_count;
 } 
 
-void EyeDisplay::EnterWifiConifg() {
-    ESP_LOGI(TAG, "EnterWifiConifg");
+void EyeDisplay::EnterWifiConfig() {
+    ESP_LOGI(TAG, "EnterWifiConfig");
     if (qrcode_img_) {
-        ESP_LOGI(TAG, "EnterWifiConifg qrcode_img_ is not null");
+        ESP_LOGI(TAG, "EnterWifiConfig qrcode_img_ is not null");
         DisplayLockGuard lock(this);
         auto screen = lv_screen_active();
         // 设置背景为白色
