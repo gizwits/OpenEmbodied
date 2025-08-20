@@ -8,7 +8,8 @@
                 "CONFIG_USE_AUDIO_PROCESSOR=y",
                 "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions.csv\"",
                 "CONFIG_LOG_DEFAULT_LEVEL_NONE=y",
-                "CONFIG_LV_FONT_MONTSERRAT_22=y"
+                "CONFIG_LV_FONT_MONTSERRAT_22=y",
+                "CONFIG_SR_WN_WN9_HILILI_TTS=y"
             ]
         }
     ]
