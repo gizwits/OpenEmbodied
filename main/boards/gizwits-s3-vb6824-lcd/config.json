@@ -7,8 +7,9 @@
                 "CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y",
                 "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions.csv\"",
                 "CONFIG_LOG_DEFAULT_LEVEL_NONE=y",
-                "CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS=y",
-                "CONFIG_LV_FONT_MONTSERRAT_22=y"
+                "CONFIG_LV_FONT_MONTSERRAT_22=y",
+                "CONFIG_USE_EYE_STYLE_VB6824=y",
+                "CONFIG_USE_AUDIO_PROCESSOR=n"
             ]
         }
     ]
