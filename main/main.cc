@@ -79,6 +79,7 @@ int soft_uart_log_callback(const char* format, va_list args)
 // 初始化软串口
 esp_err_t init_soft_uart(void)
 {
+#if SOFT_UART_LOG_ENABLED
     soft_uart_config_t config = {
         .tx_pin = SOFT_UART_TX_PIN,
         .rx_pin = SOFT_UART_RX_PIN,
@@ -94,7 +95,6 @@ esp_err_t init_soft_uart(void)
     ESP_LOGI(TAG, "Soft UART initialized successfully on TX: %d, RX: %d, Baudrate: %d", 
              SOFT_UART_TX_PIN, SOFT_UART_RX_PIN, SOFT_UART_BAUDRATE);
     
-#if SOFT_UART_LOG_ENABLED
     // 发送初始化成功消息到软串口
     const char* init_msg = "Soft UART initialized successfully!\r\n";
     soft_uart_send(soft_uart_port, (const uint8_t*)init_msg, strlen(init_msg));
@@ -103,9 +103,12 @@ esp_err_t init_soft_uart(void)
     esp_log_set_vprintf(soft_uart_log_callback);
     
     ESP_LOGI(TAG, "Log output redirected to soft UART");
+#else
+    ESP_LOGI(TAG, "Soft UART logging is disabled in configuration");
+    return ESP_OK;
 #endif
 
-#if SOFT_UART_DEBUG_ENABLED
+#if SOFT_UART_DEBUG_ENABLED && SOFT_UART_LOG_ENABLED
     // 发送调试信息到软串口
     char debug_msg[128];
     snprintf(debug_msg, sizeof(debug_msg), "Debug: TX_PIN=%d, RX_PIN=%d, Baudrate=%d\r\n",
@@ -150,6 +153,9 @@ extern "C" void app_main(void)
     // Initialize the default event loop
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
+#else
+    // Initialize the default event loop
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
 #endif
 
     // Initialize NVS flash for WiFi configuration
@@ -167,11 +173,13 @@ extern "C" void app_main(void)
     auto& watchdog = Watchdog::GetInstance();
     watchdog.SubscribeTask(xTaskGetCurrentTaskHandle());
     
+#if SOFT_UART_LOG_ENABLED
     // 发送应用启动成功消息到软串口
     if (soft_uart_port != NULL) {
         const char* app_msg = "Application started successfully\r\n";
         soft_uart_send(soft_uart_port, (const uint8_t*)app_msg, strlen(app_msg));
     }
+#endif
     
     app.MainEventLoop();
     
