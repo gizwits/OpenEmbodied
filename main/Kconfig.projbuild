@@ -79,6 +79,8 @@ choice BOARD_TYPE
         bool "机智云ESP32-S3 4键ML307"
     config BOARD_TYPE_GIZWITS_C2_6824
         bool "机智云ESP32-C2 6824"
+    config BOARD_TYPE_GIZWITS_C2_6824_ML307
+        bool "机智云ESP32-C2 6824 ML307"
     config BOARD_TYPE_GIZWITS_C2_6824_TOY
         bool "机智云ESP32-C2 6824 玩具"
     config BOARD_TYPE_LICHUANG_DEV
@@ -380,16 +382,6 @@ config RECEIVE_CUSTOM_MESSAGE
     help
         启用接收自定义消息功能，允许设备接收来自服务器的自定义消息（最好通过 MQTT 协议）
 
-config USE_AUDIO_CODEC_ENCODE_OPUS
-    depends on BOARD_TYPE_GIZWITS_C2_6824_TOY || BOARD_TYPE_GIZWITS_C2_6824 || BOARD_TYPE_DOIT_AI_01_KIT || BOARD_TYPE_DOIT_AI_01_KIT_LCD || BOARD_TYPE_DOIT_AI_01_KIT_NFC || BOARD_TYPE_DOIT_ESP32S3_EYE_6824 || BOARD_TYPE_GIZWITS_S3_VB6824_LCD
-    bool "use audio codec encode opus"
-    default y
-
-# config USE_AUDIO_CODEC_DECODE_OPUS
-#     depends on BOARD_TYPE_GIZWITS_C2_6824_TOY || BOARD_TYPE_GIZWITS_C2_6824 || BOARD_TYPE_DOIT_AI_01_KIT || BOARD_TYPE_DOIT_AI_01_KIT_LCD || BOARD_TYPE_DOIT_AI_01_KIT_NFC || BOARD_TYPE_DOIT_ESP32S3_EYE_6824
-#     bool "use audio codec decode opus"
-#     default n
-        
 
 choice IOT_PROTOCOL
     prompt "IoT Protocol"

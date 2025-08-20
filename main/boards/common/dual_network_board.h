@@ -23,6 +23,7 @@ private:
     gpio_num_t ml307_tx_pin_;
     gpio_num_t ml307_rx_pin_;
     gpio_num_t ml307_dtr_pin_;
+    uart_port_t uart_num_;
     
     // 从Settings加载网络类型
     NetworkType LoadNetworkTypeFromSettings(int32_t default_net_type);
@@ -34,7 +35,7 @@ private:
     void InitializeCurrentBoard();
  
 public:
-    DualNetworkBoard(gpio_num_t ml307_tx_pin, gpio_num_t ml307_rx_pin, gpio_num_t ml307_dtr_pin = GPIO_NUM_NC, int32_t default_net_type = 1);
+    DualNetworkBoard(gpio_num_t ml307_tx_pin, gpio_num_t ml307_rx_pin, gpio_num_t ml307_dtr_pin = GPIO_NUM_NC, int32_t default_net_type = 1, uart_port_t uart_num = UART_NUM_1);
     virtual ~DualNetworkBoard() = default;
  
     // 切换网络类型

@@ -11,7 +11,7 @@
 
 static const char *TAG = "Ml307Board";
 
-Ml307Board::Ml307Board(gpio_num_t tx_pin, gpio_num_t rx_pin, gpio_num_t dtr_pin) : tx_pin_(tx_pin), rx_pin_(rx_pin), dtr_pin_(dtr_pin) {
+Ml307Board::Ml307Board(gpio_num_t tx_pin, gpio_num_t rx_pin, gpio_num_t dtr_pin, uart_port_t uart_num) : tx_pin_(tx_pin), rx_pin_(rx_pin), dtr_pin_(dtr_pin), uart_num_(uart_num) {
 }
 
 std::string Ml307Board::GetBoardType() {
@@ -24,7 +24,7 @@ void Ml307Board::StartNetwork() {
     display->SetStatus(Lang::Strings::DETECTING_MODULE);
 
     while (true) {
-        modem_ = AtModem::Detect(tx_pin_, rx_pin_, dtr_pin_, 921600);
+        modem_ = AtModem::Detect(tx_pin_, rx_pin_, dtr_pin_, 921600, uart_num_);
         if (modem_ != nullptr) {
             break;
         }
