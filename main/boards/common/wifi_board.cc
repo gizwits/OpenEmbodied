@@ -58,8 +58,8 @@ void WifiBoard::EnterWifiConfigMode() {
 
     vTaskDelay(pdMS_TO_TICKS(2000));
 
-    // auto display = Board::GetInstance().GetDisplay();
-    // display->EnterWifiConifg();
+    auto display = Board::GetInstance().GetDisplay();
+    display->EnterWifiConfig();
 
     application.SetDeviceState(kDeviceStateWifiConfiguring);
 

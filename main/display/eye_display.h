@@ -133,7 +133,7 @@ public:
     virtual void SetPreviewImage(const lv_img_dsc_t* image) override {}
     virtual void SetTheme(const std::string& theme_name) override {}
     virtual void UpdateStatusBar(bool update_all = false) override {}
-    virtual void EnterWifiConifg() override;
+    virtual void EnterWifiConfig() override;
     virtual void EnterOTAMode() override;
     virtual void SetOTAProgress(int progress) override;
 
