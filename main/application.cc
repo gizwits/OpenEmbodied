@@ -491,7 +491,7 @@ void Application::Start() {
 
     // 播放上电提示音
     PlaySound(Lang::Sounds::P3_SUCCESS);
-#if 0
+
     bool wifi_config_mode_ = board.IsWifiConfigMode();
     auto& ssid_manager = SsidManager::GetInstance();
     auto ssid_list = ssid_manager.GetSsidList();
@@ -510,7 +510,6 @@ void Application::Start() {
             return;
         }
     }
-#endif
 
     CheckBatteryLevel();
 
