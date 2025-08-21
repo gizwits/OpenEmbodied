@@ -80,20 +80,24 @@ private:
 
         if (chat_mode == 0) {
             rec_button_->OnPressUp([this]() {
+                ESP_LOGI(TAG, "rec_button_.OnPressUp");
                 auto &app = Application::GetInstance();
                 app.StopListening();
             });
             rec_button_->OnPressDown([this]() {
+                ESP_LOGI(TAG, "rec_button_.OnPressDown");
                 auto &app = Application::GetInstance();
                 app.AbortSpeaking(kAbortReasonNone);
                 app.StartListening();
             });
         } else {
             rec_button_->OnPressDown([this]() {
+                ESP_LOGI(TAG, "rec_button_.OnPressDown");
                 auto &app = Application::GetInstance();
                 app.ToggleChatState();
             });
             boot_button_.OnClick([this]() {
+                ESP_LOGI(TAG, "boot_button_.OnClick");
                 auto &app = Application::GetInstance();
                 app.ToggleChatState();
             });
