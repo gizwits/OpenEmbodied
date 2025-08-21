@@ -451,6 +451,7 @@ void Application::Start() {
                 });
             }
         } else if (strcmp(type->valuestring, "mcp") == 0) {
+            ESP_LOGI(TAG, "Received MCP message: %s", cJSON_PrintUnformatted(root));
             auto payload = cJSON_GetObjectItem(root, "payload");
             if (cJSON_IsObject(payload)) {
                 McpServer::GetInstance().ParseMessage(payload);

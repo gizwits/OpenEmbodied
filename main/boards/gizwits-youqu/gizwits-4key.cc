@@ -148,8 +148,8 @@ public:
         InitializeGpio(POWER_HOLD_GPIO, true);
         InitializeChargingGpio();
         InitializeI2c();
-        // // InitializeIot();
-        // InitializePowerManager();
+        InitializeIot();
+        InitializePowerManager();
         
         // if (power_manager_) {
         //     power_manager_->CheckBatteryStatusImmediately();

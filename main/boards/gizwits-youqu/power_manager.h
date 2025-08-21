@@ -102,18 +102,18 @@ public:
         : charging_pin_(charging_pin), bat_led_pin_(bat_led_pin), adc_unit_(adc_unit), adc_channel_(adc_channel) {
 
         // 配置充电引脚
-        gpio_config_t io_conf = {};
-        io_conf.intr_type = GPIO_INTR_DISABLE;
-        io_conf.mode = GPIO_MODE_INPUT;
-        io_conf.pin_bit_mask = (1ULL << charging_pin_);
-        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-        io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
-        gpio_config(&io_conf);
+        // gpio_config_t io_conf = {};
+        // io_conf.intr_type = GPIO_INTR_DISABLE;
+        // io_conf.mode = GPIO_MODE_INPUT;
+        // io_conf.pin_bit_mask = (1ULL << charging_pin_);
+        // io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        // io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+        // gpio_config(&io_conf);
 
-        // 配置状态引脚
-        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-        io_conf.pin_bit_mask = (1ULL << bat_led_pin_);
-        gpio_config(&io_conf);
+        // // 配置状态引脚
+        // io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+        // io_conf.pin_bit_mask = (1ULL << bat_led_pin_);
+        // gpio_config(&io_conf);
 
         // 定时器配置
         esp_timer_create_args_t timer_args = {
