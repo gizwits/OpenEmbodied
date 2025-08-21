@@ -59,17 +59,22 @@ private:
     }
     void InitializeButtons() {
         static int first_level = gpio_get_level(BOOT_BUTTON_GPIO);
-        boot_button_.OnPressDown([this]() {
-            // 点灯
-            gpio_set_level(BUILTIN_SINGLE_LED_GPIO, 0);
-        });
+        // boot_button_.OnPressDown([this]() {
+        //     // 点灯
+        //     gpio_set_level(BUILTIN_SINGLE_LED_GPIO, 0);
+        // });
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
-            if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
-                ResetWifiConfiguration();
-            }
+            // if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
+            //     ResetWifiConfiguration();
+            // }
             app.ToggleChatState();
         });
+         // 电源键三击：重置WiFi
+         boot_button_.OnMultipleClick([this](){
+            ESP_LOGI(TAG, "Power button triple click: 重置WiFi");
+            ResetWifiConfiguration(); }, 3);
+
         boot_button_.OnLongPress([this]() {
             ESP_LOGI(TAG, "boot_button_.OnLongPress");
             auto& app = Application::GetInstance();

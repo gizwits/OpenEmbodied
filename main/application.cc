@@ -231,7 +231,7 @@ void Application::ToggleChatState() {
         SetDeviceState(kDeviceStateIdle);
         return;
     } else if (device_state_ == kDeviceStateWifiConfiguring) {
-        audio_service_.EnableAudioTesting(true);
+        // audio_service_.EnableAudioTesting(true);
         SetDeviceState(kDeviceStateAudioTesting);
         return;
     } else if (device_state_ == kDeviceStateAudioTesting) {
@@ -272,7 +272,7 @@ void Application::StartListening() {
         SetDeviceState(kDeviceStateIdle);
         return;
     } else if (device_state_ == kDeviceStateWifiConfiguring) {
-        audio_service_.EnableAudioTesting(true);
+        // audio_service_.EnableAudioTesting(true);
         SetDeviceState(kDeviceStateAudioTesting);
         return;
     }
@@ -354,6 +354,8 @@ void Application::Start() {
     esp_timer_start_periodic(clock_timer_handle_, 1000000);
 
     /* Wait for the network to be ready */
+
+    PlaySound(Lang::Sounds::OGG_SUCCESS);
     board.StartNetwork();
 
     // Update the status bar immediately to show the network state
@@ -501,7 +503,7 @@ void Application::Start() {
         display->ShowNotification(message.c_str());
         display->SetChatMessage("system", "");
         // Play the success sound to indicate the device is ready
-        audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
+        // audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
     }
 
     // Print heap stats
