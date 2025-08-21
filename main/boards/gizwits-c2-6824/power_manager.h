@@ -133,10 +133,10 @@ private:
 
         CalculateBatteryLevel(average_adc*2);
 
-        if(times++ % 50 == 0){
-            ESP_LOGI("PowerManager", "adc: %d adc_avg: %ld, VBAT: %ld, battery_level_: %u%%", 
-                adc_value, average_adc, average_adc*2, battery_level_);
-        }
+        // if(times++ % 50 == 0){
+        //     ESP_LOGI("PowerManager", "adc: %d adc_avg: %ld, VBAT: %ld, battery_level_: %u%%", 
+        //         adc_value, average_adc, average_adc*2, battery_level_);
+        // }
     }
 
     void CalculateBatteryLevel(uint32_t average_adc) {

@@ -203,16 +203,23 @@ void factory_test_init(void) {
     if (s_factory_test_mode == FACTORY_TEST_MODE_IN_FACTORY) {
         // 产测模式临时连接产测路由器
         auto& wifi_station = WifiStation::GetInstance();
+        wifi_station.OnScanBegin([]() {
+            ESP_LOGI(TAG, "Scanning WiFi...");
+        });
+        wifi_station.OnConnect([](const std::string& ssid) {
+            ESP_LOGI(TAG, "Connecting to WiFi: %s", ssid.c_str());
+        });
+        wifi_station.OnConnected([](const std::string& ssid) {
+            ESP_LOGI(TAG, "Connected to WiFi: %s", ssid.c_str());
+        });
         wifi_station.Start();
 
+        // 插入 ssid
+        wifi_station.AddAuth(FACTORY_TEST_SSID, FACTORY_TEST_PASSWORD);
+
         ESP_LOGI(TAG, "产测模式临时连接产测路由器");
-        if (WifiStation::GetInstance().ConnectToWifi(FACTORY_TEST_SSID, FACTORY_TEST_PASSWORD)) {
-            ESP_LOGI(TAG, "产测WiFi连接成功");
-            // if (WifiStation::GetInstance().WaitForConnected(10000)) {
-            //     ESP_LOGI(TAG, "产测WiFi连接成功");
-            // } else {
-            //     ESP_LOGE(TAG, "产测WiFi连接失败");
-            // }
+        if (!wifi_station.WaitForConnected(30 * 1000)) {
+            // wifi_station.Stop();
         }
     }
 }

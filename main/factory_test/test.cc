@@ -156,7 +156,7 @@ int UdpBroadcaster::EncodeVariableLength(uint32_t length, uint8_t* buffer) {
 
 bool UdpBroadcaster::init_socket() {
     // 等待 TCP/IP 栈就绪
-    ESP_LOGI(TAG, "Waiting for TCP/IP stack to be ready...");
+    // ESP_LOGI(TAG, "Waiting for TCP/IP stack to be ready...");
     vTaskDelay(pdMS_TO_TICKS(1000));  // 给 TCP/IP 栈一些时间初始化
 
     // Create broadcast socket
@@ -165,7 +165,7 @@ bool UdpBroadcaster::init_socket() {
         ESP_LOGE(TAG, "Failed to create broadcast socket");
         throw std::runtime_error("Failed to create broadcast socket");
     }
-    ESP_LOGI(TAG, "Broadcast socket created");
+    // ESP_LOGI(TAG, "Broadcast socket created");
 
     // Enable broadcast
     int broadcast = 1;
@@ -174,7 +174,7 @@ bool UdpBroadcaster::init_socket() {
         ESP_LOGE(TAG, "Failed to set broadcast option");
         throw std::runtime_error("Failed to set broadcast option");
     }
-    ESP_LOGI(TAG, "Broadcast option set");
+    // ESP_LOGI(TAG, "Broadcast option set");
 
     // Create listen socket
     listen_socket_ = socket(AF_INET, SOCK_DGRAM, 0);
@@ -182,7 +182,7 @@ bool UdpBroadcaster::init_socket() {
         ESP_LOGE(TAG, "Failed to create listen socket");
         throw std::runtime_error("Failed to create listen socket");
     }
-    ESP_LOGI(TAG, "Listen socket created");
+    // ESP_LOGI(TAG, "Listen socket created");
 
     // Set up listen address
     struct sockaddr_in listen_addr;
@@ -196,7 +196,7 @@ bool UdpBroadcaster::init_socket() {
         ESP_LOGE(TAG, "Failed to bind listen socket");
         throw std::runtime_error("Failed to bind listen socket");
     }
-    ESP_LOGI(TAG, "Listen socket bound");
+    // ESP_LOGI(TAG, "Listen socket bound");
     return true;
 }
 
@@ -204,7 +204,7 @@ bool UdpBroadcaster::init_socket() {
 void UdpBroadcaster::start() {
     if (running_) return;
     
-    ESP_LOGI(TAG, "Starting broadcast and listen threads");
+    // ESP_LOGI(TAG, "Starting broadcast and listen threads");
     running_ = true;
     
     // 等待WiFi连接成功
@@ -213,7 +213,7 @@ void UdpBroadcaster::start() {
         vTaskDelay(pdMS_TO_TICKS(500));
     }
     printf("\n");
-    ESP_LOGI(TAG, "WiFi connected successfully");
+    // ESP_LOGI(TAG, "WiFi connected successfully");
 
     if (!init_socket()) {
         ESP_LOGE(TAG, "Failed to initialize sockets");
@@ -251,7 +251,7 @@ void UdpBroadcaster::start_thread(void* arg) {
 }
 
 void UdpBroadcaster::async_start() {
-    ESP_LOGI(TAG, "Creating start thread");
+    // ESP_LOGI(TAG, "Creating start thread");
     xTaskCreate(UdpBroadcaster::start_thread, "udp_start", 8192, this, 5, nullptr);
 }
 
@@ -309,7 +309,7 @@ void UdpBroadcaster::broadcast_thread() {
         // 将 JSON 对象转换为字符串
         char *json_str = cJSON_PrintUnformatted(root);
         if (json_str) {
-            ESP_LOGE(TAG, "Broadcasting");
+            // ESP_LOGE(TAG, "Broadcasting");
             
             // 发送数据
             if (sendto(broadcast_socket_, json_str, strlen(json_str), 0,
@@ -343,9 +343,9 @@ void UdpBroadcaster::listen_thread() {
             // 确保字符串以null结尾
             buffer[received] = '\0';
             
-            ESP_LOGI(TAG, "Received %d bytes from %s:%d", received,
-                     inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
-            ESP_LOGI(TAG, "Data: %s", buffer);
+            // ESP_LOGI(TAG, "Received %d bytes from %s:%d", received,
+            //          inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+            // ESP_LOGI(TAG, "Data: %s", buffer);
             
             // 解析 JSON 数据
             cJSON *root = cJSON_Parse(buffer);
@@ -373,8 +373,8 @@ void UdpBroadcaster::listen_thread() {
                         latest_cmd_ = cmd_data;
                         cmd_cv_.notify_one();
                     } else {
-                        ESP_LOGI(TAG, "Command not for this device (target: %s, current: %s)", 
-                                target->valuestring, current_mac.c_str());
+                        // ESP_LOGI(TAG, "Command not for this device (target: %s, current: %s)", 
+                        //         target->valuestring, current_mac.c_str());
                     }
                 } else {
                     ESP_LOGW(TAG, "Invalid JSON format: missing cmd or target field");
@@ -391,7 +391,7 @@ void UdpBroadcaster::listen_thread() {
 
 void UdpBroadcaster::process_command_thread() {
 
-    ESP_LOGI(TAG, "Process command thread started");
+    // ESP_LOGI(TAG, "Process command thread started");
 
     while (running_) {
         std::optional<Command> cmd;
@@ -435,6 +435,9 @@ void UdpBroadcaster::process_command_thread() {
             ESP_LOGI(TAG, "Recording and playback finished");
         } else if (cmd->cmd == "stop") {
             ESP_LOGI(TAG, "Received exit factory test command");
+            // 清空 ssid 列表
+            auto& wifi_station = WifiStation::GetInstance();
+            wifi_station.ClearAuth();
             xTaskCreate(save_factory_test_mode_task, "save_factory_test_mode", 1024*8,
                         reinterpret_cast<void*>(static_cast<intptr_t>(FACTORY_TEST_MODE_NONE)), 5, nullptr);
         } else if (cmd->cmd == "reboot") {
