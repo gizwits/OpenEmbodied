@@ -18,7 +18,7 @@ void Protocol::OnAudioChannelOpened(std::function<void()> callback) {
     on_audio_channel_opened_ = callback;
 }
 
-void Protocol::OnAudioChannelClosed(std::function<void()> callback) {
+void Protocol::OnAudioChannelClosed(std::function<void(bool is_clean)> callback) {
     on_audio_channel_closed_ = callback;
 }
 

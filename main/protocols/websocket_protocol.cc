@@ -537,10 +537,14 @@ bool WebsocketProtocol::OpenAudioChannel() {
         last_incoming_time_ = std::chrono::steady_clock::now();
     });
 
-    websocket_->OnDisconnected([this]() {
-        ESP_LOGI(TAG, "Websocket disconnected");
+    websocket_->OnDisconnected([this](bool is_clean) {
+        if (is_clean) {
+            ESP_LOGI(TAG, "Websocket disconnected cleanly");
+        } else {
+            ESP_LOGI(TAG, "Websocket disconnected unexpectedly");
+        }
         if (on_audio_channel_closed_ != nullptr) {
-            on_audio_channel_closed_();
+            on_audio_channel_closed_(is_clean);
         }
     });
 

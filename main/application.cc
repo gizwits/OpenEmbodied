@@ -446,16 +446,21 @@ void Application::Start() {
             MqttClient::getInstance().sendTraceLog("info", "socket 通道打开");
         }, "OnAudioChannelOpened");
     });
-    protocol_->OnAudioChannelClosed([this, &board]() {
+    protocol_->OnAudioChannelClosed([this, &board](bool is_clean) {
         board.SetPowerSaveMode(true);
-        Schedule([this]() {
+        if (!is_clean) {
+            ESP_LOGW(TAG, "Audio channel closed unexpectedly");
+            HandleNetError();
+        }
+        Schedule([this, is_clean]() {
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
             if (device_state_ != kDeviceStateSleeping) {
                 SetDeviceState(kDeviceStateIdle);
             }
 
-            MqttClient::getInstance().sendTraceLog("info", "socket 通道关闭");
+            const char* msg = is_clean ? "socket 通道正常关闭" : "socket 通道异常断开";
+            MqttClient::getInstance().sendTraceLog("info", msg);
         }, "OnAudioChannelClosed");
     });
     protocol_->OnIncomingJson([this, display](const cJSON* root) {
@@ -1197,7 +1202,7 @@ void Application::QuitTalking() {
         ResetDecoder();
     }
     audio_service_.EnableWakeWordDetection(true);
-    auto display = Board::GetInstance().GetDisplay();
+    ESP_LOGI(TAG, "EnableWakeWordDetection");
 }
 
 

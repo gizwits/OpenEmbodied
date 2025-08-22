@@ -96,6 +96,7 @@ private:
 
     virtual void WakeUpPowerSaveTimer() {
         if (power_save_timer_) {
+            power_save_timer_->SetEnabled(true);
             power_save_timer_->WakeUp();
         }
     };
