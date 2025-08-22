@@ -417,27 +417,32 @@ static void handle_at_command(char *cmd) {
     else if (strncmp(cmd, "AT+REC=0", strlen("AT+REC=0")) == 0) {
         // 处理录音命令
         ESP_LOGI(TAG, "Received record command");
-        
-        // 返回录音成功响应
-        if (ft_start_record_task(2) == 0) {
-            ESP_LOGI(TAG, "Record task started");
-            factory_test_send("+REC OK", strlen("+REC OK"));
-        } else {
-            ESP_LOGE(TAG, "Record task failed to start");
-            factory_test_send("+REC ERROR", strlen("+REC ERROR"));
-        }
+        xTaskCreate([](void* arg) {
+            // 返回录音成功响应
+            if (ft_start_record_task(2) == 0) {
+                ESP_LOGI(TAG, "Record task started");
+                factory_test_send("+REC OK", strlen("+REC OK"));
+            } else {
+                ESP_LOGE(TAG, "Record task failed to start");
+                factory_test_send("+REC ERROR", strlen("+REC ERROR"));
+            }
+            vTaskDelete(NULL);
+        }, "audio_loop", 1024 * 6, nullptr, 8, nullptr);
     }
     else if (strncmp(cmd, "AT+PLAY=0", strlen("AT+PLAY=0")) == 0) {
         // 处理播放命令
+        
         ESP_LOGI(TAG, "Received play command");
-        // 返回播放成功响应
-        if (ft_start_play_task(2) == 0) {
-            ESP_LOGI(TAG, "Play task started");
-            factory_test_send("+PLAY OK", strlen("+PLAY OK"));
-        } else {
-            ESP_LOGE(TAG, "Play task failed to start");
-            factory_test_send("+PLAY ERROR", strlen("+PLAY ERROR"));
-        }
+        xTaskCreate([](void* arg) {
+            if (ft_start_play_task(2) == 0) {
+                ESP_LOGI(TAG, "Play task started");
+                factory_test_send("+PLAY OK", strlen("+PLAY OK"));
+            } else {
+                ESP_LOGE(TAG, "Play task failed to start");
+                factory_test_send("+PLAY ERROR", strlen("+PLAY ERROR"));
+            }
+            vTaskDelete(NULL);
+        }, "audio_loop", 1024 * 6, nullptr, 8, nullptr);
     }else if (strncmp(cmd, "AT+RSSI?", strlen("AT+RSSI?")) == 0) {
         ESP_LOGI(TAG, "Received get RSSI command");
         int32_t rssi = 0;
