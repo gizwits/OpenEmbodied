@@ -162,13 +162,13 @@ public:
         if (s_factory_test_mode == 0) {
             // 不在产测模式才启动，不然有问题
             InitializeButtons();
+            ESP_LOGI(TAG, "Initializing LED Signal...");
+            InitializeLedSignal();
         }
 
         ESP_LOGI(TAG, "Initializing IoT components...");
         InitializeIot();
 
-        ESP_LOGI(TAG, "Initializing LED Signal...");
-        InitializeLedSignal();
 
         ESP_LOGI(TAG, "Initializing Power Manager...");
         InitializePowerManager();
