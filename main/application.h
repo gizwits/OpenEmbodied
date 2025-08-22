@@ -79,6 +79,7 @@ public:
     const char* GetTraceId() const { return trace_id_; }
     void PlayMusic(const char* url);
     AudioService& GetAudioService() { return audio_service_; }
+    bool IsNormalReset() const { return is_normal_reset_; }  // 获取重启状态
 
 private:
     Application();
@@ -98,6 +99,7 @@ private:
     std::chrono::steady_clock::time_point last_battery_check_time_;
 
     bool has_server_time_ = false;
+    bool is_normal_reset_ = false;  // 重启状态标志：true=正常重启，false=异常重启
     bool aborted_ = false;
     int clock_ticks_ = 0;
     TaskHandle_t check_new_version_task_handle_ = nullptr;

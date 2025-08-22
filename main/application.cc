@@ -347,6 +347,20 @@ void Application::StopListening() {
 }
 
 void Application::Start() {
+    auto reset_reason = esp_reset_reason();
+    ESP_LOGI(TAG, "esp_reset_reason: %d", reset_reason);
+    
+    // 判断重启类型：ESP_RST_POWERON(1)、ESP_RST_EXT(2)、ESP_RST_SW(3) 为正常重启
+    is_normal_reset_ = (reset_reason == ESP_RST_POWERON || 
+                        reset_reason == ESP_RST_EXT || 
+                        reset_reason == ESP_RST_SW);
+    
+    if (is_normal_reset_) {
+        ESP_LOGI(TAG, "Normal reset detected");
+    } else {
+        ESP_LOGW(TAG, "Abnormal reset detected - reason: %d", reset_reason);
+    }
+    
     Settings settings("wifi", true);
     chat_mode_ = settings.GetInt("chat_mode", 1); // 0=按键说话, 1=唤醒词, 2=自然对话
     // chat_mode_ = 2; // 0=按键说话, 1=唤醒词, 2=自然对话
@@ -499,8 +513,6 @@ void Application::Start() {
             } else if (strcmp(state->valuestring, "stop") == 0) {
                 ESP_LOGI(TAG, "tts stop");
                 Schedule([this]() {
-                    auto& board = Board::GetInstance();
-
                     if (device_state_ == kDeviceStateSpeaking) {
                         if (listening_mode_ == kListeningModeManualStop) {
                             SetDeviceState(kDeviceStateIdle);
