@@ -798,6 +798,7 @@ void Application::SetDeviceState(DeviceState state) {
                 audio_service_.EnableVoiceProcessing(true, false);
                 ESP_LOGW(TAG, "start enable wake word detection");
                 audio_service_.EnableWakeWordDetection(false);
+                ESP_LOGW(TAG, "end enable wake word detection");
             }
             break;
         case kDeviceStateSpeaking:
