@@ -6,6 +6,7 @@
 #include "led/circular_strip.h"
 #include "led/gpio_led.h"
 #include "led/single_led.h"
+#include "settings.h"
 #include "iot/thing_manager.h"
 #include <esp_sleep.h>
 #include "power_save_timer.h"
@@ -155,7 +156,13 @@ public:
         InitializePowerSaveTimer();
 
         ESP_LOGI(TAG, "Initializing Buttons...");
-        InitializeButtons();
+        Settings settings("wifi", true);
+        auto s_factory_test_mode = settings.GetInt("ft_mode", 0);
+
+        if (s_factory_test_mode == 0) {
+            // 不在产测模式才启动，不然有问题
+            InitializeButtons();
+        }
 
         ESP_LOGI(TAG, "Initializing IoT components...");
         InitializeIot();

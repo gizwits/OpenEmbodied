@@ -20,16 +20,18 @@
 #include <wifi_station.h>
 #include "config.h"
 
+static const char *TAG = "factory_test";
+
 // 工厂测试音频功能包装函数
 static int ft_start_record_task(int duration_seconds) {
     return Application::GetInstance().StartRecordTest(duration_seconds);
 }
 
 static int ft_start_play_task(int duration_seconds) {
+    ESP_LOGI(TAG, "StartPlayTest: duration=%d seconds", duration_seconds);
     return Application::GetInstance().StartPlayTest(duration_seconds);
 }
 
-static const char *TAG = "factory_test";
 
 // 缺失函数的简单实现
 static esp_err_t storage_save_factory_test_mode(int mode) {
@@ -427,22 +429,21 @@ static void handle_at_command(char *cmd) {
                 factory_test_send("+REC ERROR", strlen("+REC ERROR"));
             }
             vTaskDelete(NULL);
-        }, "audio_loop", 1024 * 6, nullptr, 8, nullptr);
+        }, "audio_record", 1024 * 5, nullptr, 8, nullptr);
     }
     else if (strncmp(cmd, "AT+PLAY=0", strlen("AT+PLAY=0")) == 0) {
         // 处理播放命令
         
-        ESP_LOGI(TAG, "Received play command");
+        ESP_LOGI(TAG, "Received play command 1");
         xTaskCreate([](void* arg) {
             if (ft_start_play_task(2) == 0) {
-                ESP_LOGI(TAG, "Play task started");
                 factory_test_send("+PLAY OK", strlen("+PLAY OK"));
             } else {
                 ESP_LOGE(TAG, "Play task failed to start");
                 factory_test_send("+PLAY ERROR", strlen("+PLAY ERROR"));
             }
             vTaskDelete(NULL);
-        }, "audio_loop", 1024 * 6, nullptr, 8, nullptr);
+        }, "audio_play", 1024 * 8, nullptr, 8, nullptr);
     }else if (strncmp(cmd, "AT+RSSI?", strlen("AT+RSSI?")) == 0) {
         ESP_LOGI(TAG, "Received get RSSI command");
         int32_t rssi = 0;
