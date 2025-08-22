@@ -158,7 +158,7 @@ void factory_test_uart_init(void) {
     // 标记已接管串口
     s_uart_taken_over = true;
 
-    xTaskCreate(factory_test_task, "factory_test", 10 * 1024, nullptr, 8, nullptr);
+    xTaskCreate(factory_test_task, "factory_test", 4 * 1024, nullptr, 8, nullptr);
 
     ESP_LOGW(TAG, "Factory Test UART initialized successfully");
 }
