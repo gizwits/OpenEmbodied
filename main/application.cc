@@ -353,7 +353,10 @@ void Application::Start() {
     // 判断重启类型：ESP_RST_POWERON(1)、ESP_RST_EXT(2)、ESP_RST_SW(3) 为正常重启
     is_normal_reset_ = (reset_reason == ESP_RST_POWERON || 
                         reset_reason == ESP_RST_EXT || 
-                        reset_reason == ESP_RST_SW);
+                        reset_reason == ESP_RST_SW ||
+                        reset_reason == ESP_RST_USB ||
+                        reset_reason == ESP_RST_JTAG
+                    );
     
     if (is_normal_reset_) {
         ESP_LOGI(TAG, "Normal reset detected");
@@ -395,8 +398,10 @@ void Application::Start() {
     /* Start the clock timer to update the status bar */
     esp_timer_start_periodic(clock_timer_handle_, 1000000);
 
-    // 播放上电提示音
-    audio_service_.PlaySound(Lang::Sounds::P3_SUCCESS);
+    if (is_normal_reset_) {
+        // 播放上电提示音
+        audio_service_.PlaySound(Lang::Sounds::P3_SUCCESS);
+    }
 
     /* Wait for the network to be ready */
     board.StartNetwork();
@@ -409,7 +414,9 @@ void Application::Start() {
     }
 
     audio_service_.ResetDecoder();
-    audio_service_.PlaySound(Lang::Sounds::P3_CONNECT_SUCCESS);
+    if (is_normal_reset_) {
+        audio_service_.PlaySound(Lang::Sounds::P3_CONNECT_SUCCESS);
+    }
     vTaskDelay(pdMS_TO_TICKS(500));
 
     // Initialize NTP client
@@ -461,12 +468,16 @@ void Application::Start() {
         }, "OnAudioChannelOpened");
     });
     protocol_->OnAudioChannelClosed([this, &board](bool is_clean) {
-        board.SetPowerSaveMode(true);
         if (!is_clean) {
             ESP_LOGW(TAG, "Audio channel closed unexpectedly");
             HandleNetError();
         }
+        board.SetPowerSaveMode(true);
+        
+        // 所有可能阻塞的操作都通过 Schedule 异步执行
         Schedule([this, is_clean]() {
+            
+            
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
             if (device_state_ != kDeviceStateSleeping) {
@@ -802,20 +813,13 @@ void Application::SetDeviceState(DeviceState state) {
             break;
         case kDeviceStateListening:
             display->SetStatus(Lang::Strings::LISTENING);
-            ESP_LOGW(TAG, "start send start listening");
             display->SetEmotion("neutral");
-            ESP_LOGW(TAG, "start enable voice processing");
-
             // Make sure the audio processor is running
             if (!audio_service_.IsAudioProcessorRunning()) {
                 // Send the start listening command
-                ESP_LOGW(TAG, "start send start listening");
                 protocol_->SendStartListening(listening_mode_);
-                ESP_LOGW(TAG, "start enable voice processing");
                 audio_service_.EnableVoiceProcessing(true, false);
-                ESP_LOGW(TAG, "start enable wake word detection");
                 audio_service_.EnableWakeWordDetection(false);
-                ESP_LOGW(TAG, "end enable wake word detection");
             }
             break;
         case kDeviceStateSpeaking:
@@ -1188,12 +1192,10 @@ void Application::ExitSleepMode() {
 
 void Application::HandleNetError() {
     ESP_LOGE(TAG, "HandleNetError");
-    Schedule([this]() {
-        QuitTalking();
-        ESP_LOGE(TAG, "HandleNetError2");
-        ResetDecoder();
-        PlaySound(Lang::Sounds::P3_NET_ERR);
-    }, "HandleNetError_QuitTalking");
+    QuitTalking();
+    ESP_LOGE(TAG, "HandleNetError2");
+    ResetDecoder();
+    PlaySound(Lang::Sounds::P3_NET_ERR);
 }
 void Application::SendTextToAI(const std::string& text) {
     if (protocol_) {
@@ -1208,11 +1210,16 @@ void Application::ResetDecoder() {
 void Application::QuitTalking() {
     if (protocol_ != nullptr && protocol_->IsAudioChannelOpened()) {
         ESP_LOGI(TAG, "QuitTalking");
+        // 先发送中止消息
         protocol_->SendAbortSpeaking(kAbortReasonNone);
         SetDeviceState(kDeviceStateIdle);
+        
+        // 关闭音频通道（可能阻塞，但这是必要的清理操作）
         protocol_->CloseAudioChannel();
         ResetDecoder();
     }
+    
+    // 启用唤醒词检测
     audio_service_.EnableWakeWordDetection(true);
     ESP_LOGI(TAG, "EnableWakeWordDetection");
 }

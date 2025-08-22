@@ -6,7 +6,8 @@
 #define TAG "AfeAudioProcessor"
 
 AfeAudioProcessor::AfeAudioProcessor()
-    : afe_data_(nullptr) {
+    : afe_data_(nullptr),
+      consecutive_failures_(0) {
     event_group_ = xEventGroupCreate();
 }
 
@@ -73,6 +74,10 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms) {
         this_->AudioProcessorTask();
         vTaskDelete(NULL);
     }, "audio_communication", 4096, this, 3, NULL);
+
+    // 初始化成功，重置失败计数器
+    consecutive_failures_ = 0;
+    ESP_LOGI(TAG, "AFE audio processor initialized successfully");
 }
 
 AfeAudioProcessor::~AfeAudioProcessor() {
@@ -126,18 +131,35 @@ void AfeAudioProcessor::AudioProcessorTask() {
         feed_size, fetch_size, frame_samples_);
 
     while (true) {
-        xEventGroupWaitBits(event_group_, PROCESSOR_RUNNING, pdFALSE, pdTRUE, pdMS_TO_TICKS(1000));
+        // 等待事件位被设置，如果被清除则继续等待
+        EventBits_t bits = xEventGroupWaitBits(event_group_, PROCESSOR_RUNNING, pdFALSE, pdTRUE, pdMS_TO_TICKS(1000));
+        
+        // 检查是否应该继续运行
+        if ((bits & PROCESSOR_RUNNING) == 0) {
+            continue;  // 事件位被清除，继续等待
+        }
 
         auto res = afe_iface_->fetch_with_delay(afe_data_, pdMS_TO_TICKS(100));
-        if ((xEventGroupGetBits(event_group_) & PROCESSOR_RUNNING) == 0) {
-            continue;
-        }
         if (res == nullptr || res->ret_value == ESP_FAIL) {
+            consecutive_failures_++;
+            ESP_LOGW(TAG, "AFE fetch failed, consecutive failures: %d/%d", 
+                     consecutive_failures_, MAX_CONSECUTIVE_FAILURES);
+            
+            // 连续20次失败后触发异常重启
+            if (consecutive_failures_ >= MAX_CONSECUTIVE_FAILURES) {
+                ESP_LOGE(TAG, "AFE audio processor fetch failed %d times consecutively, triggering abnormal restart", 
+                         consecutive_failures_);
+                abort();  // 触发异常，导致 ESP_RST_PANIC 重启
+            }
+            
             if (res != nullptr) {
                 ESP_LOGI(TAG, "Error code: %d", res->ret_value);
             }
             continue;
         }
+        
+        // 成功读取，重置失败计数器
+        consecutive_failures_ = 0;
 
         // VAD state change
         if (vad_state_change_callback_) {

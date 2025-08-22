@@ -38,6 +38,10 @@ private:
     int frame_samples_ = 0;
     bool is_speaking_ = false;
     std::vector<int16_t> output_buffer_;
+    
+    // 连续失败计数器
+    int consecutive_failures_ = 0;
+    static const int MAX_CONSECUTIVE_FAILURES = 20;  // 最大连续失败次数
 
     void AudioProcessorTask();
 };

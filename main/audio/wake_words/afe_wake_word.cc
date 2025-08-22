@@ -11,7 +11,8 @@
 AfeWakeWord::AfeWakeWord()
     : afe_data_(nullptr),
       wake_word_pcm_(),
-      wake_word_opus_() {
+      wake_word_opus_(),
+      consecutive_failures_(0) {
 
     event_group_ = xEventGroupCreate();
 }
@@ -85,6 +86,10 @@ bool AfeWakeWord::Initialize(AudioCodec* codec) {
         vTaskDelete(NULL);
     }, "audio_detection", 4096, this, 3, nullptr);
 
+    // 初始化成功，重置失败计数器
+    consecutive_failures_ = 0;
+    ESP_LOGI(TAG, "AFE wake word initialized successfully");
+
     return true;
 }
 
@@ -124,12 +129,32 @@ void AfeWakeWord::AudioDetectionTask() {
         fetch_size, feed_size);
 
     while (true) {
-        xEventGroupWaitBits(event_group_, DETECTION_RUNNING_EVENT, pdFALSE, pdTRUE, pdMS_TO_TICKS(1000));
+        // 等待事件位被设置，如果被清除则继续等待
+        EventBits_t bits = xEventGroupWaitBits(event_group_, DETECTION_RUNNING_EVENT, pdFALSE, pdTRUE, pdMS_TO_TICKS(1000));
+        
+        // 检查是否应该继续运行
+        if ((bits & DETECTION_RUNNING_EVENT) == 0) {
+            continue;  // 事件位被清除，继续等待
+        }
 
         auto res = afe_iface_->fetch_with_delay(afe_data_, pdMS_TO_TICKS(100)); // 使用100ms超时而不是无限等待
         if (res == nullptr || res->ret_value == ESP_FAIL) {
+            consecutive_failures_++;
+            ESP_LOGW(TAG, "AFE fetch failed, consecutive failures: %d/%d", 
+                     consecutive_failures_, MAX_CONSECUTIVE_FAILURES);
+            
+            // 连续20次失败后触发异常重启
+            if (consecutive_failures_ >= MAX_CONSECUTIVE_FAILURES) {
+                ESP_LOGE(TAG, "AFE fetch failed %d times consecutively, triggering abnormal restart", 
+                         consecutive_failures_);
+                abort();  // 触发异常，导致 ESP_RST_PANIC 重启
+            }
+            
             continue;
         }
+        
+        // 成功读取，重置失败计数器
+        consecutive_failures_ = 0;
 
         // Store the wake word data for voice recognition, like who is speaking
         StoreWakeWordData(res->data, res->data_size / sizeof(int16_t));
