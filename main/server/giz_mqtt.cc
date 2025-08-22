@@ -169,7 +169,13 @@ bool MqttClient::initialize() {
         ESP_LOGI(TAG, "Disconnected from endpoint");
         mqtt_event_ = 0;
         // 重新连接
-        Application::GetInstance().HandleNetError();
+        disconnect_error_count_++;
+        ESP_LOGI(TAG, "Disconnect error count: %d", disconnect_error_count_);
+        if (disconnect_error_count_ <= 5) {
+            Application::GetInstance().HandleNetError();
+        } else {
+            ESP_LOGW(TAG, "Disconnect error count exceeded 5, skipping HandleNetError");
+        }
         xTaskCreate(reconnectTask, "reconnect", 1024 * 4, this, 5, nullptr);
     });
 
@@ -304,6 +310,10 @@ bool MqttClient::connect() {
     // 获取房间信息
     GetRoomInfo();
     mqtt_event_ = 1;
+    
+    // 连接成功，清零计数器
+    disconnect_error_count_ = 0;
+    ESP_LOGI(TAG, "Connection successful, disconnect error count reset to 0");
     
     return true;
 }

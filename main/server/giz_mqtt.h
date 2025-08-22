@@ -149,6 +149,7 @@ private:
     std::string username_;
     bool is_active_request_ = false;  // 标记是否为主动请求
     static int attr_size_;
+    int disconnect_error_count_ = 0;  // 断开连接错误计数器
 
     static void messageReceiveHandler(void* arg);
     static void sendTask(void* arg);
