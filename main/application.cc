@@ -1148,6 +1148,7 @@ void Application::EnterSleepMode() {
         }
 
         // 启动唤醒词
+        audio_service_.EnableVoiceProcessing(false);
         audio_service_.EnableWakeWordDetection(true);
         
     }, "EnterSleepMode_SetStatus");
@@ -1216,10 +1217,10 @@ void Application::QuitTalking() {
         
         // 关闭音频通道（可能阻塞，但这是必要的清理操作）
         protocol_->CloseAudioChannel();
-        ResetDecoder();
     }
     
     // 启用唤醒词检测
+    audio_service_.EnableVoiceProcessing(false);
     audio_service_.EnableWakeWordDetection(true);
     ESP_LOGI(TAG, "EnableWakeWordDetection");
 }
