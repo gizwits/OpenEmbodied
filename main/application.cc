@@ -431,6 +431,8 @@ void Application::Start() {
     // Update the status bar immediately to show the network state
     display->UpdateStatusBar(true);
 
+    protocol_ = std::make_unique<WebsocketProtocol>();
+
     initGizwitsServer();
 
     // Check for new firmware version or get the MQTT broker address
@@ -440,7 +442,6 @@ void Application::Start() {
     // Initialize the protocol
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
 
-    protocol_ = std::make_unique<WebsocketProtocol>();
 
     protocol_->OnNetworkError([this](const std::string& message) {
         ESP_LOGE(TAG, "OnNetworkError: %s", message.c_str());
@@ -860,7 +861,7 @@ void Application::Reboot() {
 }
 
 void Application::WakeWordInvoke(const std::string& wake_word) {
-    #if CONFIG_USE_GIZWITS_MQTT
+#if CONFIG_USE_GIZWITS_MQTT
     auto& mqtt_client = MqttClient::getInstance();
     mqtt_client.sendTraceLog("info", "唤醒词触发");
 #endif
