@@ -430,7 +430,6 @@ void Application::Start() {
     }
     // Update the status bar immediately to show the network state
     display->UpdateStatusBar(true);
-    protocol_ = std::make_unique<WebsocketProtocol>();
 
     initGizwitsServer();
 
