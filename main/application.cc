@@ -273,10 +273,10 @@ void Application::ToggleChatState() {
                 backlight->RestoreBrightness();
             }
             if (!protocol_->IsAudioChannelOpened()) {
-                SetDeviceState(kDeviceStateConnecting);
                 if (!protocol_->OpenAudioChannel()) {
                     return;
                 }
+                SetDeviceState(kDeviceStateConnecting);
             }
 
             SetListeningMode(chat_mode_ == 2  ? kListeningModeRealtime : kListeningModeAutoStop);

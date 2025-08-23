@@ -163,19 +163,19 @@ bool MqttClient::initialize() {
 
     auto network = Board::GetInstance().GetNetwork();
     mqtt_ = network->CreateMqtt(1);
-    mqtt_->SetKeepAlive(20);
+    mqtt_->SetKeepAlive(120);
 
     mqtt_->OnDisconnected([this]() {
         ESP_LOGI(TAG, "Disconnected from endpoint");
         mqtt_event_ = 0;
         // 重新连接
         disconnect_error_count_++;
-        ESP_LOGI(TAG, "Disconnect error count: %d", disconnect_error_count_);
-        if (disconnect_error_count_ <= 5) {
-            Application::GetInstance().HandleNetError();
-        } else {
-            ESP_LOGW(TAG, "Disconnect error count exceeded 5, skipping HandleNetError");
-        }
+        // ESP_LOGI(TAG, "Disconnect error count: %d", disconnect_error_count_);
+        // if (disconnect_error_count_ <= 5) {
+        //     Application::GetInstance().HandleNetError();
+        // } else {
+        //     ESP_LOGW(TAG, "Disconnect error count exceeded 5, skipping HandleNetError");
+        // }
         xTaskCreate(reconnectTask, "reconnect", 1024 * 4, this, 5, nullptr);
     });
 
