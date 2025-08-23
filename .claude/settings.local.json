@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:docs.espressif.com)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
