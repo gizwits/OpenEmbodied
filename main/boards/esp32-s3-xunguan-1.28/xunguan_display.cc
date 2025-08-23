@@ -179,7 +179,9 @@ bool XunguanDisplay::InitializeLvgl() {
     lv_display_set_dpi(lvgl_display_, 160);
     
     // Allocate draw buffers - make them larger for better performance
-    size_t draw_buffer_sz = DISPLAY_WIDTH * 40 * sizeof(lv_color16_t);
+    // 减小缓冲区大小以节省内部内存
+    // 从 40 行减少到 10 行，每个缓冲区只需 4800 字节
+    size_t draw_buffer_sz = DISPLAY_WIDTH * 10 * sizeof(lv_color16_t);
     void* buf1 = heap_caps_malloc(draw_buffer_sz, MALLOC_CAP_DMA);
     void* buf2 = heap_caps_malloc(draw_buffer_sz, MALLOC_CAP_DMA);
     
@@ -1694,9 +1696,12 @@ bool XunguanDisplay::SetFrameRateMode(FrameRateMode mode) {
             break;
             
         case FrameRateMode::NORMAL:
-            min_ms = 15;           // 最小延迟15ms (67 FPS)
-            max_ms = 25;           // 最大延迟25ms (40 FPS)
-            tick_period_us = 6000; // 6ms tick周期，167Hz
+            // min_ms = 15;           // 最小延迟15ms (67 FPS)
+            // max_ms = 25;           // 最大延迟25ms (40 FPS)
+            // tick_period_us = 6000; // 6ms tick周期，167Hz
+            min_ms = 12;           // 最小延迟12ms (83 FPS)
+            max_ms = 22;           // 最大延迟22ms (45 FPS)
+            tick_period_us = 5000; // 5ms tick周期，200Hz
             break;
             
         case FrameRateMode::SMOOTH:
