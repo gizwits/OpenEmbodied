@@ -478,10 +478,8 @@ void Application::Start() {
         
         // 所有可能阻塞的操作都通过 Schedule 异步执行
         Schedule([this, is_clean]() {
-            
-            
-            auto display = Board::GetInstance().GetDisplay();
-            display->SetChatMessage("system", "");
+            // auto display = Board::GetInstance().GetDisplay();
+            // display->SetChatMessage("system", "");
             if (device_state_ != kDeviceStateSleeping) {
                 SetDeviceState(kDeviceStateIdle);
             }
@@ -721,6 +719,7 @@ void Application::MainEventLoop() {
 }
 
 void Application::OnWakeWordDetected() {
+    Board::GetInstance().WakeUpPowerSaveTimer();
     ESP_LOGI(TAG, "OnWakeWordDetected");
     if (!protocol_) {
         return;
@@ -957,9 +956,11 @@ void Application::initGizwitsServer() {
     mqtt_client.OnRoomParamsUpdated([this](const RoomParams& params, bool is_mutual) {
         // 判断 protocol_ 是否启动
         // 如果启动了，就断开重新连接
+        bool need_auto_reconnect = false;
 
         if (protocol_->IsAudioChannelOpened()) {
             // 先停止所有正在进行的操作
+            need_auto_reconnect = true;
             Schedule([this, is_mutual]() {
                 QuitTalking();
                 if (!is_mutual) {
@@ -977,8 +978,9 @@ void Application::initGizwitsServer() {
         Schedule([this]() {
             MqttClient::getInstance().sendTraceLog("info", "获取配置智能体成功");
         }, "initGizwitsServer_SendTraceLog");
+        
         protocol_->UpdateRoomParams(params);
-        if(device_state_ == kDeviceStateSleeping) {
+        if(device_state_ == kDeviceStateSleeping || need_auto_reconnect == true) {
             Schedule([this]() {
                 // 直接连接
                 SetDeviceState(kDeviceStateConnecting);
