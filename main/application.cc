@@ -139,7 +139,8 @@ void Application::CheckNewVersion(Ota& ota) {
                 // Upgrade failed, restart audio service and continue running
                 ESP_LOGE(TAG, "Firmware upgrade failed, restarting audio service and continuing operation...");
                 audio_service_.Start(); // Restart audio service
-                board.SetPowerSaveMode(true); // Restore power save mode
+                // 暂时禁用省电模式，避免影响网络连接
+        // board.SetPowerSaveMode(true); // Restore power save mode
                 Alert(Lang::Strings::ERROR, Lang::Strings::UPGRADE_FAILED, "sad", Lang::Sounds::P3_EXCLAMATION);
                 vTaskDelay(pdMS_TO_TICKS(3000));
                 // Continue to normal operation (don't break, just fall through)
@@ -472,7 +473,8 @@ void Application::Start() {
             ESP_LOGW(TAG, "Audio channel closed unexpectedly");
             HandleNetError();
         }
-        board.SetPowerSaveMode(true);
+        // 暂时禁用省电模式，避免影响网络连接
+        // board.SetPowerSaveMode(true);
         
         // 所有可能阻塞的操作都通过 Schedule 异步执行
         Schedule([this, is_clean]() {
@@ -1209,20 +1211,24 @@ void Application::ResetDecoder() {
 }
 
 void Application::QuitTalking() {
-    if (protocol_ != nullptr && protocol_->IsAudioChannelOpened()) {
-        ESP_LOGI(TAG, "QuitTalking");
+    // 不要使用这个判断protocol_->IsAudioChannelOpened 
+    // 因为长时间没有使用 socket处于超时状态
+    if (protocol_ != nullptr) {
+        ESP_LOGI(TAG, "run close audio channel");
         // 先发送中止消息
         protocol_->SendAbortSpeaking(kAbortReasonNone);
-        SetDeviceState(kDeviceStateIdle);
         
         // 关闭音频通道（可能阻塞，但这是必要的清理操作）
         protocol_->CloseAudioChannel();
     }
+
+    ESP_LOGI(TAG, "QuitTalking SetDeviceState(kDeviceStateIdle)");
+    SetDeviceState(kDeviceStateIdle);
     
     // 启用唤醒词检测
     audio_service_.EnableVoiceProcessing(false);
     audio_service_.EnableWakeWordDetection(true);
-    ESP_LOGI(TAG, "EnableWakeWordDetection");
+    ESP_LOGI(TAG, "QuitTalking EnableWakeWordDetection");
 }
 
 

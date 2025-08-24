@@ -67,6 +67,9 @@ private:
                 Application::GetInstance().Schedule([this]() {
                     Application::GetInstance().QuitTalking();
                     Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
+
+                    // 在这个场景里要切换成睡觉表情 
+                    // display_->SetEmotion("sleepy");
                 }, "EnterSleepMode_QuitTalking");
 
             } else {

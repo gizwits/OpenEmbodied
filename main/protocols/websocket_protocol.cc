@@ -190,11 +190,13 @@ bool WebsocketProtocol::IsAudioChannelOpened() const {
 
 void WebsocketProtocol::CloseAudioChannel() {
     if (!websocket_) {
+        ESP_LOGW(TAG, "websocket_ is null");
         return;
     }
 
     // 如果已经有关闭任务在运行，直接返回
     if (close_task_handle_ != nullptr) {
+        ESP_LOGW(TAG, "close_task_handle_ is not null");
         return;
     }
 
