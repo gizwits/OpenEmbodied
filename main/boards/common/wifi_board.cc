@@ -112,6 +112,9 @@ void WifiBoard::StartNetwork() {
         display->ShowNotification(notification.c_str(), 30000);
     });
     wifi_station.Start();
+    
+    // 禁用 WiFi 省电模式以提高连接稳定性
+    wifi_station.SetPowerSaveMode(false);
 
     // Try to connect to WiFi, if failed, launch the WiFi configuration AP
     if (!wifi_station.WaitForConnected(20 * 1000)) {

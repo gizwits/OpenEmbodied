@@ -171,7 +171,6 @@ void Protocol::UpdateRoomParams(const RoomParams& params) {
     ESP_LOGI(TAG, "  conv_id: %s", params.conv_id.c_str());
     ESP_LOGI(TAG, "  access_token: %s", params.access_token.c_str());
 
-    // 保存
     room_params_ = params;
 }
 

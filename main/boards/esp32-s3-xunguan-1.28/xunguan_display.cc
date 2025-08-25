@@ -179,7 +179,9 @@ bool XunguanDisplay::InitializeLvgl() {
     lv_display_set_dpi(lvgl_display_, 160);
     
     // Allocate draw buffers - make them larger for better performance
-    size_t draw_buffer_sz = DISPLAY_WIDTH * 40 * sizeof(lv_color16_t);
+    // 减小缓冲区大小以节省内部内存
+    // 从 40 行减少到 10 行，每个缓冲区只需 4800 字节
+    size_t draw_buffer_sz = DISPLAY_WIDTH * 10 * sizeof(lv_color16_t);
     void* buf1 = heap_caps_malloc(draw_buffer_sz, MALLOC_CAP_DMA);
     void* buf2 = heap_caps_malloc(draw_buffer_sz, MALLOC_CAP_DMA);
     
@@ -1266,7 +1268,61 @@ void XunguanDisplay::ClearUIElementsNoLock() {
         return;
     }
     
-    // Delete all animations globally - simpler and safer
+    // First, clean up animation user data before deleting animations
+    // This prevents accessing deleted animations in callbacks
+    if (left_eye_ && lv_obj_is_valid(left_eye_)) {
+        // Clean up blink animation user data
+        lv_anim_t* anim = lv_anim_get(left_eye_, (lv_anim_exec_xcb_t)blink_anim_cb);
+        if (anim) {
+            BlinkUserData* user_data = (BlinkUserData*)lv_anim_get_user_data(anim);
+            if (user_data) {
+                delete user_data;
+                lv_anim_set_user_data(anim, nullptr);
+            }
+        }
+        
+        // Clean up thinking float animation user data
+        anim = lv_anim_get(left_eye_, (lv_anim_exec_xcb_t)thinking_float_anim_cb);
+        if (anim) {
+            BlinkUserData* user_data = (BlinkUserData*)lv_anim_get_user_data(anim);
+            if (user_data) {
+                delete user_data;
+                lv_anim_set_user_data(anim, nullptr);
+            }
+        }
+        
+        // Clean up eye scaling animation user data
+        anim = lv_anim_get(left_eye_, (lv_anim_exec_xcb_t)eye_scaling_anim_cb);
+        if (anim) {
+            BlinkUserData* user_data = (BlinkUserData*)lv_anim_get_user_data(anim);
+            if (user_data) {
+                delete user_data;
+                lv_anim_set_user_data(anim, nullptr);
+            }
+        }
+        
+        // Delete all animations for left_eye
+        lv_anim_del(left_eye_, nullptr);
+    }
+    
+    if (right_eye_ && lv_obj_is_valid(right_eye_)) {
+        // Delete all animations for right_eye
+        lv_anim_del(right_eye_, nullptr);
+    }
+    
+    if (mouth_ && lv_obj_is_valid(mouth_)) {
+        lv_anim_del(mouth_, nullptr);
+    }
+    
+    if (left_hand_ && lv_obj_is_valid(left_hand_)) {
+        lv_anim_del(left_hand_, nullptr);
+    }
+    
+    if (right_hand_ && lv_obj_is_valid(right_hand_)) {
+        lv_anim_del(right_hand_, nullptr);
+    }
+    
+    // Now delete all remaining animations
     lv_anim_delete_all();
     
     // Clear existing objects with safety checks
@@ -1581,23 +1637,15 @@ void XunguanDisplay::ProcessAnimationQueue() {
 void XunguanDisplay::StopCurrentAnimation() {
     DisplayLockGuard lock(this);
     
-    // Stop all animations first
+    // First clean up animation user data before stopping animations
     if (left_eye_) {
-        lv_anim_del(left_eye_, (lv_anim_exec_xcb_t)lv_obj_set_height);
-        lv_anim_del(left_eye_, (lv_anim_exec_xcb_t)lv_obj_set_width);
-        lv_anim_del(left_eye_, (lv_anim_exec_xcb_t)lv_obj_set_y);
-        lv_anim_del(left_eye_, simple_color_anim_cb);
-        lv_anim_del(left_eye_, heart_zoom_anim_cb);
-        lv_anim_del(left_eye_, blink_anim_cb);
-        lv_anim_del(left_eye_, thinking_float_anim_cb);
-        lv_anim_del(left_eye_, eye_scaling_anim_cb);
-        
         // 清理眨眼动画的用户数据
         lv_anim_t* anim = lv_anim_get(left_eye_, (lv_anim_exec_xcb_t)blink_anim_cb);
         if (anim) {
             BlinkUserData* user_data = (BlinkUserData*)lv_anim_get_user_data(anim);
             if (user_data) {
                 delete user_data;
+                lv_anim_set_user_data(anim, nullptr);
             }
         }
         
@@ -1607,6 +1655,7 @@ void XunguanDisplay::StopCurrentAnimation() {
             BlinkUserData* user_data = (BlinkUserData*)lv_anim_get_user_data(anim);
             if (user_data) {
                 delete user_data;
+                lv_anim_set_user_data(anim, nullptr);
             }
         }
         
@@ -1616,8 +1665,19 @@ void XunguanDisplay::StopCurrentAnimation() {
             BlinkUserData* user_data = (BlinkUserData*)lv_anim_get_user_data(anim);
             if (user_data) {
                 delete user_data;
+                lv_anim_set_user_data(anim, nullptr);
             }
         }
+        
+        // Now stop all animations
+        lv_anim_del(left_eye_, (lv_anim_exec_xcb_t)lv_obj_set_height);
+        lv_anim_del(left_eye_, (lv_anim_exec_xcb_t)lv_obj_set_width);
+        lv_anim_del(left_eye_, (lv_anim_exec_xcb_t)lv_obj_set_y);
+        lv_anim_del(left_eye_, simple_color_anim_cb);
+        lv_anim_del(left_eye_, heart_zoom_anim_cb);
+        lv_anim_del(left_eye_, blink_anim_cb);
+        lv_anim_del(left_eye_, thinking_float_anim_cb);
+        lv_anim_del(left_eye_, eye_scaling_anim_cb);
     }
     if (right_eye_) {
         lv_anim_del(right_eye_, (lv_anim_exec_xcb_t)lv_obj_set_height);
@@ -1703,9 +1763,12 @@ bool XunguanDisplay::SetFrameRateMode(FrameRateMode mode) {
             break;
             
         case FrameRateMode::NORMAL:
-            min_ms = 15;           // 最小延迟15ms (67 FPS)
-            max_ms = 25;           // 最大延迟25ms (40 FPS)
-            tick_period_us = 6000; // 6ms tick周期，167Hz
+            // min_ms = 15;           // 最小延迟15ms (67 FPS)
+            // max_ms = 25;           // 最大延迟25ms (40 FPS)
+            // tick_period_us = 6000; // 6ms tick周期，167Hz
+            min_ms = 12;           // 最小延迟12ms (83 FPS)
+            max_ms = 22;           // 最大延迟22ms (45 FPS)
+            tick_period_us = 5000; // 5ms tick周期，200Hz
             break;
             
         case FrameRateMode::SMOOTH:

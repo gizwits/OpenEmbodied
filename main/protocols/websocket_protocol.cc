@@ -190,11 +190,13 @@ bool WebsocketProtocol::IsAudioChannelOpened() const {
 
 void WebsocketProtocol::CloseAudioChannel() {
     if (!websocket_) {
+        ESP_LOGW(TAG, "websocket_ is null");
         return;
     }
 
     // 如果已经有关闭任务在运行，直接返回
     if (close_task_handle_ != nullptr) {
+        ESP_LOGW(TAG, "close_task_handle_ is not null");
         return;
     }
 
@@ -524,12 +526,11 @@ bool WebsocketProtocol::OpenAudioChannel() {
             } else if (event_type == "error") {
                 ESP_LOGE(TAG, "Error: %s", str_data.data());
                 MqttClient::getInstance().sendTraceLog("error", str_data.data());
-
+                SetError(str_data.data());
                 if (str_data.find("\"code\":4200") != std::string::npos || str_data.find("\"code\":4101") != std::string::npos || str_data.find("\"code\":4100") != std::string::npos) {
                     // token 过期
                     MqttClient::getInstance().GetRoomInfo(true);
                 }
-                SetError(str_data.data());
             }
             
             cJSON_Delete(root);

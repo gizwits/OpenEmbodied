@@ -138,6 +138,7 @@ private:
     QueueHandle_t send_queue_ = nullptr; // 新增：发送消息队列
     SemaphoreHandle_t mqtt_sem_ = nullptr;
     TimerHandle_t timer_ = nullptr;
+    TimerHandle_t token_refresh_timer_ = nullptr;  // Token 自动刷新定时器
     int mqtt_event_ = 0;
     int mqtt_request_failure_count_ = 0;
     int mqtt_published_id_ = -1;
@@ -155,6 +156,7 @@ private:
     static void sendTask(void* arg);
     void app2devMsgHandler(const uint8_t *data, int32_t len);
     static void timerCallback(TimerHandle_t xTimer);
+    static void tokenRefreshTimerCallback(TimerHandle_t xTimer);  // Token 刷新定时器回调
     static void reconnectTask(void* arg);
 
     void processAttrValue(std::string attr_name, int value);
@@ -162,4 +164,6 @@ private:
     bool parseRealtimeAgent(const char* in_str, int in_len, room_params_t* params);
     bool parseM2MCtrlMsg(const char* in_str, int in_len);
     void handleMqttMessage(mqtt_msg_t* msg);
+    void startTokenRefreshTimer();  // 启动 token 刷新定时器
+    void stopTokenRefreshTimer();   // 停止 token 刷新定时器
 };

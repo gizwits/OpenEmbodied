@@ -58,6 +58,9 @@ bool MqttClient::initialize() {
         mqtt_.reset();
     }
 
+    // 清理现有的 token 刷新定时器
+    stopTokenRefreshTimer();
+
     Settings settings("wifi", true);
     bool need_activation = settings.GetInt("need_activation");
     // 创建信号量用于等待回调完成
@@ -163,19 +166,19 @@ bool MqttClient::initialize() {
 
     auto network = Board::GetInstance().GetNetwork();
     mqtt_ = network->CreateMqtt(1);
-    mqtt_->SetKeepAlive(20);
+    mqtt_->SetKeepAlive(120);
 
     mqtt_->OnDisconnected([this]() {
         ESP_LOGI(TAG, "Disconnected from endpoint");
         mqtt_event_ = 0;
         // 重新连接
         disconnect_error_count_++;
-        ESP_LOGI(TAG, "Disconnect error count: %d", disconnect_error_count_);
-        if (disconnect_error_count_ <= 5) {
-            Application::GetInstance().HandleNetError();
-        } else {
-            ESP_LOGW(TAG, "Disconnect error count exceeded 5, skipping HandleNetError");
-        }
+        // ESP_LOGI(TAG, "Disconnect error count: %d", disconnect_error_count_);
+        // if (disconnect_error_count_ <= 5) {
+        //     Application::GetInstance().HandleNetError();
+        // } else {
+        //     ESP_LOGW(TAG, "Disconnect error count exceeded 5, skipping HandleNetError");
+        // }
         xTaskCreate(reconnectTask, "reconnect", 1024 * 4, this, 5, nullptr);
     });
 
@@ -327,6 +330,10 @@ bool MqttClient::disconnect() {
     ESP_LOGI(TAG, "Disconnecting from MQTT endpoint");
     mqtt_->Disconnect();
     mqtt_event_ = 0;
+    
+    // 断开连接时停止 token 刷新定时器
+    stopTokenRefreshTimer();
+    
     ESP_LOGI(TAG, "Successfully disconnected from MQTT endpoint");
     return true;
 }
@@ -387,12 +394,20 @@ void MqttClient::OnRoomParamsUpdated(std::function<void(const RoomParams&, bool 
 bool MqttClient::GetRoomInfo(bool is_active_request) {
     const char* msg = "{\"method\":\"websocket.auth.request\"}";  // 优化：简化JSON格式
 
+    ESP_LOGI(TAG, "GetRoomInfo called with is_active_request=%s", is_active_request ? "true" : "false");
+
     if (!publish("llm/" + client_id_ + "/config/request", msg)) {
         return false;
     }
 
     // 设置请求类型标志
     is_active_request_ = is_active_request;
+
+    // 如果这是手动请求，停止并重新启动 token 刷新定时器
+    if (is_active_request) {
+        ESP_LOGI(TAG, "Manual request detected, stopping token refresh timer");
+        stopTokenRefreshTimer();
+    }
 
     if (timer_) {
         xTimerDelete(timer_, 0);
@@ -506,6 +521,11 @@ void MqttClient::deinit() {
     if (timer_) {
         xTimerDelete(timer_, 0);
         timer_ = nullptr;
+    }
+
+    if (token_refresh_timer_) {
+        xTimerDelete(token_refresh_timer_, 0);
+        token_refresh_timer_ = nullptr;
     }
 
     if (mqtt_sem_) {
@@ -733,6 +753,7 @@ bool MqttClient::parseM2MCtrlMsg(const char* in_str, int in_len) {
             // Handle room leave
         } else if (strcmp(method->valuestring, "websocket.config.change") == 0) {
             // 服务器推送配置变更，传递 false 表示非主动请求
+            ESP_LOGI(TAG, "Server pushed config change, refreshing room info (non-active request)");
             GetRoomInfo(false);
         }
     }
@@ -771,6 +792,9 @@ void MqttClient::handleMqttMessage(mqtt_msg_t* msg) {
             } else {
                 ESP_LOGE(TAG, "room_params_updated_callback_ is null");
             }
+            
+            // 成功获取房间信息后，启动 token 刷新定时器
+            startTokenRefreshTimer();
             
             // 重置标志
             is_active_request_ = false;
@@ -1217,4 +1241,48 @@ size_t MqttClient::getEstimatedMemoryUsage() {
     memory += sizeof(MqttClient);
     
     return memory;
+}
+
+void MqttClient::startTokenRefreshTimer() {
+    // 停止现有的定时器
+    stopTokenRefreshTimer();
+    
+    // 创建新的定时器，58分钟后触发（58 * 60 * 1000 = 3480000 ms）
+    token_refresh_timer_ = xTimerCreate("TokenRefreshTimer", pdMS_TO_TICKS(58 * 60 * 1000), pdFALSE, this, tokenRefreshTimerCallback);
+    if (token_refresh_timer_) {
+        if (xTimerStart(token_refresh_timer_, 0) == pdPASS) {
+            ESP_LOGI(TAG, "Token refresh timer started, will refresh in 58 minutes (3480000 ms)");
+            ESP_LOGI(TAG, "Timer handle: %p", (void*)token_refresh_timer_);
+        } else {
+            ESP_LOGE(TAG, "Failed to start token refresh timer");
+            xTimerDelete(token_refresh_timer_, 0);
+            token_refresh_timer_ = nullptr;
+        }
+    } else {
+        ESP_LOGE(TAG, "Failed to create token refresh timer");
+    }
+}
+
+void MqttClient::stopTokenRefreshTimer() {
+    if (token_refresh_timer_) {
+        ESP_LOGI(TAG, "Stopping token refresh timer: %p", (void*)token_refresh_timer_);
+        xTimerStop(token_refresh_timer_, 0);
+        xTimerDelete(token_refresh_timer_, 0);
+        token_refresh_timer_ = nullptr;
+        ESP_LOGI(TAG, "Token refresh timer stopped and deleted");
+    } else {
+        ESP_LOGI(TAG, "No token refresh timer to stop");
+    }
+}
+
+void MqttClient::tokenRefreshTimerCallback(TimerHandle_t xTimer) {
+    MqttClient* client = static_cast<MqttClient*>(pvTimerGetTimerID(xTimer));
+    if (client) {
+        ESP_LOGI(TAG, "Token refresh timer triggered for client: %p", (void*)client);
+        ESP_LOGI(TAG, "Automatically refreshing room info (non-active request)");
+        // 自动刷新，标记为非主动请求
+        client->GetRoomInfo(false);
+    } else {
+        ESP_LOGE(TAG, "Token refresh timer callback: invalid client pointer");
+    }
 }
