@@ -934,7 +934,7 @@ void MqttClient::ReportTimer() {
         return;
     }
     
-    uint8_t binary_data[20];
+    uint8_t binary_data[500];  // 固定500字节缓冲区，足够容纳各种数据
     size_t data_size = 0;
     
     // 调用 board 生成上报数据

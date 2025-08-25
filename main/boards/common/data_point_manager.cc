@@ -308,10 +308,6 @@ bool DataPointManager::SetDataPointValue(const std::string& name, int value) {
 
 // 标准实现：生成上报数据
 void DataPointManager::GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) {
-    if (buffer_size < 20) {
-        data_size = 0;
-        return;
-    }
 
     // 固定头部
     buffer[0] = 0x00;
