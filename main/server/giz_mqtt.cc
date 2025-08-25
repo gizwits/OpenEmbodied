@@ -499,6 +499,7 @@ void MqttClient::messageReceiveHandler(void* arg) {
 
     while (1) {
         if (xQueueReceive(client->message_queue_, &msg, portMAX_DELAY) == pdTRUE) {
+            ESP_LOGI(TAG, "messageReceiveHandler: %s", msg.topic);
             client->handleMqttMessage(&msg);
             // 恢复内存释放
             free(msg.topic);
