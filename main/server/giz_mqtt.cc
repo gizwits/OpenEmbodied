@@ -413,9 +413,19 @@ void MqttClient::sendTraceLog(const char* level, const char* message) {
     
     // Format the payload - 优化：减少缓冲区大小，增加时间字段
     char payload[MQTT_PAYLOAD_BUFFER_SIZE] = {0};
+    
+    // 限制字符串长度以避免截断
+    std::string message_str(message);
+    std::string trace_id_str(Application::GetInstance().GetTraceId());
+    std::string level_str(level);
+    
+    if (message_str.length() > 100) message_str = message_str.substr(0, 100);
+    if (trace_id_str.length() > 50) trace_id_str = trace_id_str.substr(0, 50);
+    if (level_str.length() > 50) level_str = level_str.substr(0, 50);
+    
     snprintf(payload, sizeof(payload), 
         "{\"message\":\"%s\",\"trace_id\":\"%s\",\"extra\":\"%s\",\"time\":\"%s\"}", 
-        message, Application::GetInstance().GetTraceId(), level, time_str.c_str());
+        message_str.c_str(), trace_id_str.c_str(), level_str.c_str(), time_str.c_str());
 
     // Publish the message
     if (!publish(topic, std::string(payload))) {

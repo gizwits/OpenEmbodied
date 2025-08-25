@@ -23,6 +23,7 @@ set(SOURCES
             "player/player.cc"
             "server/giz_api.cc"
             "server/protocol/iot_protocol.cc"
+            "boards/common/data_point_manager.cc"
             "server/protocol/ota_protocol.cc"
             "protocols/mcp.cc"
             "auth.cc"

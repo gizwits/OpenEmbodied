@@ -1,0 +1,386 @@
+#include "data_point_manager.h"
+#include <esp_log.h>
+#include <esp_wifi.h>
+#include <functional>
+#include <cstdlib>
+
+#define TAG "DataPointManager"
+
+DataPointManager& DataPointManager::GetInstance() {
+    static DataPointManager instance;
+    return instance;
+}
+
+// 标准实现：获取机智云协议配置
+const char* DataPointManager::GetGizwitsProtocolJson() const {
+    return R"json(
+{
+  "name": "标准设备",
+  "packetVersion": "0x00000004",
+  "protocolType": "var_len",
+  "product_key": "standard_product_key",
+  "entities": [
+    {
+      "display_name": "标准设备",
+      "attrs": [
+        {
+          "display_name": "开关",
+          "name": "switch",
+          "data_type": "bool",
+          "position": {
+            "byte_offset": 0,
+            "unit": "bit",
+            "len": 1,
+            "bit_offset": 0
+          },
+          "type": "status_writable",
+          "id": 0,
+          "desc": "设备开关状态"
+        },
+        {
+          "display_name": "唤醒词",
+          "name": "wakeup_word",
+          "data_type": "bool",
+          "position": {
+            "byte_offset": 0,
+            "unit": "bit",
+            "len": 1,
+            "bit_offset": 1
+          },
+          "type": "status_writable",
+          "id": 1,
+          "desc": "唤醒词状态"
+        },
+        {
+          "display_name": "充电状态",
+          "name": "charge_status",
+          "data_type": "enum",
+          "enum": [
+            "none",
+            "charging",
+            "charge_done"
+          ],
+          "position": {
+            "byte_offset": 0,
+            "unit": "bit",
+            "len": 2,
+            "bit_offset": 2
+          },
+          "type": "status_readonly",
+          "id": 2,
+          "desc": "充电状态"
+        },
+        {
+          "display_name": "提示音语言",
+          "name": "alert_tone_language",
+          "data_type": "enum",
+          "enum": [
+            "chinese_simplified",
+            "english"
+          ],
+          "position": {
+            "byte_offset": 0,
+            "unit": "bit",
+            "len": 1,
+            "bit_offset": 4
+          },
+          "type": "status_writable",
+          "id": 3,
+          "desc": "提示音语言"
+        },
+        {
+          "display_name": "chat_mode",
+          "name": "chat_mode",
+          "data_type": "enum",
+          "enum": [
+            "0",
+            "1",
+            "2"
+          ],
+          "position": {
+            "byte_offset": 0,
+            "unit": "bit",
+            "len": 2,
+            "bit_offset": 5
+          },
+          "type": "status_writable",
+          "id": 4,
+          "desc": "0 按钮\n1 唤醒词\n2 自然对话"
+        },
+        {
+          "display_name": "电量",
+          "name": "battery_percentage",
+          "data_type": "uint8",
+          "position": {
+            "byte_offset": 1,
+            "unit": "byte",
+            "len": 1,
+            "bit_offset": 0
+          },
+          "uint_spec": {
+            "addition": 0,
+            "max": 100,
+            "ratio": 1,
+            "min": 0
+          },
+          "type": "status_readonly",
+          "id": 5,
+          "desc": "电池电量百分比"
+        },
+        {
+          "display_name": "音量",
+          "name": "volume_set",
+          "data_type": "uint8",
+          "position": {
+            "byte_offset": 2,
+            "unit": "byte",
+            "len": 1,
+            "bit_offset": 0
+          },
+          "uint_spec": {
+            "addition": 0,
+            "max": 100,
+            "ratio": 1,
+            "min": 0
+          },
+          "type": "status_writable",
+          "id": 6,
+          "desc": "音量设置"
+        },
+        {
+          "display_name": "rssi",
+          "name": "rssi",
+          "data_type": "uint8",
+          "position": {
+            "byte_offset": 3,
+            "unit": "byte",
+            "len": 1,
+            "bit_offset": 0
+          },
+          "uint_spec": {
+            "addition": -100,
+            "max": 100,
+            "ratio": 1,
+            "min": 0
+          },
+          "type": "status_readonly",
+          "id": 7,
+          "desc": "WiFi信号强度"
+        },
+        {
+          "display_name": "亮度",
+          "name": "brightness",
+          "data_type": "uint8",
+          "position": {
+            "byte_offset": 4,
+            "unit": "byte",
+            "len": 1,
+            "bit_offset": 0
+          },
+          "uint_spec": {
+            "addition": 0,
+            "max": 100,
+            "ratio": 1,
+            "min": 0
+          },
+          "type": "status_writable",
+          "id": 8,
+          "desc": "屏幕亮度"
+        }
+      ],
+      "name": "entity0",
+      "id": 0
+    }
+  ]
+}
+)json";
+}
+
+// 标准实现：获取数据点数量
+size_t DataPointManager::GetDataPointCount() const {
+    return 9; // 9个标准数据点
+}
+
+// 标准实现：获取数据点值
+bool DataPointManager::GetDataPointValue(const std::string& name, int& value) const {
+    if (name == "switch") {
+        value = 1; // 开关状态，固定为1
+        return true;
+    } else if (name == "wakeup_word") {
+        value = 1; // 唤醒词状态，固定为1
+        return true;
+    } else if (name == "charge_status") {
+        if (is_charging_callback_) {
+            value = is_charging_callback_() ? 1 : 0; // 充电状态
+        } else {
+            value = 0;
+        }
+        return true;
+    } else if (name == "alert_tone_language") {
+        value = 1; // 提示音语言，固定为中文
+        return true;
+    } else if (name == "chat_mode") {
+        if (get_chat_mode_callback_) {
+            value = get_chat_mode_callback_();
+        } else {
+            value = 0;
+        }
+        return true;
+    } else if (name == "battery_percentage") {
+        if (get_battery_level_callback_) {
+            value = get_battery_level_callback_();
+        } else {
+            value = 0;
+        }
+        return true;
+    } else if (name == "volume_set") {
+        if (get_volume_callback_) {
+            value = get_volume_callback_();
+        } else {
+            value = 0;
+        }
+        return true;
+    } else if (name == "rssi") {
+        if (get_rssi_callback_) {
+            value = get_rssi_callback_();
+        } else {
+            value = 0;
+        }
+        return true;
+    } else if (name == "brightness") {
+        if (get_brightness_callback_) {
+            value = get_brightness_callback_();
+        } else {
+            value = 0;
+        }
+        return true;
+    }
+    return false;
+}
+
+// 标准实现：设置数据点值
+bool DataPointManager::SetDataPointValue(const std::string& name, int value) {
+    if (name == "chat_mode") {
+        if (set_chat_mode_callback_) {
+            set_chat_mode_callback_(value);
+            return true;
+        }
+    } else if (name == "volume_set") {
+        if (set_volume_callback_) {
+            set_volume_callback_(value);
+            return true;
+        }
+    } else if (name == "brightness") {
+        if (set_brightness_callback_) {
+            set_brightness_callback_(value);
+            return true;
+        }
+    }
+    return false;
+}
+
+// 标准实现：生成上报数据
+void DataPointManager::GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) {
+    if (buffer_size < 20) {
+        data_size = 0;
+        return;
+    }
+
+    // 固定头部
+    buffer[0] = 0x00;
+    buffer[1] = 0x00;
+    buffer[2] = 0x00;
+    buffer[3] = 0x03;
+    
+    // 命令标识
+    buffer[4] = 0x0b;
+    buffer[5] = 0x00;
+    buffer[6] = 0x00;
+    buffer[7] = 0x93;
+    
+    // 数据长度
+    buffer[8] = 0x00;
+    buffer[9] = 0x00;
+    buffer[10] = 0x00;
+    buffer[11] = 0x02;
+    
+    // 数据类型
+    buffer[12] = 0x14;
+    buffer[13] = 0x01;
+    buffer[14] = 0xff;
+
+    // 状态字节
+    uint8_t status = 0;
+    status |= (1 << 0); // switch
+    status |= (1 << 1); // wakeup_word
+    
+    if (is_charging_callback_) {
+        status |= (is_charging_callback_() ? 1 : 0) << 2; // charge_status
+    }
+    
+    status |= (1 << 4); // alert_tone_language
+    
+    if (get_chat_mode_callback_) {
+        status |= (get_chat_mode_callback_() << 5); // chat_mode
+    }
+    
+    buffer[15] = status;
+
+    // 电量
+    if (get_battery_level_callback_) {
+        buffer[16] = get_battery_level_callback_();
+    } else {
+        buffer[16] = 0;
+    }
+
+    // 音量
+    if (get_volume_callback_) {
+        buffer[17] = get_volume_callback_();
+    } else {
+        buffer[17] = 0;
+    }
+
+    // RSSI
+    if (get_rssi_callback_) {
+        buffer[18] = get_rssi_callback_();
+    } else {
+        buffer[18] = 0;
+    }
+
+    // 亮度
+    if (get_brightness_callback_) {
+        buffer[19] = get_brightness_callback_();
+    } else {
+        buffer[19] = 0;
+    }
+
+    data_size = 20;
+}
+
+// 标准实现：处理数据点值
+void DataPointManager::ProcessDataPointValue(const std::string& name, int value) {
+    ESP_LOGI(TAG, "ProcessDataPointValue: %s = %d", name.c_str(), value);
+    SetDataPointValue(name, value);
+}
+
+void DataPointManager::SetCallbacks(
+    std::function<bool()> is_charging_callback,
+    std::function<int()> get_chat_mode_callback,
+    std::function<void(int)> set_chat_mode_callback,
+    std::function<int()> get_battery_level_callback,
+    std::function<int()> get_volume_callback,
+    std::function<void(int)> set_volume_callback,
+    std::function<int()> get_rssi_callback,
+    std::function<int()> get_brightness_callback,
+    std::function<void(int)> set_brightness_callback
+) {
+    is_charging_callback_ = is_charging_callback;
+    get_chat_mode_callback_ = get_chat_mode_callback;
+    set_chat_mode_callback_ = set_chat_mode_callback;
+    get_battery_level_callback_ = get_battery_level_callback;
+    get_volume_callback_ = get_volume_callback;
+    set_volume_callback_ = set_volume_callback;
+    get_rssi_callback_ = get_rssi_callback;
+    get_brightness_callback_ = get_brightness_callback;
+    set_brightness_callback_ = set_brightness_callback;
+}
