@@ -257,6 +257,9 @@ void XunguanDisplay::lvgl_task(void* arg) {
     
     
     uint32_t time_till_next_ms = 0;
+
+    // 添加计数器用于观测线程存活
+    static uint32_t counter = 0;
     
     // Log immediately to confirm task started
     
@@ -272,6 +275,12 @@ void XunguanDisplay::lvgl_task(void* arg) {
         
         // 增加额外的休眠时间以减少CPU负载
         time_till_next_ms += 2;  // 额外增加2ms休眠
+
+        // 增加计数器并每隔1000次打印一次日志
+        counter++;
+        if (counter % 1000 == 0) {
+            ESP_LOGI(TAG, "LVGL任务存活: %lu", counter);
+        }
         
         vTaskDelay(pdMS_TO_TICKS(time_till_next_ms));
     }
