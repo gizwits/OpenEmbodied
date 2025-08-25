@@ -3,6 +3,8 @@
 #include <esp_wifi.h>
 #include <functional>
 #include <cstdlib>
+#include <chrono>
+#include <cmath>
 
 #define TAG "DataPointManager"
 
@@ -241,8 +243,33 @@ bool DataPointManager::GetDataPointValue(const std::string& name, int& value) co
         }
         return true;
     } else if (name == "rssi") {
+        // RSSI 变化规则：差值大于 20 或者超过 1 分钟才更新
+        static int last_rssi_value = 0;
+        static auto last_rssi_update_time = std::chrono::steady_clock::now();
+        
         if (get_rssi_callback_) {
-            value = get_rssi_callback_();
+            int current_rssi = get_rssi_callback_();
+            auto current_time = std::chrono::steady_clock::now();
+            auto duration_since_last_update = std::chrono::duration_cast<std::chrono::minutes>(current_time - last_rssi_update_time).count();
+            
+            // 检查是否需要更新 RSSI
+            bool should_update = false;
+            if (duration_since_last_update >= 1) {
+                // 超过 1 分钟，强制更新
+                should_update = true;
+            } else if (abs(current_rssi - last_rssi_value) > 20) {
+                // 差值大于 20，更新
+                should_update = true;
+            }
+            
+            if (should_update) {
+                last_rssi_value = current_rssi;
+                last_rssi_update_time = current_time;
+                ESP_LOGD(TAG, "RSSI updated: %d (diff: %d, time: %ld min)", 
+                         current_rssi, abs(current_rssi - last_rssi_value), duration_since_last_update);
+            }
+            
+            value = last_rssi_value;
         } else {
             value = 0;
         }
