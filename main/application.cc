@@ -364,11 +364,13 @@ void Application::Start() {
     }
     
     Settings settings("wifi", true);
-    chat_mode_ = settings.GetInt("chat_mode", 1); // 0=按键说话, 1=唤醒词, 2=自然对话
-    // chat_mode_ = 2; // 0=按键说话, 1=唤醒词, 2=自然对话
-    ESP_LOGI(TAG, "chat_mode_: %d", chat_mode_);
 
     auto& board = Board::GetInstance();
+
+    // 获取当前对话模式
+    chat_mode_ = settings.GetInt("chat_mode", board.GetDefaultChatMode()); // 0=按键说话, 1=唤醒词, 2=自然对话
+        
+    ESP_LOGI(TAG, "chat_mode_: %d", chat_mode_);
     Auth::getInstance().init();
     
     SetDeviceState(kDeviceStateStarting);
@@ -495,6 +497,11 @@ void Application::Start() {
         // 有交互
         Board::GetInstance().ResetPowerSaveTimer();
         auto type = cJSON_GetObjectItem(root, "type");
+        if (!type || !cJSON_IsString(type)) {
+            ESP_LOGW(TAG, "Invalid JSON: missing or invalid 'type' field");
+            ESP_LOGW(TAG, "JSON: %s", cJSON_Print(root));
+            return;
+        }
         if (strcmp(type->valuestring, "tts") == 0) {
             auto state = cJSON_GetObjectItem(root, "state");
             if (strcmp(state->valuestring, "start") == 0) {
@@ -536,6 +543,10 @@ void Application::Start() {
                 }, "OnIncomingJson_TTS_Stop");
             } else if (strcmp(state->valuestring, "sentence_start") == 0) {
                 auto text = cJSON_GetObjectItem(root, "text");
+                if (!text || !cJSON_IsString(text)) {
+                    ESP_LOGW(TAG, "Invalid JSON: missing or invalid 'text' field in tts sentence_start");
+                    return;
+                }
                 if (cJSON_IsString(text)) {
                     // ESP_LOGI(TAG, "<< %s", text->valuestring);
                     // Schedule([this, display, message = std::string(text->valuestring)]() {

@@ -125,8 +125,6 @@ public:
     MqttClient(const MqttClient&) = delete;
     MqttClient& operator=(const MqttClient&) = delete;
     void ReportTimer();
-    void ReportTimer_const();
-    static const char* kGizwitsProtocolJson;
     
     // 内存优化相关函数
     void printMemoryUsage();

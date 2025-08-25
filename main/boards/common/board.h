@@ -62,6 +62,7 @@ public:
     virtual bool GetBatteryLevel(int &level, bool& charging, bool& discharging) { return false; }
     virtual std::string GetJson();
     virtual void SetPowerSaveMode(bool enabled) = 0;
+    virtual int GetDefaultChatMode() { return 1; }
     virtual bool IsWifiConfigMode();
     
     virtual std::string GetBoardJson() = 0;
@@ -77,6 +78,29 @@ public:
     virtual uint8_t GetDefaultBrightness() { return 0; }
     virtual void EnterDeepSleepIfNotCharging() { }
     
+    // 设备模式相关方法
+    virtual DeviceMode GetDeviceMode() const { return device_mode_; }
+    virtual void SetDeviceMode(DeviceMode mode) { device_mode_ = mode; }
+    virtual std::string GetDeviceModeString() const {
+        switch (device_mode_) {
+            case DeviceMode::BUTTON_MODE:
+                return "button_mode";
+            case DeviceMode::WAKE_WORD_MODE:
+                return "wake_word_mode";
+            case DeviceMode::NATURAL_CHAT_MODE:
+                return "natural_chat_mode";
+            default:
+                return "unknown_mode";
+        }
+    }
+    
+    // 数据点相关方法
+    virtual const char* GetGizwitsProtocolJson() const { return nullptr; }
+    virtual size_t GetDataPointCount() const { return 0; }
+    virtual bool GetDataPointValue(const std::string& name, int& value) const { return false; }
+    virtual bool SetDataPointValue(const std::string& name, int value) { return false; }
+    virtual void GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) { data_size = 0; }
+    virtual void ProcessDataPointValue(const std::string& name, int value) {}
 };
 
 #define DECLARE_BOARD(BOARD_CLASS_NAME) \

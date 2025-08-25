@@ -19,26 +19,57 @@
 int MqttClient::attr_size_ = 0;
 
 void MqttClient::InitAttrsFromJson() {
-    cJSON* root = cJSON_Parse(MqttClient::kGizwitsProtocolJson);
-    if (!root) return;
+    // 从 board 获取协议配置
+    const char* protocol_json = Board::GetInstance().GetGizwitsProtocolJson();
+    if (!protocol_json) {
+        ESP_LOGD(TAG, "Board does not support data points, skipping attribute initialization");
+        return;
+    }
+    
+    cJSON* root = cJSON_Parse(protocol_json);
+    if (!root) {
+        ESP_LOGE(TAG, "Failed to parse protocol JSON from board");
+        return;
+    }
+    
     cJSON* entities = cJSON_GetObjectItem(root, "entities");
-    if (!entities || !cJSON_IsArray(entities)) { cJSON_Delete(root); return; }
+    if (!entities || !cJSON_IsArray(entities)) { 
+        ESP_LOGE(TAG, "Invalid entities in protocol JSON");
+        cJSON_Delete(root); 
+        return; 
+    }
+    
     cJSON* entity0 = cJSON_GetArrayItem(entities, 0);
-    if (!entity0) { cJSON_Delete(root); return; }
+    if (!entity0) { 
+        ESP_LOGE(TAG, "No entity0 found in protocol JSON");
+        cJSON_Delete(root); 
+        return; 
+    }
+    
     cJSON* attrs = cJSON_GetObjectItem(entity0, "attrs");
-    if (!attrs || !cJSON_IsArray(attrs)) { cJSON_Delete(root); return; }
+    if (!attrs || !cJSON_IsArray(attrs)) { 
+        ESP_LOGE(TAG, "Invalid attrs in protocol JSON");
+        cJSON_Delete(root); 
+        return; 
+    }
+    
     int attr_count = cJSON_GetArraySize(attrs);
+    ESP_LOGI(TAG, "Found %d attributes in protocol configuration", attr_count);
+    
     for (int i = 0; i < attr_count; ++i) {
         cJSON* attr = cJSON_GetArrayItem(attrs, i);
         if (!attr) continue;
+        
         cJSON* name = cJSON_GetObjectItem(attr, "name");
         cJSON* position = cJSON_GetObjectItem(attr, "position");
         if (!name || !position) continue;
+        
         cJSON* byte_offset = cJSON_GetObjectItem(position, "byte_offset");
         cJSON* bit_offset = cJSON_GetObjectItem(position, "bit_offset");
         cJSON* len = cJSON_GetObjectItem(position, "len");
         cJSON* unit = cJSON_GetObjectItem(position, "unit");
         if (!byte_offset || !bit_offset || !len || !unit) continue;
+        
         Attr a;
         a.name = name->valuestring;
         a.byte_offset = byte_offset->valueint;
@@ -46,8 +77,14 @@ void MqttClient::InitAttrsFromJson() {
         a.len = len->valueint;
         a.unit = unit->valuestring;
         g_attrs.push_back(a);
+        
+        ESP_LOGI(TAG, "Added attribute: %s (byte_offset=%d, bit_offset=%d, len=%d, unit=%s)", 
+                 a.name.c_str(), a.byte_offset, a.bit_offset, a.len, a.unit.c_str());
     }
+    
     attr_size_ = (attr_count + 8 - 1) / 8;
+    ESP_LOGI(TAG, "Calculated attr_size_: %d", attr_size_);
+    
     cJSON_Delete(root);
 }
 
@@ -492,9 +529,19 @@ void MqttClient::sendTraceLog(const char* level, const char* message) {
     
     // Format the payload - 优化：减少缓冲区大小，增加时间字段
     char payload[MQTT_PAYLOAD_BUFFER_SIZE] = {0};
+    
+    // 限制字符串长度以避免截断
+    std::string message_str(message);
+    std::string trace_id_str(Application::GetInstance().GetTraceId());
+    std::string level_str(level);
+    
+    if (message_str.length() > 100) message_str = message_str.substr(0, 100);
+    if (trace_id_str.length() > 50) trace_id_str = trace_id_str.substr(0, 50);
+    if (level_str.length() > 50) level_str = level_str.substr(0, 50);
+    
     snprintf(payload, sizeof(payload), 
         "{\"message\":\"%s\",\"trace_id\":\"%s\",\"extra\":\"%s\",\"time\":\"%s\"}", 
-        message, Application::GetInstance().GetTraceId(), level, time_str.c_str());
+        message_str.c_str(), trace_id_str.c_str(), level_str.c_str(), time_str.c_str());
 
     // Publish the message
     if (!publish(topic, std::string(payload))) {
@@ -577,6 +624,7 @@ void MqttClient::messageReceiveHandler(void* arg) {
 
     while (1) {
         if (xQueueReceive(client->message_queue_, &msg, portMAX_DELAY) == pdTRUE) {
+            ESP_LOGI(TAG, "messageReceiveHandler: %s", msg.topic);
             client->handleMqttMessage(&msg);
             // 恢复内存释放
             free(msg.topic);
@@ -947,6 +995,13 @@ void MqttClient::app2devMsgHandler(const uint8_t *data, int32_t len)
 
         if (action == 0x11) {
             std::call_once(g_attrs_once, InitAttrsFromJson);
+            
+            // 检查是否支持数据点
+            if (attr_size_ == 0) {
+                ESP_LOGD(TAG, "Board does not support data points, skipping data point processing");
+                return;
+            }
+            
             // 拼接属性区所有字节为一个二进制串
             uint16_t bits = 0;
             for (int i = 0; i < attr_size_; ++i) {
@@ -1014,18 +1069,16 @@ void MqttClient::app2devMsgHandler(const uint8_t *data, int32_t len)
 
 void MqttClient::processAttrValue(std::string attr_name, int value) {
     ESP_LOGI(TAG, "processAttrValue: %s = %d", attr_name.c_str(), value);
-    if (attr_name == "chat_mode") {
-        Application::GetInstance().SetChatMode(value);
-        ESP_LOGI(TAG, "chat_mode: %d", value);
+    
+    // 检查 board 是否支持数据点
+    if (!Board::GetInstance().GetGizwitsProtocolJson()) {
+        // 如果 board 不支持数据点，直接返回，不处理
+        ESP_LOGD(TAG, "Board does not support data points, skipping attribute processing");
+        return;
     }
-    else if (attr_name == "volume_set") {
-        Board::GetInstance().GetAudioCodec()->SetOutputVolume(value);
-        ESP_LOGI(TAG, "volume_set: %d", value);
-    }
-    else if (attr_name == "brightness") {
-        Board::GetInstance().SetBrightness(value);
-        ESP_LOGI(TAG, "brightness: %d", value);
-    }
+    
+    // 调用 board 处理数据点值
+    Board::GetInstance().ProcessDataPointValue(attr_name, value);
 }
 
 // Upload binary p0 data to dev2app/<client_id_>
@@ -1056,47 +1109,23 @@ bool MqttClient::uploadP0Data(const void* data, size_t data_len) {
 
 
 void MqttClient::ReportTimer() {
-    uint8_t binary_data[20] = {
-        0x00, 0x00, 0x00, 0x03,  // 固定头部
-        0x0b, 0x00, 0x00, 0x93,  // 命令标识
-        0x00, 0x00, 0x00, 0x02,  // 数据长度
-        0x14, 0x01, 0xff,        // 数据类型
-        0x00, // 0b01011011 switch，类型为bool，值为true：字段bit0，字段值为0b1；wakeup_word，类型为bool，值为true：字段bit1，字段值为0b1；charge_status，类型为enum，值为2：字段bit3 ~ bit2，字段值为0b10；alert_tone_language，类型为enum，值为1：字段bit4 ~ bit4，字段值为0b1；chat_mode，类型为enum，值为2：字段bit6 ~ bit5，字段值为0b10；          
-        0x64, // 电量
-        0x0a, // 音量
-        0x00, // rssi
-        0x00, // brightness
-    };
-
-    int chat_mode = Application::GetInstance().GetChatMode();
-    // 使用实际的chat_mode值
-    uint8_t status = 0;
-    status |= (1 << 0); // switch
-    status |= (1 << 1); // wakeup_word
-    status |= (Board::GetInstance().IsCharging() ? 1 : 0) << 2; // charge_status
-    status |= (1 << 4); // alert_tone_language
-    status |= (chat_mode << 5); // chat_mode
-
-    // 本设备无法判断充满电
-    int pos = 15;
-    binary_data[pos++] = status;
-
-    int battery_level = 0;
-    bool charging = false;
-    bool discharging = false;
-    Board::GetInstance().GetBatteryLevel(battery_level, charging, discharging);
-    binary_data[pos++] = battery_level;
-
-    auto codec = Board::GetInstance().GetAudioCodec();
-    int volume = codec->output_volume();
-    binary_data[pos++] = volume;
-
-    wifi_ap_record_t ap_info;
-    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
-        binary_data[pos++] = 100 - (uint8_t)abs(ap_info.rssi);
+    // 检查 board 是否支持数据点
+    if (!Board::GetInstance().GetGizwitsProtocolJson()) {
+        // 如果 board 不支持数据点，直接返回，不上报
+        ESP_LOGD(TAG, "Board does not support data points, skipping report");
+        return;
     }
-
-    binary_data[pos++] = Board::GetInstance().GetBrightness();
+    
+    uint8_t binary_data[500];  // 固定500字节缓冲区，足够容纳各种数据
+    size_t data_size = 0;
+    
+    // 调用 board 生成上报数据
+    Board::GetInstance().GenerateReportData(binary_data, sizeof(binary_data), data_size);
+    
+    if (data_size == 0) {
+        ESP_LOGE(TAG, "Failed to generate report data from board");
+        return;
+    }
 
     // 每分钟上报一次 或者关键数据变化也报
     static uint8_t last_binary_data[3] = {0x00, 0x00, 0x00};
@@ -1104,275 +1133,37 @@ void MqttClient::ReportTimer() {
     static auto last_report_time = std::chrono::steady_clock::now();
     auto current_time = std::chrono::steady_clock::now();
     auto duration_since_last_report = std::chrono::duration_cast<std::chrono::minutes>(current_time - last_report_time).count();
-    if (memcmp(&binary_data[15], last_binary_data, 3) != 0 || 
-        binary_data[19] != last_brightness ||
-        duration_since_last_report >= 1) {
-        ESP_LOGI(TAG, "IsCharging: %d", Board::GetInstance().IsCharging());
-        ESP_LOGI(TAG, "Status: %d", status);
-        ESP_LOGI(TAG, "Chat mode: %d", chat_mode);
-        ESP_LOGI(TAG, "Battery Level: %d", binary_data[15]);
-        ESP_LOGI(TAG, "Volume: %d", volume);
-        ESP_LOGI(TAG, "WiFi RSSI: %d dBm", ap_info.rssi);
-        if (mqtt_) {
-            uploadP0Data(binary_data, sizeof(binary_data));
-        }
-        memcpy(last_binary_data, &binary_data[15], 3);
-        last_brightness = binary_data[19];
-        last_report_time = current_time;
-    }
-
-}
-
-void MqttClient::ReportTimer_const() {
-    uint8_t binary_data[18] = {
-        0x00, 0x00, 0x00, 0x03,  // 固定头部
-        0x0b, 0x00, 0x00, 0x93,  // 命令标识
-        0x00, 0x00, 0x00, 0x02,  // 数据长度
-        0x04, // 定长上报
-        0x00, // 0b00010111 
-        /*
-switch，类型为bool，值为true：字段bit0，字段值为0b1；
-wakeup_word，类型为bool，值为true：字段bit1，字段值为0b1；
-alert_tone_language，类型为enum，值为1：字段bit2 ~ bit2，字段值为0b1；
-chat_mode，类型为enum，值为2：字段bit4 ~ bit3，字段值为0b10；
-        */
-        0x64, // volume_set，类型为uint8，字段值为100；
-        0x01, // charge_status，类型为enum，值为2：字段bit1 ~ bit0，字段值为0b10；
-        0x0a, // battery_percentage，类型为uint8，字段值为100；
-        0x00, // rssi，类型为uint8，字段值为100；实际值计算公式y=1.000000*x+(-100.000000)
-    };
-
-    int chat_mode = Application::GetInstance().GetChatMode();
-    // 使用实际的chat_mode值
-    uint8_t status = 0;
-    status |= (1 << 0); // switch
-    status |= (1 << 1); // wakeup_word
-    status |= (0 << 2); // alert_tone_language[chinese_simplified,english]
-    status |= (chat_mode << 3); // chat_mode
-
-    binary_data[13] = status;
-    ESP_LOGI(TAG, "Status: %d", status);
-    ESP_LOGI(TAG, "Chat mode: %d", chat_mode);
-
-
-    auto codec = Board::GetInstance().GetAudioCodec();
-    int volume = codec->output_volume();
-    ESP_LOGI(TAG, "Volume: %d", volume);
-    binary_data[14] = volume;
-
-    binary_data[15] = Board::GetInstance().IsCharging() ? 1 : 0;    // 本设备无法判断充满电
-    ESP_LOGI(TAG, "is_charging: %d", binary_data[15]);
-
-    int battery_level = 0;
-    bool charging = false;
-    bool discharging = false;
-    Board::GetInstance().GetBatteryLevel(battery_level, charging, discharging);
-    binary_data[16] = battery_level;
-    ESP_LOGI(TAG, "Battery Level: %d", battery_level);
-
-    wifi_ap_record_t ap_info;
-    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
-        ESP_LOGI(TAG, "WiFi RSSI: %d dBm", ap_info.rssi);
-        binary_data[17] = 100 - (uint8_t)abs(ap_info.rssi);
+    
+    // 检查关键数据是否变化
+    bool data_changed = false;
+    if (data_size >= 20) {
+        data_changed = (memcmp(&binary_data[15], last_binary_data, 3) != 0 || 
+                       binary_data[19] != last_brightness);
     }
     
-    if (mqtt_) {
-        uploadP0Data(binary_data, sizeof(binary_data));
+    if (data_changed || duration_since_last_report >= 1) {
+        ESP_LOGI(TAG, "Report data generated from board, size: %zu", data_size);
+        if (mqtt_) {
+            uploadP0Data(binary_data, data_size);
+        }
+        
+        // 更新上次上报的数据
+        if (data_size >= 20) {
+            memcpy(last_binary_data, &binary_data[15], 3);
+            last_brightness = binary_data[19];
+        }
+        last_report_time = current_time;
     }
-
 }
-
-
 
 // const int MqttClient::attr_size_ = (8 + 8 - 1) / 8;
-const char* MqttClient::kGizwitsProtocolJson = R"json(
-{
-  "name": "绿林魔方",
-  "packetVersion": "0x00000004",
-  "protocolType": "var_len",
-  "product_key": "73e57262afa74d6294476c595e42f30f",
-  "entities": [
-    {
-      "display_name": "机智云开发套件",
-      "attrs": [
-        {
-          "display_name": "开关",
-          "name": "switch",
-          "data_type": "bool",
-          "position": {
-            "byte_offset": 0,
-            "unit": "bit",
-            "len": 1,
-            "bit_offset": 0
-          },
-          "type": "status_writable",
-          "id": 0,
-          "desc": "1"
-        },
-        {
-          "display_name": "唤醒词",
-          "name": "wakeup_word",
-          "data_type": "bool",
-          "position": {
-            "byte_offset": 0,
-            "unit": "bit",
-            "len": 1,
-            "bit_offset": 0
-          },
-          "type": "status_writable",
-          "id": 1,
-          "desc": ""
-        },
-        {
-          "display_name": "充电状态",
-          "name": "charge_status",
-          "data_type": "enum",
-          "enum": [
-            "none",
-            " charging",
-            "charge_done"
-          ],
-          "position": {
-            "byte_offset": 0,
-            "unit": "bit",
-            "len": 2,
-            "bit_offset": 0
-          },
-          "type": "status_readonly",
-          "id": 2,
-          "desc": ""
-        },
-        {
-          "display_name": "提示音语言",
-          "name": "alert_tone_language",
-          "data_type": "enum",
-          "enum": [
-            "chinese_simplified",
-            "english"
-          ],
-          "position": {
-            "byte_offset": 0,
-            "unit": "bit",
-            "len": 1,
-            "bit_offset": 0
-          },
-          "type": "status_writable",
-          "id": 3,
-          "desc": ""
-        },
-        {
-          "display_name": "chat_mode",
-          "name": "chat_mode",
-          "data_type": "enum",
-          "enum": [
-            "0",
-            "1",
-            "2"
-          ],
-          "position": {
-            "byte_offset": 0,
-            "unit": "bit",
-            "len": 2,
-            "bit_offset": 0
-          },
-          "type": "status_writable",
-          "id": 4,
-          "desc": "0 按钮\n1 唤醒词\n2 自然对话"
-        },
-        {
-          "display_name": "电量",
-          "name": "battery_percentage",
-          "data_type": "uint8",
-          "position": {
-            "byte_offset": 0,
-            "unit": "byte",
-            "len": 1,
-            "bit_offset": 0
-          },
-          "uint_spec": {
-            "addition": 0,
-            "max": 100,
-            "ratio": 1,
-            "min": 0
-          },
-          "type": "status_readonly",
-          "id": 5,
-          "desc": ""
-        },
-        {
-          "display_name": "音量",
-          "name": "volume_set",
-          "data_type": "uint8",
-          "position": {
-            "byte_offset": 0,
-            "unit": "byte",
-            "len": 1,
-            "bit_offset": 0
-          },
-          "uint_spec": {
-            "addition": 0,
-            "max": 100,
-            "ratio": 1,
-            "min": 0
-          },
-          "type": "status_writable",
-          "id": 6,
-          "desc": ""
-        },
-        {
-          "display_name": "rssi",
-          "name": "rssi",
-          "data_type": "uint8",
-          "position": {
-            "byte_offset": 0,
-            "unit": "byte",
-            "len": 1,
-            "bit_offset": 0
-          },
-          "uint_spec": {
-            "addition": -100,
-            "max": 100,
-            "ratio": 1,
-            "min": 0
-          },
-          "type": "status_readonly",
-          "id": 7,
-          "desc": "无 1"
-        },
-        {
-          "display_name": "亮度",
-          "name": "brightness",
-          "data_type": "uint8",
-          "position": {
-            "byte_offset": 0,
-            "unit": "byte",
-            "len": 1,
-            "bit_offset": 0
-          },
-          "uint_spec": {
-            "addition": 0,
-            "max": 100,
-            "ratio": 1,
-            "min": 0
-          },
-          "type": "status_writable",
-          "id": 8,
-          "desc": ""
-        }
-      ],
-      "name": "entity0",
-      "id": 0
-    }
-  ]
-}
-)json";
 
 void MqttClient::printMemoryUsage() {
     size_t total_memory = getEstimatedMemoryUsage();
     ESP_LOGI(TAG, "MQTT Memory Usage:");
     ESP_LOGI(TAG, "  Task stacks: %zu bytes", MQTT_TASK_STACK_SIZE_RCV + MQTT_TASK_STACK_SIZE_RESEND);
     ESP_LOGI(TAG, "  Message queue: %zu bytes", MQTT_QUEUE_SIZE * sizeof(mqtt_msg_t));
-    ESP_LOGI(TAG, "  Static data: %zu bytes", sizeof(g_attrs) + strlen(kGizwitsProtocolJson));
+    ESP_LOGI(TAG, "  Static data: %zu bytes", sizeof(g_attrs));
     ESP_LOGI(TAG, "  Total estimated: %zu bytes", total_memory);
     ESP_LOGI(TAG, "  Note: Increased stack size to prevent JSON parsing stack overflow");
 }
@@ -1388,7 +1179,6 @@ size_t MqttClient::getEstimatedMemoryUsage() {
     
     // 静态数据内存
     memory += sizeof(g_attrs);
-    memory += strlen(kGizwitsProtocolJson);
     
     // 其他成员变量
     memory += sizeof(MqttClient);

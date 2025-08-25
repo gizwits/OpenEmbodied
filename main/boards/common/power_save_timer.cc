@@ -65,7 +65,7 @@ void PowerSaveTimer::PowerSaveCheck() {
         return;
     }
     
-    ESP_LOGE(TAG, "[pt %d][sleep %d]", ticks_, in_sleep_mode_);
+    // ESP_LOGE(TAG, "[pt %d][sleep %d]", ticks_, in_sleep_mode_);
     
     ticks_++;
     if (seconds_to_sleep_ != -1 && ticks_ >= seconds_to_sleep_) {

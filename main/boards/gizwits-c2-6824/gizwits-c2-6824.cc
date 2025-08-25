@@ -16,6 +16,8 @@
 #include <esp_log.h>
 #include "assets/lang_config.h"
 #include "vb6824.h"
+#include <esp_wifi.h>
+#include "data_point_manager.h"
 
 #include <esp_lcd_panel_vendor.h>
 #include <driver/spi_common.h>
@@ -52,7 +54,6 @@ private:
         });
         power_save_timer_->OnExitSleepMode([this]() {
             ESP_LOGI(TAG, "Shutting down");
-            run_sleep_mode(true);
         });
         power_save_timer_->OnShutdownRequest([this]() {
             
@@ -145,6 +146,33 @@ private:
         PowerManager::GetInstance();
     }
 
+    void InitializeDataPointManager() {
+        
+        // 设置 DataPointManager 的回调函数
+        DataPointManager::GetInstance().SetCallbacks(
+            [this]() -> bool { return IsCharging(); },
+            []() -> int { return Application::GetInstance().GetChatMode(); },
+            [](int value) { Application::GetInstance().SetChatMode(value); },
+            [this]() -> int { 
+                int level = 0;
+                bool charging = false, discharging = false;
+                GetBatteryLevel(level, charging, discharging);
+                return level;
+            },
+            [this]() -> int { return GetAudioCodec()->output_volume(); },
+            [this](int value) { GetAudioCodec()->SetOutputVolume(value); },
+            []() -> int { 
+                wifi_ap_record_t ap_info;
+                if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+                    return 100 - (uint8_t)abs(ap_info.rssi);
+                }
+                return 0;
+            },
+            [this]() -> int { return GetBrightness(); },
+            [this](int value) { SetBrightness(value); }
+        );
+    }
+
 public:
     CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO){      
         gpio_config_t io_conf = {};
@@ -179,6 +207,7 @@ public:
         ESP_LOGI(TAG, "Power Manager initialized.");
 
 
+
         audio_codec.OnWakeUp([this](const std::string& command) {
             ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());
             if (IsCommandInList(command, wake_words_)){
@@ -194,6 +223,10 @@ public:
         PowerManager::GetInstance().CheckBatteryStatusImmediately();
         ESP_LOGI(TAG, "Immediately check the battery level upon startup: %d", PowerManager::GetInstance().GetBatteryLevel());
 
+
+        ESP_LOGI(TAG, "Initializing Data Point Manager...");
+        InitializeDataPointManager();
+        ESP_LOGI(TAG, "Data Point Manager initialized.");
     }
 
     virtual void WakeUpPowerSaveTimer() {
@@ -202,8 +235,11 @@ public:
         }
     };
 
-    uint8_t GetBatteryLevel() override {
-        return PowerManager::GetInstance().GetBatteryLevel();
+    bool GetBatteryLevel(int &level, bool& charging, bool& discharging) override {
+        level = PowerManager::GetInstance().GetBatteryLevel();
+        charging = PowerManager::GetInstance().IsCharging();
+        discharging = !charging;
+        return true;
     }
 
     bool IsCharging() override {
@@ -232,6 +268,31 @@ public:
 
     uint8_t GetDefaultBrightness() {
         return LedSignal::GetInstance().GetDefaultBrightness();
+    }
+
+    // 数据点相关方法实现
+    const char* GetGizwitsProtocolJson() const override {
+        return DataPointManager::GetInstance().GetGizwitsProtocolJson();
+    }
+
+    size_t GetDataPointCount() const override {
+        return DataPointManager::GetInstance().GetDataPointCount();
+    }
+
+    bool GetDataPointValue(const std::string& name, int& value) const override {
+        return DataPointManager::GetInstance().GetDataPointValue(name, value);
+    }
+
+    bool SetDataPointValue(const std::string& name, int value) override {
+        return DataPointManager::GetInstance().SetDataPointValue(name, value);
+    }
+
+    void GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) override {
+        DataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
+    }
+
+    void ProcessDataPointValue(const std::string& name, int value) override {
+        DataPointManager::GetInstance().ProcessDataPointValue(name, value);
     }
 
 };

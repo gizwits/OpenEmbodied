@@ -87,7 +87,7 @@ static void handle_at_command_buffer(uint8_t *data);
 
 static void factory_test_task(void *arg)
 {
-#if defined(FACTORY_TEST_UART_RX_PIN)
+#ifdef FACTORY_TEST_UART_RX_PIN
     // Configure a temporary buffer for the incoming data
     uint8_t *data = static_cast<uint8_t*>(malloc(AT_BUF_SIZE+1));
     
@@ -125,6 +125,7 @@ static void factory_test_task(void *arg)
 
 // 初始化产测串口
 void factory_test_uart_init(void) {
+#ifdef FACTORY_TEST_UART_RX_PIN
     // 如果已经接管了串口，直接返回
     if (s_uart_taken_over) {
         ESP_LOGI(TAG, "UART already taken over, skipping initialization");
