@@ -13,6 +13,8 @@
 #include <esp_log.h>
 #include "assets/lang_config.h"
 #include "vb6824.h"
+#include <esp_wifi.h>
+#include "data_point_manager.h"
 
 #include <esp_lcd_panel_vendor.h>
 #include <driver/spi_common.h>
@@ -102,6 +104,29 @@ private:
         thing_manager.AddThing(iot::CreateThing("Speaker"));
     }
 
+    void InitializeDataPointManager() {
+        // 设置 DataPointManager 的回调函数
+        DataPointManager::GetInstance().SetCallbacks(
+            [this]() -> bool { return false; }, // IsCharging - toy 版本可能没有充电功能
+            []() -> int { return Application::GetInstance().GetChatMode(); },
+            [](int value) { Application::GetInstance().SetChatMode(value); },
+            [this]() -> int { 
+                return 100; // 固定电量 100%
+            },
+            [this]() -> int { return GetAudioCodec()->output_volume(); },
+            [this](int value) { GetAudioCodec()->SetOutputVolume(value); },
+            []() -> int { 
+                wifi_ap_record_t ap_info;
+                if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+                    return 100 - (uint8_t)abs(ap_info.rssi);
+                }
+                return 0;
+            },
+            [this]() -> int { return 100; }, // 固定亮度 100%
+            [this](int value) { /* toy 版本可能没有亮度调节 */ }
+        );
+    }
+
 public:
     CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO),
     volume_up_button_(VOLUME_UP_BUTTON_GPIO), volume_down_button_(VOLUME_DOWN_BUTTON_GPIO),
@@ -109,6 +134,10 @@ public:
 
         InitializeButtons();
         InitializeIot();
+        InitializeDataPointManager();
+
+        ESP_LOGI(TAG, "Initializing Data Point Manager...");
+        ESP_LOGI(TAG, "Data Point Manager initialized.");
 
         InitializeGpio(POWER_GPIO, true);
         InitializeGpio(POWER_GPIO, true);
@@ -148,6 +177,32 @@ public:
     virtual AudioCodec* GetAudioCodec() override {
         return &audio_codec;
     }
+
+    // 数据点相关方法实现
+    const char* GetGizwitsProtocolJson() const override {
+        return DataPointManager::GetInstance().GetGizwitsProtocolJson();
+    }
+
+    size_t GetDataPointCount() const override {
+        return DataPointManager::GetInstance().GetDataPointCount();
+    }
+
+    bool GetDataPointValue(const std::string& name, int& value) const override {
+        return DataPointManager::GetInstance().GetDataPointValue(name, value);
+    }
+
+    bool SetDataPointValue(const std::string& name, int value) override {
+        return DataPointManager::GetInstance().SetDataPointValue(name, value);
+    }
+
+    void GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) override {
+        DataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
+    }
+
+    void ProcessDataPointValue(const std::string& name, int value) override {
+        DataPointManager::GetInstance().ProcessDataPointValue(name, value);
+    }
+
 };
 
 DECLARE_BOARD(CustomBoard);
