@@ -18,7 +18,7 @@ void Protocol::OnAudioChannelOpened(std::function<void()> callback) {
     on_audio_channel_opened_ = callback;
 }
 
-void Protocol::OnAudioChannelClosed(std::function<void()> callback) {
+void Protocol::OnAudioChannelClosed(std::function<void(bool is_clean)> callback) {
     on_audio_channel_closed_ = callback;
 }
 
@@ -175,7 +175,6 @@ void Protocol::UpdateRoomParams(const RoomParams& params) {
     ESP_LOGI(TAG, "  conv_id: %s", params.conv_id.c_str());
     ESP_LOGI(TAG, "  access_token: %s", params.access_token.c_str());
 
-    // 保存
     room_params_ = params;
 }
 

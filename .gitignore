@@ -13,3 +13,4 @@ main/assets/lang_config.h
 .cache
 scripts/auth.py
 scripts/.env
+scripts/auth/auth.py

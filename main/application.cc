@@ -139,7 +139,8 @@ void Application::CheckNewVersion(Ota& ota) {
                 // Upgrade failed, restart audio service and continue running
                 ESP_LOGE(TAG, "Firmware upgrade failed, restarting audio service and continuing operation...");
                 audio_service_.Start(); // Restart audio service
-                board.SetPowerSaveMode(true); // Restore power save mode
+                // 暂时禁用省电模式，避免影响网络连接
+        // board.SetPowerSaveMode(true); // Restore power save mode
                 Alert(Lang::Strings::ERROR, Lang::Strings::UPGRADE_FAILED, "sad", Lang::Sounds::P3_EXCLAMATION);
                 vTaskDelay(pdMS_TO_TICKS(3000));
                 // Continue to normal operation (don't break, just fall through)
@@ -273,10 +274,10 @@ void Application::ToggleChatState() {
                 backlight->RestoreBrightness();
             }
             if (!protocol_->IsAudioChannelOpened()) {
-                SetDeviceState(kDeviceStateConnecting);
                 if (!protocol_->OpenAudioChannel()) {
                     return;
                 }
+                SetDeviceState(kDeviceStateConnecting);
             }
 
             SetListeningMode(chat_mode_ == 2  ? kListeningModeRealtime : kListeningModeAutoStop);
@@ -347,6 +348,23 @@ void Application::StopListening() {
 }
 
 void Application::Start() {
+    auto reset_reason = esp_reset_reason();
+    ESP_LOGI(TAG, "esp_reset_reason: %d", reset_reason);
+    
+    // 判断重启类型：ESP_RST_POWERON(1)、ESP_RST_EXT(2)、ESP_RST_SW(3) 为正常重启
+    is_normal_reset_ = (reset_reason == ESP_RST_POWERON || 
+                        reset_reason == ESP_RST_EXT || 
+                        reset_reason == ESP_RST_SW ||
+                        reset_reason == ESP_RST_USB ||
+                        reset_reason == ESP_RST_JTAG
+                    );
+    
+    if (is_normal_reset_) {
+        ESP_LOGI(TAG, "Normal reset detected");
+    } else {
+        ESP_LOGW(TAG, "Abnormal reset detected - reason: %d", reset_reason);
+    }
+    
     Settings settings("wifi", true);
     chat_mode_ = settings.GetInt("chat_mode", 1); // 0=按键说话, 1=唤醒词, 2=自然对话
     // chat_mode_ = 2; // 0=按键说话, 1=唤醒词, 2=自然对话
@@ -379,8 +397,10 @@ void Application::Start() {
     /* Start the clock timer to update the status bar */
     esp_timer_start_periodic(clock_timer_handle_, 1000000);
 
-    // 播放上电提示音
-    audio_service_.PlaySound(Lang::Sounds::P3_SUCCESS);
+    if (is_normal_reset_) {
+        // 播放上电提示音
+        audio_service_.PlaySound(Lang::Sounds::P3_SUCCESS);
+    }
 
     /* Wait for the network to be ready */
     board.StartNetwork();
@@ -396,7 +416,9 @@ void Application::Start() {
     }
 
     audio_service_.ResetDecoder();
-    audio_service_.PlaySound(Lang::Sounds::P3_CONNECT_SUCCESS);
+    if (is_normal_reset_) {
+        audio_service_.PlaySound(Lang::Sounds::P3_CONNECT_SUCCESS);
+    }
     vTaskDelay(pdMS_TO_TICKS(500));
 
     // Initialize NTP client
@@ -412,6 +434,7 @@ void Application::Start() {
     display->UpdateStatusBar(true);
     
     // 先创建protocol_，确保MQTT回调中能安全访问
+
     protocol_ = std::make_unique<WebsocketProtocol>();
 
     initGizwitsServer();
@@ -449,16 +472,24 @@ void Application::Start() {
             MqttClient::getInstance().sendTraceLog("info", "socket 通道打开");
         }, "OnAudioChannelOpened");
     });
-    protocol_->OnAudioChannelClosed([this, &board]() {
-        board.SetPowerSaveMode(true);
-        Schedule([this]() {
-            auto display = Board::GetInstance().GetDisplay();
-            display->SetChatMessage("system", "");
+    protocol_->OnAudioChannelClosed([this, &board](bool is_clean) {
+        if (!is_clean) {
+            ESP_LOGW(TAG, "Audio channel closed unexpectedly");
+            HandleNetError();
+        }
+        // 暂时禁用省电模式，避免影响网络连接
+        // board.SetPowerSaveMode(true);
+        
+        // 所有可能阻塞的操作都通过 Schedule 异步执行
+        Schedule([this, is_clean]() {
+            // auto display = Board::GetInstance().GetDisplay();
+            // display->SetChatMessage("system", "");
             if (device_state_ != kDeviceStateSleeping) {
                 SetDeviceState(kDeviceStateIdle);
             }
 
-            MqttClient::getInstance().sendTraceLog("info", "socket 通道关闭");
+            const char* msg = is_clean ? "socket 通道正常关闭" : "socket 通道异常断开";
+            MqttClient::getInstance().sendTraceLog("info", msg);
         }, "OnAudioChannelClosed");
     });
     protocol_->OnIncomingJson([this, display](const cJSON* root) {
@@ -497,8 +528,6 @@ void Application::Start() {
             } else if (strcmp(state->valuestring, "stop") == 0) {
                 ESP_LOGI(TAG, "tts stop");
                 Schedule([this]() {
-                    auto& board = Board::GetInstance();
-
                     if (device_state_ == kDeviceStateSpeaking) {
                         if (listening_mode_ == kListeningModeManualStop) {
                             SetDeviceState(kDeviceStateIdle);
@@ -700,6 +729,7 @@ void Application::OnWakeWordDetected() {
         ESP_LOGI(TAG, "OnWakeWordDetected: chat_mode_ == 0");
         return;
     }
+    Board::GetInstance().WakeUpPowerSaveTimer();
     ESP_LOGI(TAG, "OnWakeWordDetected");
     if (!protocol_) {
         return;
@@ -796,18 +826,12 @@ void Application::SetDeviceState(DeviceState state) {
             break;
         case kDeviceStateListening:
             display->SetStatus(Lang::Strings::LISTENING);
-            ESP_LOGW(TAG, "start send start listening");
             display->SetEmotion("neutral");
-            ESP_LOGW(TAG, "start enable voice processing");
-
             // Make sure the audio processor is running
             if (!audio_service_.IsAudioProcessorRunning()) {
                 // Send the start listening command
-                ESP_LOGW(TAG, "start send start listening");
                 protocol_->SendStartListening(listening_mode_);
-                ESP_LOGW(TAG, "start enable voice processing");
                 audio_service_.EnableVoiceProcessing(true, false);
-                ESP_LOGW(TAG, "start enable wake word detection");
                 audio_service_.EnableWakeWordDetection(false);
             }
             break;
@@ -851,7 +875,7 @@ void Application::Reboot() {
 }
 
 void Application::WakeWordInvoke(const std::string& wake_word) {
-    #if CONFIG_USE_GIZWITS_MQTT
+#if CONFIG_USE_GIZWITS_MQTT
     auto& mqtt_client = MqttClient::getInstance();
     mqtt_client.sendTraceLog("info", "唤醒词触发");
 #endif
@@ -947,9 +971,11 @@ void Application::initGizwitsServer() {
     mqtt_client.OnRoomParamsUpdated([this](const RoomParams& params, bool is_mutual) {
         // 判断 protocol_ 是否启动
         // 如果启动了，就断开重新连接
+        bool need_auto_reconnect = false;
 
         if (protocol_->IsAudioChannelOpened()) {
             // 先停止所有正在进行的操作
+            need_auto_reconnect = true;
             Schedule([this, is_mutual]() {
                 QuitTalking();
                 if (!is_mutual) {
@@ -967,8 +993,9 @@ void Application::initGizwitsServer() {
         Schedule([this]() {
             MqttClient::getInstance().sendTraceLog("info", "获取配置智能体成功");
         }, "initGizwitsServer_SendTraceLog");
+        
         protocol_->UpdateRoomParams(params);
-        if(device_state_ == kDeviceStateSleeping) {
+        if(device_state_ == kDeviceStateSleeping || need_auto_reconnect == true) {
             Schedule([this]() {
                 // 直接连接
                 SetDeviceState(kDeviceStateConnecting);
@@ -1140,6 +1167,7 @@ void Application::EnterSleepMode() {
         }
 
         // 启动唤醒词
+        audio_service_.EnableVoiceProcessing(false);
         audio_service_.EnableWakeWordDetection(true);
         
     }, "EnterSleepMode_SetStatus");
@@ -1184,12 +1212,10 @@ void Application::ExitSleepMode() {
 
 void Application::HandleNetError() {
     ESP_LOGE(TAG, "HandleNetError");
-    Schedule([this]() {
-        QuitTalking();
-        ESP_LOGE(TAG, "HandleNetError2");
-        ResetDecoder();
-        PlaySound(Lang::Sounds::P3_NET_ERR);
-    }, "HandleNetError_QuitTalking");
+    QuitTalking();
+    ESP_LOGE(TAG, "HandleNetError2");
+    ResetDecoder();
+    PlaySound(Lang::Sounds::P3_NET_ERR);
 }
 void Application::SendTextToAI(const std::string& text) {
     if (protocol_) {
@@ -1202,15 +1228,24 @@ void Application::ResetDecoder() {
 }
 
 void Application::QuitTalking() {
-    if (protocol_ != nullptr && protocol_->IsAudioChannelOpened()) {
-        ESP_LOGI(TAG, "QuitTalking");
+    // 不要使用这个判断protocol_->IsAudioChannelOpened 
+    // 因为长时间没有使用 socket处于超时状态
+    if (protocol_ != nullptr) {
+        ESP_LOGI(TAG, "run close audio channel");
+        // 先发送中止消息
         protocol_->SendAbortSpeaking(kAbortReasonNone);
-        SetDeviceState(kDeviceStateIdle);
+        
+        // 关闭音频通道（可能阻塞，但这是必要的清理操作）
         protocol_->CloseAudioChannel();
-        ResetDecoder();
     }
+
+    ESP_LOGI(TAG, "QuitTalking SetDeviceState(kDeviceStateIdle)");
+    SetDeviceState(kDeviceStateIdle);
+    
+    // 启用唤醒词检测
+    audio_service_.EnableVoiceProcessing(false);
     audio_service_.EnableWakeWordDetection(true);
-    auto display = Board::GetInstance().GetDisplay();
+    ESP_LOGI(TAG, "QuitTalking EnableWakeWordDetection");
 }
 
 

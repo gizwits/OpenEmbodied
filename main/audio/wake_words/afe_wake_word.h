@@ -52,6 +52,10 @@ private:
     std::deque<std::vector<uint8_t>> wake_word_opus_;
     std::mutex wake_word_mutex_;
     std::condition_variable wake_word_cv_;
+    
+    // 连续失败计数器
+    int consecutive_failures_ = 0;
+    static const int MAX_CONSECUTIVE_FAILURES = 20;  // 最大连续失败次数
 
     void StoreWakeWordData(const int16_t* data, size_t size);
     void AudioDetectionTask();
