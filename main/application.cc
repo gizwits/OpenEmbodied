@@ -733,6 +733,7 @@ void Application::OnWakeWordDetected() {
         if (!protocol_->IsAudioChannelOpened()) {
             SetDeviceState(kDeviceStateConnecting);
             if (!protocol_->OpenAudioChannel()) {
+                audio_service_.EnableVoiceProcessing(false);
                 audio_service_.EnableWakeWordDetection(true);
                 return;
             }
@@ -827,12 +828,7 @@ void Application::SetDeviceState(DeviceState state) {
             display->SetStatus(Lang::Strings::SPEAKING);
             if (listening_mode_ != kListeningModeRealtime) {
                 audio_service_.EnableVoiceProcessing(false);
-                // Only AFE wake word can be detected in speaking mode
-#if CONFIG_USE_AFE_WAKE_WORD
                 audio_service_.EnableWakeWordDetection(true);
-#else
-                audio_service_.EnableWakeWordDetection(false);
-#endif
             }
             audio_service_.ResetDecoder();
             break;
@@ -955,21 +951,22 @@ void Application::initGizwitsServer() {
     auto& mqtt_client = MqttClient::getInstance();
     mqtt_client.OnRoomParamsUpdated([this](const RoomParams& params, bool is_mutual) {
         // 判断 protocol_ 是否启动
-        // 如果启动了，就断开重新连接
-        bool need_auto_reconnect = false;
+        // 非正常启动 自动连接
+        bool need_auto_reconnect = !IsNormalReset();
 
         if (protocol_->IsAudioChannelOpened()) {
             // 先停止所有正在进行的操作
-            need_auto_reconnect = true;
             Schedule([this, is_mutual]() {
                 QuitTalking();
                 if (!is_mutual) {
+                    ResetDecoder();
                     PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
                 }
             }, "initGizwitsServer_QuitTalking");
         } else {
             if (!protocol_->GetRoomParams().access_token.empty() && device_state_ != kDeviceStateSleeping) {
                 if (!is_mutual) {
+                    ResetDecoder();
                     PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
                 }
             }
@@ -983,11 +980,11 @@ void Application::initGizwitsServer() {
         if(device_state_ == kDeviceStateSleeping || need_auto_reconnect == true) {
             Schedule([this]() {
                 // 直接连接
+                vTaskDelay(pdMS_TO_TICKS(500));
                 SetDeviceState(kDeviceStateConnecting);
                 if (!protocol_->OpenAudioChannel()) {
                     return;
                 }
-                ResetDecoder();
                 SetListeningMode(chat_mode_ == 2  ? kListeningModeRealtime : kListeningModeAutoStop);
             }, "initGizwitsServer_OpenAudioChannel");
         }
