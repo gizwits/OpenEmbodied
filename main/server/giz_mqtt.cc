@@ -899,7 +899,11 @@ void MqttClient::ReportTimer() {
     int pos = 15;
     binary_data[pos++] = status;
 
-    binary_data[pos++] = Board::GetInstance().GetBatteryLevel();
+    int battery_level = 0;
+    bool charging = false;
+    bool discharging = false;
+    Board::GetInstance().GetBatteryLevel(battery_level, charging, discharging);
+    binary_data[pos++] = battery_level;
 
     auto codec = Board::GetInstance().GetAudioCodec();
     int volume = codec->output_volume();
@@ -977,7 +981,11 @@ chat_mode，类型为enum，值为2：字段bit4 ~ bit3，字段值为0b10；
     binary_data[15] = Board::GetInstance().IsCharging() ? 1 : 0;    // 本设备无法判断充满电
     ESP_LOGI(TAG, "is_charging: %d", binary_data[15]);
 
-    binary_data[16] = Board::GetInstance().GetBatteryLevel();
+    int battery_level = 0;
+    bool charging = false;
+    bool discharging = false;
+    Board::GetInstance().GetBatteryLevel(battery_level, charging, discharging);
+    binary_data[16] = battery_level;
     ESP_LOGI(TAG, "Battery Level: %d", binary_data[15]);
 
     wifi_ap_record_t ap_info;

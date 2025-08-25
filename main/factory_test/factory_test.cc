@@ -87,6 +87,7 @@ static void handle_at_command_buffer(uint8_t *data);
 
 static void factory_test_task(void *arg)
 {
+#ifdef FACTORY_TEST_UART_RX_PIN
     // Configure a temporary buffer for the incoming data
     uint8_t *data = static_cast<uint8_t*>(malloc(AT_BUF_SIZE+1));
     
@@ -119,10 +120,12 @@ static void factory_test_task(void *arg)
         // 短暂延时，避免CPU占用过高
         vTaskDelay(pdMS_TO_TICKS(10));
     }
+#endif
 }
 
 // 初始化产测串口
 void factory_test_uart_init(void) {
+#ifdef FACTORY_TEST_UART_RX_PIN
     // 如果已经接管了串口，直接返回
     if (s_uart_taken_over) {
         ESP_LOGI(TAG, "UART already taken over, skipping initialization");
@@ -163,6 +166,7 @@ void factory_test_uart_init(void) {
     xTaskCreate(factory_test_task, "factory_test", 4 * 1024, nullptr, 8, nullptr);
 
     ESP_LOGW(TAG, "Factory Test UART initialized successfully");
+#endif
 }
 
 // 发送数据到串口 - 通过错误日志发送

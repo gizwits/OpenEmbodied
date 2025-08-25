@@ -48,17 +48,6 @@ std::string Board::GenerateUuid() {
     return std::string(uuid_str);
 }
 
-bool Board::GetBatteryLevel(int &level, bool& charging, bool& discharging) {
-    return false;
-}
-
-bool Board::IsCharging() {
-    return false;
-}
-
-uint8_t Board::GetBatteryLevel() {
-    return 0;
-}
 
 bool Board::IsWifiConfigMode() {
     return wifi_config_mode_;
