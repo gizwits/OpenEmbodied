@@ -265,7 +265,7 @@ bool DataPointManager::GetDataPointValue(const std::string& name, int& value) co
             if (should_update) {
                 last_rssi_value = current_rssi;
                 last_rssi_update_time = current_time;
-                ESP_LOGD(TAG, "RSSI updated: %d (diff: %d, time: %ld min)", 
+                ESP_LOGD(TAG, "RSSI updated: %d (diff: %d, time: %lld min)", 
                          current_rssi, abs(current_rssi - last_rssi_value), duration_since_last_update);
             }
             
