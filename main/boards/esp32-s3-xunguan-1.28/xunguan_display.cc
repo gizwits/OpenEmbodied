@@ -242,7 +242,7 @@ bool XunguanDisplay::CreateLvglTask() {
         "LVGL",
         5 * 1024,
         this,
-        5,
+        1,
         &lvgl_task_handle_
     );
     
