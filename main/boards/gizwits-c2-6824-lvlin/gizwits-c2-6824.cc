@@ -206,6 +206,10 @@ public:
         return PowerManager::GetInstance().IsCharging();
     }
 
+    int GetDefaultChatMode() override {
+        return 0;
+    }
+
     void EnterDeepSleepIfNotCharging() {
         PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
     }
