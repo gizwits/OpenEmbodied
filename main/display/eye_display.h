@@ -180,13 +180,13 @@ private:
     void StartLaughingAnimation();
     void StartSadAnimation();
     void StartAngryAnimation();
+    void StartWinkingAnimation();
     void StartCryingAnimation();
     void StartLovingAnimation();
     void StartEmbarrassedAnimation();
     void StartSurprisedAnimation();
     void StartShockedAnimation();
     void StartThinkingAnimation();
-    void StartWinkingAnimation();
     void StartCoolAnimation();
     void StartRelaxedAnimation();
     void StartDeliciousAnimation();

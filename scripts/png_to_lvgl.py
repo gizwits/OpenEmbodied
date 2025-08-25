@@ -3,7 +3,7 @@ import numpy as np
 import os
 
 def convert_png_to_lvgl_alpha8(png_path, output_path, var_name="spiral_img_64"):
-    img = Image.open(png_path).convert('RGBA').resize((80, 80), Image.BICUBIC)
+    img = Image.open(png_path).convert('RGBA').resize((120, 120), Image.BICUBIC)
     pixels = np.array(img)
     # 只用alpha通道
     alpha = pixels[:, :, 3]
@@ -20,8 +20,8 @@ static const uint8_t spiral_map64[] = {{
 const lv_img_dsc_t {var_name} = {{
     .header = {{
         .cf = LV_COLOR_FORMAT_A8,
-        .w = 80,
-        .h = 80,
+        .w = 120,
+        .h = 120,
     }},
     .data_size = sizeof(spiral_map64),
     .data = spiral_map64,

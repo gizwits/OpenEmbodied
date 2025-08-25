@@ -218,7 +218,7 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
     } else if (strcmp(emotion, "thinking") == 0) {
         new_state = EyeState::THINKING;
     } else if (strcmp(emotion, "winking") == 0) {
-        new_state = EyeState::HAPPY;
+        new_state = EyeState::WINKING;
     } else if (strcmp(emotion, "cool") == 0) {
         new_state = EyeState::HAPPY;
     } else if (strcmp(emotion, "relaxed") == 0) {
@@ -630,7 +630,7 @@ void EyeDisplay::StartLovingAnimation() {
     // 左眼爱心放大缩小动画
     lv_anim_init(&left_anim_);
     lv_anim_set_var(&left_anim_, left_heart);
-    lv_anim_set_values(&left_anim_, 64, 128);  // 从100%放大到200%
+    lv_anim_set_values(&left_anim_, 74, 128);  // 从100%放大到200%
     lv_anim_set_time(&left_anim_, 500);         // 放大时间
     lv_anim_set_playback_time(&left_anim_, 500);// 缩小时间
     lv_anim_set_repeat_count(&left_anim_, LV_ANIM_REPEAT_INFINITE);
@@ -641,7 +641,7 @@ void EyeDisplay::StartLovingAnimation() {
     // 右眼爱心放大缩小动画
     lv_anim_init(&right_anim_);
     lv_anim_set_var(&right_anim_, right_heart);
-    lv_anim_set_values(&right_anim_, 64, 128);  // 从100%放大到200%
+    lv_anim_set_values(&right_anim_, 74, 128);  // 从100%放大到200%
     lv_anim_set_time(&right_anim_, 500);
     lv_anim_set_playback_time(&right_anim_, 500);
     lv_anim_set_repeat_count(&right_anim_, LV_ANIM_REPEAT_INFINITE);
