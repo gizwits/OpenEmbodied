@@ -1,12 +1,12 @@
 #include "wifi_board.h"
-#include "audio/codecs/vb6824_audio_codec.h"
+#include "audio_codecs/vb6824_audio_codec.h"
 #include "application.h"
 #include "button.h"
 #include "config.h"
 #include "led/circular_strip.h"
-#include "settings.h"
 #include "led/gpio_led.h"
 #include "led/single_led.h"
+#include "settings.h"
 #include "iot/thing_manager.h"
 #include <esp_sleep.h>
 #include "power_save_timer.h"
@@ -28,7 +28,7 @@
 
 #define TAG "CustomBoard"
 
-#define RESET_WIFI_CONFIGURATION_COUNT 3
+#define RESET_WIFI_CONFIGURATION_COUNT 10
 #define SLEEP_TIME_SEC 60 * 3
 // #define SLEEP_TIME_SEC 30
 class CustomBoard : public WifiBoard {
@@ -80,24 +80,20 @@ private:
 
         if (chat_mode == 0) {
             rec_button_->OnPressUp([this]() {
-                ESP_LOGI(TAG, "rec_button_.OnPressUp");
                 auto &app = Application::GetInstance();
                 app.StopListening();
             });
             rec_button_->OnPressDown([this]() {
-                ESP_LOGI(TAG, "rec_button_.OnPressDown");
                 auto &app = Application::GetInstance();
                 app.AbortSpeaking(kAbortReasonNone);
                 app.StartListening();
             });
         } else {
             rec_button_->OnPressDown([this]() {
-                ESP_LOGI(TAG, "rec_button_.OnPressDown");
                 auto &app = Application::GetInstance();
                 app.ToggleChatState();
             });
             boot_button_.OnClick([this]() {
-                ESP_LOGI(TAG, "boot_button_.OnClick");
                 auto &app = Application::GetInstance();
                 app.ToggleChatState();
             });
@@ -160,19 +156,19 @@ public:
         InitializePowerSaveTimer();
 
         ESP_LOGI(TAG, "Initializing Buttons...");
-
-        ESP_LOGI(TAG, "Initializing IoT components...");
-        InitializeIot();
-
-        ESP_LOGI(TAG, "Initializing LED Signal...");
         Settings settings("wifi", true);
         auto s_factory_test_mode = settings.GetInt("ft_mode", 0);
 
         if (s_factory_test_mode == 0) {
             // 不在产测模式才启动，不然有问题
             InitializeButtons();
+            ESP_LOGI(TAG, "Initializing LED Signal...");
             InitializeLedSignal();
         }
+
+        ESP_LOGI(TAG, "Initializing IoT components...");
+        InitializeIot();
+
 
         ESP_LOGI(TAG, "Initializing Power Manager...");
         InitializePowerManager();

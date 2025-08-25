@@ -20,16 +20,18 @@
 #include <wifi_station.h>
 #include "config.h"
 
+static const char *TAG = "factory_test";
+
 // 工厂测试音频功能包装函数
 static int ft_start_record_task(int duration_seconds) {
     return Application::GetInstance().StartRecordTest(duration_seconds);
 }
 
 static int ft_start_play_task(int duration_seconds) {
+    ESP_LOGI(TAG, "StartPlayTest: duration=%d seconds", duration_seconds);
     return Application::GetInstance().StartPlayTest(duration_seconds);
 }
 
-static const char *TAG = "factory_test";
 
 // 缺失函数的简单实现
 static esp_err_t storage_save_factory_test_mode(int mode) {
@@ -162,7 +164,7 @@ void factory_test_uart_init(void) {
     // 标记已接管串口
     s_uart_taken_over = true;
 
-    xTaskCreate(factory_test_task, "factory_test", 10 * 1024, nullptr, 8, nullptr);
+    xTaskCreate(factory_test_task, "factory_test", 4 * 1024, nullptr, 8, nullptr);
 
     ESP_LOGW(TAG, "Factory Test UART initialized successfully");
 #endif
@@ -208,16 +210,23 @@ void factory_test_init(void) {
     if (s_factory_test_mode == FACTORY_TEST_MODE_IN_FACTORY) {
         // 产测模式临时连接产测路由器
         auto& wifi_station = WifiStation::GetInstance();
+        wifi_station.OnScanBegin([]() {
+            ESP_LOGI(TAG, "Scanning WiFi...");
+        });
+        wifi_station.OnConnect([](const std::string& ssid) {
+            ESP_LOGI(TAG, "Connecting to WiFi: %s", ssid.c_str());
+        });
+        wifi_station.OnConnected([](const std::string& ssid) {
+            ESP_LOGI(TAG, "Connected to WiFi: %s", ssid.c_str());
+        });
         wifi_station.Start();
 
+        // 插入 ssid
+        wifi_station.AddAuth(FACTORY_TEST_SSID, FACTORY_TEST_PASSWORD);
+
         ESP_LOGI(TAG, "产测模式临时连接产测路由器");
-        if (WifiStation::GetInstance().ConnectToWifi(FACTORY_TEST_SSID, FACTORY_TEST_PASSWORD)) {
-            ESP_LOGI(TAG, "产测WiFi连接成功");
-            // if (WifiStation::GetInstance().WaitForConnected(10000)) {
-            //     ESP_LOGI(TAG, "产测WiFi连接成功");
-            // } else {
-            //     ESP_LOGE(TAG, "产测WiFi连接失败");
-            // }
+        if (!wifi_station.WaitForConnected(30 * 1000)) {
+            // wifi_station.Stop();
         }
     }
 }
@@ -415,27 +424,31 @@ static void handle_at_command(char *cmd) {
     else if (strncmp(cmd, "AT+REC=0", strlen("AT+REC=0")) == 0) {
         // 处理录音命令
         ESP_LOGI(TAG, "Received record command");
-        
-        // 返回录音成功响应
-        if (ft_start_record_task(2) == 0) {
-            ESP_LOGI(TAG, "Record task started");
-            factory_test_send("+REC OK", strlen("+REC OK"));
-        } else {
-            ESP_LOGE(TAG, "Record task failed to start");
-            factory_test_send("+REC ERROR", strlen("+REC ERROR"));
-        }
+        xTaskCreate([](void* arg) {
+            // 返回录音成功响应
+            if (ft_start_record_task(2) == 0) {
+                ESP_LOGI(TAG, "Record task started");
+                factory_test_send("+REC OK", strlen("+REC OK"));
+            } else {
+                ESP_LOGE(TAG, "Record task failed to start");
+                factory_test_send("+REC ERROR", strlen("+REC ERROR"));
+            }
+            vTaskDelete(NULL);
+        }, "audio_record", 1024 * 5, nullptr, 8, nullptr);
     }
     else if (strncmp(cmd, "AT+PLAY=0", strlen("AT+PLAY=0")) == 0) {
         // 处理播放命令
-        ESP_LOGI(TAG, "Received play command");
-        // 返回播放成功响应
-        if (ft_start_play_task(2) == 0) {
-            ESP_LOGI(TAG, "Play task started");
-            factory_test_send("+PLAY OK", strlen("+PLAY OK"));
-        } else {
-            ESP_LOGE(TAG, "Play task failed to start");
-            factory_test_send("+PLAY ERROR", strlen("+PLAY ERROR"));
-        }
+        
+        ESP_LOGI(TAG, "Received play command 1");
+        xTaskCreate([](void* arg) {
+            if (ft_start_play_task(2) == 0) {
+                factory_test_send("+PLAY OK", strlen("+PLAY OK"));
+            } else {
+                ESP_LOGE(TAG, "Play task failed to start");
+                factory_test_send("+PLAY ERROR", strlen("+PLAY ERROR"));
+            }
+            vTaskDelete(NULL);
+        }, "audio_play", 1024 * 8, nullptr, 8, nullptr);
     }else if (strncmp(cmd, "AT+RSSI?", strlen("AT+RSSI?")) == 0) {
         ESP_LOGI(TAG, "Received get RSSI command");
         int32_t rssi = 0;

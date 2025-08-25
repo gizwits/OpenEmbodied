@@ -55,6 +55,12 @@ private:
 
 
 
+    // 唤醒词列表
+    std::vector<std::string> wake_words_ = {"你好小智", "你好小云", "合养精灵", "嗨小火人"};
+    std::vector<std::string> network_config_words_ = {"开始配网"};
+
+
+
     void InitializePowerSaveTimer() {
         power_save_timer_ = new PowerSaveTimer(-1, 60, 300);
         power_save_timer_->OnEnterSleepMode([this]() {
@@ -334,6 +340,13 @@ public:
             }
         });
     }
+
+
+    // 检查命令是否在列表中
+    bool IsCommandInList(const std::string& command, const std::vector<std::string>& command_list) {
+        return std::find(command_list.begin(), command_list.end(), command) != command_list.end();
+    }
+
 
     static void RestoreBacklightTask(void* arg) {
         auto* self = static_cast<MovecallMojiESP32S3*>(arg);

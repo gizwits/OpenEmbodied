@@ -35,8 +35,8 @@ set(SOURCES "audio/audio_codec.cc"
             "device_state_event.cc"
             "main.cc"
             "factory_test/factory_test.cc"
-            "factory_test/test_uart.cc"
             "factory_test/test.cc"
+            "factory_test/test_uart.cc"
             )
 
 set(INCLUDE_DIRS "." "display" "audio" "protocols")
@@ -117,6 +117,8 @@ elseif(CONFIG_BOARD_TYPE_GIZWITS_C2_6824)
     set(BOARD_TYPE "gizwits-c2-6824")
 elseif(CONFIG_BOARD_TYPE_GIZWITS_C2_6824_ML307)
     set(BOARD_TYPE "gizwits-c2-6824-ml307")
+elseif(CONFIG_BOARD_TYPE_GIZWITS_C2_6824_LVLIN)
+    set(BOARD_TYPE "gizwits-c2-6824-lvlin")
 elseif(CONFIG_BOARD_TYPE_GIZWITS_C2_6824_TOY)
     set(BOARD_TYPE "gizwits-c2-6824-toy")
 elseif(CONFIG_BOARD_TYPE_ESP32S3_XUNGUAN_AMOLED_1_28)

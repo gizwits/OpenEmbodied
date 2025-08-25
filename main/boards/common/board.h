@@ -60,6 +60,8 @@ public:
     virtual void StartNetwork() = 0;
     virtual const char* GetNetworkStateIcon() = 0;
     virtual bool GetBatteryLevel(int &level, bool& charging, bool& discharging);
+    virtual uint8_t GetBatteryLevel();
+    virtual bool IsCharging();
     virtual std::string GetJson();
     virtual void SetPowerSaveMode(bool enabled) = 0;
     virtual bool IsWifiConfigMode();
@@ -72,6 +74,10 @@ public:
     virtual void PowerOff() {};
     virtual void ResetPowerSaveTimer() {};  // 新增：重置电源保存定时器
     virtual void WakeUpPowerSaveTimer() {};
+    virtual uint8_t GetBrightness() { return 0; }
+    virtual void SetBrightness(uint8_t brightness) { }
+    virtual uint8_t GetDefaultBrightness() { return 0; }
+    virtual void EnterDeepSleepIfNotCharging() { }
     
 };
 

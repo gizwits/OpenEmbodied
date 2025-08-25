@@ -167,6 +167,10 @@ extern "C" void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
+    
+    esp_log_level_set("adc_hal", ESP_LOG_INFO);
+    esp_log_level_set("LedSignal", ESP_LOG_INFO);
+
     // Launch the application
     auto& app = Application::GetInstance();
     app.Start();

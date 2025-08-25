@@ -240,13 +240,12 @@ void Application::DismissAlert() {
 void Application::ToggleChatState() {
     Board::GetInstance().WakeUpPowerSaveTimer();
 
-
     if (player_.IsDownloading()) {
         CancelPlayMusic();
         return;
     }
 
-    ESP_LOGI(TAG, "ToggleChatState, device_state_: %d", device_state_);
+    ESP_LOGI(TAG, "ToggleChatState, device_state_:[%d][%s]", device_state_, STATE_STRINGS[device_state_]);
     if (device_state_ == kDeviceStateActivating) {
         SetDeviceState(kDeviceStateIdle);
         return;
@@ -297,7 +296,6 @@ void Application::ToggleChatState() {
 
 void Application::StartListening() {
     Board::GetInstance().WakeUpPowerSaveTimer();
-
     CancelPlayMusic();
     if (device_state_ == kDeviceStateActivating) {
         SetDeviceState(kDeviceStateIdle);
@@ -776,7 +774,9 @@ void Application::OnWakeWordDetected() {
 void Application::AbortSpeaking(AbortReason reason) {
     ESP_LOGI(TAG, "Abort speaking");
     aborted_ = true;
-    protocol_->SendAbortSpeaking(reason);
+    if(protocol_){
+        protocol_->SendAbortSpeaking(reason);
+    }
 }
 
 void Application::SetListeningMode(ListeningMode mode) {
@@ -1103,7 +1103,7 @@ void Application::StartReportTimer() {
         .skip_unhandled_events = true
     };
     esp_timer_create(&report_timer_args, &report_timer_handle_);
-    esp_timer_start_periodic(report_timer_handle_, 60000000); // 1分钟
+    esp_timer_start_periodic(report_timer_handle_, 2000000); // 3秒
 #endif
 }
 
@@ -1123,7 +1123,7 @@ bool Application::CheckBatteryLevel() {
     bool discharging = false;
     if (Board::GetInstance().GetBatteryLevel(level, charging, discharging)) {
         ESP_LOGI(TAG, "current Battery level: %d, charging: %d, discharging: %d", level, charging, discharging);
-        if (level <= 10 && discharging) {
+        if (level <= 15 && discharging) {
             // 电量
             Alert(Lang::Strings::ERROR, Lang::Strings::ERROR, "sad", Lang::Sounds::P3_BATTLE_LOW);
             return false;

@@ -184,12 +184,15 @@ void WebsocketProtocol::SendStopListening() {
 }
 
 bool WebsocketProtocol::IsAudioChannelOpened() const {
-    if (Application::GetInstance().GetChatMode() == 0) {
-        return websocket_ && websocket_->IsConnected() && !error_occurred_;
-    }
-    return websocket_ && websocket_->IsConnected() && !error_occurred_ && !IsTimeout();
+    // if (Application::GetInstance().GetChatMode() == 0) {
+    //     return websocket_ != nullptr && websocket_->IsConnected() && !error_occurred_;
+    // }
+    return websocket_ != nullptr && websocket_->IsConnected() && !error_occurred_ && !IsTimeout();
 }
 
+bool WebsocketProtocol::HasErrorOccurred() const {
+    return error_occurred_;
+}
 
 void WebsocketProtocol::CloseAudioChannel() {
     if (!websocket_) {

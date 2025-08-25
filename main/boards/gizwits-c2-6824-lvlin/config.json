@@ -2,9 +2,8 @@
     "target": "esp32c2",
     "builds": [
         {
-            "name": "gizwits-c2-6824",
+            "name": "gizwits-c2-6824-lvlin",
             "sdkconfig_append": [
-                "CONFIG_BOARD_TYPE_GIZWITS_C2_6824=y",
                 "CONFIG_MQTT_USE_CUSTOM_CONFIG=y",
                 "CONFIG_MQTT_TASK_STACK_SIZE=3584",
                 "CONFIG_ESPTOOLPY_FLASHSIZE_4MB=n",
@@ -14,8 +13,8 @@
                 "CONFIG_ESP32C2_REV_MIN_FULL=200",
                 "CONFIG_ESP_REV_MIN_FULL=200",
                 "CONFIG_USE_EYE_STYLE_VB6824=y",
-                "CONFIG_USE_AUDIO_PROCESSOR=n",
-                "CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS=y"
+                "CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS=y",
+                "CONFIG_USE_AUDIO_PROCESSOR=n"
             ]
         }
     ]
