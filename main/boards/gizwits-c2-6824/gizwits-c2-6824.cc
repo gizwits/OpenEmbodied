@@ -54,7 +54,6 @@ private:
         });
         power_save_timer_->OnExitSleepMode([this]() {
             ESP_LOGI(TAG, "Shutting down");
-            run_sleep_mode(true);
         });
         power_save_timer_->OnShutdownRequest([this]() {
             
