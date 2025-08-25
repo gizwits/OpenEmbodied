@@ -16,6 +16,7 @@
 #include <esp_log.h>
 #include "assets/lang_config.h"
 #include "vb6824.h"
+#include <esp_wifi.h>
 
 #include <esp_lcd_panel_vendor.h>
 #include <driver/spi_common.h>
@@ -202,8 +203,11 @@ public:
         }
     };
 
-    uint8_t GetBatteryLevel() override {
-        return PowerManager::GetInstance().GetBatteryLevel();
+    bool GetBatteryLevel(int &level, bool& charging, bool& discharging) override {
+        level = PowerManager::GetInstance().GetBatteryLevel();
+        charging = PowerManager::GetInstance().IsCharging();
+        discharging = !charging;
+        return true;
     }
 
     bool IsCharging() override {
@@ -232,6 +236,315 @@ public:
 
     uint8_t GetDefaultBrightness() {
         return LedSignal::GetInstance().GetDefaultBrightness();
+    }
+
+    // 数据点相关方法实现
+    const char* GetGizwitsProtocolJson() const override {
+        return R"json(
+{
+  "name": "绿林魔方",
+  "packetVersion": "0x00000004",
+  "protocolType": "var_len",
+  "product_key": "73e57262afa74d6294476c595e42f30f",
+  "entities": [
+    {
+      "display_name": "机智云开发套件",
+      "attrs": [
+        {
+          "display_name": "开关",
+          "name": "switch",
+          "data_type": "bool",
+          "position": {
+            "byte_offset": 0,
+            "unit": "bit",
+            "len": 1,
+            "bit_offset": 0
+          },
+          "type": "status_writable",
+          "id": 0,
+          "desc": "1"
+        },
+        {
+          "display_name": "唤醒词",
+          "name": "wakeup_word",
+          "data_type": "bool",
+          "position": {
+            "byte_offset": 0,
+            "unit": "bit",
+            "len": 1,
+            "bit_offset": 0
+          },
+          "type": "status_writable",
+          "id": 1,
+          "desc": ""
+        },
+        {
+          "display_name": "充电状态",
+          "name": "charge_status",
+          "data_type": "enum",
+          "enum": [
+            "none",
+            " charging",
+            "charge_done"
+          ],
+          "position": {
+            "byte_offset": 0,
+            "unit": "bit",
+            "len": 2,
+            "bit_offset": 0
+          },
+          "type": "status_readonly",
+          "id": 2,
+          "desc": ""
+        },
+        {
+          "display_name": "提示音语言",
+          "name": "alert_tone_language",
+          "data_type": "enum",
+          "enum": [
+            "chinese_simplified",
+            "english"
+          ],
+          "position": {
+            "byte_offset": 0,
+            "unit": "bit",
+            "len": 1,
+            "bit_offset": 0
+          },
+          "type": "status_writable",
+          "id": 3,
+          "desc": ""
+        },
+        {
+          "display_name": "chat_mode",
+          "name": "chat_mode",
+          "data_type": "enum",
+          "enum": [
+            "0",
+            "1",
+            "2"
+          ],
+          "position": {
+            "byte_offset": 0,
+            "unit": "bit",
+            "len": 2,
+            "bit_offset": 0
+          },
+          "type": "status_writable",
+          "id": 4,
+          "desc": "0 按钮\n1 唤醒词\n2 自然对话"
+        },
+        {
+          "display_name": "电量",
+          "name": "battery_percentage",
+          "data_type": "uint8",
+          "position": {
+            "byte_offset": 0,
+            "unit": "byte",
+            "len": 1,
+            "bit_offset": 0
+          },
+          "uint_spec": {
+            "addition": 0,
+            "max": 100,
+            "ratio": 1,
+            "min": 0
+          },
+          "type": "status_readonly",
+          "id": 5,
+          "desc": ""
+        },
+        {
+          "display_name": "音量",
+          "name": "volume_set",
+          "data_type": "uint8",
+          "position": {
+            "byte_offset": 0,
+            "unit": "byte",
+            "len": 1,
+            "bit_offset": 0
+          },
+          "uint_spec": {
+            "addition": 0,
+            "max": 100,
+            "ratio": 1,
+            "min": 0
+          },
+          "type": "status_writable",
+          "id": 6,
+          "desc": ""
+        },
+        {
+          "display_name": "rssi",
+          "name": "rssi",
+          "data_type": "uint8",
+          "position": {
+            "byte_offset": 0,
+            "unit": "byte",
+            "len": 1,
+            "bit_offset": 0
+          },
+          "uint_spec": {
+            "addition": -100,
+            "max": 100,
+            "ratio": 1,
+            "min": 0
+          },
+          "type": "status_readonly",
+          "id": 7,
+          "desc": "无 1"
+        },
+        {
+          "display_name": "亮度",
+          "name": "brightness",
+          "data_type": "uint8",
+          "position": {
+            "byte_offset": 0,
+            "unit": "byte",
+            "len": 1,
+            "bit_offset": 0
+          },
+          "uint_spec": {
+            "addition": 0,
+            "max": 100,
+            "ratio": 1,
+            "min": 0
+          },
+          "type": "status_writable",
+          "id": 8,
+          "desc": ""
+        }
+      ],
+      "name": "entity0",
+      "id": 0
+    }
+  ]
+}
+)json";
+    }
+
+    size_t GetDataPointCount() const override {
+        return 9; // 9个数据点
+    }
+
+    bool GetDataPointValue(const std::string& name, int& value) const override {
+        if (name == "switch") {
+            value = 1; // 开关状态，固定为1
+            return true;
+        } else if (name == "wakeup_word") {
+            value = 1; // 唤醒词状态，固定为1
+            return true;
+        } else if (name == "charge_status") {
+            value = IsCharging() ? 1 : 0; // 充电状态
+            return true;
+        } else if (name == "alert_tone_language") {
+            value = 1; // 提示音语言，固定为中文
+            return true;
+        } else if (name == "chat_mode") {
+            value = Application::GetInstance().GetChatMode();
+            return true;
+        } else if (name == "battery_percentage") {
+            int level = 0;
+            bool charging = false, discharging = false;
+            GetBatteryLevel(level, charging, discharging);
+            value = level;
+            return true;
+        } else if (name == "volume_set") {
+            value = GetAudioCodec()->output_volume();
+            return true;
+        } else if (name == "rssi") {
+            wifi_ap_record_t ap_info;
+            if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+                value = 100 - (uint8_t)abs(ap_info.rssi);
+            } else {
+                value = 0;
+            }
+            return true;
+        } else if (name == "brightness") {
+            value = GetBrightness();
+            return true;
+        }
+        return false;
+    }
+
+    bool SetDataPointValue(const std::string& name, int value) override {
+        if (name == "chat_mode") {
+            Application::GetInstance().SetChatMode(value);
+            return true;
+        } else if (name == "volume_set") {
+            GetAudioCodec()->SetOutputVolume(value);
+            return true;
+        } else if (name == "brightness") {
+            SetBrightness(value);
+            return true;
+        }
+        return false;
+    }
+
+    void GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) override {
+        if (buffer_size < 20) {
+            data_size = 0;
+            return;
+        }
+
+        // 固定头部
+        buffer[0] = 0x00;
+        buffer[1] = 0x00;
+        buffer[2] = 0x00;
+        buffer[3] = 0x03;
+        
+        // 命令标识
+        buffer[4] = 0x0b;
+        buffer[5] = 0x00;
+        buffer[6] = 0x00;
+        buffer[7] = 0x93;
+        
+        // 数据长度
+        buffer[8] = 0x00;
+        buffer[9] = 0x00;
+        buffer[10] = 0x00;
+        buffer[11] = 0x02;
+        
+        // 数据类型
+        buffer[12] = 0x14;
+        buffer[13] = 0x01;
+        buffer[14] = 0xff;
+
+        // 状态字节
+        uint8_t status = 0;
+        status |= (1 << 0); // switch
+        status |= (1 << 1); // wakeup_word
+        status |= (IsCharging() ? 1 : 0) << 2; // charge_status
+        status |= (1 << 4); // alert_tone_language
+        status |= (Application::GetInstance().GetChatMode() << 5); // chat_mode
+        buffer[15] = status;
+
+        // 电量
+        int battery_level = 0;
+        bool charging = false, discharging = false;
+        GetBatteryLevel(battery_level, charging, discharging);
+        buffer[16] = battery_level;
+
+        // 音量
+        buffer[17] = GetAudioCodec()->output_volume();
+
+        // RSSI
+        wifi_ap_record_t ap_info;
+        if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+            buffer[18] = 100 - (uint8_t)abs(ap_info.rssi);
+        } else {
+            buffer[18] = 0;
+        }
+
+        // 亮度
+        buffer[19] = GetBrightness();
+
+        data_size = 20;
+    }
+
+    void ProcessDataPointValue(const std::string& name, int value) override {
+        ESP_LOGI(TAG, "ProcessDataPointValue: %s = %d", name.c_str(), value);
+        SetDataPointValue(name, value);
     }
 
 };
