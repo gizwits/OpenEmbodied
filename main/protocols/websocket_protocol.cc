@@ -540,6 +540,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
 
     std::string user_language = "common";
     std::string parameters = "";
+    std::string custom_variables = "";
     
     // 如果存在 config，解析其中的参数
     if (!room_params_.config.empty()) {
@@ -563,6 +564,16 @@ bool WebsocketProtocol::OpenAudioChannel() {
                     if (parameters_str) {
                         parameters = std::string(parameters_str);
                         free(parameters_str);
+                    }
+                }
+                
+                // 提取 custom_variables
+                cJSON* custom_variables_item = cJSON_GetObjectItem(chat_config, "custom_variables");
+                if (custom_variables_item && cJSON_IsObject(custom_variables_item)) {
+                    char* custom_variables_str = cJSON_Print(custom_variables_item);
+                    if (custom_variables_str) {
+                        custom_variables = std::string(custom_variables_str);
+                        free(custom_variables_str);
                     }
                 }
             }
@@ -625,7 +636,11 @@ bool WebsocketProtocol::OpenAudioChannel() {
         message += "\"parameters\":" + parameters + ",";
     }
     message += "\"meta_data\":{},";
-    message += "\"custom_variables\":{},";
+    if (!custom_variables.empty()) {
+        message += "\"custom_variables\":" + custom_variables + ",";
+    } else {
+        message += "\"custom_variables\":{},";
+    }
     message += "\"extra_params\":{}";
     message += "},";
     message += "\"input_audio\":{";
