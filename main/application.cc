@@ -979,12 +979,14 @@ void Application::initGizwitsServer() {
             Schedule([this, is_mutual]() {
                 QuitTalking();
                 if (!is_mutual) {
+                    ResetDecoder();
                     PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
                 }
             }, "initGizwitsServer_QuitTalking");
         } else {
             if (!protocol_->GetRoomParams().access_token.empty() && device_state_ != kDeviceStateSleeping) {
                 if (!is_mutual) {
+                    ResetDecoder();
                     PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
                 }
             }
