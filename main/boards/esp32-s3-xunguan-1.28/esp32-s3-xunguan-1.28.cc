@@ -9,8 +9,8 @@
 #include "font_awesome_symbols.h"
 
 #include "led/single_led.h"
-#include "xunguan_display.h"
-// #include "display/eye_display.h"
+// #include "xunguan_display.h"
+#include "display/eye_display.h"
 #include "display/display.h"
 
 #include <wifi_station.h>
@@ -41,7 +41,7 @@ class MovecallMojiESP32S3 : public WifiBoard {
 private:
     Button boot_button_;
     Button touch_button_;
-    XunguanDisplay* display_;
+    EyeDisplay* display_;
     bool need_power_off_ = false;
     i2c_master_bus_handle_t i2c_bus_;
     // LIS2HH12专用I2C
@@ -250,19 +250,19 @@ private:
             return;
         }
         
-        // display_ = new XunguanDisplay(panel_io, panel,
-        //     DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
-        //     DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y,
-        //     &qrcode_img,
-        //     {
-        //         .text_font = &font_puhui_20_4,
-        //         .icon_font = &font_awesome_20_4,
-        //         .emoji_font = font_emoji_64_init(),
-        //     });
-        display_ = new XunguanDisplay();
-        if (!display_->Initialize(panel_io, panel)) {
-            ESP_LOGE(TAG, "Failed to initialize XunguanDisplay");
-        }
+        display_ = new EyeDisplay(panel_io, panel,
+            DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
+            DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y,
+            &qrcode_img,
+            {
+                .text_font = &font_puhui_20_4,
+                .icon_font = &font_awesome_20_4,
+                .emoji_font = font_emoji_64_init(),
+            });
+        // display_ = new XunguanDisplay();
+        // if (!display_->Initialize(panel_io, panel)) {
+        //     ESP_LOGE(TAG, "Failed to initialize XunguanDisplay");
+        // }
     }
 
     int MaxBacklightBrightness() {
@@ -333,7 +333,7 @@ private:
             //     InnerResetWifiConfiguration();
             // }
             app.ToggleChatState();
-            // display_->TestNextEmotion();
+            display_->TestNextEmotion();
         });
         boot_button_.OnLongPress([this]() {
             ESP_LOGI(TAG, "boot_button_.OnLongPress");
@@ -510,7 +510,7 @@ private:
         // 注册充电状态改变回调
         power_manager_->SetChargingStatusCallback([this](bool is_charging) {
             ESP_LOGI(TAG, "充电状态改变: %s", is_charging ? "开始充电" : "停止充电");
-            XunguanDisplay* xunguan_display = static_cast<XunguanDisplay*>(GetDisplay());
+            // XunguanDisplay* xunguan_display = static_cast<XunguanDisplay*>(GetDisplay());
             if (is_charging) {
                 // 充电开始时的处理逻辑
                 ESP_LOGI(TAG, "检测到开始充电");
@@ -519,32 +519,32 @@ private:
                 
                 // 设置充电时的自定义帧率：100-125Hz (8-10ms延迟)
                 // 需要强制转换成 XunguanDisplay 类型
-                if (xunguan_display) {
-                    if (xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL)) {
-                    // if (xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::POWER_SAVE)) {
-                        ESP_LOGI(TAG, "充电帧率设置成功");
-                    } else {
-                        ESP_LOGE(TAG, "充电帧率设置失败");
-                    }
-                } else {
-                    ESP_LOGE(TAG, "无法获取 XunguanDisplay 对象");
-                }
+                // if (xunguan_display) {
+                //     if (xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL)) {
+                //     // if (xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::POWER_SAVE)) {
+                //         ESP_LOGI(TAG, "充电帧率设置成功");
+                //     } else {
+                //         ESP_LOGE(TAG, "充电帧率设置失败");
+                //     }
+                // } else {
+                //     ESP_LOGE(TAG, "无法获取 XunguanDisplay 对象");
+                // }
             } else {
                 // 充电停止时的处理逻辑
                 ESP_LOGI(TAG, "检测到停止充电");
                 
                 // 恢复正常帧率模式
                 // 需要强制转换成 XunguanDisplay 类型
-                if (xunguan_display) {
-                    ESP_LOGI(TAG, "停止充电，恢复正常帧率模式");
-                    if (xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL)) {
-                        ESP_LOGI(TAG, "正常帧率模式恢复成功");
-                    } else {
-                        ESP_LOGE(TAG, "正常帧率模式恢复失败");
-                    }
-                } else {
-                    ESP_LOGE(TAG, "无法获取 XunguanDisplay 对象");
-                }
+                // if (xunguan_display) {
+                //     ESP_LOGI(TAG, "停止充电，恢复正常帧率模式");
+                //     if (xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL)) {
+                //         ESP_LOGI(TAG, "正常帧率模式恢复成功");
+                //     } else {
+                //         ESP_LOGE(TAG, "正常帧率模式恢复失败");
+                //     }
+                // } else {
+                //     ESP_LOGE(TAG, "无法获取 XunguanDisplay 对象");
+                // }
 
                 if (this->is_charging_sleep_) {
                     ESP_LOGI(TAG, "充电停止，关机");
@@ -626,18 +626,18 @@ public:
         int level;
         bool charging, discharging;
         self->GetBatteryLevel(level, charging, discharging);
-        XunguanDisplay* xunguan_display = static_cast<XunguanDisplay*>(self->GetDisplay());
+        // XunguanDisplay* xunguan_display = static_cast<XunguanDisplay*>(self->GetDisplay());
         self->GetBacklight()->RestoreBrightness();
 
         // xunguan_display->StartAutoTest(1000);
 
-        if (charging) {
-            // 降低发热            
-            // xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::POWER_SAVE);
-            xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL);
-        } else {
-            xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL);
-        }
+        // if (charging) {
+        //     // 降低发热            
+        //     // xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::POWER_SAVE);
+        //     xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL);
+        // } else {
+        //     xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL);
+        // }
         vTaskDelete(NULL); // 任务结束时删除自己
     }
 
