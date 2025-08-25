@@ -87,6 +87,9 @@ public:
     AudioService& GetAudioService() { return audio_service_; }
     bool IsNormalReset() const { return is_normal_reset_; }  // 获取重启状态
 
+    bool IsWebsocketWorking() const { return protocol_ ? protocol_->IsAudioChannelOpened() : false; }
+    bool HasWebsocketError() const { return protocol_ ? protocol_->HasErrorOccurred() : false; }
+
 private:
     Application();
     ~Application();
@@ -119,6 +122,7 @@ private:
     void StartReportTimer();
 
     void SetListeningMode(ListeningMode mode);
+
 };
 
 #endif // _APPLICATION_H_

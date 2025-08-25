@@ -1,5 +1,5 @@
 #include "wifi_board.h"
-#include "audio_codecs/vb6824_audio_codec.h"
+#include "audio/codecs/vb6824_audio_codec.h"
 #include "application.h"
 #include "button.h"
 #include "config.h"
@@ -198,11 +198,14 @@ public:
         }
     };
 
-    uint8_t GetBatteryLevel() override {
-        return PowerManager::GetInstance().GetBatteryLevel();
+    virtual bool GetBatteryLevel(int &level, bool& charging, bool& discharging) override {
+        level = PowerManager::GetInstance().GetBatteryLevel();
+        charging = PowerManager::GetInstance().IsCharging();
+        discharging = !charging;
+        return true;
     }
 
-    bool IsCharging() override {
+    virtual bool IsCharging() override {
         return PowerManager::GetInstance().IsCharging();
     }
 

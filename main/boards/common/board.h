@@ -59,9 +59,7 @@ public:
     virtual NetworkInterface* GetNetwork() = 0;
     virtual void StartNetwork() = 0;
     virtual const char* GetNetworkStateIcon() = 0;
-    virtual bool GetBatteryLevel(int &level, bool& charging, bool& discharging);
-    virtual uint8_t GetBatteryLevel();
-    virtual bool IsCharging();
+    virtual bool GetBatteryLevel(int &level, bool& charging, bool& discharging) { return false; }
     virtual std::string GetJson();
     virtual void SetPowerSaveMode(bool enabled) = 0;
     virtual bool IsWifiConfigMode();

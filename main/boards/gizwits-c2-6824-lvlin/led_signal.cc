@@ -215,7 +215,11 @@ bool LedSignal::CheckIfCharging() {
 }
 
 bool LedSignal::CheckIfBatteryLow() {
-    return Board::GetInstance().GetBatteryLevel() < 25;
+    int battery_level = 0;
+    bool charging = false;
+    bool discharging = false;
+    Board::GetInstance().GetBatteryLevel(battery_level, charging, discharging);
+    return battery_level < 25;
 }
 
 
