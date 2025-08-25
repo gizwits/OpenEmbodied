@@ -552,27 +552,27 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 }
             }
             
-            // 提取 parameters
-            cJSON* chat_config = cJSON_GetObjectItem(config_json, "chat_config");
-            if (chat_config && cJSON_IsObject(chat_config)) {
-                cJSON* parameters_item = cJSON_GetObjectItem(chat_config, "parameters");
-                if (parameters_item && cJSON_IsObject(parameters_item)) {
-                    char* parameters_str = cJSON_Print(parameters_item);
-                    if (parameters_str) {
-                        parameters = std::string(parameters_str);
-                        free(parameters_str);
+                            // 提取 parameters
+                cJSON* chat_config = cJSON_GetObjectItem(config_json, "chat_config");
+                if (chat_config && cJSON_IsObject(chat_config)) {
+                    cJSON* parameters_item = cJSON_GetObjectItem(chat_config, "parameters");
+                    if (parameters_item && cJSON_IsObject(parameters_item)) {
+                        char* parameters_str = cJSON_PrintUnformatted(parameters_item);
+                        if (parameters_str) {
+                            parameters = std::string(parameters_str);
+                            free(parameters_str);
+                        }
                     }
-                }
-                
-                // 提取 custom_variables
-                cJSON* custom_variables_item = cJSON_GetObjectItem(chat_config, "custom_variables");
-                if (custom_variables_item && cJSON_IsObject(custom_variables_item)) {
-                    char* custom_variables_str = cJSON_Print(custom_variables_item);
-                    if (custom_variables_str) {
-                        custom_variables = std::string(custom_variables_str);
-                        free(custom_variables_str);
+                    
+                    // 提取 custom_variables
+                    cJSON* custom_variables_item = cJSON_GetObjectItem(chat_config, "custom_variables");
+                    if (custom_variables_item && cJSON_IsObject(custom_variables_item)) {
+                        char* custom_variables_str = cJSON_PrintUnformatted(custom_variables_item);
+                        if (custom_variables_str) {
+                            custom_variables = std::string(custom_variables_str);
+                            free(custom_variables_str);
+                        }
                     }
-                }
             }
             cJSON_Delete(config_json);
         }
