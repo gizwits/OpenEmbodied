@@ -150,7 +150,10 @@ private:
             []() -> int { return Application::GetInstance().GetChatMode(); },
             [](int value) { Application::GetInstance().SetChatMode(value); },
             [this]() -> int { 
-                return GetBatteryLevel();
+                int level = 0;
+                bool charging = false, discharging = false;
+                GetBatteryLevel(level, charging, discharging);
+                return level;
             },
             [this]() -> int { return GetAudioCodec()->output_volume(); },
             [this](int value) { GetAudioCodec()->SetOutputVolume(value); },
@@ -213,7 +216,6 @@ public:
         });
 
         PowerManager::GetInstance().CheckBatteryStatusImmediately();
-        ESP_LOGI(TAG, "Immediately check the battery level upon startup: %d", PowerManager::GetInstance().GetBatteryLevel());
 
         ESP_LOGI(TAG, "Initializing Data Point Manager...");
         InitializeDataPointManager();
