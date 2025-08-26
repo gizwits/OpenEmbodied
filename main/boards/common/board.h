@@ -12,6 +12,12 @@
 #include "camera.h"
 #include "servo.h"
 #include <network_interface.h>
+//enum NetworkType
+enum class NetworkType {
+    WIFI,
+    ML307
+};
+
 
 void* create_board();
 
@@ -43,6 +49,8 @@ public:
         static Board* instance = static_cast<Board*>(create_board());
         return *instance;
     }
+
+    virtual NetworkType GetNetworkType() { return NetworkType::WIFI; }
 
     virtual ~Board() = default;
     virtual std::string GetBoardType() = 0;

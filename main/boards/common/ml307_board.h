@@ -20,6 +20,7 @@ public:
     Ml307Board(gpio_num_t tx_pin, gpio_num_t rx_pin, gpio_num_t dtr_pin = GPIO_NUM_NC, uart_port_t uart_num = UART_NUM_1);
     virtual std::string GetBoardType() override;
     virtual void StartNetwork() override;
+    virtual NetworkType GetNetworkType() override { return NetworkType::ML307; }
     virtual NetworkInterface* GetNetwork() override;
     virtual const char* GetNetworkStateIcon() override;
     virtual void SetPowerSaveMode(bool enabled) override;

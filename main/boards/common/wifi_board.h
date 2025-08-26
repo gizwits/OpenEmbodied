@@ -11,6 +11,7 @@ protected:
 
 public:
     WifiBoard();
+    virtual NetworkType GetNetworkType() override { return NetworkType::WIFI; }
     virtual std::string GetBoardType() override;
     virtual void StartNetwork() override;
     virtual NetworkInterface* GetNetwork() override;

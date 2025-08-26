@@ -6,12 +6,6 @@
 #include "ml307_board.h"
 #include <memory>
 
-//enum NetworkType
-enum class NetworkType {
-    WIFI,
-    ML307
-};
-
 // 双网络板卡类，可以在WiFi和ML307之间切换
 class DualNetworkBoard : public Board {
 private:

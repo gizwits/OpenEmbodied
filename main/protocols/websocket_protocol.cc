@@ -636,6 +636,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     uint32_t random_value = esp_random();
     snprintf(event_id, sizeof(event_id), "%lu", random_value);
 
+    NetworkType network_type = Board::GetInstance().GetNetworkType();
 
     int chat_mode = Application::GetInstance().GetChatMode();
     
@@ -709,11 +710,17 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "\"use_cbr\":false,";
     message += "\"frame_size_ms\":60,";
     message += "\"limit_config\":{";
-    message += "\"period\":3,";
 #ifdef CONFIG_IDF_TARGET_ESP32C2
-    message += "\"max_frame_num\":50";
+    if (network_type == NetworkType::ML307) {
+        message += "\"period\":1,";
+        message += "\"max_frame_num\":25";
+    } else {
+        message += "\"period\":3,";
+        message += "\"max_frame_num\":50";
+    }
 #else
-    message += "\"max_frame_num\":60";
+    message += "\"period\":1,";
+    message += "\"max_frame_num\":25";
 #endif
     message += "}";
     message += "},";
