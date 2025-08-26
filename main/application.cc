@@ -548,10 +548,12 @@ void Application::Start() {
             // 先停止所有正在进行的操作
             Schedule([this]() {
                 QuitTalking();
+                ResetDecoder();
                 PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
             });
         } else {
             if (!protocol_->GetRoomParams().access_token.empty()) {
+                ResetDecoder();
                 PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
             }
         }
@@ -698,6 +700,11 @@ void Application::Start() {
     protocol_->OnIncomingJson([this, display](const cJSON* root) {
         // Parse JSON data
         auto type = cJSON_GetObjectItem(root, "type");
+        if (!type || !cJSON_IsString(type)) {
+            ESP_LOGW(TAG, "Invalid JSON: missing or invalid 'type' field");
+            ESP_LOGW(TAG, "JSON: %s", cJSON_Print(root));
+            return;
+        }
         if (strcmp(type->valuestring, "tts") == 0) {
             auto state = cJSON_GetObjectItem(root, "state");
             if (strcmp(state->valuestring, "start") == 0) {
@@ -732,6 +739,10 @@ void Application::Start() {
                 });
             } else if (strcmp(state->valuestring, "sentence_start") == 0) {
                 auto text = cJSON_GetObjectItem(root, "text");
+                if (!text || !cJSON_IsString(text)) {
+                    ESP_LOGW(TAG, "Invalid JSON: missing or invalid 'text' field in tts sentence_start");
+                    return;
+                }
                 if (cJSON_IsString(text)) {
                     // ESP_LOGI(TAG, "<< %s", text->valuestring);
                     Schedule([this, display, message = std::string(text->valuestring)]() {
