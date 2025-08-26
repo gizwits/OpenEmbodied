@@ -9,6 +9,7 @@
 #include <esp_log.h>
 #include <arpa/inet.h>
 #include "assets/lang_config.h"
+#include <queue>
 
 #define TAG "WS"
 
@@ -111,6 +112,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
     websocket_->OnData([this](const char* data, size_t len, bool binary) {
         if (binary) {
             if (on_incoming_audio_ != nullptr) {
+                std::unique_ptr<AudioStreamPacket> packet;
+                
                 if (version_ == 2) {
                     BinaryProtocol2* bp2 = (BinaryProtocol2*)data;
                     bp2->version = ntohs(bp2->version);
@@ -118,39 +121,80 @@ bool WebsocketProtocol::OpenAudioChannel() {
                     bp2->timestamp = ntohl(bp2->timestamp);
                     bp2->payload_size = ntohl(bp2->payload_size);
                     auto payload = (uint8_t*)bp2->payload;
-                    on_incoming_audio_(std::make_unique<AudioStreamPacket>(AudioStreamPacket{
+                    packet = std::make_unique<AudioStreamPacket>(AudioStreamPacket{
                         .sample_rate = server_sample_rate_,
                         .frame_duration = server_frame_duration_,
                         .timestamp = bp2->timestamp,
                         .payload = std::vector<uint8_t>(payload, payload + bp2->payload_size)
-                    }));
+                    });
                 } else if (version_ == 3) {
                     BinaryProtocol3* bp3 = (BinaryProtocol3*)data;
                     bp3->type = bp3->type;
                     bp3->payload_size = ntohs(bp3->payload_size);
                     auto payload = (uint8_t*)bp3->payload;
-                    on_incoming_audio_(std::make_unique<AudioStreamPacket>(AudioStreamPacket{
+                    packet = std::make_unique<AudioStreamPacket>(AudioStreamPacket{
                         .sample_rate = server_sample_rate_,
                         .frame_duration = server_frame_duration_,
                         .timestamp = 0,
                         .payload = std::vector<uint8_t>(payload, payload + bp3->payload_size)
-                    }));
+                    });
                 } else {
-                    on_incoming_audio_(std::make_unique<AudioStreamPacket>(AudioStreamPacket{
+                    packet = std::make_unique<AudioStreamPacket>(AudioStreamPacket{
                         .sample_rate = server_sample_rate_,
                         .frame_duration = server_frame_duration_,
                         .timestamp = 0,
                         .payload = std::vector<uint8_t>((uint8_t*)data, (uint8_t*)data + len)
-                    }));
+                    });
+                }
+                
+                // Handle TTS buffering
+                if (tts_buffering_ && buffer_packet_count_ < BUFFER_SIZE) {
+                    // Buffer packets until we reach the buffer size
+                    auto buffer_packet = std::make_unique<AudioStreamPacket>(*packet);
+                    audio_buffer_.push(std::move(buffer_packet));
+                    buffer_packet_count_++;
+                    
+                    ESP_LOGD(TAG, "Buffering audio packet %zu/%zu", buffer_packet_count_, BUFFER_SIZE);
+                    
+                    // Start processing after buffering enough packets
+                    if (buffer_packet_count_ == BUFFER_SIZE) {
+                        ESP_LOGI(TAG, "Buffer reached %zu packets, starting audio playback", BUFFER_SIZE);
+                        ProcessBufferedAudio();
+                        // Don't reset tts_buffering_ here, let TTS stop event handle it
+                    }
+                } else {
+                    // Direct callback if not buffering or buffer is already processed
+                    on_incoming_audio_(std::move(packet));
                 }
             }
         } else {
             // Parse JSON data
             auto root = cJSON_Parse(data);
             auto type = cJSON_GetObjectItem(root, "type");
+            ESP_LOGI(TAG, "Received message type: %s", cJSON_PrintUnformatted(root));
             if (cJSON_IsString(type)) {
                 if (strcmp(type->valuestring, "hello") == 0) {
                     ParseServerHello(root);
+                } else if (strcmp(type->valuestring, "tts") == 0) {
+                    // Handle TTS events
+                    auto state = cJSON_GetObjectItem(root, "state");
+                    if (cJSON_IsString(state)) {
+                        if (strcmp(state->valuestring, "start") == 0) {
+                            ESP_LOGI(TAG, "TTS start event detected, beginning audio buffering");
+                            tts_buffering_ = true;
+                            buffer_packet_count_ = 0;
+                            ClearAudioBuffer();
+                        } else if (strcmp(state->valuestring, "stop") == 0) {
+                            ESP_LOGI(TAG, "TTS stop event detected, clearing buffer and flags");
+                            ProcessBufferedAudio();  // Process any remaining buffered audio
+                            tts_buffering_ = false;
+                            buffer_packet_count_ = 0;
+                            ClearAudioBuffer();
+                        }
+                    }
+                    if (on_incoming_json_ != nullptr) {
+                        on_incoming_json_(root);
+                    }
                 } else {
                     if (on_incoming_json_ != nullptr) {
                         on_incoming_json_(root);
@@ -250,4 +294,27 @@ void WebsocketProtocol::ParseServerHello(const cJSON* root) {
     }
 
     xEventGroupSetBits(event_group_handle_, WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT);
+}
+
+void WebsocketProtocol::ProcessBufferedAudio() {
+    // Process all buffered audio packets
+    while (!audio_buffer_.empty()) {
+        auto packet = std::move(audio_buffer_.front());
+        audio_buffer_.pop();
+        
+        if (on_incoming_audio_ != nullptr) {
+            on_incoming_audio_(std::move(packet));
+        }
+    }
+    // Note: tts_buffering_ is not reset here, it's controlled by TTS events
+    // After processing buffer, subsequent packets will be directly forwarded
+}
+
+void WebsocketProtocol::ClearAudioBuffer() {
+    // Clear the audio buffer queue
+    while (!audio_buffer_.empty()) {
+        audio_buffer_.pop();
+    }
+    buffer_packet_count_ = 0;
+    ESP_LOGD(TAG, "Audio buffer cleared");
 }
