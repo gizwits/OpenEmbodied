@@ -15,6 +15,8 @@
 #include "vb6824.h"
 #include <esp_wifi.h>
 #include "toy_data_point_manager.h"
+#include "settings.h"
+#include <esp_timer.h>
 
 #include <esp_lcd_panel_vendor.h>
 #include <driver/spi_common.h>
@@ -31,10 +33,50 @@ private:
     Button prev_button_;
     Button next_button_;
 
+    // 上电计数器相关
+    Settings power_counter_settings_;
+    esp_timer_handle_t power_counter_timer_;
+    static constexpr int POWER_COUNT_THRESHOLD = 5;  // 触发阈值
+    static constexpr int POWER_COUNT_RESET_DELAY_MS = 2000;  // 2秒后重置
 
     int64_t prev_last_click_time_ = 0;
     int64_t next_last_click_time_ = 0;
 
+    // 定时器回调函数
+    static void PowerCounterTimerCallback(void* arg) {
+        CustomBoard* board = static_cast<CustomBoard*>(arg);
+        board->ResetPowerCounter();
+    }
+
+    // 重置上电计数器
+    void ResetPowerCounter() {
+        power_counter_settings_.SetInt("power_count", 0);
+        ESP_LOGI(TAG, "Power counter reset to 0");
+    }
+
+    // 检查并处理上电计数
+    void CheckPowerCount() {
+        int current_count = power_counter_settings_.GetInt("power_count", 0);
+        current_count++;
+        power_counter_settings_.SetInt("power_count", current_count);
+        
+        ESP_LOGI(TAG, "Power count: %d", current_count);
+        
+        if (current_count >= POWER_COUNT_THRESHOLD) {
+            ESP_LOGI(TAG, "Power count threshold reached! Triggering event...");
+            // 在这里添加你的事件处理逻辑
+            // 例如：触发某种特殊模式、发送通知等
+            
+            // 重置计数器
+            ResetPowerCounter();
+            auto& wifi_station = WifiStation::GetInstance();
+            wifi_station.ClearAuth();
+            ResetWifiConfiguration();
+        }
+        
+        // 启动定时器，2秒后重置计数器
+        esp_timer_start_once(power_counter_timer_, POWER_COUNT_RESET_DELAY_MS * 1000);
+    }
 
     void InitializeButtons() {
 
@@ -130,7 +172,16 @@ private:
 public:
     CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO),
     volume_up_button_(VOLUME_UP_BUTTON_GPIO), volume_down_button_(VOLUME_DOWN_BUTTON_GPIO),
-    prev_button_(PREV_BUTTON_GPIO), next_button_(NEXT_BUTTON_GPIO){      
+    prev_button_(PREV_BUTTON_GPIO), next_button_(NEXT_BUTTON_GPIO),
+    power_counter_settings_("power_counter", true) {      
+
+        // 初始化上电计数器定时器
+        esp_timer_create_args_t timer_args = {
+            .callback = &CustomBoard::PowerCounterTimerCallback,
+            .arg = this,
+            .name = "power_counter_timer"
+        };
+        ESP_ERROR_CHECK(esp_timer_create(&timer_args, &power_counter_timer_));
 
         InitializeButtons();
         InitializeIot();
@@ -142,6 +193,9 @@ public:
         InitializeGpio(POWER_GPIO, true);
         InitializeGpio(POWER_GPIO, true);
 
+        // 检查上电计数
+        CheckPowerCount();
+
         audio_codec.OnWakeUp([this](const std::string& command) {
             ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());
             if (command == "你好小智" || command.find("小云") != std::string::npos){
@@ -151,6 +205,12 @@ public:
                 ResetWifiConfiguration();
             }
         });
+    }
+
+    ~CustomBoard() {
+        if (power_counter_timer_) {
+            esp_timer_delete(power_counter_timer_);
+        }
     }
 
     void InitializeGpio(gpio_num_t gpio_num_, bool output = false) {
