@@ -19,8 +19,7 @@
 #define SOFT_UART_LOG_PREFIX_SIZE 128  // 日志前缀缓冲区大小
 
 // 调试配置
-#define SOFT_UART_DEBUG_ENABLED 1      // 是否启用调试信息
-#define SOFT_UART_ECHO_ENABLED 0       // 是否启用回显功能（接收到的数据回发）
+#define SOFT_UART_DEBUG_ENABLED 0      // 是否启用调试信息
 
 // 引脚说明：
 // - TX_PIN: 连接到USB转串口模块的RX端，或连接到其他设备的RX端
@@ -37,7 +36,3 @@
 //    - ESP32 RX_PIN -> 其他ESP32 TX_PIN
 //    - ESP32 GND -> 其他ESP32 GND
 //
-// 3. Arduino或其他开发板：
-//    - ESP32 TX_PIN -> Arduino RX_PIN
-//    - ESP32 RX_PIN -> Arduino TX_PIN
-//    - ESP32 GND -> Arduino GND

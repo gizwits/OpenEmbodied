@@ -132,8 +132,6 @@ void factory_test_uart_init(void) {
         return;
     }
 
-#if defined(FACTORY_TEST_UART_RX_PIN)
-
     ESP_LOGI(TAG, "Initializing factory test UART on UART_NUM_0");
     ESP_LOGI(TAG, "TX Pin: %d, RX Pin: %d", FACTORY_TEST_UART_TX_PIN, FACTORY_TEST_UART_RX_PIN);
 

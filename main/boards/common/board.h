@@ -78,22 +78,6 @@ public:
     virtual uint8_t GetDefaultBrightness() { return 0; }
     virtual void EnterDeepSleepIfNotCharging() { }
     
-    // 设备模式相关方法
-    virtual DeviceMode GetDeviceMode() const { return device_mode_; }
-    virtual void SetDeviceMode(DeviceMode mode) { device_mode_ = mode; }
-    virtual std::string GetDeviceModeString() const {
-        switch (device_mode_) {
-            case DeviceMode::BUTTON_MODE:
-                return "button_mode";
-            case DeviceMode::WAKE_WORD_MODE:
-                return "wake_word_mode";
-            case DeviceMode::NATURAL_CHAT_MODE:
-                return "natural_chat_mode";
-            default:
-                return "unknown_mode";
-        }
-    }
-    
     // 数据点相关方法
     virtual const char* GetGizwitsProtocolJson() const { return nullptr; }
     virtual size_t GetDataPointCount() const { return 0; }
