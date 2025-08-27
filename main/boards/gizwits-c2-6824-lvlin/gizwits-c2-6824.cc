@@ -108,18 +108,12 @@ private:
                 ResetWifiConfiguration();
             }
         });
-        // rec_button_->OnPressRepeat([this](uint16_t count) {
-        //     ESP_LOGI(TAG, "rec_button_.OnPressRepeat: %d", count);
-        //     if(count >= RESET_WIFI_CONFIGURATION_COUNT){
-        //         ResetWifiConfiguration();
-        //     }
-        // });
-
-
-// void Button::OnMultipleClick(std::function<void()> callback, uint8_t click_count) {
-//     if (button_handle_ == nullptr) {
-//         return;
-//     }
+        rec_button_->OnPressRepeat([this](uint16_t count) {
+            ESP_LOGI(TAG, "rec_button_.OnPressRepeat: %d", count);
+            if(count >= RESET_WIFI_CONFIGURATION_COUNT){
+                ResetWifiConfiguration();
+            }
+        });
     }
 
     void InitializeLedSignal() {
