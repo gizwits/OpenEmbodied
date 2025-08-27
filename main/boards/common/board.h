@@ -68,7 +68,6 @@ public:
     virtual bool IsCharging() { return false; }
     virtual std::string GetJson();
     virtual void SetPowerSaveMode(bool enabled) = 0;
-    virtual int GetDefaultChatMode() { return 1; }
     virtual bool IsWifiConfigMode();
     virtual std::string GetBoardJson() = 0;
     virtual std::string GetDeviceStatusJson() = 0;

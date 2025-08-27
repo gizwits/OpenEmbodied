@@ -78,13 +78,15 @@ private:
 
         const int chat_mode = Application::GetInstance().GetChatMode();
         rec_button_ = new Button(BUILTIN_REC_BUTTON_GPIO);
-
+        ESP_LOGI(TAG, "chat_mode %d", chat_mode);
         if (chat_mode == 0) {
             rec_button_->OnPressUp([this]() {
+                ESP_LOGI(TAG, "rec_button_.OnPressUp");
                 auto &app = Application::GetInstance();
                 app.StopListening();
             });
             rec_button_->OnPressDown([this]() {
+                ESP_LOGI(TAG, "rec_button_.OnPressDown");
                 auto &app = Application::GetInstance();
                 app.AbortSpeaking(kAbortReasonNone);
                 app.StartListening();
@@ -106,12 +108,18 @@ private:
                 ResetWifiConfiguration();
             }
         });
-        rec_button_->OnPressRepeat([this](uint16_t count) {
-            ESP_LOGI(TAG, "rec_button_.OnPressRepeat: %d", count);
-            if(count >= RESET_WIFI_CONFIGURATION_COUNT){
-                ResetWifiConfiguration();
-            }
-        });
+        // rec_button_->OnPressRepeat([this](uint16_t count) {
+        //     ESP_LOGI(TAG, "rec_button_.OnPressRepeat: %d", count);
+        //     if(count >= RESET_WIFI_CONFIGURATION_COUNT){
+        //         ResetWifiConfiguration();
+        //     }
+        // });
+
+
+// void Button::OnMultipleClick(std::function<void()> callback, uint8_t click_count) {
+//     if (button_handle_ == nullptr) {
+//         return;
+//     }
     }
 
     void InitializeLedSignal() {
@@ -237,10 +245,6 @@ public:
 
     bool IsCharging() override {
         return PowerManager::GetInstance().IsCharging();
-    }
-
-    int GetDefaultChatMode() override {
-        return 0;
     }
 
     void EnterDeepSleepIfNotCharging() {
