@@ -11,7 +11,7 @@ dependencies:
   # 78/esp-wifi-connect: ~2.4.2
   kylewang4929/esp-ml307: ~3.3.2
   78/esp-opus-encoder: ~2.4.0
-  kylewang4929/esp-wifi-connect-next: "3.1.2"
+  kylewang4929/esp-wifi-connect-next: "3.1.3"
   78/xiaozhi-fonts: ~1.3.2
   espressif/led_strip: ^2.5.5
   espressif/esp_codec_dev: 

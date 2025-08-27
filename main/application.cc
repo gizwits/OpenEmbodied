@@ -354,7 +354,8 @@ void Application::Start() {
                         reset_reason == ESP_RST_EXT || 
                         reset_reason == ESP_RST_SW ||
                         reset_reason == ESP_RST_USB ||
-                        reset_reason == ESP_RST_JTAG
+                        reset_reason == ESP_RST_JTAG ||
+                        reset_reason == ESP_RST_DEEPSLEEP
                     );
     
     if (is_normal_reset_) {

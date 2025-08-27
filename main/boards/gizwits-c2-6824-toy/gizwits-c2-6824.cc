@@ -32,6 +32,8 @@ private:
     Button volume_down_button_;
     Button prev_button_;
     Button next_button_;
+    PowerSaveTimer* power_save_timer_;
+
 
     // 上电计数器相关
     Settings power_counter_settings_;
@@ -41,6 +43,38 @@ private:
 
     int64_t prev_last_click_time_ = 0;
     int64_t next_last_click_time_ = 0;
+
+    void InitializePowerSaveTimer() {
+        power_save_timer_ = new PowerSaveTimer(-1, 60 * 20, 60 * 30);
+        power_save_timer_->OnEnterSleepMode([this]() {
+            ESP_LOGI(TAG, "Shutting down");
+            run_sleep_mode(true);
+        });
+        power_save_timer_->OnExitSleepMode([this]() {
+        });
+        power_save_timer_->OnShutdownRequest([this]() {
+            
+        });
+        power_save_timer_->SetEnabled(true);
+    }
+
+    void run_sleep_mode(bool need_delay = true){
+        auto& application = Application::GetInstance();
+        if (need_delay) {
+            application.QuitTalking();
+            GetAudioCodec()->EnableOutput(true);
+            application.Alert("", "", "", Lang::Sounds::P3_SLEEP);
+            vTaskDelay(pdMS_TO_TICKS(1500));
+            ESP_LOGI(TAG, "Sleep mode");
+        }
+        vb6824_shutdown();
+        vTaskDelay(pdMS_TO_TICKS(200));
+        // 杰挺不需要唤醒源
+        // esp_deep_sleep_enable_gpio_wakeup(1ULL << BOOT_BUTTON_GPIO, ESP_GPIO_WAKEUP_GPIO_LOW);
+        
+        esp_deep_sleep_start();
+    }
+
 
     // 定时器回调函数
     static void PowerCounterTimerCallback(void* arg) {
@@ -186,6 +220,7 @@ public:
         InitializeButtons();
         InitializeIot();
         InitializeDataPointManager();
+        InitializePowerSaveTimer();
 
         ESP_LOGI(TAG, "Initializing Data Point Manager...");
         ESP_LOGI(TAG, "Data Point Manager initialized.");
