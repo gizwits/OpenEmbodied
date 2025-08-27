@@ -1,5 +1,6 @@
 #include "gpio_led.h"
 #include "application.h"
+#include "device_state.h"
 #include <esp_log.h>
 
 #define TAG "GpioLed"
@@ -21,7 +22,7 @@
 #define LEDC_LS_CH0_CHANNEL    LEDC_CHANNEL_0
 
 #define LEDC_DUTY              (8191)
-#define LEDC_FADE_TIME    (0)
+#define LEDC_FADE_TIME    (1000)
 // GPIO_LED
 
 GpioLed::GpioLed(gpio_num_t gpio)
@@ -82,7 +83,6 @@ GpioLed::GpioLed(gpio_num_t gpio, int output_invert, ledc_timer_t timer_num, led
     ESP_ERROR_CHECK(esp_timer_create(&blink_timer_args, &blink_timer_));
 
     ledc_initialized_ = true;
-    ESP_LOGI(TAG, "ledc_initialized_: %d", ledc_initialized_);
 }
 
 GpioLed::~GpioLed() {
@@ -221,6 +221,7 @@ void GpioLed::OnStateChanged() {
             TurnOn();
             break;
         case kDeviceStateListening:
+        case kDeviceStateAudioTesting:
             if (app.IsVoiceDetected()) {
                 SetBrightness(HIGH_BRIGHTNESS);
             } else {
@@ -240,10 +241,6 @@ void GpioLed::OnStateChanged() {
         case kDeviceStateActivating:
             SetBrightness(ACTIVATING_BRIGHTNESS);
             StartContinuousBlink(500);
-            break;
-        case kDeviceStateSleeping:
-            SetBrightness(1); // 最低亮度
-            TurnOn();
             break;
         default:
             ESP_LOGE(TAG, "Unknown gpio led event: %d", device_state);

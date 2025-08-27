@@ -15,7 +15,7 @@ CircularStrip::CircularStrip(gpio_num_t gpio, uint8_t max_leds) : max_leds_(max_
     led_strip_config_t strip_config = {};
     strip_config.strip_gpio_num = gpio;
     strip_config.max_leds = max_leds_;
-    strip_config.led_pixel_format = LED_PIXEL_FORMAT_GRB;
+    strip_config.color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB;
     strip_config.led_model = LED_MODEL_WS2812;
 
     led_strip_rmt_config_t rmt_config = {};
@@ -182,10 +182,6 @@ void CircularStrip::SetBrightness(uint8_t default_brightness, uint8_t low_bright
     OnStateChanged();
 }
 
-void CircularStrip::TurnOff() {
-    SetAllColor({ 0, 0, 0 });
-}
-
 void CircularStrip::OnStateChanged() {
     auto& app = Application::GetInstance();
     auto device_state = app.GetDeviceState();
@@ -201,17 +197,16 @@ void CircularStrip::OnStateChanged() {
             Blink(color, 500);
             break;
         }
-        case kDeviceStateIdle:{
-            StripColor color = { 10, 10, 10 };
-            SetAllColor(color);
+        case kDeviceStateIdle:
+            FadeOut(50);
             break;
-        }
         case kDeviceStateConnecting: {
             StripColor color = { low_brightness_, low_brightness_, default_brightness_ };
             SetAllColor(color);
             break;
         }
-        case kDeviceStateListening: {
+        case kDeviceStateListening:
+        case kDeviceStateAudioTesting: {
             StripColor color = { default_brightness_, low_brightness_, low_brightness_ };
             SetAllColor(color);
             break;
@@ -229,11 +224,6 @@ void CircularStrip::OnStateChanged() {
         case kDeviceStateActivating: {
             StripColor color = { low_brightness_, default_brightness_, low_brightness_ };
             Blink(color, 500);
-            break;
-        }
-        case kDeviceStateSleeping: {
-            StripColor color = { 1, 1, 1 }; // 最低亮度
-            SetAllColor(color);
             break;
         }
         default:

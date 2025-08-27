@@ -18,7 +18,7 @@ SingleLed::SingleLed(gpio_num_t gpio) {
     led_strip_config_t strip_config = {};
     strip_config.strip_gpio_num = gpio;
     strip_config.max_leds = 1;
-    strip_config.led_pixel_format = LED_PIXEL_FORMAT_GRB;
+    strip_config.color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB;
     strip_config.led_model = LED_MODEL_WS2812;
 
     led_strip_rmt_config_t rmt_config = {};
@@ -136,6 +136,7 @@ void SingleLed::OnStateChanged() {
             TurnOn();
             break;
         case kDeviceStateListening:
+        case kDeviceStateAudioTesting:
             if (app.IsVoiceDetected()) {
                 SetColor(HIGH_BRIGHTNESS, 0, 0);
             } else {
@@ -154,10 +155,6 @@ void SingleLed::OnStateChanged() {
         case kDeviceStateActivating:
             SetColor(0, DEFAULT_BRIGHTNESS, 0);
             StartContinuousBlink(500);
-            break;
-        case kDeviceStateSleeping:
-            SetColor(1, 1, 1); // 最低亮度
-            TurnOn();
             break;
         default:
             ESP_LOGW(TAG, "Unknown led strip event: %d", device_state);

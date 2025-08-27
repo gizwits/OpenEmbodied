@@ -3,7 +3,6 @@
 #include "application.h"
 #include "button.h"
 #include "config.h"
-#include "led/gpio_led.h"
 #include "iot/thing_manager.h"
 #include <esp_sleep.h>
 #include "power_save_timer.h"
@@ -226,7 +225,15 @@ public:
         ESP_LOGI(TAG, "Data Point Manager initialized.");
 
         InitializeGpio(POWER_GPIO, true);
-        InitializeGpio(POWER_GPIO, true);
+
+        gpio_config_t io_conf = {};
+        io_conf.pin_bit_mask = (1ULL << LED_GPIO);
+        io_conf.mode = GPIO_MODE_OUTPUT;
+        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        io_conf.intr_type = GPIO_INTR_DISABLE;
+        gpio_config(&io_conf);
+        gpio_set_level(LED_GPIO, 0);
 
         // 检查上电计数
         CheckPowerCount();
@@ -264,10 +271,10 @@ public:
         }
     }
 
-    virtual Led* GetLed() override {
-        static GpioLed led(LED_GPIO);
-        return &led;
-    }
+    // virtual Led* GetLed() override {
+    //     static GpioLed led(LED_GPIO);
+    //     return &led;
+    // }
 
     virtual AudioCodec* GetAudioCodec() override {
         return &audio_codec;
