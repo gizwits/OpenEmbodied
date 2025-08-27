@@ -40,6 +40,7 @@ private:
     PowerSaveTimer* power_save_timer_;
     VbAduioCodec audio_codec;
     bool sleep_flag_ = false;
+    uint32_t power_on_time_;  // 上电时间戳
     // PowerManager* power_manager_;
     
     // 唤醒词列表
@@ -81,11 +82,19 @@ private:
         ESP_LOGI(TAG, "chat_mode %d", chat_mode);
         if (chat_mode == 0) {
             rec_button_->OnPressUp([this]() {
+                // 检查是否已经过了5秒
+                if ((esp_timer_get_time() / 1000 - power_on_time_) < 5000) {
+                    return;
+                }
                 ESP_LOGI(TAG, "rec_button_.OnPressUp");
                 auto &app = Application::GetInstance();
                 app.StopListening();
             });
             rec_button_->OnPressDown([this]() {
+                // 检查是否已经过了5秒
+                if ((esp_timer_get_time() / 1000 - power_on_time_) < 5000) {
+                    return;
+                }
                 ESP_LOGI(TAG, "rec_button_.OnPressDown");
                 auto &app = Application::GetInstance();
                 app.AbortSpeaking(kAbortReasonNone);
@@ -172,6 +181,8 @@ private:
 
 public:
     CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO){      
+        power_on_time_ = esp_timer_get_time() / 1000;  // 记录上电时间（毫秒）
+        
         gpio_config_t io_conf = {};
         io_conf.pin_bit_mask = (1ULL << BUILTIN_LED_GPIO);
         io_conf.mode = GPIO_MODE_OUTPUT;
