@@ -13,6 +13,9 @@
 #include "assets/lang_config.h"
 #include "protocols/mcp.h"
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+
 #define TAG "WS"
 
 #define MAX_AUDIO_PACKET_SIZE 512
@@ -561,8 +564,13 @@ bool WebsocketProtocol::OpenAudioChannel() {
     websocket_->OnDisconnected([this](bool is_clean) {
         if (is_clean) {
             ESP_LOGI(TAG, "Websocket disconnected cleanly");
+            reconnect_attempts_ = 0;   // 正常断开，重置重连计数
+            should_reconnect_ = false; // 正常断开不需要重连
         } else {
             ESP_LOGI(TAG, "Websocket disconnected unexpectedly");
+            // 异常断开，尝试重连
+            should_reconnect_ = true;
+            HandleReconnect();
         }
         if (on_audio_channel_closed_ != nullptr) {
             on_audio_channel_closed_(is_clean);
@@ -575,6 +583,22 @@ bool WebsocketProtocol::OpenAudioChannel() {
         SetError(Lang::Strings::SERVER_NOT_CONNECTED);
         return false;
     }
+
+    // 测试正常断开 - 连接成功后5秒自动断开
+    // xTaskCreate([](void* param) {
+    //     WebsocketProtocol* self = static_cast<WebsocketProtocol*>(param);
+    //     vTaskDelay(pdMS_TO_TICKS(5000)); // 延时5秒
+        
+    //     if (self->websocket_ && self->websocket_->IsConnected()) {
+    //         ESP_LOGI(TAG, "=== 手动断开测试 ===");
+    //         ESP_LOGI(TAG, "手动断开WebSocket连接");
+    //         self->websocket_->Close();  // 触发 is_clean = true 的回调
+    //     } else {
+    //         ESP_LOGI(TAG, "=== WebSocket连接已断开 ===");
+    //     }
+    //     vTaskDelete(nullptr);
+    // }, "disconnect_test", 2048, this, 5, nullptr);
+
 
     // Wait for server hello
     EventBits_t bits = xEventGroupWaitBits(event_group_handle_, WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT, pdTRUE, pdFALSE, pdMS_TO_TICKS(5000));
@@ -773,4 +797,74 @@ void WebsocketProtocol::SwitchToSpeaking() {
         on_incoming_json_(message_json);
         cJSON_Delete(message_json);
     }
+}
+
+// 重连
+void WebsocketProtocol::HandleReconnect() {
+    // 如果正在重连或不应该重连，则直接返回
+    if (is_reconnecting_ || !should_reconnect_) {
+        return;
+    }
+    
+    // 检查是否已达到最大重连次数
+    if (reconnect_attempts_ >= MAX_RECONNECT_ATTEMPTS) {
+        ESP_LOGE(TAG, "已达到最大重连次数 (%d次)", MAX_RECONNECT_ATTEMPTS);
+        SetError("重连失败，请检查网络连接");
+        
+        if (on_audio_channel_closed_ != nullptr) {
+            on_audio_channel_closed_(false);
+        }
+        
+        // 重置重连状态，允许后续再次触发重连
+        is_reconnecting_ = false;
+        return;
+    }
+    
+    is_reconnecting_ = true;
+    reconnect_attempts_++;
+    
+    ESP_LOGI(TAG, "尝试重连... (%d/%d)", reconnect_attempts_, MAX_RECONNECT_ATTEMPTS);
+    
+    // 创建重连任务，使用静态函数包装以避免lambda捕获问题（兼容更多编译器）
+    xTaskCreate(ReconnectTask, "ws_reconnect_task", 8192, this, 5, nullptr);
+}
+void WebsocketProtocol::ReconnectTask(void* param) {
+    WebsocketProtocol* self = static_cast<WebsocketProtocol*>(param);
+    
+    // 重连间隔时间（指数退避）5s,10s,20s
+    uint32_t delay_ms = self->RECONNECT_INTERVAL_MS * (1 << (self->reconnect_attempts_ - 1));
+    // 限制最大延迟时间
+    if (delay_ms > 30000) {
+        delay_ms = 30000;
+    }
+    
+    vTaskDelay(pdMS_TO_TICKS(delay_ms));
+    
+    bool reconnect_success = self->OpenAudioChannel();
+    if (reconnect_success) {
+        ESP_LOGI(TAG, "重连成功");
+        self->reconnect_attempts_ = 0;
+        self->is_reconnecting_ = false;
+        
+        // 通知上层应用连接已恢复
+        if (self->on_audio_channel_opened_ != nullptr) {
+            self->on_audio_channel_opened_();
+        }
+    } else {
+        ESP_LOGE(TAG, "第%d次重连失败", self->reconnect_attempts_);
+        self->is_reconnecting_ = false;
+        
+        // 如果还有重连机会，通过 HandleReconnect 创建新任务
+        if (self->reconnect_attempts_ < self->MAX_RECONNECT_ATTEMPTS) {
+            self->HandleReconnect();
+        } else {
+            // 已达到最大重试次数
+            ESP_LOGE(TAG, "已达到最大重连次数，连接失败");
+            if (self->on_audio_channel_closed_ != nullptr) {
+                self->on_audio_channel_closed_(false);
+            }
+        }
+    }
+    
+    vTaskDelete(nullptr);
 }

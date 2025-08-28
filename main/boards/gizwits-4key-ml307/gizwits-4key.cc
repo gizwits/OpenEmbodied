@@ -40,6 +40,10 @@ private:
     int64_t dual_long_press_time_ = 0;
     bool is_sleep_ = false;
 
+    // 新增的网络监控方法声明
+    void InitializeNetworkMonitor();
+    void CheckNetworkStatus();
+
     void InitializeI2c() {
         // Initialize I2C peripheral
         i2c_master_bus_config_t i2c_bus_cfg = {
@@ -175,6 +179,9 @@ public:
         InitializeChargingGpio();
         InitializeI2c();
         InitializeIot();
+
+        // 添加网络监控
+        InitializeNetworkMonitor(); 
         // InitializePowerManager();
         
         // if (power_manager_) {
@@ -266,5 +273,40 @@ public:
     }
 
 };
+
+// 新增的网络监控初始化方法
+void GizwitsDevBoard::InitializeNetworkMonitor() {
+    // 创建网络监控任务
+    xTaskCreate([](void* arg) {
+        auto* board = static_cast<GizwitsDevBoard*>(arg);
+        ESP_LOGI("网络监控", "启动网络状态监控任务");
+        while (true) {
+            board->CheckNetworkStatus();
+            vTaskDelay(pdMS_TO_TICKS(30000)); // 每30秒检查一次
+        }
+    }, "network_monitor", 4096, this, 5, nullptr);
+}
+
+// 新增的网络状态检查方法
+void GizwitsDevBoard::CheckNetworkStatus() {
+    ESP_LOGI("网络监控", "检查网络连接状态...");
+    
+    // 添加内存使用情况打印
+    ESP_LOGI("系统状态", "当前可用堆内存: %lu 字节", (unsigned long)esp_get_free_heap_size());
+    ESP_LOGI("系统状态", "最小可用堆内存: %lu 字节", (unsigned long)esp_get_minimum_free_heap_size());
+    
+    auto* network = GetNetwork();
+    if (network) {
+        ESP_LOGI("网络监控", "成功获取网络接口");
+        
+        const char* state_icon = GetNetworkStateIcon();
+        if (state_icon) {
+            ESP_LOGI("网络监控", "网络状态图标: %s", state_icon);
+        }
+    } else {
+        ESP_LOGE("网络监控", "无法获取网络接口");
+    }
+}
+
 
 DECLARE_BOARD(GizwitsDevBoard);
