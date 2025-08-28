@@ -474,6 +474,7 @@ void Application::Start() {
         }, "OnAudioChannelOpened");
     });
     protocol_->OnAudioChannelClosed([this, &board](bool is_clean) {
+        ESP_LOGW("OnAudioChannelClosed", "is_clean: %d", is_clean);
         if (!is_clean) {
             ESP_LOGW(TAG, "Audio channel closed unexpectedly");
             HandleNetError();
@@ -481,17 +482,12 @@ void Application::Start() {
         // 暂时禁用省电模式，避免影响网络连接
         // board.SetPowerSaveMode(true);
         
-        // 所有可能阻塞的操作都通过 Schedule 异步执行
-        Schedule([this, is_clean]() {
-            // auto display = Board::GetInstance().GetDisplay();
-            // display->SetChatMessage("system", "");
-            if (device_state_ != kDeviceStateSleeping) {
-                SetDeviceState(kDeviceStateIdle);
-            }
+        if (device_state_ != kDeviceStateSleeping) {
+            SetDeviceState(kDeviceStateIdle);
+        }
 
-            const char* msg = is_clean ? "socket 通道正常关闭" : "socket 通道异常断开";
-            MqttClient::getInstance().sendTraceLog("info", msg);
-        }, "OnAudioChannelClosed");
+        const char* msg = is_clean ? "socket 通道正常关闭" : "socket 通道异常断开";
+        MqttClient::getInstance().sendTraceLog("info", msg);
     });
     protocol_->OnIncomingJson([this, display](const cJSON* root) {
         // Parse JSON data
@@ -843,6 +839,7 @@ void Application::SetDeviceState(DeviceState state) {
             if (!audio_service_.IsAudioProcessorRunning()) {
                 // Send the start listening command
                 protocol_->SendStartListening(listening_mode_);
+                ESP_LOGI(TAG, "SetDeviceState_Listening_SendStartListening");
                 audio_service_.EnableVoiceProcessing(true, false);
                 audio_service_.EnableWakeWordDetection(false);
             }
@@ -1013,9 +1010,11 @@ void Application::initGizwitsServer() {
             Schedule([this]() {
                 // 直接连接
                 SetDeviceState(kDeviceStateConnecting);
+                vTaskDelay(pdMS_TO_TICKS(500));
                 if (!protocol_->OpenAudioChannel()) {
                     return;
                 }
+                ESP_LOGI(TAG, "initGizwitsServer_OpenAudioChannel_EnableVoiceProcessing");
                 ResetDecoder();
                 SetListeningMode(chat_mode_ == 2  ? kListeningModeRealtime : kListeningModeAutoStop);
             }, "initGizwitsServer_OpenAudioChannel");

@@ -331,18 +331,20 @@ bool MqttClient::connect() {
     ESP_LOGI(TAG, "  %s (QoS 1)", server_notify_topic.c_str());
     ESP_LOGI(TAG, "  %s (QoS 0)", p0_notify_topic.c_str());
     
-    vTaskDelay(pdMS_TO_TICKS(10));
     if (mqtt_->Subscribe(response_topic, 0) != 0) {
         ESP_LOGE(TAG, "Failed to subscribe to response topic");
     }
+
     
     if (mqtt_->Subscribe(push_topic, 1) != 0) {
         ESP_LOGE(TAG, "Failed to subscribe to push topic");
     }
     
+
     if (mqtt_->Subscribe(server_notify_topic, 1) != 0) {
         ESP_LOGE(TAG, "Failed to subscribe to server notify topic");
     }
+
     if (mqtt_->Subscribe(p0_notify_topic, 0) != 0) {
         ESP_LOGE(TAG, "Failed to subscribe to p0 notify topic");
         sendTraceLog("error", "订阅 p0 通知 失败");

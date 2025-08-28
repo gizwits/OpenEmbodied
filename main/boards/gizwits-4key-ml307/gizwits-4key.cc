@@ -59,31 +59,6 @@ private:
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
     }
 
-
-
-    void CheckNetType() {
-        if (GetNetworkType() == NetworkType::WIFI) {
-            Disable4GModule();
-        } else if (GetNetworkType() == NetworkType::ML307) {
-            Enable4GModule();
-        }
-        
-    }
-
-    void Enable4GModule() {
-        // enable the 4G module
-        ESP_LOGI(TAG, "Enable4GModule");
-        gpio_reset_pin(ML307_POWER_PIN);
-        gpio_set_direction(ML307_POWER_PIN, GPIO_MODE_OUTPUT);
-        gpio_set_level(ML307_POWER_PIN, ML307_POWER_OUTPUT_INVERT ? 0 : 1);
-    }
-    void Disable4GModule() {
-        // enable the 4G module
-        ESP_LOGI(TAG, "Disable4GModule");
-        gpio_reset_pin(ML307_POWER_PIN);
-        gpio_set_direction(ML307_POWER_PIN, GPIO_MODE_OUTPUT);
-        gpio_set_level(ML307_POWER_PIN, ML307_POWER_OUTPUT_INVERT ? 1 : 0);
-    }
     void InitializeButtons() {
         static int first_level = gpio_get_level(BOOT_BUTTON_GPIO);
         boot_button_.OnClick([this]() {
@@ -221,7 +196,6 @@ public:
         InitializeChargingGpio();
         InitializeI2c();
         InitializeIot();
-        CheckNetType();
 
         // InitializeLedStrip();
         // InitializePowerManager();
