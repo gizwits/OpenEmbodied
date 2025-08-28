@@ -231,3 +231,10 @@ void CircularStrip::OnStateChanged() {
             return;
     }
 }
+
+void CircularStrip::TurnOff() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    esp_timer_stop(strip_timer_);
+    led_strip_clear(led_strip_);
+    led_strip_refresh(led_strip_);
+}

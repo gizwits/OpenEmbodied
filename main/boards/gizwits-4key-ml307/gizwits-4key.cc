@@ -39,6 +39,7 @@ private:
     bool volume_down_long_pressed_ = false;
     int64_t dual_long_press_time_ = 0;
     bool is_sleep_ = false;
+    // CircularStrip* led_strip_;
 
     void InitializeI2c() {
         // Initialize I2C peripheral
@@ -57,19 +58,60 @@ private:
 
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
     }
+
+
+
+    void CheckNetType() {
+        if (GetNetworkType() == NetworkType::WIFI) {
+            Disable4GModule();
+        } else if (GetNetworkType() == NetworkType::ML307) {
+            Enable4GModule();
+        }
+        
+    }
+
+    void Enable4GModule() {
+        // enable the 4G module
+        ESP_LOGI(TAG, "Enable4GModule");
+        gpio_reset_pin(ML307_POWER_PIN);
+        gpio_set_direction(ML307_POWER_PIN, GPIO_MODE_OUTPUT);
+        gpio_set_level(ML307_POWER_PIN, ML307_POWER_OUTPUT_INVERT ? 0 : 1);
+    }
+    void Disable4GModule() {
+        // enable the 4G module
+        ESP_LOGI(TAG, "Disable4GModule");
+        gpio_reset_pin(ML307_POWER_PIN);
+        gpio_set_direction(ML307_POWER_PIN, GPIO_MODE_OUTPUT);
+        gpio_set_level(ML307_POWER_PIN, ML307_POWER_OUTPUT_INVERT ? 1 : 0);
+    }
     void InitializeButtons() {
         static int first_level = gpio_get_level(BOOT_BUTTON_GPIO);
         boot_button_.OnClick([this]() {
             WakeUp();
         }); 
-        boot_button_.OnPressRepeat([this](uint16_t count) {
-            ESP_LOGI(TAG, "boot_button_.OnPressRepeat");
-            if(count >= 5){
+        // boot_button_.OnPressRepeat([this](uint16_t count) {
+        //     ESP_LOGI(TAG, "boot_button_.OnPressRepeat");
+        //     if(count >= 5){
+        //         RunResetWifiConfiguration();
+        //     } else {
+        //         Application::GetInstance().ToggleChatState();
+        //     }
+        // });
+
+
+        // void OnPressRepeaDone(std::function<void(uint16_t)> callback);
+        boot_button_.OnPressRepeaDone([this](uint16_t count) {
+            ESP_LOGI(TAG, "boot_button_.OnPressRepeaDone");
+            if(count == 5){
+                SwitchNetworkType();
+                return;
+            }
+            if(count >= 3){
                 RunResetWifiConfiguration();
-            } else {
-                Application::GetInstance().ToggleChatState();
             }
         });
+
+
         boot_button_.OnLongPress([this]() {
             ESP_LOGI(TAG, "boot_button_.OnLongPress");
             auto& app = Application::GetInstance();
@@ -150,6 +192,10 @@ private:
         thing_manager.AddThing(iot::CreateThing("Speaker"));
     }
 
+    // void InitializeLedStrip() {
+    //     led_strip_ = new CircularStrip(BUILTIN_LED_GPIO, 4);
+    // }
+
 
     // void InitializePowerManager() {
     //     power_manager_ =
@@ -175,6 +221,9 @@ public:
         InitializeChargingGpio();
         InitializeI2c();
         InitializeIot();
+        CheckNetType();
+
+        // InitializeLedStrip();
         // InitializePowerManager();
         
         // if (power_manager_) {
@@ -243,10 +292,9 @@ public:
     //     return true;
     // }
 
-    virtual Led* GetLed() override {
-        static CircularStrip led(BUILTIN_LED_GPIO, 4);
-        return &led;
-    }
+    // virtual Led* GetLed() override {
+    //     return led_strip_;
+    // }
     virtual AudioCodec* GetAudioCodec() override {
         static Es8311AudioCodec audio_codec(
             i2c_bus_, 
