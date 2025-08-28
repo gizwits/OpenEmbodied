@@ -38,7 +38,7 @@ private:
     Settings power_counter_settings_;
     esp_timer_handle_t power_counter_timer_;
     static constexpr int POWER_COUNT_THRESHOLD = 5;  // 触发阈值
-    static constexpr int POWER_COUNT_RESET_DELAY_MS = 2000;  // 2秒后重置
+    static constexpr int POWER_COUNT_RESET_DELAY_MS = 4000;  // 2秒后重置
 
     int64_t prev_last_click_time_ = 0;
     int64_t next_last_click_time_ = 0;
