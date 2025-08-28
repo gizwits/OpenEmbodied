@@ -101,7 +101,7 @@ private:
 
         // void OnPressRepeaDone(std::function<void(uint16_t)> callback);
         boot_button_.OnPressRepeaDone([this](uint16_t count) {
-            ESP_LOGI(TAG, "boot_button_.OnPressRepeaDone");
+            ESP_LOGI(TAG, "boot_button_.OnPressRepeaDone, count: %d", count);
             if(count == 5){
                 SwitchNetworkType();
                 return;
