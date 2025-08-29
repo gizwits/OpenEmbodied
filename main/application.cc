@@ -442,7 +442,7 @@ void Application::Start() {
 
     // Check for new firmware version or get the MQTT broker address
     Ota ota;
-    // CheckNewVersion(ota);
+    CheckNewVersion(ota);
 
     // Initialize the protocol
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
@@ -980,11 +980,8 @@ void Application::initGizwitsServer() {
     mqtt_client.OnRoomParamsUpdated([this](const RoomParams& params, bool is_mutual) {
         // 判断 protocol_ 是否启动
         // 如果启动了，就断开重新连接
-        bool need_auto_reconnect = false;
-
         if (protocol_->IsAudioChannelOpened()) {
             // 先停止所有正在进行的操作
-            need_auto_reconnect = true;
             Schedule([this, is_mutual]() {
                 QuitTalking();
                 if (!is_mutual) {
@@ -1006,7 +1003,7 @@ void Application::initGizwitsServer() {
         }, "initGizwitsServer_SendTraceLog");
         
         protocol_->UpdateRoomParams(params);
-        if(device_state_ == kDeviceStateSleeping || need_auto_reconnect == true) {
+        if(device_state_ == kDeviceStateSleeping) {
             Schedule([this]() {
                 // 直接连接
                 SetDeviceState(kDeviceStateConnecting);

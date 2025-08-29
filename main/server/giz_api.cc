@@ -614,6 +614,7 @@ int32_t GServer::getFirmwareUpdate(const char* hw_version, const char* sw_versio
     http->Close();
     
 
+    ESP_LOGI(TAG, "Firmware Update Response: %s", response.c_str());
     // 解析响应
     char* params = strdup(response.c_str());
     char* saveptr = nullptr;
