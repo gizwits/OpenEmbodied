@@ -825,7 +825,7 @@ void WebsocketProtocol::HandleReconnect() {
     
     ESP_LOGI(TAG, "尝试重连... (%d/%d)", reconnect_attempts_, MAX_RECONNECT_ATTEMPTS);
     
-    // 创建重连任务，使用静态函数包装以避免lambda捕获问题（兼容更多编译器）
+    // 创建重连任务
     xTaskCreate(ReconnectTask, "ws_reconnect_task", 8192, this, 5, nullptr);
 }
 void WebsocketProtocol::ReconnectTask(void* param) {

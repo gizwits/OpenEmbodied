@@ -650,6 +650,10 @@ void MqttClient::sendTask(void* arg) {
                 } else {
                     client->GetRoomInfo();
                 }
+            } else if (msg.qos == MQTT_SEND_CONTROL_TOKEN_REFRESH) {
+                // 处理 token 刷新请求
+                ESP_LOGI(TAG, "Processing token refresh in send task");
+                client->GetRoomInfo(false);
             } else {
                 // 正常发送MQTT消息
                 if (client->mqtt_) {
@@ -1222,10 +1226,15 @@ void MqttClient::tokenRefreshTimerCallback(TimerHandle_t xTimer) {
     MqttClient* client = static_cast<MqttClient*>(pvTimerGetTimerID(xTimer));
     if (client) {
         ESP_LOGI(TAG, "Token refresh timer triggered for client: %p", (void*)client);
-        ESP_LOGI(TAG, "Automatically refreshing room info (non-active request)");
-        // 自动刷新，标记为非主动请求
-        client->GetRoomInfo(false);
-    } else {
-        ESP_LOGE(TAG, "Token refresh timer callback: invalid client pointer");
+        
+        // 发送消息到队列
+        if (client->send_queue_) {
+            mqtt_send_msg_t msg = {0};
+            msg.topic = nullptr;
+            msg.payload = nullptr;
+            msg.payload_len = 0;
+            msg.qos = MQTT_SEND_CONTROL_TOKEN_REFRESH; 
+            xQueueSendToBack(client->send_queue_, &msg, 0);
+        }
     }
 }

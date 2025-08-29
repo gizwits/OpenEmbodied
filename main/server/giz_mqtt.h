@@ -37,6 +37,7 @@
 
 // 发送队列控制消息标识（使用qos字段传递特殊控制）
 #define MQTT_SEND_CONTROL_ROOMINFO  (-1)
+#define MQTT_SEND_CONTROL_TOKEN_REFRESH  (-2)
 
 
 struct Attr {
