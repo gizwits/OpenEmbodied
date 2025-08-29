@@ -335,6 +335,8 @@ choice BOARD_TYPE
         bool "九川智能"
      config BOARD_TYPE_GIZWITS_YOUQU
         bool "Gizwits Youqu"
+    config BOARD_TYPE_GIZWITS_4KEY
+        bool "Gizwits 4key"
     config BOARD_TYPE_LABPLUS_MPYTHON_V3
         bool "labplus mpython_v3 board"
         depends on IDF_TARGET_ESP32S3

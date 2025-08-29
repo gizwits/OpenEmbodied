@@ -95,7 +95,7 @@ public:
     bool IsAudioProcessorRunning() const { return xEventGroupGetBits(event_group_) & AS_EVENT_AUDIO_PROCESSOR_RUNNING; }
 
     void EnableWakeWordDetection(bool enable);
-    void EnableVoiceProcessing(bool enable);
+    void EnableVoiceProcessing(bool enable, bool force_stop = true);
     void EnableAudioTesting(bool enable);
     void EnableDeviceAec(bool enable);
 
@@ -119,6 +119,7 @@ private:
     OpusResampler reference_resampler_;
     OpusResampler output_resampler_;
     DebugStatistics debug_statistics_;
+    bool pending_voice_processing_start_ = false;
 
     EventGroupHandle_t event_group_;
 

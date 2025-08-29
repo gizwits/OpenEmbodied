@@ -299,6 +299,27 @@ void AudioService::AudioOutputTask() {
         last_output_time_ = std::chrono::steady_clock::now();
         debug_statistics_.playback_count++;
 
+        // 检查是否需要启动语音处理
+        if (pending_voice_processing_start_) {
+            bool should_start_voice_processing = false;
+            {
+                std::lock_guard<std::mutex> guard(audio_queue_mutex_);
+                if (audio_decode_queue_.empty()) {
+                    // 解码队列为空，可以安全启动语音处理
+                    ESP_LOGD(TAG, "Audio playback completed, enabling voice processing");
+                    pending_voice_processing_start_ = false;
+                    should_start_voice_processing = true;
+                }
+            }
+            
+            if (should_start_voice_processing) {
+                ResetDecoder();
+                audio_input_need_warmup_ = true;
+                audio_processor_->Start();
+                xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_PROCESSOR_RUNNING);
+            }
+        }
+
 #if CONFIG_USE_SERVER_AEC
         /* Record the timestamp for server AEC */
         if (task->timestamp > 0) {
@@ -493,22 +514,48 @@ void AudioService::EnableWakeWordDetection(bool enable) {
     }
 }
 
-void AudioService::EnableVoiceProcessing(bool enable) {
-    ESP_LOGD(TAG, "%s voice processing", enable ? "Enabling" : "Disabling");
+void AudioService::EnableVoiceProcessing(bool enable, bool force_stop) {
+    ESP_LOGI(TAG, "%s voice processing (force_stop: %s)", enable ? "Enabling" : "Disabling", force_stop ? "true" : "false");
     if (enable) {
         if (!audio_processor_initialized_) {
             audio_processor_->Initialize(codec_, OPUS_FRAME_DURATION_MS);
             audio_processor_initialized_ = true;
         }
 
-        /* We should make sure no audio is playing */
-        ResetDecoder();
-        audio_input_need_warmup_ = true;
-        audio_processor_->Start();
-        xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_PROCESSOR_RUNNING);
+        if (force_stop) {
+            // 强制立即进入聆听模式
+            /* We should make sure no audio is playing */
+            ResetDecoder();
+            audio_input_need_warmup_ = true;
+            audio_processor_->Start();
+            xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_PROCESSOR_RUNNING);
+        } else {
+            // 等待播放完成后再进入聆听模式
+            bool should_start_immediately = false;
+            {
+                std::lock_guard<std::mutex> guard(audio_queue_mutex_);
+                if (audio_decode_queue_.empty()) {
+                    // 没有音频在播放，立即进入聆听模式
+                    should_start_immediately = true;
+                } else {
+                    // 有音频在播放，设置标志等待播放完成
+                    ESP_LOGD(TAG, "Waiting for audio playback to complete before enabling voice processing");
+                    pending_voice_processing_start_ = true;
+                    // 不立即启动，等待播放完成后在 AudioOutputTask 中检查并启动
+                }
+            }
+            
+            if (should_start_immediately) {
+                ResetDecoder();
+                audio_input_need_warmup_ = true;
+                audio_processor_->Start();
+                xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_PROCESSOR_RUNNING);
+            }
+        }
     } else {
         audio_processor_->Stop();
         xEventGroupClearBits(event_group_, AS_EVENT_AUDIO_PROCESSOR_RUNNING);
+        pending_voice_processing_start_ = false; // 清除待启动标志
     }
 }
 
