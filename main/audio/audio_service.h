@@ -105,6 +105,15 @@ public:
     void EnableVoiceProcessing(bool enable, bool force_stop = true);
     void EnableAudioTesting(bool enable);
     void EnableDeviceAec(bool enable);
+    
+    // 验证语音处理状态
+    bool VerifyVoiceProcessingState(bool expected_enabled = true);
+    
+    // 带重试机制的语音处理启用
+    bool EnableVoiceProcessingWithRetry(bool enable, bool force_stop = true, int timeout_ms = 2000);
+    
+    // 显示音频服务完整状态（用于调试）
+    void LogAudioServiceState();
 
     void SetCallbacks(AudioServiceCallbacks& callbacks);
 

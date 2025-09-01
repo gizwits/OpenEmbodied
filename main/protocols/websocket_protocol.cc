@@ -20,7 +20,7 @@
 #if CONFIG_IDF_TARGET_ESP32S3
 #define MAX_CACHED_PACKETS 10
 #else
-#define MAX_CACHED_PACKETS 4
+#define MAX_CACHED_PACKETS 8
 #endif
 
 struct Emotion {
@@ -101,6 +101,7 @@ void WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
         // 如果距离用户说话结束不到1秒，忽略音频上传
         if (elapsed < 1000) {
             ESP_LOGW(TAG, "Ignoring audio upload, elapsed: %lld ms since speech stopped", elapsed);
+            // 直接返回，不修改const对象，让调用方负责清理
             return;
         } else {
             // 超过1秒后，清除记录
@@ -408,6 +409,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
                                         on_incoming_audio_(std::move(cached_packet));
                                     }
                                     packet_cache_.clear();
+                                    packet_cache_.shrink_to_fit();
                                     ESP_LOGI(TAG, "Pushed %d cached packets", cached_packet_count_);
                                 }
                                 // 推送当前包
@@ -468,7 +470,6 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 cached_packet_count_ = 0;
                 packet_cache_.clear();
 
-
                 // 重置打断记录状态，因为这是新对话的开始
                 abort_speaking_recorded_ = false;
                 // 重置语音停止记录状态，因为对话已完成
@@ -490,6 +491,14 @@ bool WebsocketProtocol::OpenAudioChannel() {
                     // 结束流程
                     is_start_progress_ = false;
                 }
+
+
+                // 清理消息缓存，防止内存泄漏
+                message_cache_.clear();
+                message_cache_.shrink_to_fit();
+                message_buffer_.clear();
+                message_buffer_.shrink_to_fit();
+
             } else if (event_type == "input_audio_buffer.speech_started") {
 
                 MqttClient::getInstance().sendTraceLog("info", "input_audio_buffer.speech_started");
@@ -711,12 +720,14 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "\"frame_size_ms\":60,";
     message += "\"limit_config\":{";
 #ifdef CONFIG_IDF_TARGET_ESP32C2
+    
     if (network_type == NetworkType::ML307) {
         message += "\"period\":1,";
         message += "\"max_frame_num\":25";
     } else {
-        message += "\"period\":3,";
-        message += "\"max_frame_num\":50";
+        ESP_LOGI(TAG, "network_type: %d", static_cast<int>(network_type));
+        message += "\"period\":1,";
+        message += "\"max_frame_num\":17";
     }
 #else
     message += "\"period\":1,";

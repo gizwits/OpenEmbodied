@@ -67,7 +67,7 @@ void WifiBoard::EnterWifiConfigMode() {
     while (true) {
         int free_sram = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
         int min_free_sram = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
-        ESP_LOGI(TAG, "Free internal: %u minimal internal: %u", free_sram, min_free_sram);
+        ESP_LOGW(TAG, "Free internal: %u minimal internal: %u", free_sram, min_free_sram);
         vTaskDelay(pdMS_TO_TICKS(10000));
     }
 }
