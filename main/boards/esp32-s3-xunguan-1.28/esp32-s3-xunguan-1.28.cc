@@ -293,34 +293,34 @@ private:
         static int first_level = gpio_get_level(BOOT_BUTTON_GPIO);
         ESP_LOGI(TAG, "first_level: %d", first_level);
 
-        touch_button_.OnPressDown([this]() {
+        // touch_button_.OnPressDown([this]() {
           
-            ESP_LOGI(TAG, "touch_button_.OnPressDown");
+        //     ESP_LOGI(TAG, "touch_button_.OnPressDown");
 
-            TickType_t current_time = xTaskGetTickCount();
-            const TickType_t touch_cooldown = pdMS_TO_TICKS(5000); // 5秒冷却时间
+        //     TickType_t current_time = xTaskGetTickCount();
+        //     const TickType_t touch_cooldown = pdMS_TO_TICKS(5000); // 5秒冷却时间
             
-            // 检查是否已经过了冷却时间
-            if (current_time - last_touch_time_ >= touch_cooldown) {
-                last_touch_time_ = current_time; // 更新上次触发时间
+        //     // 检查是否已经过了冷却时间
+        //     if (current_time - last_touch_time_ >= touch_cooldown) {
+        //         last_touch_time_ = current_time; // 更新上次触发时间
 
-                //切换表情
-                if (CheckAndHandleEnterSleepMode()) {
-                    // 交给休眠逻辑托管
-                    ESP_LOGI(TAG, "触摸唤醒");
-                    return;
-                }
-                display_->SetEmotion("loving");
-                if (ChannelIsOpen()) {
-                    Application::GetInstance().SendTextToAI("用户正在抚摸你");
-                } else {
-                    ESP_LOGI("touch", "Channel is not open");
-                    Application::GetInstance().ToggleChatState();
-                }
-            } else {
-                ESP_LOGI("touch", "Touch detected but in cooldown period");
-            }
-        });
+        //         //切换表情
+        //         if (CheckAndHandleEnterSleepMode()) {
+        //             // 交给休眠逻辑托管
+        //             ESP_LOGI(TAG, "触摸唤醒");
+        //             return;
+        //         }
+        //         display_->SetEmotion("loving");
+        //         if (ChannelIsOpen()) {
+        //             Application::GetInstance().SendTextToAI("用户正在抚摸你");
+        //         } else {
+        //             ESP_LOGI("touch", "Channel is not open");
+        //             Application::GetInstance().ToggleChatState();
+        //         }
+        //     } else {
+        //         ESP_LOGI("touch", "Touch detected but in cooldown period");
+        //     }
+        // });
 
         boot_button_.OnClick([this]() {
             if (CheckAndHandleEnterSleepMode()) {

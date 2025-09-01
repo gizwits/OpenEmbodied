@@ -613,9 +613,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "\"id\":\"" + std::string(event_id) + "\",";
     message += "\"event_type\":\"chat.update\",";
     message += "\"data\":{";
-    if (room_params_.need_play_prologue) {
-        message += "\"need_play_prologue\":true,";
-    }
+    message += "\"need_play_prologue\":true,";
     message += "\"event_subscriptions\": [";
     message += "\"chat.created\",";
     message += "\"chat.updated\",";
