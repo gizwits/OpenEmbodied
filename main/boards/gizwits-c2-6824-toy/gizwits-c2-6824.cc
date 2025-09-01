@@ -46,9 +46,6 @@ private:
     void InitializePowerSaveTimer() {
         power_save_timer_ = new PowerSaveTimer(-1, 60 * 20, 60 * 30);
         
-        // 启用轻量级模式，节省内存
-        power_save_timer_->SetLightweightMode(true);
-        
         power_save_timer_->OnEnterSleepMode([this]() {
             ESP_LOGI(TAG, "Shutting down");
             run_sleep_mode(true);
@@ -309,10 +306,6 @@ public:
         DataPointManager::GetInstance().ProcessDataPointValue(name, value);
     }
     
-    // 新增：返回 PowerSaveTimer 实例
-    PowerSaveTimer* GetPowerSaveTimer() override {
-        return power_save_timer_;
-    }
 
 };
 

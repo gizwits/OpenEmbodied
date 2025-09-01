@@ -8,69 +8,35 @@
 
 PowerSaveTimer::PowerSaveTimer(int cpu_max_freq, int seconds_to_sleep, int seconds_to_shutdown)
     : cpu_max_freq_(cpu_max_freq), seconds_to_sleep_(seconds_to_sleep), seconds_to_shutdown_(seconds_to_shutdown) {
-    // 默认使用轻量级模式
-    lightweight_mode_ = true;
+    // esp_timer_create_args_t timer_args = {
+    //     .callback = [](void* arg) {
+    //         auto self = static_cast<PowerSaveTimer*>(arg);
+    //         self->PowerSaveCheck();
+    //     },
+    //     .arg = this,
+    //     .dispatch_method = ESP_TIMER_TASK,
+    //     .name = "power_save_timer",
+    //     .skip_unhandled_events = true,
+    // };
+    // ESP_ERROR_CHECK(esp_timer_create(&timer_args, &power_save_timer_));
 }
 
 PowerSaveTimer::~PowerSaveTimer() {
-    if (power_save_timer_) {
-        esp_timer_stop(power_save_timer_);
-        esp_timer_delete(power_save_timer_);
-    }
-}
-
-void PowerSaveTimer::InitializeTimer() {
-    if (power_save_timer_) {
-        return; // 已经初始化过了
-    }
-    
-    esp_timer_create_args_t timer_args = {
-        .callback = [](void* arg) {
-            auto self = static_cast<PowerSaveTimer*>(arg);
-            self->PowerSaveCheck();
-        },
-        .arg = this,
-        .dispatch_method = ESP_TIMER_TASK,
-        .name = "power_save_timer",
-        .skip_unhandled_events = true,
-    };
-    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &power_save_timer_));
+    esp_timer_stop(power_save_timer_);
+    esp_timer_delete(power_save_timer_);
 }
 
 void PowerSaveTimer::SetEnabled(bool enabled) {
     if (enabled && !enabled_) {
         ticks_ = 0;
         enabled_ = enabled;
-        
-        if (lightweight_mode_) {
-            // 轻量级模式：使用 main loop
-            last_update_time_ = esp_timer_get_time();
-            ESP_LOGI(TAG, "Power save timer enabled (lightweight mode)");
-        } else {
-            // 传统模式：使用独立定时器
-            InitializeTimer();
-            ESP_ERROR_CHECK(esp_timer_start_periodic(power_save_timer_, 1000000));
-            ESP_LOGI(TAG, "Power save timer enabled (timer mode)");
-        }
+        // ESP_ERROR_CHECK(esp_timer_start_periodic(power_save_timer_, 1000000));
+        ESP_LOGI(TAG, "Power save timer enabled");
     } else if (!enabled && enabled_) {
-        if (power_save_timer_) {
-            ESP_ERROR_CHECK(esp_timer_stop(power_save_timer_));
-        }
+        ESP_ERROR_CHECK(esp_timer_stop(power_save_timer_));
         enabled_ = enabled;
         WakeUp();
         ESP_LOGI(TAG, "Power save timer disabled");
-    }
-}
-
-void PowerSaveTimer::Update() {
-    if (!enabled_ || !lightweight_mode_) {
-        return;
-    }
-    
-    uint64_t current_time = esp_timer_get_time();
-    if (current_time - last_update_time_ >= UPDATE_INTERVAL_US) {
-        last_update_time_ = current_time;
-        PowerSaveCheck();
     }
 }
 
@@ -142,8 +108,4 @@ void PowerSaveTimer::WakeUp() {
             on_exit_sleep_mode_();
         }
     }
-}
-
-void PowerSaveTimer::ResetTimer() {
-    ticks_ = 0;
 }

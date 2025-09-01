@@ -10,7 +10,6 @@
 #include "mcp_server.h"
 #include "wifi_station.h"
 #include "watchdog.h"
-#include "power_save_timer.h"
 
 #include "settings.h"
 #include <cstring>
@@ -678,12 +677,6 @@ void Application::MainEventLoop() {
         if (duration >= 2) {
             CheckBatteryLevel();
             last_battery_check_time_ = now;
-        }
-        
-        // 更新 PowerSaveTimer（轻量级模式）
-        auto& board = Board::GetInstance();
-        if (auto* power_save_timer = board.GetPowerSaveTimer()) {
-            power_save_timer->Update();
         }
 
         auto bits = xEventGroupWaitBits(event_group_, MAIN_EVENT_SCHEDULE |
