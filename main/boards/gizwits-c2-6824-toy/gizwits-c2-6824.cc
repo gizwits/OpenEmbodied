@@ -13,7 +13,7 @@
 #include "assets/lang_config.h"
 #include "vb6824.h"
 #include <esp_wifi.h>
-#include "toy_data_point_manager.h"
+#include "data_point_manager.h"
 #include "settings.h"
 #include <esp_timer.h>
 
@@ -180,8 +180,8 @@ private:
     }
 
     void InitializeDataPointManager() {
-        // 设置 ToyDataPointManager 的回调函数
-        ToyDataPointManager::GetInstance().SetCallbacks(
+        // 设置 DataPointManager 的回调函数
+        DataPointManager::GetInstance().SetCallbacks(
             [this]() -> bool { return false; }, // IsCharging - toy 版本可能没有充电功能
             []() -> int { return Application::GetInstance().GetChatMode(); },
             [](int value) { Application::GetInstance().SetChatMode(value); },
@@ -282,27 +282,27 @@ public:
 
     // 数据点相关方法实现
     const char* GetGizwitsProtocolJson() const override {
-        return ToyDataPointManager::GetInstance().GetGizwitsProtocolJson();
+        return DataPointManager::GetInstance().GetGizwitsProtocolJson();
     }
 
     size_t GetDataPointCount() const override {
-        return ToyDataPointManager::GetInstance().GetDataPointCount();
+        return DataPointManager::GetInstance().GetDataPointCount();
     }
 
     bool GetDataPointValue(const std::string& name, int& value) const override {
-        return ToyDataPointManager::GetInstance().GetDataPointValue(name, value);
+        return DataPointManager::GetInstance().GetDataPointValue(name, value);
     }
 
     bool SetDataPointValue(const std::string& name, int value) override {
-        return ToyDataPointManager::GetInstance().SetDataPointValue(name, value);
+        return DataPointManager::GetInstance().SetDataPointValue(name, value);
     }
 
     void GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) override {
-        ToyDataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
+        DataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
     }
 
     void ProcessDataPointValue(const std::string& name, int value) override {
-        ToyDataPointManager::GetInstance().ProcessDataPointValue(name, value);
+        DataPointManager::GetInstance().ProcessDataPointValue(name, value);
     }
 
 };
