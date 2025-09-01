@@ -305,8 +305,6 @@ public:
     void ProcessDataPointValue(const std::string& name, int value) override {
         DataPointManager::GetInstance().ProcessDataPointValue(name, value);
     }
-    
-
 };
 
 DECLARE_BOARD(CustomBoard);

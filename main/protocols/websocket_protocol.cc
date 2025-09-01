@@ -20,7 +20,7 @@
 #if CONFIG_IDF_TARGET_ESP32S3
 #define MAX_CACHED_PACKETS 10
 #else
-#define MAX_CACHED_PACKETS 8
+#define MAX_CACHED_PACKETS 4
 #endif
 
 struct Emotion {
@@ -407,9 +407,9 @@ bool WebsocketProtocol::OpenAudioChannel() {
                                     // 先推送所有缓存的包
                                     for (auto& cached_packet : packet_cache_) {
                                         on_incoming_audio_(std::move(cached_packet));
+                                        vTaskDelay(pdMS_TO_TICKS(5));
                                     }
                                     packet_cache_.clear();
-                                    packet_cache_.shrink_to_fit();
                                     ESP_LOGI(TAG, "Pushed %d cached packets", cached_packet_count_);
                                 }
                                 // 推送当前包
