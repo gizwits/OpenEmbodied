@@ -12,6 +12,9 @@
 #include "camera.h"
 #include "servo.h"
 #include <network_interface.h>
+
+// 前向声明
+class PowerSaveTimer;
 //enum NetworkType
 enum class NetworkType {
     WIFI,
@@ -81,6 +84,7 @@ public:
     virtual void PowerOff() {};
     virtual void ResetPowerSaveTimer() {};  // 新增：重置电源保存定时器
     virtual void WakeUpPowerSaveTimer() {};
+    virtual PowerSaveTimer* GetPowerSaveTimer() { return nullptr; }  // 新增：获取电源保存定时器
     virtual uint8_t GetBrightness() { return 0; }
     virtual void SetBrightness(uint8_t brightness) { }
     virtual uint8_t GetDefaultBrightness() { return 0; }

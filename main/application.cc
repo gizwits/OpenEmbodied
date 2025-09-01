@@ -678,6 +678,12 @@ void Application::MainEventLoop() {
             CheckBatteryLevel();
             last_battery_check_time_ = now;
         }
+        
+        // 更新 PowerSaveTimer（轻量级模式）
+        auto& board = Board::GetInstance();
+        if (auto* power_save_timer = board.GetPowerSaveTimer()) {
+            power_save_timer->Update();
+        }
 
         auto bits = xEventGroupWaitBits(event_group_, MAIN_EVENT_SCHEDULE |
             MAIN_EVENT_SEND_AUDIO |
