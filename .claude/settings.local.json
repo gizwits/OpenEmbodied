@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:docs.espressif.com)"
+      "WebFetch(domain:docs.espressif.com)",
+      "Bash(grep:*)",
+      "Bash(idf.py:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

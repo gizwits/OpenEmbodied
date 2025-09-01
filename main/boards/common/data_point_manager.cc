@@ -17,7 +17,7 @@ DataPointManager& DataPointManager::GetInstance() {
 
 // 标准实现：获取机智云协议配置
 const char* DataPointManager::GetGizwitsProtocolJson() const {
-    return R"json(
+    static const char* protocol_json = R"json(
 {
   "name": "标准设备",
   "packetVersion": "0x00000004",
@@ -212,6 +212,7 @@ const char* DataPointManager::GetGizwitsProtocolJson() const {
   ]
 }
 )json";
+    return protocol_json;
 }
 
 // 标准实现：获取数据点数量
