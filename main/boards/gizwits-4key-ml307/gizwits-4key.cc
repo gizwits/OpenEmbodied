@@ -40,10 +40,6 @@ private:
     int64_t dual_long_press_time_ = 0;
     bool is_sleep_ = false;
 
-    // 新增的网络监控方法声明
-    void InitializeNetworkMonitor();
-    void CheckNetworkStatus();
-
     void InitializeI2c() {
         // Initialize I2C peripheral
         i2c_master_bus_config_t i2c_bus_cfg = {
@@ -61,19 +57,35 @@ private:
 
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
     }
+
     void InitializeButtons() {
         static int first_level = gpio_get_level(BOOT_BUTTON_GPIO);
         boot_button_.OnClick([this]() {
             WakeUp();
         }); 
-        boot_button_.OnPressRepeat([this](uint16_t count) {
-            ESP_LOGI(TAG, "boot_button_.OnPressRepeat");
-            if(count >= 5){
+        // boot_button_.OnPressRepeat([this](uint16_t count) {
+        //     ESP_LOGI(TAG, "boot_button_.OnPressRepeat");
+        //     if(count >= 5){
+        //         RunResetWifiConfiguration();
+        //     } else {
+        //         Application::GetInstance().ToggleChatState();
+        //     }
+        // });
+
+
+        // void OnPressRepeaDone(std::function<void(uint16_t)> callback);
+        boot_button_.OnPressRepeaDone([this](uint16_t count) {
+            ESP_LOGI(TAG, "boot_button_.OnPressRepeaDone, count: %d", count);
+            if(count == 5){
+                SwitchNetworkType();
+                return;
+            }
+            if(count >= 3){
                 RunResetWifiConfiguration();
-            } else {
-                Application::GetInstance().ToggleChatState();
             }
         });
+
+
         boot_button_.OnLongPress([this]() {
             ESP_LOGI(TAG, "boot_button_.OnLongPress");
             auto& app = Application::GetInstance();
@@ -154,6 +166,10 @@ private:
         thing_manager.AddThing(iot::CreateThing("Speaker"));
     }
 
+    // void InitializeLedStrip() {
+    //     led_strip_ = new CircularStrip(BUILTIN_LED_GPIO, 4);
+    // }
+
 
     // void InitializePowerManager() {
     //     power_manager_ =
@@ -179,9 +195,6 @@ public:
         InitializeChargingGpio();
         InitializeI2c();
         InitializeIot();
-
-        // 添加网络监控
-        InitializeNetworkMonitor(); 
         // InitializePowerManager();
         
         // if (power_manager_) {
@@ -250,10 +263,9 @@ public:
     //     return true;
     // }
 
-    virtual Led* GetLed() override {
-        static CircularStrip led(BUILTIN_LED_GPIO, 4);
-        return &led;
-    }
+    // virtual Led* GetLed() override {
+    //     return led_strip_;
+    // }
     virtual AudioCodec* GetAudioCodec() override {
         static Es8311AudioCodec audio_codec(
             i2c_bus_, 

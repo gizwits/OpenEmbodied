@@ -99,7 +99,13 @@ private:
             });
         }
 
-        boot_button_.OnPressRepeat([this](uint16_t count) {
+
+        boot_button_.OnPressRepeaDone([this](uint16_t count) {
+            ESP_LOGI(TAG, "boot_button_.OnPressRepeaDone, count: %d", count);
+            if(count == 5){
+                SwitchNetworkType();
+                return;
+            }
             if(count >= 3){
                 RunResetWifiConfiguration();
             }

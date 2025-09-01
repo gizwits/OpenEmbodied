@@ -3,7 +3,6 @@
 #include "application.h"
 #include "button.h"
 #include "config.h"
-#include "led/gpio_led.h"
 #include "iot/thing_manager.h"
 #include <esp_sleep.h>
 #include "power_save_timer.h"
@@ -32,15 +31,49 @@ private:
     Button volume_down_button_;
     Button prev_button_;
     Button next_button_;
+    PowerSaveTimer* power_save_timer_;
+
 
     // 上电计数器相关
     Settings power_counter_settings_;
     esp_timer_handle_t power_counter_timer_;
     static constexpr int POWER_COUNT_THRESHOLD = 5;  // 触发阈值
-    static constexpr int POWER_COUNT_RESET_DELAY_MS = 2000;  // 2秒后重置
+    static constexpr int POWER_COUNT_RESET_DELAY_MS = 4000;  // 2秒后重置
 
     int64_t prev_last_click_time_ = 0;
     int64_t next_last_click_time_ = 0;
+
+    void InitializePowerSaveTimer() {
+        power_save_timer_ = new PowerSaveTimer(-1, 60 * 20, 60 * 30);
+        power_save_timer_->OnEnterSleepMode([this]() {
+            ESP_LOGI(TAG, "Shutting down");
+            run_sleep_mode(true);
+        });
+        power_save_timer_->OnExitSleepMode([this]() {
+        });
+        power_save_timer_->OnShutdownRequest([this]() {
+            
+        });
+        power_save_timer_->SetEnabled(true);
+    }
+
+    void run_sleep_mode(bool need_delay = true){
+        auto& application = Application::GetInstance();
+        if (need_delay) {
+            application.QuitTalking();
+            GetAudioCodec()->EnableOutput(true);
+            application.Alert("", "", "", Lang::Sounds::P3_SLEEP);
+            vTaskDelay(pdMS_TO_TICKS(1500));
+            ESP_LOGI(TAG, "Sleep mode");
+        }
+        vb6824_shutdown();
+        vTaskDelay(pdMS_TO_TICKS(200));
+        // 杰挺不需要唤醒源
+        // esp_deep_sleep_enable_gpio_wakeup(1ULL << BOOT_BUTTON_GPIO, ESP_GPIO_WAKEUP_GPIO_LOW);
+        
+        esp_deep_sleep_start();
+    }
+
 
     // 定时器回调函数
     static void PowerCounterTimerCallback(void* arg) {
@@ -186,12 +219,21 @@ public:
         InitializeButtons();
         InitializeIot();
         InitializeDataPointManager();
+        InitializePowerSaveTimer();
 
         ESP_LOGI(TAG, "Initializing Data Point Manager...");
         ESP_LOGI(TAG, "Data Point Manager initialized.");
 
         InitializeGpio(POWER_GPIO, true);
-        InitializeGpio(POWER_GPIO, true);
+
+        gpio_config_t io_conf = {};
+        io_conf.pin_bit_mask = (1ULL << LED_GPIO);
+        io_conf.mode = GPIO_MODE_OUTPUT;
+        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        io_conf.intr_type = GPIO_INTR_DISABLE;
+        gpio_config(&io_conf);
+        gpio_set_level(LED_GPIO, 0);
 
         // 检查上电计数
         CheckPowerCount();
@@ -229,10 +271,10 @@ public:
         }
     }
 
-    virtual Led* GetLed() override {
-        static GpioLed led(LED_GPIO);
-        return &led;
-    }
+    // virtual Led* GetLed() override {
+    //     static GpioLed led(LED_GPIO);
+    //     return &led;
+    // }
 
     virtual AudioCodec* GetAudioCodec() override {
         return &audio_codec;
