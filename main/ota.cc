@@ -62,13 +62,12 @@ bool Ota::CheckVersion() {
     std::string hw_version = BOARD_NAME;
     
     // Use GServer to check for firmware updates
-    auto& gserver = GServer::getInstance();
     bool has_update = false;
     std::string did = Auth::getInstance().getDeviceId();
     
      if (!did.empty()) {
         // 存在 did的情况
-        gserver.getFirmwareUpdate(
+        GServer::getFirmwareUpdate(
             hw_version.c_str(),
             current_version_.c_str(),
             [this, &has_update](const char* package_type, const char* package_md5, const char* package_url, const char* sw_version) {
