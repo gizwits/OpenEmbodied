@@ -10,6 +10,7 @@
 #include "mcp_server.h"
 #include "wifi_station.h"
 #include "watchdog.h"
+#include "power_save_timer.h"
 
 #include "settings.h"
 #include <cstring>
