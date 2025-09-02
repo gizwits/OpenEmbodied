@@ -396,6 +396,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
                             packet.frame_duration = OPUS_FRAME_DURATION_MS;
                             packet.payload.assign(audio_data_buffer_.begin(), audio_data_buffer_.begin() + actual_len);
                             
+                            // ESP_LOGI(TAG, "get package");
                             if (cached_packet_count_ < MAX_CACHED_PACKETS) {
                                 // 还在缓存阶段，添加到缓存
                                 packet_cache_.push_back(std::move(packet));
@@ -407,7 +408,6 @@ bool WebsocketProtocol::OpenAudioChannel() {
                                     // 先推送所有缓存的包
                                     for (auto& cached_packet : packet_cache_) {
                                         on_incoming_audio_(std::move(cached_packet));
-                                        vTaskDelay(pdMS_TO_TICKS(5));
                                     }
                                     packet_cache_.clear();
                                     ESP_LOGI(TAG, "Pushed %d cached packets", cached_packet_count_);
@@ -415,6 +415,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
                                 // 推送当前包
                                 on_incoming_audio_(std::move(packet));
                             }
+                            // on_incoming_audio_(std::move(packet));
                         }
                     }
                 }

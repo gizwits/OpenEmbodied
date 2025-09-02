@@ -4,7 +4,8 @@
       "WebFetch(domain:docs.espressif.com)",
       "Bash(grep:*)",
       "Bash(idf.py:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ],
     "deny": [],
     "ask": []

@@ -845,7 +845,8 @@ void Application::SetDeviceState(DeviceState state) {
                 // Send the start listening command
                 protocol_->SendStartListening(listening_mode_);
                 ESP_LOGI(TAG, "SetDeviceState_Listening_SendStartListening");
-                audio_service_.EnableVoiceProcessingWithRetry(true, false, 5000);
+                // audio_service_.EnableVoiceProcessingWithRetry(true, false, 5000);
+                audio_service_.EnableVoiceProcessing(true, false);
                 audio_service_.EnableWakeWordDetection(false);
             }
             break;

@@ -161,7 +161,7 @@ void AudioService::Start() {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->AudioInputTask();
         vTaskDelete(NULL);
-    }, "audio_input", input_task_size, this, 8, &audio_input_task_handle_);
+    }, "audio_input", input_task_size, this, 6, &audio_input_task_handle_);  // 提高优先级从 8 到 6
 
     /* Start the audio output task */
     // xTaskCreate([](void* arg) {
@@ -180,7 +180,7 @@ void AudioService::Start() {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->OpusCodecTask();
         vTaskDelete(NULL);
-    }, "opus_codec", task_size, this, 2, &opus_codec_task_handle_);
+    }, "opus_codec", task_size, this, 5, &opus_codec_task_handle_);  // 提高优先级从 2 到 5
 }
 
 void AudioService::Stop() {
@@ -415,28 +415,6 @@ void AudioService::OpusCodecTask() {
             break;
         }
 
-        /* Check if we need to start voice processing after playback */
-        if (pending_voice_processing_start_ && audio_decode_queue_.empty()) {
-            ESP_LOGI(TAG, "Audio playback completed, starting pending voice processing");
-            pending_voice_processing_start_ = false;
-            lock.unlock();  // 解锁以避免死锁
-            
-            ResetDecoder();
-            audio_input_need_warmup_ = true;
-            audio_processor_->Start();
-            xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_PROCESSOR_RUNNING);
-            
-            // 验证状态切换是否成功
-            if (IsAudioProcessorRunning()) {
-                ESP_LOGI(TAG, "Successfully entered listening state after playback");
-            } else {
-                ESP_LOGE(TAG, "Failed to enter listening state after playback");
-            }
-            
-            lock.lock();  // 重新加锁
-            continue;  // 继续循环
-        }
-
         /* Decode the audio from decode queue and output directly */
         if (!audio_decode_queue_.empty()) {
             auto packet = std::move(audio_decode_queue_.front());
@@ -502,12 +480,6 @@ void AudioService::OpusCodecTask() {
                         audio_processor_->Start();
                         xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_PROCESSOR_RUNNING);
                         
-                        // 验证状态切换是否成功
-                        if (IsAudioProcessorRunning()) {
-                            ESP_LOGI(TAG, "Successfully entered listening state after audio playback");
-                        } else {
-                            ESP_LOGE(TAG, "Failed to enter listening state after audio playback");
-                        }
                     }
                 }
 
@@ -731,12 +703,6 @@ void AudioService::EnableVoiceProcessing(bool enable, bool force_stop) {
             audio_processor_->Start();
             xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_PROCESSOR_RUNNING);
             
-            // 验证状态切换是否成功
-            if (IsAudioProcessorRunning()) {
-                ESP_LOGI(TAG, "Successfully entered listening state (force mode)");
-            } else {
-                ESP_LOGE(TAG, "Failed to enter listening state (force mode)");
-            }
         } else {
             // 正常模式 - 等待播放完成后再进入聆听模式
             ESP_LOGI(TAG, "Normal mode - checking audio playback status");
@@ -762,12 +728,6 @@ void AudioService::EnableVoiceProcessing(bool enable, bool force_stop) {
                 audio_processor_->Start();
                 xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_PROCESSOR_RUNNING);
                 
-                // 验证状态切换是否成功
-                if (IsAudioProcessorRunning()) {
-                    ESP_LOGI(TAG, "Successfully entered listening state (immediate)");
-                } else {
-                    ESP_LOGE(TAG, "Failed to enter listening state (immediate)");
-                }
             } else {
                 ESP_LOGI(TAG, "Voice processing will start after audio playback completes");
             }
@@ -784,12 +744,6 @@ void AudioService::EnableVoiceProcessing(bool enable, bool force_stop) {
         xEventGroupClearBits(event_group_, AS_EVENT_AUDIO_PROCESSOR_RUNNING);
         pending_voice_processing_start_ = false; // 清除待启动标志
         
-        // 验证状态切换是否成功
-        if (!IsAudioProcessorRunning()) {
-            ESP_LOGI(TAG, "Successfully disabled voice processing");
-        } else {
-            ESP_LOGE(TAG, "Failed to disable voice processing");
-        }
     }
 }
 
@@ -868,45 +822,6 @@ bool AudioService::EnableVoiceProcessingWithRetry(bool enable, bool force_stop, 
         ESP_LOGE(TAG, "Failed to start voice processing even after force mode");
         return false;
     }
-}
-
-void AudioService::LogAudioServiceState() {
-    ESP_LOGI(TAG, "=== Audio Service Complete State ===");
-    ESP_LOGI(TAG, "Service stopped: %s", service_stopped_ ? "true" : "false");
-    ESP_LOGI(TAG, "Audio processor initialized: %s", audio_processor_initialized_ ? "true" : "false");
-    ESP_LOGI(TAG, "Wake word initialized: %s", wake_word_initialized_ ? "true" : "false");
-    ESP_LOGI(TAG, "Voice detected: %s", voice_detected_ ? "true" : "false");
-    ESP_LOGI(TAG, "Audio input need warmup: %s", audio_input_need_warmup_ ? "true" : "false");
-    ESP_LOGI(TAG, "Pending voice processing start: %s", pending_voice_processing_start_ ? "true" : "false");
-    
-    // 事件组状态
-    EventBits_t events = xEventGroupGetBits(event_group_);
-    ESP_LOGI(TAG, "Event group bits: 0x%08x", (unsigned int)events);
-    ESP_LOGI(TAG, "  - Audio testing running: %s", (events & AS_EVENT_AUDIO_TESTING_RUNNING) ? "true" : "false");
-    ESP_LOGI(TAG, "  - Wake word running: %s", (events & AS_EVENT_WAKE_WORD_RUNNING) ? "true" : "false");
-    ESP_LOGI(TAG, "  - Audio processor running: %s", (events & AS_EVENT_AUDIO_PROCESSOR_RUNNING) ? "true" : "false");
-    ESP_LOGI(TAG, "  - Playback not empty: %s", (events & AS_EVENT_PLAYBACK_NOT_EMPTY) ? "true" : "false");
-    
-    // 队列状态
-    {
-        std::lock_guard<std::mutex> lock(audio_queue_mutex_);
-        ESP_LOGI(TAG, "Queue status:");
-        ESP_LOGI(TAG, "  - Audio decode queue: %zu packets", audio_decode_queue_.size());
-        ESP_LOGI(TAG, "  - Audio send queue: %zu packets", audio_send_queue_.size());
-        ESP_LOGI(TAG, "  - Audio testing queue: %zu packets", audio_testing_queue_.size());
-#ifndef CONFIG_USE_EYE_STYLE_VB6824
-        ESP_LOGI(TAG, "  - Audio encode queue: %zu tasks", audio_encode_queue_.size());
-#endif
-        ESP_LOGI(TAG, "  - Timestamp queue: %zu timestamps", timestamp_queue_.size());
-    }
-    
-    // 任务状态
-    ESP_LOGI(TAG, "Task status:");
-    ESP_LOGI(TAG, "  - Audio input task: %s", (audio_input_task_handle_ != nullptr) ? "running" : "stopped");
-    ESP_LOGI(TAG, "  - Audio output task: %s", (audio_output_task_handle_ != nullptr) ? "running" : "stopped");
-    ESP_LOGI(TAG, "  - Opus codec task: %s", (opus_codec_task_handle_ != nullptr) ? "running" : "stopped");
-    
-    ESP_LOGI(TAG, "=====================================");
 }
 
 void AudioService::EnableAudioTesting(bool enable) {

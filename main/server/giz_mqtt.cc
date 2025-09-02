@@ -282,8 +282,8 @@ bool MqttClient::initialize() {
     }
 
     // Create tasks
-    xTaskCreate(messageReceiveHandler, "mqtt_rcv", MQTT_TASK_STACK_SIZE_RCV, this, 5, nullptr);
-    xTaskCreate(sendTask, "mqtt_send", MQTT_TASK_STACK_SIZE_RESEND, this, 5, nullptr);
+    xTaskCreate(messageReceiveHandler, "mqtt_rcv", MQTT_TASK_STACK_SIZE_RCV, this, 1, nullptr);
+    xTaskCreate(sendTask, "mqtt_send", MQTT_TASK_STACK_SIZE_RESEND, this, 1, nullptr);
 
     // 打印内存使用情况
     printMemoryUsage();

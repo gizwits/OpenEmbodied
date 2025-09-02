@@ -112,9 +112,6 @@ public:
     // 带重试机制的语音处理启用
     bool EnableVoiceProcessingWithRetry(bool enable, bool force_stop = true, int timeout_ms = 2000);
     
-    // 显示音频服务完整状态（用于调试）
-    void LogAudioServiceState();
-
     void SetCallbacks(AudioServiceCallbacks& callbacks);
 
     bool PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> packet, bool wait = false);
