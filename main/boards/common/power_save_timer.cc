@@ -8,17 +8,17 @@
 
 PowerSaveTimer::PowerSaveTimer(int cpu_max_freq, int seconds_to_sleep, int seconds_to_shutdown)
     : cpu_max_freq_(cpu_max_freq), seconds_to_sleep_(seconds_to_sleep), seconds_to_shutdown_(seconds_to_shutdown) {
-    // esp_timer_create_args_t timer_args = {
-    //     .callback = [](void* arg) {
-    //         auto self = static_cast<PowerSaveTimer*>(arg);
-    //         self->PowerSaveCheck();
-    //     },
-    //     .arg = this,
-    //     .dispatch_method = ESP_TIMER_TASK,
-    //     .name = "power_save_timer",
-    //     .skip_unhandled_events = true,
-    // };
-    // ESP_ERROR_CHECK(esp_timer_create(&timer_args, &power_save_timer_));
+    esp_timer_create_args_t timer_args = {
+        .callback = [](void* arg) {
+            auto self = static_cast<PowerSaveTimer*>(arg);
+            self->PowerSaveCheck();
+        },
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "power_save_timer",
+        .skip_unhandled_events = true,
+    };
+    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &power_save_timer_));
 }
 
 PowerSaveTimer::~PowerSaveTimer() {
@@ -30,7 +30,7 @@ void PowerSaveTimer::SetEnabled(bool enabled) {
     if (enabled && !enabled_) {
         ticks_ = 0;
         enabled_ = enabled;
-        // ESP_ERROR_CHECK(esp_timer_start_periodic(power_save_timer_, 1000000));
+        ESP_ERROR_CHECK(esp_timer_start_periodic(power_save_timer_, 1000000));
         ESP_LOGI(TAG, "Power save timer enabled");
     } else if (!enabled && enabled_) {
         ESP_ERROR_CHECK(esp_timer_stop(power_save_timer_));
