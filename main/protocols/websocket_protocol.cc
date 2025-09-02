@@ -17,6 +17,12 @@
 
 #define MAX_AUDIO_PACKET_SIZE 512
 
+// WebSocket audio send path constants
+// If packet/frame size changes, adjust these accordingly
+#define WS_AUDIO_BASE64_LEN 56           // Observed base64 length for current audio packet
+#define WS_BASE64_BUFFER_BYTES 64        // Base64 buffer capacity (includes null terminator headroom)
+#define WS_MESSAGE_BUFFER_RESERVE 320    // Typical JSON envelope reserve to avoid realloc churn
+
 #if CONFIG_IDF_TARGET_ESP32S3
 #define MAX_CACHED_PACKETS 10
 #else
@@ -111,19 +117,17 @@ bool WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
     }
     // 提取前面一半的数据
     std::vector<uint8_t> data = packet.payload;
-    // Calculate required base64 buffer size
-    size_t out_len = 4 * ((data.size() + 2) / 3);
-    
-    // Resize base64 buffer if needed
-    if (out_len + 1 > base64_buffer_size_) {
-        base64_buffer_.reset(new char[out_len + 1]);
-        base64_buffer_size_ = out_len + 1;
+    // 需要注意：如果改了包长度，这里的宏需要同步调整
+    constexpr size_t kExpectedBase64Len = WS_AUDIO_BASE64_LEN;
+    constexpr size_t kMaxBase64Bytes = WS_BASE64_BUFFER_BYTES;
+    if (base64_buffer_size_ == 0) {
+        base64_buffer_.reset(new char[kMaxBase64Bytes]);
+        base64_buffer_size_ = kMaxBase64Bytes;
         if (!base64_buffer_) {
             ESP_LOGE(TAG, "Failed to allocate base64 buffer");
             return false;
         }
     }
-
     size_t encoded_len;
     mbedtls_base64_encode((unsigned char *)base64_buffer_.get(), base64_buffer_size_, &encoded_len,
                          (const unsigned char*)data.data(), data.size());
@@ -134,9 +138,11 @@ bool WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
     uint32_t random_value = esp_random();
     snprintf(event_id, sizeof(event_id), "%lu", random_value);
 
-    // Reuse message buffer
+    // Reuse message buffer with small fixed reserve
     message_buffer_.clear();
-    message_buffer_.reserve(256 + out_len);  // Pre-allocate space
+    if (message_buffer_.capacity() < WS_MESSAGE_BUFFER_RESERVE) {
+        message_buffer_.reserve(WS_MESSAGE_BUFFER_RESERVE);
+    }
     message_buffer_ = "{";
     message_buffer_ += "\"id\":\"" + std::string(event_id) + "\",";
     message_buffer_ += "\"event_type\":\"input_audio_buffer.append\",";
@@ -147,8 +153,6 @@ bool WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
 
     // 复制并发送
     websocket_->Send(message_buffer_.data(), message_buffer_.size(), false);
-    // ESP_LOGI(TAG, "SendAudio success: %d", message_buffer_.size());
-    
     return true;
 }
 
@@ -397,26 +401,25 @@ bool WebsocketProtocol::OpenAudioChannel() {
                             packet.frame_duration = OPUS_FRAME_DURATION_MS;
                             packet.payload.assign(audio_data_buffer_.begin(), audio_data_buffer_.begin() + actual_len);
                             
-                            // ESP_LOGI(TAG, "get package");
-                            // if (cached_packet_count_ < MAX_CACHED_PACKETS) {
-                            //     // 还在缓存阶段，添加到缓存
-                            //     packet_cache_.push_back(std::move(packet));
-                            //     cached_packet_count_++;
-                            //     // ESP_LOGI(TAG, "Caching packet %d/%d", cached_packet_count_, MAX_CACHED_PACKETS);
-                            // } else {
-                            //     // 缓存已满，开始推送
-                            //     if (!packet_cache_.empty()) {
-                            //         // 先推送所有缓存的包
-                            //         for (auto& cached_packet : packet_cache_) {
-                            //             on_incoming_audio_(std::move(cached_packet));
-                            //         }
-                            //         packet_cache_.clear();
-                            //         ESP_LOGI(TAG, "Pushed %d cached packets", cached_packet_count_);
-                            //     }
-                            //     // 推送当前包
-                            //     on_incoming_audio_(std::move(packet));
-                            // }
-                            on_incoming_audio_(std::move(packet));
+                            if (cached_packet_count_ < MAX_CACHED_PACKETS) {
+                                // 还在缓存阶段，添加到缓存
+                                packet_cache_.push_back(std::move(packet));
+                                cached_packet_count_++;
+                                // ESP_LOGI(TAG, "Caching packet %d/%d", cached_packet_count_, MAX_CACHED_PACKETS);
+                            } else {
+                                // 缓存已满，开始推送
+                                if (!packet_cache_.empty()) {
+                                    // 先推送所有缓存的包
+                                    for (auto& cached_packet : packet_cache_) {
+                                        on_incoming_audio_(std::move(cached_packet));
+                                    }
+                                    packet_cache_.clear();
+                                    ESP_LOGI(TAG, "Pushed %d cached packets", cached_packet_count_);
+                                }
+                                // 推送当前包
+                                on_incoming_audio_(std::move(packet));
+                            }
+                            // on_incoming_audio_(std::move(packet));
                         }
                     }
                 }
@@ -473,7 +476,6 @@ bool WebsocketProtocol::OpenAudioChannel() {
 
                 if (event_type == "conversation.audio.completed") {
                     packet_cache_.clear();
-                    packet_cache_.shrink_to_fit();
                 }
 
                 // 重置打断记录状态，因为这是新对话的开始
@@ -498,12 +500,9 @@ bool WebsocketProtocol::OpenAudioChannel() {
                     is_start_progress_ = false;
                 }
 
-
                 // 清理消息缓存，防止内存泄漏
                 message_cache_.clear();
-                message_cache_.shrink_to_fit();
                 message_buffer_.clear();
-                message_buffer_.shrink_to_fit();
 
             } else if (event_type == "input_audio_buffer.speech_started") {
 

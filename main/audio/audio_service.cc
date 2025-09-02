@@ -121,7 +121,6 @@ void AudioService::Initialize(AudioCodec* codec) {
         .callback = [](void* arg) {
             AudioService* audio_service = (AudioService*)arg;
             audio_service->CheckAndUpdateAudioPowerState();
-            // audio_service->CheckMemoryStatus();  // 添加内存状态检查
         },
         .arg = this,
         .dispatch_method = ESP_TIMER_TASK,
@@ -155,7 +154,7 @@ void AudioService::Start() {
     /* Start the audio input task */
     int input_task_size = 1024 *4;
 #ifdef CONFIG_IDF_TARGET_ESP32C2
-    input_task_size = 1024;
+    input_task_size = 1024 * 2;
 #endif
     xTaskCreate([](void* arg) {
         AudioService* audio_service = (AudioService*)arg;
@@ -903,69 +902,5 @@ void AudioService::CheckAndUpdateAudioPowerState() {
     }
     if (!codec_->input_enabled() && !codec_->output_enabled()) {
         esp_timer_stop(audio_power_timer_);
-    }
-}
-
-void AudioService::CheckMemoryStatus() {
-    size_t free_heap = esp_get_free_heap_size();
-    size_t min_free_heap = esp_get_minimum_free_heap_size();
-    
-    // 只在内存不足时记录警告
-    if (free_heap < 15000) {  // 少于15KB时警告
-        ESP_LOGW(TAG, "Low memory warning! Free: %u, Min: %u", (unsigned int)free_heap, (unsigned int)min_free_heap);
-        
-        // 如果内存严重不足，强制清理一些队列
-        if (free_heap < 10000) {
-            ESP_LOGW(TAG, "Critical memory shortage, forcing queue cleanup");
-            std::lock_guard<std::mutex> lock(audio_queue_mutex_);
-            
-            // 清理一些队列以释放内存
-            if (audio_decode_queue_.size() > MAX_DECODE_PACKETS_IN_QUEUE / 2) {
-                size_t old_size = audio_decode_queue_.size();
-                audio_decode_queue_.clear();
-                ESP_LOGW(TAG, "Cleared decode queue: %u -> 0", (unsigned int)old_size);
-            }
-            
-#ifndef CONFIG_USE_EYE_STYLE_VB6824
-            if (audio_encode_queue_.size() > MAX_ENCODE_TASKS_IN_QUEUE / 2) {
-                size_t old_size = audio_encode_queue_.size();
-                audio_encode_queue_.clear();
-                ESP_LOGW(TAG, "Cleared encode queue: %u -> 0", (unsigned int)old_size);
-            }
-#endif
-            
-            // 清理其他队列
-            if (audio_testing_queue_.size() > 0) {
-                size_t old_size = audio_testing_queue_.size();
-                audio_testing_queue_.clear();
-                ESP_LOGW(TAG, "Cleared testing queue: %u -> 0", (unsigned int)old_size);
-            }
-            
-            if (audio_send_queue_.size() > MAX_SEND_PACKETS_IN_QUEUE / 2) {
-                size_t old_size = audio_send_queue_.size();
-                audio_send_queue_.clear();
-                ESP_LOGW(TAG, "Cleared send queue: %u -> 0", (unsigned int)old_size);
-            }
-            
-            audio_queue_cv_.notify_all();
-        }
-    }
-    
-    // 记录队列状态
-    static uint32_t last_log_time = 0;
-    uint32_t current_time = esp_timer_get_time() / 1000000;  // 转换为秒
-    
-    if (current_time - last_log_time >= 30) {  // 每30秒记录一次
-        std::lock_guard<std::mutex> lock(audio_queue_mutex_);
-        ESP_LOGI(TAG, "Queue status - Decode: %u/%d, Encode: %u/%d, Testing: %u, Send: %u/%d", 
-                 (unsigned int)audio_decode_queue_.size(), MAX_DECODE_PACKETS_IN_QUEUE,
-#ifndef CONFIG_USE_EYE_STYLE_VB6824
-                 (unsigned int)audio_encode_queue_.size(), MAX_ENCODE_TASKS_IN_QUEUE,
-#else
-                 0, 0,
-#endif
-                 (unsigned int)audio_testing_queue_.size(),
-                 (unsigned int)audio_send_queue_.size(), MAX_SEND_PACKETS_IN_QUEUE);
-        last_log_time = current_time;
     }
 }

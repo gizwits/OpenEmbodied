@@ -614,15 +614,8 @@ void Application::Start() {
 
     SetDeviceState(kDeviceStateIdle);
 
-    has_server_time_ = ota.HasServerTime();
     if (protocol_started) {
-        std::string message = std::string(Lang::Strings::VERSION) + ota.GetCurrentVersion();
-        display->ShowNotification(message.c_str());
-        display->SetChatMessage("system", "");
-        // Play the success sound to indicate the device is ready
-        // audio_service_.PlaySound(Lang::Sounds::P3_SUCCESS);
         display->SetEmotion("sleepy");
-
     }
 
     // Print heap stats
