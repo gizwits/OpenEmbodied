@@ -23,7 +23,7 @@ public:
     virtual void SendTextToAI(const std::string& text);
     virtual void CloseAudioChannel() override;
     virtual bool IsAudioChannelOpened() const override;
-    virtual void SendAudio(const AudioStreamPacket& packet) override;
+    virtual bool SendAudio(const AudioStreamPacket& packet) override;
     virtual bool HasErrorOccurred() const override;
 
 private:

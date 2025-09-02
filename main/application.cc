@@ -692,8 +692,16 @@ void Application::MainEventLoop() {
         if (bits & MAIN_EVENT_SEND_AUDIO) {
             auto send_start = esp_timer_get_time();
             while (auto packet = audio_service_.PopPacketFromSendQueue()) {
-                // TODO 发送错误的时候要处理
-                protocol_->SendAudio(*packet);
+                // 尝试发送音频包
+                bool sent = protocol_->SendAudio(*packet);
+                if (!sent) {
+                    // 如果发送失败（比如被忽略），主动清理 packet 内存
+                    if (!packet->payload.empty()) {
+                        ESP_LOGD(TAG, "Clearing unsent packet payload: %u bytes", (unsigned int)packet->payload.size());
+                        packet->payload.clear();
+                        packet->payload.shrink_to_fit();
+                    }
+                }
             }
             auto send_end = esp_timer_get_time();
             ESP_LOGD(TAG, "SendAudio took %lld us", send_end - send_start);

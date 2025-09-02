@@ -87,9 +87,9 @@ bool WebsocketProtocol::Start() {
     return true;
 }
 
-void WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
+bool WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
     if (!websocket_ || !websocket_->IsConnected() || packet.payload.empty() || busy_sending_audio_) {
-        return;
+        return false;
     }
     
     // 在chat_mode==1时，检查是否需要忽略音频上传
@@ -101,8 +101,8 @@ void WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
         // 如果距离用户说话结束不到1秒，忽略音频上传
         if (elapsed < 1000) {
             ESP_LOGW(TAG, "Ignoring audio upload, elapsed: %lld ms since speech stopped", elapsed);
-            // 直接返回，不修改const对象，让调用方负责清理
-            return;
+            // 返回 false 表示没有发送，调用方需要清理 packet
+            return false;
         } else {
             // 超过1秒后，清除记录
             speech_stopped_recorded_ = false;
@@ -120,7 +120,7 @@ void WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
         base64_buffer_size_ = out_len + 1;
         if (!base64_buffer_) {
             ESP_LOGE(TAG, "Failed to allocate base64 buffer");
-            return;
+            return false;
         }
     }
 
@@ -148,7 +148,8 @@ void WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
     // 复制并发送
     websocket_->Send(message_buffer_.data(), message_buffer_.size(), false);
     // ESP_LOGI(TAG, "SendAudio success: %d", message_buffer_.size());
-
+    
+    return true;
 }
 
 
@@ -397,25 +398,25 @@ bool WebsocketProtocol::OpenAudioChannel() {
                             packet.payload.assign(audio_data_buffer_.begin(), audio_data_buffer_.begin() + actual_len);
                             
                             // ESP_LOGI(TAG, "get package");
-                            if (cached_packet_count_ < MAX_CACHED_PACKETS) {
-                                // 还在缓存阶段，添加到缓存
-                                packet_cache_.push_back(std::move(packet));
-                                cached_packet_count_++;
-                                // ESP_LOGI(TAG, "Caching packet %d/%d", cached_packet_count_, MAX_CACHED_PACKETS);
-                            } else {
-                                // 缓存已满，开始推送
-                                if (!packet_cache_.empty()) {
-                                    // 先推送所有缓存的包
-                                    for (auto& cached_packet : packet_cache_) {
-                                        on_incoming_audio_(std::move(cached_packet));
-                                    }
-                                    packet_cache_.clear();
-                                    ESP_LOGI(TAG, "Pushed %d cached packets", cached_packet_count_);
-                                }
-                                // 推送当前包
-                                on_incoming_audio_(std::move(packet));
-                            }
-                            // on_incoming_audio_(std::move(packet));
+                            // if (cached_packet_count_ < MAX_CACHED_PACKETS) {
+                            //     // 还在缓存阶段，添加到缓存
+                            //     packet_cache_.push_back(std::move(packet));
+                            //     cached_packet_count_++;
+                            //     // ESP_LOGI(TAG, "Caching packet %d/%d", cached_packet_count_, MAX_CACHED_PACKETS);
+                            // } else {
+                            //     // 缓存已满，开始推送
+                            //     if (!packet_cache_.empty()) {
+                            //         // 先推送所有缓存的包
+                            //         for (auto& cached_packet : packet_cache_) {
+                            //             on_incoming_audio_(std::move(cached_packet));
+                            //         }
+                            //         packet_cache_.clear();
+                            //         ESP_LOGI(TAG, "Pushed %d cached packets", cached_packet_count_);
+                            //     }
+                            //     // 推送当前包
+                            //     on_incoming_audio_(std::move(packet));
+                            // }
+                            on_incoming_audio_(std::move(packet));
                         }
                     }
                 }
@@ -469,7 +470,11 @@ bool WebsocketProtocol::OpenAudioChannel() {
             } else if (event_type == "conversation.chat.completed" || event_type == "conversation.audio.completed") {
                 is_first_packet_ = false;
                 cached_packet_count_ = 0;
-                packet_cache_.clear();
+
+                if (event_type == "conversation.audio.completed") {
+                    packet_cache_.clear();
+                    packet_cache_.shrink_to_fit();
+                }
 
                 // 重置打断记录状态，因为这是新对话的开始
                 abort_speaking_recorded_ = false;
