@@ -375,7 +375,6 @@ bool WebsocketProtocol::OpenAudioChannel() {
                         base64_content.length());
 
                     if (ret == 0 && actual_len > 0) {
-                        ESP_LOGI(TAG, "RecvAudio actual_len=%u", (unsigned)actual_len);
                         if (on_incoming_audio_ != nullptr) {
                             // 队列长度限制逻辑在下游
                             if (is_first_packet_ == true) {

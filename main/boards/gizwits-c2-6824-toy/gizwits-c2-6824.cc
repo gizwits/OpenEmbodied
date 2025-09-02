@@ -5,7 +5,7 @@
 #include "config.h"
 #include "iot/thing_manager.h"
 #include <esp_sleep.h>
-#include "power_save_timer.h"
+#include "power_save_timer.h" // retained for other boards; this board uses a lighter timer
 #include <driver/rtc_io.h>
 #include "driver/gpio.h"
 #include <wifi_station.h>
@@ -31,7 +31,11 @@ private:
     Button volume_down_button_;
     Button prev_button_;
     Button next_button_;
-    PowerSaveTimer* power_save_timer_;
+    // Minimal idle power-save (no heap, no std::function)
+    esp_timer_handle_t idle_timer_ = nullptr;
+    volatile int idle_ticks_ = 0;
+    static constexpr int SLEEP_SECONDS = 60 * 20;
+    static constexpr int SHUTDOWN_SECONDS = -1; // not used
 
 
     // 上电计数器相关
@@ -43,19 +47,34 @@ private:
     int64_t prev_last_click_time_ = 0;
     int64_t next_last_click_time_ = 0;
 
+    static void IdleTimerCb(void* arg) {
+        auto* self = static_cast<CustomBoard*>(arg);
+        auto& app = Application::GetInstance();
+        if (!app.CanEnterSleepMode()) {
+            self->idle_ticks_ = 0;
+            return;
+        }
+        int t = ++self->idle_ticks_;
+        if (SLEEP_SECONDS != -1 && t >= SLEEP_SECONDS) {
+            ESP_LOGI(TAG, "Idle timeout reached (%d s), entering sleep", t);
+            self->run_sleep_mode(true);
+        }
+        if (SHUTDOWN_SECONDS != -1 && t >= SHUTDOWN_SECONDS) {
+            // optional shutdown action
+        }
+    }
+
     void InitializePowerSaveTimer() {
-        power_save_timer_ = new PowerSaveTimer(-1, 60 * 20, 60 * 30);
-        
-        power_save_timer_->OnEnterSleepMode([this]() {
-            ESP_LOGI(TAG, "Shutting down");
-            run_sleep_mode(true);
-        });
-        power_save_timer_->OnExitSleepMode([this]() {
-        });
-        power_save_timer_->OnShutdownRequest([this]() {
-            
-        });
-        power_save_timer_->SetEnabled(true);
+        if (idle_timer_ == nullptr) {
+            esp_timer_create_args_t args = {
+                .callback = &CustomBoard::IdleTimerCb,
+                .arg = this,
+                .name = "idle_timer"
+            };
+            ESP_ERROR_CHECK(esp_timer_create(&args, &idle_timer_));
+        }
+        idle_ticks_ = 0;
+        ESP_ERROR_CHECK(esp_timer_start_periodic(idle_timer_, 1000000));
     }
 
     void run_sleep_mode(bool need_delay = true){
@@ -253,6 +272,11 @@ public:
     ~CustomBoard() {
         if (power_counter_timer_) {
             esp_timer_delete(power_counter_timer_);
+        }
+        if (idle_timer_) {
+            esp_timer_stop(idle_timer_);
+            esp_timer_delete(idle_timer_);
+            idle_timer_ = nullptr;
         }
     }
 

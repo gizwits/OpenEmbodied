@@ -229,7 +229,7 @@ bool MqttClient::initialize() {
 
         // ESP_LOGI(TAG, "OnMessage topic: %s, payload: %s", topic.c_str(), payload.c_str());
         
-        // 修复：恢复使用strdup确保字符串在消息处理期间保持有效
+        // Inline handle without queue/task
         mqtt_msg_t msg = {0};
         msg.topic = strdup(topic.c_str());
         msg.topic_len = topic.length();
@@ -240,12 +240,11 @@ bool MqttClient::initialize() {
             memcpy(msg.data, payload.data(), payload.size());
         }
         msg.data_len = payload.size();
-        
-        ESP_LOGI(TAG, "Message queued - topic: %s, payload: %s", msg.topic, msg.payload);
-        
-        if (message_queue_) {
-            xQueueSendToBack(message_queue_, &msg, portMAX_DELAY);
-        }
+        ESP_LOGI(TAG, "Message inline handle - topic: %s, payload_len: %d", msg.topic, (int)msg.payload_len);
+        handleMqttMessage(&msg);
+        free(msg.topic);
+        free(msg.payload);
+        free(msg.data);
     });
 
     ESP_LOGI(TAG, "MQTT 连接参数:");
@@ -254,36 +253,8 @@ bool MqttClient::initialize() {
     ESP_LOGI(TAG, "  客户端 ID: %s", client_id_.c_str());
     ESP_LOGI(TAG, "  token: %s", password_.c_str());
 
-    // Create message queue
-    message_queue_ = xQueueCreate(MQTT_QUEUE_SIZE, sizeof(mqtt_msg_t));
-    if (!message_queue_) {
-        ESP_LOGE(TAG, "Failed to create message queue");
-        return false;
-    }
-
-    // Create semaphore
-    mqtt_sem_ = xSemaphoreCreateBinary();
-    if (!mqtt_sem_) {
-        ESP_LOGE(TAG, "Failed to create semaphore");
-        vQueueDelete(message_queue_);
-        message_queue_ = nullptr;
-        return false;
-    }
-
-    // Create send queue
-    send_queue_ = xQueueCreate(MQTT_SEND_QUEUE_SIZE, sizeof(mqtt_send_msg_t));
-    if (!send_queue_) {
-        ESP_LOGE(TAG, "Failed to create send queue");
-        vSemaphoreDelete(mqtt_sem_);
-        mqtt_sem_ = nullptr;
-        vQueueDelete(message_queue_);
-        message_queue_ = nullptr;
-        return false;
-    }
-
-    // Create tasks
-    xTaskCreate(messageReceiveHandler, "mqtt_rcv", MQTT_TASK_STACK_SIZE_RCV, this, 1, nullptr);
-    xTaskCreate(sendTask, "mqtt_send", MQTT_TASK_STACK_SIZE_RESEND, this, 1, nullptr);
+    // Inline mode: no extra tasks/queues to save RAM
+    mqtt_sem_ = nullptr;
 
     // 打印内存使用情况
     printMemoryUsage();
@@ -379,49 +350,17 @@ bool MqttClient::disconnect() {
 }
 
 bool MqttClient::publish(const std::string& topic, const std::string& payload) {
-    // 将消息入队，由发送任务异步发送
-    if (!send_queue_) {
-        ESP_LOGE(TAG, "Send queue not initialized");
+    if (!mqtt_) {
+        ESP_LOGE(TAG, "MQTT client not initialized");
         return false;
     }
-    
     ESP_LOGI(TAG, "publish: topic='%s', payload length=%zu", topic.c_str(), payload.length());
-    
-    mqtt_send_msg_t msg = {0};
-    msg.topic = strdup(topic.c_str());
-    
-    // 对于二进制数据，不能使用 strdup，需要使用 memcpy 来保持数据完整性
-    if (payload.length() > 0) {
-        msg.payload = static_cast<char*>(malloc(payload.length()));
-        if (msg.payload) {
-            memcpy(msg.payload, payload.data(), payload.length());
-            msg.payload_len = payload.length(); // 设置 payload 长度
-            ESP_LOGI(TAG, "publish: msg.topic='%s', msg.payload allocated with length=%zu", msg.topic, payload.length());
-        } else {
-            ESP_LOGE(TAG, "Failed to allocate payload buffer");
-            if (msg.topic) free(msg.topic);
-            return false;
-        }
-    } else {
-        msg.payload = nullptr;
-        msg.payload_len = 0;
-    }
-    
-    msg.qos = 0;
-    if (!msg.topic) {
-        if (msg.payload) free(msg.payload);
-        ESP_LOGE(TAG, "Failed to allocate topic buffer");
+    // Some implementations return bytes sent (>=0) on success, negative on error
+    int r = mqtt_->Publish(topic, payload);
+    if (r < 0) {
+        ESP_LOGE(TAG, "Publish failed with code %d", r);
         return false;
     }
-    
-    if (xQueueSendToBack(send_queue_, &msg, 0) != pdPASS) {
-        ESP_LOGE(TAG, "Send queue full, dropping publish to %s", topic.c_str());
-        free(msg.topic);
-        if (msg.payload) free(msg.payload);
-        return false;
-    }
-    
-    ESP_LOGI(TAG, "publish: message queued successfully");
     return true;
 }
 
@@ -605,91 +544,16 @@ void MqttClient::deinit() {
         mqtt_sem_ = nullptr;
     }
 
-    if (message_queue_) {
-        vQueueDelete(message_queue_);
-        message_queue_ = nullptr;
-    }
-
-    if (send_queue_) {
-        vQueueDelete(send_queue_);
-        send_queue_ = nullptr;
-    }
-
     if (mqtt_) {
         mqtt_.reset();
     }
 }
 
-void MqttClient::messageReceiveHandler(void* arg) {
-    MqttClient* client = static_cast<MqttClient*>(arg);
-    mqtt_msg_t msg;
-
-    while (1) {
-        if (xQueueReceive(client->message_queue_, &msg, portMAX_DELAY) == pdTRUE) {
-            ESP_LOGI(TAG, "messageReceiveHandler: %s", msg.topic);
-            client->handleMqttMessage(&msg);
-            // 恢复内存释放
-            free(msg.topic);
-            free(msg.payload);
-            free(msg.data);
-        }
-        vTaskDelay(10);
-    }
-}
-
-void MqttClient::sendTask(void* arg) {
-    MqttClient* client = static_cast<MqttClient*>(arg);
-    mqtt_send_msg_t msg;
-    while (1) {
-        if (xQueueReceive(client->send_queue_, &msg, portMAX_DELAY) == pdTRUE) {
-            if (msg.qos == MQTT_SEND_CONTROL_ROOMINFO) {
-                // 处理房间信息请求的超时重试
-                if (++client->mqtt_request_failure_count_ > MQTT_REQUEST_FAILURE_COUNT) {
-                    if (client->timer_) {
-                        xTimerDelete(client->timer_, 0);
-                        client->timer_ = nullptr;
-                    }
-                } else {
-                    client->GetRoomInfo();
-                }
-            } else {
-                // 正常发送MQTT消息
-                if (client->mqtt_) {
-                    std::string topic_str = msg.topic ? msg.topic : "";
-                    // 使用 payload_len 而不是依赖字符串的 \0 终止符
-                    std::string payload_str = msg.payload ? std::string(msg.payload, msg.payload_len) : "";
-                    ESP_LOGI(TAG, "sendTask: topic='%s', payload length=%zu", topic_str.c_str(), payload_str.length());
-                    
-                    // 对于二进制数据，显示前几个字节的十六进制值
-                    // if (payload_str.length() > 0) {
-                    //     ESP_LOGI(TAG, "sendTask: payload first 16 bytes (hex):");
-                    //     size_t show_len = std::min(payload_str.length(), (size_t)16);
-                    //     for (size_t i = 0; i < show_len; i++) {
-                    //         if (i % 8 == 0) ESP_LOGI(TAG, "  %02zu: ", i);
-                    //         ESP_LOGI(TAG, "%02x ", (uint8_t)payload_str[i]);
-                    //         if (i % 8 == 7) ESP_LOGI(TAG, "");
-                    //     }
-                    //     if (show_len % 8 != 0) ESP_LOGI(TAG, "");
-                    // }
-                    
-                    client->mqtt_->Publish(topic_str, payload_str);
-                }
-                if (msg.topic) free(msg.topic);
-                if (msg.payload) free(msg.payload);
-            }
-        }
-    }
-}
 
 void MqttClient::timerCallback(TimerHandle_t xTimer) {
     MqttClient* client = static_cast<MqttClient*>(pvTimerGetTimerID(xTimer));
-    if (client && client->send_queue_) {
-        mqtt_send_msg_t ctrl = {0};
-        ctrl.topic = nullptr;
-        ctrl.payload = nullptr;
-        ctrl.payload_len = 0;
-        ctrl.qos = MQTT_SEND_CONTROL_ROOMINFO;
-        xQueueSendToBack(client->send_queue_, &ctrl, 0);
+    if (client) {
+        client->GetRoomInfo();
     }
 }
 
@@ -831,12 +695,8 @@ bool MqttClient::parseM2MCtrlMsg(const char* in_str, int in_len) {
     if (method && method->valuestring) {
         if (strcmp(method->valuestring, "rtc.room.join") == 0) {
             // Handle room join
-            // 改为通过发送队列触发一次控制检查
-            if (send_queue_) {
-                mqtt_send_msg_t ctrl = {0};
-                ctrl.qos = MQTT_SEND_CONTROL_ROOMINFO;
-                xQueueSendToBack(send_queue_, &ctrl, 0);
-            }
+            // Inline trigger
+            GetRoomInfo();
 
         } else if (strcmp(method->valuestring, "rtc.room.leave") == 0) {
             // Handle room leave
