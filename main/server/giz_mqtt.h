@@ -22,7 +22,7 @@
 #define MQTT_TASK_STACK_SIZE_RCV     4096    // 消息接收任务栈大小 - 增加以处理大型JSON
 #define MQTT_TASK_STACK_SIZE_RESEND  2048    // 消息重发任务栈大小
 #endif
-#define MQTT_QUEUE_SIZE              8      // 消息队列大小
+#define MQTT_QUEUE_SIZE              5      // 消息队列大小
 #define MQTT_TOPIC_BUFFER_SIZE       48      // 主题缓冲区大小
 #define MQTT_PAYLOAD_BUFFER_SIZE     256     // 负载缓冲区大小
 #define MQTT_TOKEN_REPORT_BUFFER_SIZE 128    // Token报告缓冲区大小
