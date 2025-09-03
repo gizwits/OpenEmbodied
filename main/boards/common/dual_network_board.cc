@@ -63,14 +63,18 @@ std::string DualNetworkBoard::GetBoardType() {
 }
 
 void DualNetworkBoard::StartNetwork() {
+    ESP_LOGI(TAG, "开始启动网络连接...");
     auto display = Board::GetInstance().GetDisplay();
     
     if (network_type_ == NetworkType::WIFI) {
         display->SetStatus(Lang::Strings::CONNECTING);
+        ESP_LOGI(TAG, "当前使用WiFi网络");
     } else {
+        ESP_LOGI(TAG, "当前使用4G网络");
         display->SetStatus(Lang::Strings::DETECTING_MODULE);
     }
     current_board_->StartNetwork();
+    ESP_LOGI(TAG, "网络启动完成");
 }
 
 NetworkInterface* DualNetworkBoard::GetNetwork() {

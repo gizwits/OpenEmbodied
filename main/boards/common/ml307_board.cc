@@ -19,23 +19,31 @@ std::string Ml307Board::GetBoardType() {
 }
 
 void Ml307Board::StartNetwork() {
+    ESP_LOGI(TAG, "开始启动4G网络连接...");
     auto& application = Application::GetInstance();
     auto display = Board::GetInstance().GetDisplay();
     display->SetStatus(Lang::Strings::DETECTING_MODULE);
+    ESP_LOGI(TAG, "开始检测ML307模块...");
 
     while (true) {
+        ESP_LOGI(TAG, "尝试检测ML307模块...");
         modem_ = AtModem::Detect(tx_pin_, rx_pin_, dtr_pin_, 921600, uart_num_);
         if (modem_ != nullptr) {
+            ESP_LOGI(TAG, "成功检测到ML307模块");
             break;
         }
+        ESP_LOGW(TAG, "未检测到ML307模块，1秒后重试...");
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 
+    ESP_LOGI(TAG, "设置网络状态变化回调...");
     modem_->OnNetworkStateChanged([this, &application](bool network_ready) {
         if (network_ready) {
-            ESP_LOGI(TAG, "Network is ready");
+            //ESP_LOGI(TAG, "Network is ready");
+            ESP_LOGI(TAG, "网络已准备就绪");
         } else {
-            ESP_LOGE(TAG, "Network is down");
+            //ESP_LOGE(TAG, "Network is down");
+            ESP_LOGE(TAG, "网络连接断开");
             auto device_state = application.GetDeviceState();
             if (device_state == kDeviceStateListening || device_state == kDeviceStateSpeaking) {
                 application.Schedule([this, &application]() {
@@ -47,25 +55,36 @@ void Ml307Board::StartNetwork() {
 
     // Wait for network ready
     display->SetStatus(Lang::Strings::REGISTERING_NETWORK);
+    ESP_LOGI(TAG, "等待网络注册...");
     while (true) {
+        ESP_LOGI(TAG, "检查网络注册状态...");
         auto result = modem_->WaitForNetworkReady();
         if (result == NetworkStatus::ErrorInsertPin) {
+            ESP_LOGE(TAG, "SIM卡PIN错误");
             application.Alert(Lang::Strings::ERROR, Lang::Strings::PIN_ERROR, "sad", Lang::Sounds::P3_ERR_PIN);
         } else if (result == NetworkStatus::ErrorRegistrationDenied) {
+            ESP_LOGE(TAG, "网络注册被拒绝");
             application.Alert(Lang::Strings::ERROR, Lang::Strings::REG_ERROR, "sad", Lang::Sounds::P3_ERR_REG);
         } else {
+            ESP_LOGI(TAG, "网络注册成功");
             break;
         }
+        ESP_LOGI(TAG, "10秒后重试网络注册...");
         vTaskDelay(pdMS_TO_TICKS(10000));
     }
 
     // Print the ML307 modem information
+    ESP_LOGI(TAG, "获取模块信息...");
     std::string module_revision = modem_->GetModuleRevision();
     std::string imei = modem_->GetImei();
     std::string iccid = modem_->GetIccid();
+    // ESP_LOGI(TAG, "ML307 Revision: %s", module_revision.c_str());
+    // ESP_LOGI(TAG, "ML307 IMEI: %s", imei.c_str());
+    // ESP_LOGI(TAG, "ML307 ICCID: %s", iccid.c_str());
     ESP_LOGI(TAG, "ML307 Revision: %s", module_revision.c_str());
     ESP_LOGI(TAG, "ML307 IMEI: %s", imei.c_str());
     ESP_LOGI(TAG, "ML307 ICCID: %s", iccid.c_str());
+    ESP_LOGI(TAG, "4G网络连接完成");
 }
 
 NetworkInterface* Ml307Board::GetNetwork() {
@@ -74,22 +93,30 @@ NetworkInterface* Ml307Board::GetNetwork() {
 
 const char* Ml307Board::GetNetworkStateIcon() {
     if (modem_ == nullptr || !modem_->network_ready()) {
+        ESP_LOGW(TAG, "网络未就绪或modem为空");
         return FONT_AWESOME_SIGNAL_OFF;
     }
     int csq = modem_->GetCsq();
+    ESP_LOGI(TAG, "当前信号质量(CSQ): %d", csq);
     if (csq == -1) {
+        ESP_LOGW(TAG, "无法获取信号质量");
         return FONT_AWESOME_SIGNAL_OFF;
     } else if (csq >= 0 && csq <= 14) {
+        ESP_LOGI(TAG, "信号强度: 很弱");
         return FONT_AWESOME_SIGNAL_1;
     } else if (csq >= 15 && csq <= 19) {
+        ESP_LOGI(TAG, "信号强度: 弱");
         return FONT_AWESOME_SIGNAL_2;
     } else if (csq >= 20 && csq <= 24) {
+        ESP_LOGI(TAG, "信号强度: 中等");
         return FONT_AWESOME_SIGNAL_3;
     } else if (csq >= 25 && csq <= 31) {
+        ESP_LOGI(TAG, "信号强度: 强");
         return FONT_AWESOME_SIGNAL_4;
     }
 
-    ESP_LOGW(TAG, "Invalid CSQ: %d", csq);
+    ESP_LOGW(TAG, "无效的信号质量值: %d", csq);
+    //ESP_LOGW(TAG, "Invalid CSQ: %d", csq);
     return FONT_AWESOME_SIGNAL_OFF;
 }
 

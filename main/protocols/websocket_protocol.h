@@ -25,7 +25,8 @@ public:
     virtual bool IsAudioChannelOpened() const override;
     virtual bool SendAudio(const AudioStreamPacket& packet) override;
     virtual bool HasErrorOccurred() const override;
-
+    virtual void HandleReconnect();
+    
 private:
     std::unique_ptr<WebSocket> websocket_;
     EventGroupHandle_t event_group_handle_;
@@ -48,6 +49,14 @@ private:
     std::string GetHelloMessage();
     static void CloseAudioChannelTask(void* param);
     void SwitchToSpeaking();
+
+    static void ReconnectTask(void* param);
+
+    static const int MAX_RECONNECT_ATTEMPTS = 3; // 最大重连数
+    static const int RECONNECT_INTERVAL_MS = 5000; // 重连间隔时间
+    int reconnect_attempts_ = 0; // 当前重连次数
+    bool is_reconnecting_ = false; // 是否正在重连
+    bool should_reconnect_ = true; // 控制是否需要重连
 };
 
 #endif
