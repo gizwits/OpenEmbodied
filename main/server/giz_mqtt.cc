@@ -860,7 +860,7 @@ void MqttClient::app2devMsgHandler(const uint8_t *data, int32_t len)
             
             // 检查是否支持数据点
             if (attr_size_ == 0) {
-                ESP_LOGD(TAG, "Board does not support data points, skipping data point processing");
+                ESP_LOGW(TAG, "Board does not support data points, skipping data point processing");
                 return;
             }
             
@@ -888,6 +888,8 @@ void MqttClient::app2devMsgHandler(const uint8_t *data, int32_t len)
             
             int payload_bit_index = 0;
             int payload_byte_index = 0;
+
+            ESP_LOGI(TAG, "attr_size_: %d", attr_size_);
             
             for (int bit_index = 0; bit_index < attr_size_ * 8; ++bit_index) {
                 int bit_val = (bits >> bit_index) & 0x01;
@@ -1084,15 +1086,10 @@ void MqttClient::tokenRefreshTimerCallback(TimerHandle_t xTimer) {
     MqttClient* client = static_cast<MqttClient*>(pvTimerGetTimerID(xTimer));
     if (client) {
         ESP_LOGI(TAG, "Token refresh timer triggered for client: %p", (void*)client);
-        
-        // 发送消息到队列
-        if (client->send_queue_) {
-            mqtt_send_msg_t msg = {0};
-            msg.topic = nullptr;
-            msg.payload = nullptr;
-            msg.payload_len = 0;
-            msg.qos = MQTT_SEND_CONTROL_TOKEN_REFRESH; 
-            xQueueSendToBack(client->send_queue_, &msg, 0);
-        }
+        ESP_LOGI(TAG, "Automatically refreshing room info (non-active request)");
+        // 自动刷新，标记为非主动请求
+        client->GetRoomInfo(false);
+    } else {
+        ESP_LOGE(TAG, "Token refresh timer callback: invalid client pointer");
     }
 }
