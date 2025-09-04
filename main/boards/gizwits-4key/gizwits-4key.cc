@@ -328,7 +328,6 @@ public:
         charging = isCharging();
         discharging = !charging;
         level = power_manager_->GetBatteryLevel();
-        ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
         return true;
     }
 

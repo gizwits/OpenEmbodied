@@ -160,7 +160,7 @@ void AudioService::Start() {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->AudioInputTask();
         vTaskDelete(NULL);
-    }, "audio_input", input_task_size, this, 6, &audio_input_task_handle_);  // 提高优先级从 8 到 6
+    }, "audio_input", input_task_size, this, 8, &audio_input_task_handle_);  // 提高优先级从 8 到 6
 
     /* Start the audio output task */
     // xTaskCreate([](void* arg) {
@@ -179,7 +179,7 @@ void AudioService::Start() {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->OpusCodecTask();
         vTaskDelete(NULL);
-    }, "opus_codec", task_size, this, 5, &opus_codec_task_handle_);  // 提高优先级从 2 到 5
+    }, "opus_codec", task_size, this, 2, &opus_codec_task_handle_);  // 提高优先级从 2 到 5
 }
 
 void AudioService::Stop() {
