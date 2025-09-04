@@ -37,7 +37,6 @@
 
 // 发送队列控制消息标识（使用qos字段传递特殊控制）
 #define MQTT_SEND_CONTROL_ROOMINFO  (-1)
-#define MQTT_SEND_CONTROL_TOKEN_REFRESH  (-2)
 
 
 struct Attr {
@@ -135,6 +134,8 @@ private:
     std::unique_ptr<Mqtt> mqtt_;
     std::function<void(const RoomParams&, bool is_mutual)> room_params_updated_callback_;
     std::function<void(const std::string&, const std::string&)> message_callback_;
+    QueueHandle_t message_queue_ = nullptr;
+    QueueHandle_t send_queue_ = nullptr; // 新增：发送消息队列
     SemaphoreHandle_t mqtt_sem_ = nullptr;
     TimerHandle_t timer_ = nullptr;
     TimerHandle_t token_refresh_timer_ = nullptr;  // Token 自动刷新定时器
@@ -151,6 +152,8 @@ private:
     static int attr_size_;
     int disconnect_error_count_ = 0;  // 断开连接错误计数器
 
+    static void messageReceiveHandler(void* arg);
+    static void sendTask(void* arg);
     void app2devMsgHandler(const uint8_t *data, int32_t len);
     static void timerCallback(TimerHandle_t xTimer);
     static void tokenRefreshTimerCallback(TimerHandle_t xTimer);  // Token 刷新定时器回调
