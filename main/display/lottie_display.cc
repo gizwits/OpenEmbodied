@@ -120,7 +120,7 @@ void LottieDisplay::InitializeLVGL() {
     ESP_LOGI(TAG, "Initialize LVGL port");
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     port_cfg.task_priority = 1;
-    port_cfg.timer_period_ms = 24;
+    port_cfg.timer_period_ms = 20;
     port_cfg.task_stack = 4096 * 6;
     lvgl_port_init(&port_cfg);
 
@@ -128,7 +128,7 @@ void LottieDisplay::InitializeLVGL() {
     const lvgl_port_display_cfg_t display_cfg = {
         .io_handle = panel_io_,
         .panel_handle = panel_,
-        .buffer_size = static_cast<uint32_t>(width_ * 4),
+        .buffer_size = static_cast<uint32_t>(width_ * 40),
         .double_buffer = true,
         .hres = static_cast<uint32_t>(width_),
         .vres = static_cast<uint32_t>(height_),
@@ -262,11 +262,40 @@ void LottieDisplay::ProcessAnimationChange(const char* animation_name) {
     // Check if file exists first
     struct stat st;
     if (stat(filepath, &st) == 0) {
-        // File exists, load it
+        // Delete the old animation object and create a new one
+        if (current_animation_ != nullptr) {
+            lv_obj_del(current_animation_);
+            current_animation_ = nullptr;
+        }
+        
+        // Create new Lottie animation object
+        lv_obj_t * scr = lv_disp_get_scr_act(display_);
+        current_animation_ = lv_lottie_create(scr);
+        
+        // Set up the animation buffer (reuse existing buffer)
+        int ANIMATION_WIDTH = (width_ < height_) ? width_ : height_;
+        if (animation_buffer != NULL) {
+            lv_lottie_set_buffer(current_animation_, ANIMATION_WIDTH, ANIMATION_WIDTH, animation_buffer);
+        }
+        
+        // Center the animation
+        lv_obj_center(current_animation_);
+        lv_obj_set_size(current_animation_, ANIMATION_WIDTH, ANIMATION_WIDTH);
+        
+        // Load the new animation file
         lv_lottie_set_src_file(current_animation_, filepath);
         ESP_LOGI(TAG, "Loading animation from file: %s", filepath);
+        
+        // Ensure the animation is visible
+        lv_obj_clear_flag(current_animation_, LV_OBJ_FLAG_HIDDEN);
+        
+        // Force refresh
+        lv_obj_invalidate(current_animation_);
+        lv_refr_now(display_);
+        
+        ESP_LOGI(TAG, "Animation recreated and loaded: %s", filepath);
     } else {
-       
+        ESP_LOGW(TAG, "Animation file not found: %s", filepath);
     }
     
 #else
@@ -281,6 +310,8 @@ void LottieDisplay::ProcessAnimationChange(const char* animation_name) {
     
     lvgl_port_unlock();
     current_state_ = AnimationState::PLAYING;
+    
+    ESP_LOGI(TAG, "Animation switched to: %s (mapped: %s)", animation_name, mapped_animation);
 }
 
 void LottieDisplay::PlayAnimation(const char* animation_name) {
@@ -341,19 +372,6 @@ void LottieDisplay::SetupUI() {
 
     // 设置 Lottie 对象大小为缓冲区大小
     lv_obj_set_size(lottie, ANIMATION_WIDTH, ANIMATION_WIDTH);
-    
-    // 如果需要缩放到全屏，使用变换
-    if (width_ != ANIMATION_WIDTH || height_ != ANIMATION_WIDTH) {
-        float scale_x = (float)width_ / ANIMATION_WIDTH;
-        float scale_y = (float)height_ / ANIMATION_WIDTH;
-        float scale = (scale_x < scale_y) ? scale_x : scale_y;  // 保持纵横比
-        
-        // 使用 LVGL 的缩放样式
-        lv_obj_set_style_transform_scale_x(lottie, (int)(scale * 256), 0);  // 256 = 100%
-        lv_obj_set_style_transform_scale_y(lottie, (int)(scale * 256), 0);
-        ESP_LOGI(TAG, "Scaling Lottie from %dx%d to %dx%d (scale: %.2f)", 
-                 ANIMATION_WIDTH, ANIMATION_WIDTH, width_, height_, scale);
-    }
 
     ESP_LOGI(TAG, "SetupUI lottie: %p", lottie);
     

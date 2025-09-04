@@ -42,14 +42,10 @@ void lv_mem_deinit(void) {
  * This allocates from PSRAM preferentially
  */
 void* lv_malloc_core(size_t size) {
-    void* ptr = NULL;
-    ptr = heap_caps_malloc(size, MALLOC_CAP_SPIRAM);
-
-    
+    void* ptr = heap_caps_malloc(size, MALLOC_CAP_SPIRAM);
     if (ptr == NULL) {
         ESP_LOGE(TAG, "Failed to allocate %zu bytes", size);
     }
-    
     return ptr;
 }
 

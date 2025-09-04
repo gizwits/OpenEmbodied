@@ -109,3 +109,8 @@ void PowerSaveTimer::WakeUp() {
         }
     }
 }
+
+
+void PowerSaveTimer::ResetTimer() {
+    ticks_ = 0;
+}

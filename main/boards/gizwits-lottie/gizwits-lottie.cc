@@ -31,7 +31,6 @@
 #define TAG "GizwitsLottie"
 
 LV_FONT_DECLARE(font_puhui_20_4);
-LV_FONT_DECLARE(font_awesome_20_4);
 
 #define LIS2HH12_I2C_ADDR 0x1D  // SDO接GND为0x1D，接VDD为0x1E
 #define LIS2HH12_INT1_PIN GPIO_NUM_42
@@ -245,15 +244,16 @@ private:
         }
         
         // Create LottieDisplay instead of EyeDisplay
+        DisplayFonts fonts = {
+            .text_font = &font_puhui_20_4,
+            .icon_font = nullptr,
+            .emoji_font = nullptr,  // 延迟初始化，避免在 LVGL 初始化前调用
+        };
         display_ = new LottieDisplay(panel_io, panel,
             DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
             DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y,
             &qrcode_img,
-            {
-                .text_font = &font_puhui_20_4,
-                .icon_font = &font_awesome_20_4,
-                .emoji_font = nullptr,  // 延迟初始化，避免在 LVGL 初始化前调用
-            });
+            fonts);
         
         ESP_LOGI(TAG, "LottieDisplay initialized successfully");
     }

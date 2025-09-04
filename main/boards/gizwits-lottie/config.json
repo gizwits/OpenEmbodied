@@ -14,7 +14,8 @@
                 "CONFIG_LV_USE_CANVAS=y",
                 "CONFIG_LV_USE_VECTOR_GRAPHIC=y",
                 "CONFIG_LV_USE_MATRIX=y",
-                "CONFIG_LV_USE_THORVG=y"
+                "CONFIG_LV_USE_THORVG=y",
+                "CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=0"
             ]
         }
     ]
