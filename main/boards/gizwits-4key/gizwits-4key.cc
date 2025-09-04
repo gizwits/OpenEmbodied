@@ -282,7 +282,7 @@ public:
     bool isCharging() {
         int chrg = gpio_get_level(CHARGING_PIN);
         int standby = gpio_get_level(STANDBY_PIN);
-        ESP_LOGI(TAG, "chrg: %d, standby: %d", chrg, standby);
+        // ESP_LOGI(TAG, "chrg: %d, standby: %d", chrg, standby);
         return chrg == 0 || standby == 0;
     }
     

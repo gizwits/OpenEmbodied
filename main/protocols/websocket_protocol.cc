@@ -22,9 +22,15 @@
 
 // WebSocket audio send path constants
 // If packet/frame size changes, adjust these accordingly
+#if CONFIG_IDF_TARGET_ESP32S3
+#define WS_AUDIO_BASE64_LEN 256           // Observed base64 length for current audio packet
+#define WS_BASE64_BUFFER_BYTES 256        // Base64 buffer capacity (includes null terminator headroom)
+#define WS_MESSAGE_BUFFER_RESERVE 320    // Typical JSON envelope reserve to avoid realloc churn
+#else
 #define WS_AUDIO_BASE64_LEN 56           // Observed base64 length for current audio packet
 #define WS_BASE64_BUFFER_BYTES 64        // Base64 buffer capacity (includes null terminator headroom)
 #define WS_MESSAGE_BUFFER_RESERVE 320    // Typical JSON envelope reserve to avoid realloc churn
+#endif
 
 #if CONFIG_IDF_TARGET_ESP32S3
 #define MAX_CACHED_PACKETS 10
@@ -648,7 +654,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
             if (chat_config && cJSON_IsObject(chat_config)) {
                 cJSON* parameters_item = cJSON_GetObjectItem(chat_config, "parameters");
                 if (parameters_item && cJSON_IsObject(parameters_item)) {
-                    char* parameters_str = cJSON_Print(parameters_item);
+                    char* parameters_str = cJSON_PrintUnformatted(parameters_item);
                     if (parameters_str) {
                         parameters = std::string(parameters_str);
                         free(parameters_str);
@@ -658,7 +664,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 // 提取 custom_variables
                 cJSON* custom_variables_item = cJSON_GetObjectItem(chat_config, "custom_variables");
                 if (custom_variables_item && cJSON_IsObject(custom_variables_item)) {
-                    char* custom_variables_str = cJSON_Print(custom_variables_item);
+                    char* custom_variables_str = cJSON_PrintUnformatted(custom_variables_item);
                     if (custom_variables_str) {
                         custom_variables = std::string(custom_variables_str);
                         free(custom_variables_str);
