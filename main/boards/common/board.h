@@ -97,6 +97,7 @@ public:
     virtual bool SetDataPointValue(const std::string& name, int value) { return false; }
     virtual void GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) { data_size = 0; }
     virtual void ProcessDataPointValue(const std::string& name, int value) {}
+
 };
 
 #define DECLARE_BOARD(BOARD_CLASS_NAME) \
