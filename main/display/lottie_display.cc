@@ -257,7 +257,7 @@ void LottieDisplay::ProcessAnimationChange(const char* animation_name) {
 #if LV_USE_LOTTIE
     // Build the file path for the animation
     char filepath[128];
-    snprintf(filepath, sizeof(filepath), "%s/%s.json", LOTTIE_MOUNT_POINT, mapped_animation);
+    snprintf(filepath, sizeof(filepath), "%s/1/%s.json", LOTTIE_MOUNT_POINT, mapped_animation);
     
     // Check if file exists first
     struct stat st;

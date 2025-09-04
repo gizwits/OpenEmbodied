@@ -285,3 +285,11 @@ add_custom_command(
 add_custom_target(lang_header ALL
     DEPENDS ${LANG_HEADER}
 )
+
+# Add Lottie SPIFFS image if board uses lottie
+if(CONFIG_LV_USE_LOTTIE)
+    # 自动生成 Lottie SPIFFS 镜像
+    # 从 main/assets/lottie 目录创建 SPIFFS 镜像
+    spiffs_create_partition_image(lottie ${CMAKE_CURRENT_SOURCE_DIR}/assets/lottie FLASH_IN_PROJECT)
+endif()
+
