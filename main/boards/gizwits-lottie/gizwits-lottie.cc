@@ -1,0 +1,592 @@
+#include "wifi_board.h"
+#include "application.h"
+#include "button.h"
+#include "config.h"
+#include "iot/thing_manager.h"
+#include "audio/codecs/box_audio_codec.h"
+#include "power_manager.h"
+#include "assets/lang_config.h"
+#include "font_awesome_symbols.h"
+
+#include "led/single_led.h"
+#include "display/lottie_display.h"
+#include "display/display.h"
+
+#include <wifi_station.h>
+#include "power_save_timer.h"
+#include <esp_log.h>
+#include <esp_efuse_table.h>
+#include <driver/i2c_master.h>
+
+#include <esp_lcd_panel_io.h>
+#include <esp_lcd_panel_ops.h>
+#include <esp_lcd_gc9a01.h>
+
+#include "driver/gpio.h"
+#include "driver/spi_master.h"
+#include "esp_timer.h"
+
+#include <math.h>
+
+#define TAG "GizwitsLottie"
+
+LV_FONT_DECLARE(font_puhui_20_4);
+LV_FONT_DECLARE(font_awesome_20_4);
+
+#define LIS2HH12_I2C_ADDR 0x1D  // SDO接GND为0x1D，接VDD为0x1E
+#define LIS2HH12_INT1_PIN GPIO_NUM_42
+
+class GizwitsLottie : public WifiBoard {
+private:
+    Button boot_button_;
+    Button touch_button_;
+    LottieDisplay* display_;
+    bool need_power_off_ = false;
+    i2c_master_bus_handle_t i2c_bus_;
+    // LIS2HH12专用I2C
+    i2c_master_bus_handle_t lis2hh12_i2c_bus_;
+    i2c_master_dev_handle_t lis2hh12_dev_;
+    int64_t power_on_time_ = 0;  // 记录上电时间
+    PowerManager* power_manager_;
+    TickType_t last_touch_time_ = 0;  // 上次抚摸触发时间
+    PowerSaveTimer* power_save_timer_;
+    bool is_charging_sleep_ = false;
+
+    void InitializePowerSaveTimer() {
+        // 20 分钟进休眠
+        // 30 分钟 关机
+        power_save_timer_ = new PowerSaveTimer(-1, 60 * 20, 60 * 30);
+        power_save_timer_->OnEnterSleepMode([this]() {
+            ESP_LOGE(TAG, "Enabling sleep mode");
+            if(IsCharging()) {
+                // 充电中
+                is_charging_sleep_ = true;
+                Application::GetInstance().Schedule([this]() {
+                    Application::GetInstance().QuitTalking();
+                    Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
+                    // 在这个场景里要切换成睡觉动画
+                    display_->SetEmotion("sleepy");
+                }, "EnterSleepMode_QuitTalking");
+            } else {
+                // 关闭 wifi，进入待机模式
+                Application::GetInstance().EnterSleepMode();
+            }
+        });
+        power_save_timer_->OnExitSleepMode([this]() {
+            ESP_LOGE(TAG, "退出休眠模式");
+        });
+        power_save_timer_->OnShutdownRequest([this]() {
+            // 关机
+            if (IsCharging()) {
+                // 充电模式下不管
+            } else {
+                PowerOff();
+            }
+        });
+        power_save_timer_->SetEnabled(true);
+    }
+
+    virtual void ResetPowerSaveTimer() {
+        if (power_save_timer_) {
+            power_save_timer_->ResetTimer();
+        }
+    };
+
+    virtual void WakeUpPowerSaveTimer() {
+        if (power_save_timer_) {
+            power_save_timer_->SetEnabled(true);
+            power_save_timer_->WakeUp();
+        }
+    };
+
+    static void lis2hh12_task(void* arg) {
+        GizwitsLottie* board = static_cast<GizwitsLottie*>(arg);
+        float last_ax = 0, last_ay = 0, last_az = 0;
+        const float threshold = 0.5; // g-force
+        int shake_count = 0;
+        const int shake_count_threshold = 10; // 连续10次才算shake
+        const int shake_count_decay = 1;     // 每次没检测到就-1
+        TickType_t last_shake_time = 0;      // 上次摇晃触发时间
+        const TickType_t shake_cooldown = pdMS_TO_TICKS(5000); // 5秒冷却时间
+        while (1) {
+            // 读取X/Y/Z
+            int16_t x = (int16_t)((board->lis2hh12_read_reg_pub(0x29) << 8) | board->lis2hh12_read_reg_pub(0x28));
+            int16_t y = (int16_t)((board->lis2hh12_read_reg_pub(0x2B) << 8) | board->lis2hh12_read_reg_pub(0x2A));
+            int16_t z = (int16_t)((board->lis2hh12_read_reg_pub(0x2D) << 8) | board->lis2hh12_read_reg_pub(0x2C));
+            float ax = x * 0.061f / 1000.0f;
+            float ay = y * 0.061f / 1000.0f;
+            float az = z * 0.061f / 1000.0f;
+            if (fabs(ax - last_ax) > threshold || fabs(ay - last_ay) > threshold || fabs(az - last_az) > threshold) {
+                shake_count++;
+                if (shake_count >= shake_count_threshold) {
+                    TickType_t current_time = xTaskGetTickCount();
+                    // 检查是否已经过了冷却时间
+                    if (current_time - last_shake_time >= shake_cooldown) {
+                        ESP_LOGI("LIS2HH12", "Shake detected! ax=%.2f ay=%.2f az=%.2f", ax, ay, az);
+                        last_shake_time = current_time; // 更新上次触发时间
+                        shake_count = 0; // 触发后清零
+                        // 这里可以触发你的摇晃事件
+                        if (board->ChannelIsOpen()) {
+                            board->display_->SetEmotion("vertigo");
+                            Application::GetInstance().SendTextToAI("用户正在摇晃你");
+                        } else {
+                            ESP_LOGI("LIS2HH12", "Channel is not open");
+                        }
+                    } else {
+                        ESP_LOGI("LIS2HH12", "Shake detected but in cooldown period");
+                        shake_count = 0; // 重置计数但不触发
+                    }
+                }
+            } else {
+                if (shake_count > 0) shake_count -= shake_count_decay;
+            }
+            last_ax = ax; last_ay = ay; last_az = az;
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+    }
+
+    void InitializeI2c() {
+        // Initialize I2C peripheral
+        i2c_master_bus_config_t i2c_bus_cfg = {
+            .i2c_port = (i2c_port_t)1,
+            .sda_io_num = AUDIO_CODEC_I2C_SDA_PIN,
+            .scl_io_num = AUDIO_CODEC_I2C_SCL_PIN,
+            .clk_source = I2C_CLK_SRC_DEFAULT,
+            .glitch_ignore_cnt = 7,
+            .intr_priority = 0,
+            .trans_queue_depth = 0,
+            .flags = {
+                .enable_internal_pullup = 1,
+            },
+        };
+        ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
+    }
+
+    // SPI初始化
+    void InitializeSpi() {
+        spi_bus_config_t buscfg = {
+            .mosi_io_num = DISPLAY_SPI_MOSI_PIN,
+            .miso_io_num = -1,  // No MISO for this display
+            .sclk_io_num = DISPLAY_SPI_SCLK_PIN,
+            .quadwp_io_num = -1,
+            .quadhd_io_num = -1,
+            .max_transfer_sz = DISPLAY_WIDTH * 40 * sizeof(uint16_t),  // Reduced for power saving
+        };
+        
+        esp_err_t ret = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "SPI bus initialization failed: %s", esp_err_to_name(ret));
+        }
+    }
+
+    // GC9A01初始化
+    void InitializeGc9a01Display() {
+        esp_lcd_panel_io_spi_config_t io_config = {
+            .cs_gpio_num = DISPLAY_SPI_CS_PIN,
+            .dc_gpio_num = DISPLAY_SPI_DC_PIN,
+            .spi_mode = 0,
+            .pclk_hz = DISPLAY_SPI_SCLK_HZ,
+            .trans_queue_depth = 10,
+            .lcd_cmd_bits = 8,
+            .lcd_param_bits = 8,
+        };
+        
+        esp_lcd_panel_io_handle_t panel_io = nullptr;
+        esp_err_t ret = esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_config, &panel_io);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Panel IO creation failed: %s", esp_err_to_name(ret));
+            return;
+        }
+        
+        esp_lcd_panel_dev_config_t panel_config = {
+            .reset_gpio_num = DISPLAY_SPI_RESET_PIN,
+            .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR,
+            .bits_per_pixel = 16,
+        };
+        
+        esp_lcd_panel_handle_t panel = nullptr;
+        ret = esp_lcd_new_panel_gc9a01(panel_io, &panel_config, &panel);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Panel creation failed: %s", esp_err_to_name(ret));
+            return;
+        }
+        
+        ret = esp_lcd_panel_reset(panel);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Panel reset failed: %s", esp_err_to_name(ret));
+            return;
+        }
+        
+        ret = esp_lcd_panel_init(panel);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Panel init failed: %s", esp_err_to_name(ret));
+            return;
+        }
+        
+        // Invert colors for GC9A01
+        ret = esp_lcd_panel_invert_color(panel, true);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Panel color invert failed: %s", esp_err_to_name(ret));
+            return;
+        }
+        
+        // Mirror display
+        ret = esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Panel mirror failed: %s", esp_err_to_name(ret));
+            return;
+        }
+        
+        // Turn on display
+        ret = esp_lcd_panel_disp_on_off(panel, true);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Panel display on failed: %s", esp_err_to_name(ret));
+            return;
+        }
+        
+        // Create LottieDisplay instead of EyeDisplay
+        display_ = new LottieDisplay(panel_io, panel,
+            DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
+            DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y,
+            &qrcode_img,
+            {
+                .text_font = &font_puhui_20_4,
+                .icon_font = &font_awesome_20_4,
+                .emoji_font = nullptr,  // 延迟初始化，避免在 LVGL 初始化前调用
+            });
+        
+        ESP_LOGI(TAG, "LottieDisplay initialized successfully");
+    }
+
+    int MaxBacklightBrightness() {
+        return 8;
+    }
+
+    void InitializeChargingGpio() {
+        gpio_config_t io_conf = {
+            .pin_bit_mask = (1ULL << STANDBY_PIN),
+            .mode = GPIO_MODE_INPUT,
+            .pull_up_en = GPIO_PULLUP_ENABLE,  // 需要上拉，因为这些引脚是开漏输出
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE
+        };
+        ESP_ERROR_CHECK(gpio_config(&io_conf));
+
+        gpio_config_t io_conf2 = {
+            .pin_bit_mask = (1ULL << CHARGING_PIN),
+            .mode = GPIO_MODE_INPUT,
+            .pull_up_en = GPIO_PULLUP_ENABLE,  // 需要上拉，因为这些引脚是开漏输出
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE
+        };
+        ESP_ERROR_CHECK(gpio_config(&io_conf2));
+    }
+
+    void InitializeButtons() {
+        static int first_level = gpio_get_level(BOOT_BUTTON_GPIO);
+        ESP_LOGI(TAG, "first_level: %d", first_level);
+
+        boot_button_.OnClick([this]() {
+            if (CheckAndHandleEnterSleepMode()) {
+                // 交给休眠逻辑托管
+                ESP_LOGI(TAG, "长按唤醒");
+                return;
+            }
+            auto& app = Application::GetInstance();
+            app.ToggleChatState();
+        });
+        
+        boot_button_.OnLongPress([this]() {
+            ESP_LOGI(TAG, "boot_button_.OnLongPress");
+            auto& app = Application::GetInstance();
+            // 计算设备运行时间
+            int64_t current_time = esp_timer_get_time() / 1000; // 转换为毫秒
+            int64_t uptime_ms = current_time - power_on_time_;
+            ESP_LOGI(TAG, "设备运行时间: %lld ms", uptime_ms);
+            
+            // 首次上电5秒内且first_level==0才忽略
+            const int64_t MIN_UPTIME_MS = 5000; // 5秒
+            if (first_level == 0 && uptime_ms < MIN_UPTIME_MS) {
+                first_level = 1;
+                ESP_LOGI(TAG, "首次上电5秒内，忽略长按操作");
+            } else {
+                ESP_LOGI(TAG, "执行关机操作");
+                this->GetBacklight()->SetBrightness(0, false);
+                need_power_off_ = true;
+            }
+        });
+        
+        boot_button_.OnPressUp([this]() {
+            first_level = 1;
+            ESP_LOGI(TAG, "boot_button_.OnPressUp");
+            if (need_power_off_) {
+                need_power_off_ = false;
+                // 使用静态函数来避免lambda捕获问题
+                xTaskCreate([](void* arg) {
+                    auto* board = static_cast<GizwitsLottie*>(arg);
+                    board->display_->SetEmotion("neutral");
+
+                    if (board->IsCharging()) {
+                        // 充电中，只关闭背光
+                        board->GetBacklight()->SetBrightness(0, false);
+                        board->is_charging_sleep_ = true;
+                        Application::GetInstance().QuitTalking();
+                    } else {
+                        // 没有充电，关机
+                        board->PowerOff();
+                    }
+                    vTaskDelete(NULL);
+                }, "power_off_task", 4028, this, 10, NULL);
+            }
+        });
+
+        boot_button_.OnMultipleClick([this]() {
+            InnerResetWifiConfiguration();
+        }, 3);
+    }
+
+    // 物联网初始化，添加对 AI 可见设备
+    void InitializeIot() {
+        auto& thing_manager = iot::ThingManager::GetInstance();
+        thing_manager.AddThing(iot::CreateThing("Speaker")); 
+        thing_manager.AddThing(iot::CreateThing("Screen"));   
+    }
+    
+    void InitializeGpio(gpio_num_t gpio_num_, bool output = false) {
+        gpio_config_t config = {
+            .pin_bit_mask = (1ULL << gpio_num_),
+            .mode = GPIO_MODE_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_ENABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        ESP_ERROR_CHECK(gpio_config(&config));
+        if (output) {
+            gpio_set_level(gpio_num_, 1);
+        } else {
+            gpio_set_level(gpio_num_, 0);
+        }
+    }
+    
+    int MaxVolume() {
+        return 80;
+    }
+
+    void InnerResetWifiConfiguration() {
+        ResetWifiConfiguration();
+    }
+
+    bool ChannelIsOpen() {
+        auto& app = Application::GetInstance();
+        return app.GetDeviceState() != kDeviceStateIdle;
+    }
+    
+    void InitializeLis2hh12I2c() {
+        i2c_master_bus_config_t i2c_bus_cfg = {
+            .i2c_port = I2C_NUM_0, // 用另一个I2C控制器
+            .sda_io_num = GPIO_NUM_38,      // LIS2HH12的SDA
+            .scl_io_num = GPIO_NUM_41,      // LIS2HH12的SCL
+            .clk_source = I2C_CLK_SRC_DEFAULT,
+            .glitch_ignore_cnt = 7,
+            .intr_priority = 0,
+            .trans_queue_depth = 0,
+            .flags = {
+                .enable_internal_pullup = 1,
+            },
+        };
+        esp_err_t ret = i2c_new_master_bus(&i2c_bus_cfg, &lis2hh12_i2c_bus_);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to create LIS2HH12 I2C bus: %s", esp_err_to_name(ret));
+            return;
+        }
+        
+        i2c_device_config_t dev_cfg = {
+            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+            .device_address = LIS2HH12_I2C_ADDR,
+            .scl_speed_hz = 400000,  // 降低到100kHz，提高稳定性
+        };
+        ret = i2c_master_bus_add_device(lis2hh12_i2c_bus_, &dev_cfg, &lis2hh12_dev_);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to add LIS2HH12 device: %s", esp_err_to_name(ret));
+            return;
+        }
+        
+        ESP_LOGI(TAG, "LIS2HH12 I2C initialized successfully");
+    }
+
+    void InitializeLis2hh12() {
+        // 首先检测设备是否存在
+        uint8_t who_am_i = this->lis2hh12_read_reg(0x0F); // WHO_AM_I寄存器
+        ESP_LOGI(TAG, "LIS2HH12 WHO_AM_I: 0x%02X", who_am_i);
+        
+        if (who_am_i != 0x41) { // LIS2HH12的WHO_AM_I值应该是0x41
+            ESP_LOGE(TAG, "LIS2HH12 not found! Expected 0x41, got 0x%02X", who_am_i);
+            return;
+        }
+        
+        ESP_LOGI(TAG, "LIS2HH12 detected successfully");
+        
+        // 0x20: CTRL1, 0x57 = 100Hz, all axes enable, normal mode
+        this->lis2hh12_write_reg(0x20, 0x57);
+        // 0x23: CTRL4, 0x00 = continuous update, LSB at lower address
+        this->lis2hh12_write_reg(0x23, 0x00);
+        
+        ESP_LOGI(TAG, "LIS2HH12 initialized successfully");
+    }
+
+    // LIS2HH12 I2C读写成员函数
+    uint8_t lis2hh12_read_reg(uint8_t reg) {
+        uint8_t data = 0;
+        esp_err_t ret = i2c_master_transmit_receive(lis2hh12_dev_, &reg, 1, &data, 1, pdMS_TO_TICKS(500));
+        if (ret != ESP_OK) {
+            return 0;
+        }
+        return data;
+    }
+    
+    void lis2hh12_write_reg(uint8_t reg, uint8_t value) {
+        uint8_t buf[2] = {reg, value};
+        esp_err_t ret = i2c_master_transmit(lis2hh12_dev_, buf, 2, pdMS_TO_TICKS(100));
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "LIS2HH12 write reg 0x%02X failed: %s", reg, esp_err_to_name(ret));
+        }
+    }
+
+    virtual bool NeedPlayProcessVoice() override {
+        return true;
+    }
+
+    void InitializePowerManager() {
+        power_manager_ =
+            new PowerManager(GPIO_NUM_NC, GPIO_NUM_NC, BAT_ADC_UNIT, BAT_ADC_CHANNEL);
+        
+        // 注册充电状态改变回调
+        power_manager_->SetChargingStatusCallback([this](bool is_charging) {
+            ESP_LOGI(TAG, "充电状态改变: %s", is_charging ? "开始充电" : "停止充电");
+            if (is_charging) {
+                // 充电开始时的处理逻辑
+                ESP_LOGI(TAG, "检测到开始充电");
+                // 降低发热                
+                GetBacklight()->SetBrightness(5, false);
+            } else {
+                // 充电停止时的处理逻辑
+                ESP_LOGI(TAG, "检测到停止充电");
+                
+                if (this->is_charging_sleep_) {
+                    ESP_LOGI(TAG, "充电停止，关机");
+                    PowerOff();
+                }
+            }
+
+            // 通知 mqtt 
+            auto& mqtt_client = MqttClient::getInstance();
+            mqtt_client.ReportTimer();
+        });
+    }
+
+public:
+    GizwitsLottie() : boot_button_(BOOT_BUTTON_GPIO), touch_button_(TOUCH_BUTTON_GPIO) { 
+        // 记录上电时间
+        power_on_time_ = esp_timer_get_time() / 1000; // 转换为毫秒
+        ESP_LOGI(TAG, "设备启动，上电时间戳: %lld ms", power_on_time_);
+
+        // 设置I2C master日志级别为ERROR，忽略I2C事务失败的日志
+        esp_log_level_set("i2c.master", ESP_LOG_ERROR);
+        
+        InitializeChargingGpio();
+        InitializeGpio(POWER_GPIO, true);
+        InitializeI2c();
+        InitializeGpio(AUDIO_CODEC_PA_PIN, true);
+        InitializeSpi();
+        InitializeGc9a01Display();
+        // InitializeLis2hh12I2c(); // 新增LIS2HH12专用I2C
+        // InitializeLis2hh12();    // 初始化LIS2HH12
+        
+        InitializeButtons();
+        // InitializeIot();
+        // xTaskCreatePinnedToCore(GizwitsLottie::lis2hh12_task, "lis2hh12_task", 1024 * 3, this, 1, NULL, 0); // 启动检测任务
+        InitializePowerManager();
+        InitializePowerSaveTimer();
+        
+        if (power_manager_) {
+            power_manager_->CheckBatteryStatusImmediately();
+            ESP_LOGI(TAG, "启动时立即检测电量: %d", power_manager_->GetBatteryLevel());
+        }
+        // xTaskCreate(
+        //     RestoreBacklightTask,      // 任务函数
+        //     "restore_backlight",       // 名字
+        //     4096,                      // 栈大小
+        //     this,                      // 参数传递 this 指针
+        //     5,                         // 优先级
+        //     NULL                       // 任务句柄
+        // );
+    }
+
+    virtual void PowerOff() override {
+        gpio_set_level(POWER_GPIO, 0);
+    }
+
+    bool CheckAndHandleEnterSleepMode() {
+        auto& app = Application::GetInstance();
+        if (app.GetDeviceState() == kDeviceStateSleeping) {
+            // 如果休眠中
+            app.ExitSleepMode();
+            return true;
+        }
+        return false;
+    }
+
+    static void RestoreBacklightTask(void* arg) {
+        auto* self = static_cast<GizwitsLottie*>(arg);
+        int level;
+        bool charging, discharging;
+        self->GetBatteryLevel(level, charging, discharging);
+        self->GetBacklight()->RestoreBrightness();
+        vTaskDelete(NULL); // 任务结束时删除自己
+    }
+
+    virtual Display* GetDisplay() override {
+        return display_;
+    }
+    
+    virtual Backlight* GetBacklight() override {
+        static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
+        return &backlight;
+    }
+
+    virtual bool IsCharging() override {
+        int chrg = gpio_get_level(CHARGING_PIN);
+        int standby = gpio_get_level(STANDBY_PIN);
+        return chrg == 0 || standby == 0;
+    }
+
+    virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
+        charging = IsCharging();
+        discharging = !charging;
+        level = power_manager_->GetBatteryLevel();
+        ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
+        return true;
+    }
+
+    virtual AudioCodec* GetAudioCodec() override {
+        static BoxAudioCodec audio_codec(
+            i2c_bus_, 
+            AUDIO_INPUT_SAMPLE_RATE, 
+            AUDIO_OUTPUT_SAMPLE_RATE,
+            AUDIO_I2S_GPIO_MCLK, 
+            AUDIO_I2S_GPIO_BCLK, 
+            AUDIO_I2S_GPIO_WS, 
+            AUDIO_I2S_GPIO_DOUT, 
+            AUDIO_I2S_GPIO_DIN,
+            AUDIO_CODEC_PA_PIN, 
+            AUDIO_CODEC_ES8311_ADDR, 
+            AUDIO_CODEC_ES7210_ADDR, 
+            AUDIO_INPUT_REFERENCE);
+        return &audio_codec;
+    }
+
+    // 公开I2C读寄存器方法供任务调用
+    uint8_t lis2hh12_read_reg_pub(uint8_t reg) { return this->lis2hh12_read_reg(reg); }
+};
+
+DECLARE_BOARD(GizwitsLottie);

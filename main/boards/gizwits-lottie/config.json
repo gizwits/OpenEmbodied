@@ -1,0 +1,21 @@
+{
+    "target": "esp32s3",
+    "builds": [
+        {
+            "name": "gizwits-lottie",
+            "sdkconfig_append": [
+                "CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y",
+                "CONFIG_USE_AUDIO_PROCESSOR=y",
+                "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions_lottie.csv\"",
+                "CONFIG_LV_FONT_MONTSERRAT_22=y",
+                "CONFIG_SR_WN_WN9_HILILI_TTS=y",
+                "CONFIG_LV_USE_LOTTIE=y",
+                "CONFIG_LV_USE_THORVG_INTERNAL=y",
+                "CONFIG_LV_USE_CANVAS=y",
+                "CONFIG_LV_USE_VECTOR_GRAPHIC=y",
+                "CONFIG_LV_USE_MATRIX=y",
+                "CONFIG_LV_USE_THORVG=y"
+            ]
+        }
+    ]
+}
