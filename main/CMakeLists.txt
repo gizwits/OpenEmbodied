@@ -120,6 +120,8 @@ elseif(CONFIG_BOARD_TYPE_ESP32S3_Touch_AMOLED_1_8)
     set(BOARD_TYPE "esp32-s3-touch-amoled-1.8")
 elseif(CONFIG_BOARD_TYPE_GIZWITS_C2_6824)
     set(BOARD_TYPE "gizwits-c2-6824")
+elseif(CONFIG_BOARD_TYPE_GIZWITS_C2_6824_CWH)
+    set(BOARD_TYPE "gizwits-c2-6824-cwh")
 elseif(CONFIG_BOARD_TYPE_GIZWITS_C2_6824_ML307)
     set(BOARD_TYPE "gizwits-c2-6824-ml307")
 elseif(CONFIG_BOARD_TYPE_GIZWITS_C2_6824_LVLIN)
@@ -251,6 +253,8 @@ if(CONFIG_USE_EYE_STYLE_VB6824 OR CONFIG_USE_AUDIO_CODEC_DECODE_OPUS)
                             "audio/codecs/es8311_audio_codec.cc"
                             "audio/codecs/es8374_audio_codec.cc"
                             "audio/codecs/es8389_audio_codec.cc"
+                            "display/lottie_display.cc"
+                            "display/lv_mem_psram.c"
                             "audio/codecs/es8388_audio_codec.cc")
 endif()
 

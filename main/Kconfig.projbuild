@@ -81,6 +81,8 @@ choice BOARD_TYPE
         bool "机智云ESP32-S3 4键ML307"
     config BOARD_TYPE_GIZWITS_C2_6824
         bool "机智云ESP32-C2 6824"
+    config BOARD_TYPE_GIZWITS_C2_6824_CWH
+        bool "机智云ESP32-C2 6824 cwh"
     config BOARD_TYPE_GIZWITS_C2_6824_ML307
         bool "机智云ESP32-C2 6824 ML307"
     config BOARD_TYPE_GIZWITS_C2_6824_LVLIN
