@@ -97,7 +97,6 @@ private:
             rec_button_.OnPressDown([this]() {
                 ESP_LOGI(TAG, "rec_button_.OnPressDown");
                 auto &app = Application::GetInstance();
-                app.AbortSpeaking(kAbortReasonNone);
                 app.StartListening();
             });
         } else {

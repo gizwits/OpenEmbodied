@@ -568,7 +568,6 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 CozeMCPParser::getInstance().handle_mcp(str_data);
             } else if (event_type == "error") {
                 ESP_LOGE(TAG, "Error: %s", str_data.data());
-                MqttClient::getInstance().sendTraceLog("error", str_data.data());
                 SetError(str_data.data());
                 if (str_data.find("\"code\":4200") != std::string::npos || str_data.find("\"code\":4101") != std::string::npos || str_data.find("\"code\":4100") != std::string::npos) {
                     // token 过期

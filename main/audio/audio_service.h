@@ -116,6 +116,7 @@ public:
 
     bool PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> packet, bool wait = false);
     std::unique_ptr<AudioStreamPacket> PopPacketFromSendQueue();
+    void ResetSendQueue();
     void PlaySound(const std::string_view& sound);
 #if defined(CONFIG_USE_EYE_STYLE_VB6824)
     bool ReadAudioData(std::vector<uint8_t>& opus, int sample_rate, int samples);

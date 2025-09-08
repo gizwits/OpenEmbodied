@@ -322,6 +322,7 @@ void Application::StartListening() {
         Schedule([this]() {
             AbortSpeaking(kAbortReasonNone);
             SetListeningMode(kListeningModeManualStop);
+
         }, "StartListening_AbortSpeaking");
     }
 }
@@ -337,10 +338,15 @@ void Application::StopListening() {
         return;
     }
 
+
     Schedule([this]() {
         if (device_state_ == kDeviceStateListening) {
             SetDeviceState(kDeviceStateIdle);
+            // 清空上传队列
+            audio_service_.ResetSendQueue();
+            vTaskDelay(pdMS_TO_TICKS(100));
             protocol_->SendStopListening();
+            ESP_LOGI(TAG, "StopListening(kDeviceStateListening)");
         }
     }, "StopListening_SendStop");
 }
@@ -847,7 +853,13 @@ void Application::SetDeviceState(DeviceState state) {
                 protocol_->SendStartListening(listening_mode_);
                 ESP_LOGI(TAG, "SetDeviceState_Listening_SendStartListening");
                 // audio_service_.EnableVoiceProcessingWithRetry(true, false, 5000);
-                audio_service_.EnableVoiceProcessing(true, false);
+                if (chat_mode_ == 0) {
+                    // 立即进入聆听模式
+                    audio_service_.EnableVoiceProcessing(true, true);
+                } else {
+                    audio_service_.EnableVoiceProcessing(true, false);
+                }
+
                 audio_service_.EnableWakeWordDetection(false);
             }
             break;
@@ -1010,7 +1022,7 @@ void Application::initGizwitsServer() {
         }, "initGizwitsServer_SendTraceLog");
         
         protocol_->UpdateRoomParams(params);
-        if(device_state_ == kDeviceStateSleeping || !is_normal_reset_) {
+        if((device_state_ == kDeviceStateSleeping || !is_normal_reset_) && chat_mode_ != 0) {
             Schedule([this]() {
                 // 直接连接
                 SetDeviceState(kDeviceStateConnecting);
