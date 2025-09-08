@@ -25,6 +25,7 @@ public:
     virtual bool IsAudioChannelOpened() const override;
     virtual bool SendAudio(const AudioStreamPacket& packet) override;
     virtual bool HasErrorOccurred() const override;
+    virtual bool IsAudioCanEnterSleepMode() const override;
     virtual void HandleReconnect();
     
 private:

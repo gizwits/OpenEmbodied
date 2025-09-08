@@ -27,7 +27,8 @@ void Protocol::OnNetworkError(std::function<void(const std::string& message)> ca
 }
 
 void Protocol::SetError(const std::string& message) {
-    error_occurred_ = true;
+    // coze 不做错误判断，严重错误会自动重连
+    // error_occurred_ = true;
     if (on_network_error_ != nullptr) {
         on_network_error_(message);
     }
@@ -162,8 +163,8 @@ bool Protocol::IsTimeout() const {
     }
     else
     {
-        int t = duration.count();
-        ESP_LOGE(TAG, "[wt%d]", t);
+        // int t = duration.count();
+        // ESP_LOGE(TAG, "[wt%d]", t);
     }
     return timeout;
 }

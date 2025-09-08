@@ -199,9 +199,13 @@ void WebsocketProtocol::SendStopListening() {
 }
 
 bool WebsocketProtocol::IsAudioChannelOpened() const {
-    // if (Application::GetInstance().GetChatMode() == 0) {
-    //     return websocket_ != nullptr && websocket_->IsConnected() && !error_occurred_;
-    // }
+    // 实际上IsAudioChannelOpened 不应该考虑超时
+    return websocket_ != nullptr && websocket_->IsConnected() && !error_occurred_;
+}
+
+
+bool WebsocketProtocol::IsAudioCanEnterSleepMode() const {
+    // 休眠才需要判断 timeout
     return websocket_ != nullptr && websocket_->IsConnected() && !error_occurred_ && !IsTimeout();
 }
 
@@ -581,7 +585,9 @@ bool WebsocketProtocol::OpenAudioChannel() {
     });
 
     websocket_->OnDisconnected([this](bool is_clean) {
-        if (is_clean) {
+        auto chat_mode = Application::GetInstance().GetChatMode();
+        // chat_mode == 0 表示按键说话，这种情况下不重连
+        if (is_clean || chat_mode == 0) {
             ESP_LOGI(TAG, "Websocket disconnected cleanly");
             reconnect_attempts_ = 0;   // 正常断开，重置重连计数
             should_reconnect_ = false; // 正常断开不需要重连

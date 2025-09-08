@@ -77,6 +77,7 @@ public:
     virtual bool OpenAudioChannel() = 0;
     virtual void CloseAudioChannel() = 0;
     virtual bool IsAudioChannelOpened() const = 0;
+    virtual bool IsAudioCanEnterSleepMode() const = 0;
     virtual bool IsAudioChannelBusy() const;
     virtual bool SendAudio(const AudioStreamPacket& packet) = 0;
     virtual void SendWakeWordDetected(const std::string& wake_word);

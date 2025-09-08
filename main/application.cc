@@ -816,7 +816,7 @@ void Application::SetDeviceState(DeviceState state) {
     ESP_LOGI(TAG, "STATE: %s", STATE_STRINGS[device_state_]);
 
     // Send the state change event
-    DeviceStateEventManager::GetInstance().PostStateChangeEvent(previous_state, state);
+    // DeviceStateEventManager::GetInstance().PostStateChangeEvent(previous_state, state);
 
     auto& board = Board::GetInstance();
     auto display = board.GetDisplay();
@@ -965,9 +965,9 @@ bool Application::CanEnterSleepMode() {
     //     return false;
     // }
 
-    // if (protocol_ && protocol_->IsAudioChannelOpened()) {
-    //     return false;
-    // }
+    if (protocol_ && protocol_->IsAudioCanEnterSleepMode()) {
+        return false;
+    }
     if (player_.IsDownloading()) {
         return false;
     }
