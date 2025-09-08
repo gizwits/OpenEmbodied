@@ -34,6 +34,18 @@ config PRODUCT_KEY
     default "f1029d2150c242a38c2088ecf6b92121"
     help
         Product key for Gizwits.
+
+config PRODUCT_TEST_WIFI
+    string "Product Test WiFi"
+    default ""
+    help
+        Product test WiFi for Gizwits.
+
+config PRODUCT_TEST_WIFI_PASSWORD
+    string "Product Test WiFi Password"
+    default ""
+    help
+        Product test WiFi password for Gizwits.
         
 config PRODUCT_SECRET
     string "Product Secret"

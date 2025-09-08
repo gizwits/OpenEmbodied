@@ -366,6 +366,8 @@ void Application::Start() {
     }
     
     Settings settings("wifi", true);
+    factory_test_mode_ = settings.GetInt("ft_mode", 0);
+
     chat_mode_ = settings.GetInt("chat_mode", 1); // 0=按键说话, 1=唤醒词, 2=自然对话
     // chat_mode_ = 2; // 0=按键说话, 1=唤醒词, 2=自然对话
     ESP_LOGI(TAG, "chat_mode_: %d", chat_mode_);
@@ -402,6 +404,17 @@ void Application::Start() {
     if (is_normal_reset_) {
         // 播放上电提示音
         audio_service_.PlaySound(Lang::Sounds::P3_SUCCESS);
+    }
+
+    if (factory_test_mode_ == 1) {
+        // 产测模式
+        // 消费掉flag
+        settings.SetInt("ft_mode", 0);
+        vTaskDelay(pdMS_TO_TICKS(500));
+        PlaySound(Lang::Sounds::P3_TEST_MODE);
+        audio_service_.EnableWakeWordDetection(true);
+        audio_service_.EnableVoiceProcessing(false);
+        return;
     }
 
     /* Wait for the network to be ready */
@@ -720,6 +733,7 @@ void Application::MainEventLoop() {
 
 void Application::OnWakeWordDetected() {
     Board::GetInstance().WakeUpPowerSaveTimer();
+    Board::GetInstance().WakeWordDetected();
     ESP_LOGI(TAG, "OnWakeWordDetected");
     if (!protocol_) {
         return;

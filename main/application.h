@@ -64,6 +64,7 @@ public:
     void PlaySound(const std::string_view& sound);
     void WakeWordInvoke(const std::string& wake_word);
     bool CanEnterSleepMode();
+    bool IsFactoryTestMode() const { return factory_test_mode_ == 1; }
     void SendMcpMessage(const std::string& payload);
     void QuitTalking();
     void SetChatMode(int mode);
@@ -87,6 +88,7 @@ private:
     std::mutex mutex_;
     std::deque<std::pair<std::string, std::function<void()>>> main_tasks_;
     std::unique_ptr<Protocol> protocol_;
+    int factory_test_mode_ = 0;
     EventGroupHandle_t event_group_ = nullptr;
     esp_timer_handle_t clock_timer_handle_ = nullptr;
     volatile DeviceState device_state_ = kDeviceStateUnknown;

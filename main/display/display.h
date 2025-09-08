@@ -7,6 +7,10 @@
 #include <esp_pm.h>
 
 #include <string>
+#include <vector>
+
+// 前向声明
+struct TestItem;
 
 struct DisplayFonts {
     const lv_font_t* text_font = nullptr;
@@ -33,6 +37,16 @@ public:
     virtual void EnterOTAMode() {}
     virtual void ClearScreen() {}
     virtual void SetOTAProgress(int progress) {}
+    
+    // 产测模式相关方法
+    virtual void EnterTestMode() {}
+    virtual void SetTestItems(const std::vector<TestItem>& test_items) {}
+    virtual void UpdateTestItem(const std::string& id, bool pass) {}
+    virtual void UpdateTestItemStatus(const std::string& id, int status) {}
+    
+    // RGB三基色检测
+    virtual void StartRGBTest() {}
+    virtual void StopRGBTest() {}
 
     inline int width() const { return width_; }
     inline int height() const { return height_; }

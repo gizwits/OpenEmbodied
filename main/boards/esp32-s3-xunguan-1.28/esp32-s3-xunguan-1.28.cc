@@ -7,6 +7,8 @@
 #include "power_manager.h"
 #include "assets/lang_config.h"
 #include "font_awesome_symbols.h"
+#include "wifi_connection_manager.h"
+
 
 #include "led/single_led.h"
 // #include "xunguan_display.h"
@@ -52,6 +54,15 @@ private:
     TickType_t last_touch_time_ = 0;  // 上次抚摸触发时间
     PowerSaveTimer* power_save_timer_;
     bool is_charging_sleep_ = false;
+
+    std::vector<TestItem> test_items = {
+        {"lcd", "LCD测试", 1},
+        {"key", "按键测试", 0},
+        {"wifi", "WiFi连接测试", 0},
+        {"sensor", "陀螺仪测试", 0},
+        {"battery", "电池检测", 0},
+        {"mic", "麦克风检测", 0},
+    };
 
 
     void InitializePowerSaveTimer() {
@@ -131,13 +142,19 @@ private:
                         ESP_LOGI("LIS2HH12", "Shake detected! ax=%.2f ay=%.2f az=%.2f", ax, ay, az);
                         last_shake_time = current_time; // 更新上次触发时间
                         shake_count = 0; // 触发后清零
-                        // 这里可以触发你的摇晃事件
-                        if (board->ChannelIsOpen()) {
-                            board->display_->SetEmotion("vertigo");
-                            Application::GetInstance().SendTextToAI("用户正在摇晃你");
+
+                        if (Application::GetInstance().IsFactoryTestMode()) {
+                            board->display_->UpdateTestItem("sensor", 1);
                         } else {
-                            ESP_LOGI("LIS2HH12", "Channel is not open");
+                            // 这里可以触发你的摇晃事件
+                            if (board->ChannelIsOpen()) {
+                                board->display_->SetEmotion("vertigo");
+                                Application::GetInstance().SendTextToAI("用户正在摇晃你");
+                            } else {
+                                ESP_LOGI("LIS2HH12", "Channel is not open");
+                            }
                         }
+
                     } else {
                         ESP_LOGI("LIS2HH12", "Shake detected but in cooldown period");
                         shake_count = 0; // 重置计数但不触发
@@ -259,10 +276,6 @@ private:
                 .icon_font = &font_awesome_20_4,
                 .emoji_font = font_emoji_64_init(),
             });
-        // display_ = new XunguanDisplay();
-        // if (!display_->Initialize(panel_io, panel)) {
-        //     ESP_LOGE(TAG, "Failed to initialize XunguanDisplay");
-        // }
     }
 
     int MaxBacklightBrightness() {
@@ -323,6 +336,14 @@ private:
         // });
 
         boot_button_.OnClick([this]() {
+
+            if (Application::GetInstance().IsFactoryTestMode()) {
+                // 通过按键测试
+                display_->UpdateTestItem("key", 1);
+                return;
+            }
+
+
             if (CheckAndHandleEnterSleepMode()) {
                 // 交给休眠逻辑托管
                 ESP_LOGI(TAG, "长按唤醒");
@@ -597,6 +618,7 @@ public:
             power_manager_->CheckBatteryStatusImmediately();
             ESP_LOGI(TAG, "启动时立即检测电量: %d", power_manager_->GetBatteryLevel());
         }
+
         xTaskCreate(
             RestoreBacklightTask,      // 任务函数
             "restore_backlight",       // 名字
@@ -605,10 +627,62 @@ public:
             5,                         // 优先级
             NULL                       // 任务句柄
         );
+
+        if (Application::GetInstance().IsFactoryTestMode()) {
+            display_->EnterTestMode();
+            display_->SetTestItems(test_items);
+            // 开始产测模式
+
+            Application::GetInstance().Schedule([this]() {
+                display_->StartRGBTest();
+                vTaskDelay(pdMS_TO_TICKS(9000));
+                display_->StopRGBTest();
+            }, "factory_test_mode");
+
+            Application::GetInstance().Schedule([this]() {
+                // 尝试连接产测路由wifi
+                auto& wifi_station = WifiStation::GetInstance();
+                wifi_station.Start();
+
+                ESP_LOGI(TAG, "产测模式临时连接产测路由器");
+                auto& wifi_manager = WifiConnectionManager::GetInstance();
+                esp_err_t ret = wifi_manager.Connect(CONFIG_PRODUCT_TEST_WIFI, CONFIG_PRODUCT_TEST_WIFI_PASSWORD);
+                ESP_LOGI(TAG, "产测模式临时连接产测路由器 ret: %d", ret);
+                if (ret == ESP_OK) {
+                    display_->UpdateTestItemStatus("wifi", 1);
+                } else {
+                    // 设置失败
+                    display_->UpdateTestItemStatus("wifi", 2);
+                }
+            }, "factory_test_mode");
+
+            Application::GetInstance().Schedule([this]() {
+                // ADC 电池检测
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                int level = 0;
+                bool charging = false;
+                bool discharging = false;
+                GetBatteryLevel(level, charging, discharging);
+                // 合理范围：1..100 认为有效（0 可能意味着未接电池/异常）
+                if (level >= 1 && level <= 100) {
+                    display_->UpdateTestItemStatus("battery", 1);
+                } else {
+                    display_->UpdateTestItemStatus("battery", 2);
+                }
+            }, "adc_test");
+        }
     }
 
     virtual void PowerOff() override {
         gpio_set_level(POWER_GPIO, 0);
+    }
+
+    virtual void WakeWordDetected() override {
+        ESP_LOGI(TAG, "WakeWordDetected");
+        display_->UpdateTestItemStatus("mic", 1);
+
+        GetAudioCodec()->EnableOutput(true);
+        Application::GetInstance().PlaySound(Lang::Sounds::P3_SUCCESS);
     }
 
     bool CheckAndHandleEnterSleepMode() {
