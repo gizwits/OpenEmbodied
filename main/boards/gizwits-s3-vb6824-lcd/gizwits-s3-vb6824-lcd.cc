@@ -47,17 +47,6 @@ private:
     TickType_t last_touch_time_ = 0;  // 上次抚摸触发时间
     PowerSaveTimer* power_save_timer_;
     bool is_charging_sleep_ = false;
-
-    std::vector<TestItem> test_items = {
-        {"lcd", "LCD测试", 1},
-        {"key", "按键测试", 0},
-        {"wifi", "WiFi连接测试", 0},
-        {"sensor", "陀螺仪测试", 0},
-        {"battery", "电池检测", 0},
-        {"mic", "麦克风检测", 0},
-    };
-
-
     void InitializePowerSaveTimer() {
         // 20 分钟进休眠
         // 30 分钟 关机
@@ -207,23 +196,23 @@ private:
     }
 
     void InitializeChargingGpio() {
-        gpio_config_t io_conf = {
-            .pin_bit_mask = (1ULL << STANDBY_PIN),
-            .mode = GPIO_MODE_INPUT,
-            .pull_up_en = GPIO_PULLUP_ENABLE,  // 需要上拉，因为这些引脚是开漏输出
-            .pull_down_en = GPIO_PULLDOWN_DISABLE,
-            .intr_type = GPIO_INTR_DISABLE
-        };
-        ESP_ERROR_CHECK(gpio_config(&io_conf));
+        // gpio_config_t io_conf = {
+        //     .pin_bit_mask = (1ULL << STANDBY_PIN),
+        //     .mode = GPIO_MODE_INPUT,
+        //     .pull_up_en = GPIO_PULLUP_ENABLE,  // 需要上拉，因为这些引脚是开漏输出
+        //     .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        //     .intr_type = GPIO_INTR_DISABLE
+        // };
+        // ESP_ERROR_CHECK(gpio_config(&io_conf));
 
-        gpio_config_t io_conf2 = {
-            .pin_bit_mask = (1ULL << CHARGING_PIN),
-            .mode = GPIO_MODE_INPUT,
-            .pull_up_en = GPIO_PULLUP_ENABLE,  // 需要上拉，因为这些引脚是开漏输出
-            .pull_down_en = GPIO_PULLDOWN_DISABLE,
-            .intr_type = GPIO_INTR_DISABLE
-        };
-        ESP_ERROR_CHECK(gpio_config(&io_conf2));
+        // gpio_config_t io_conf2 = {
+        //     .pin_bit_mask = (1ULL << CHARGING_PIN),
+        //     .mode = GPIO_MODE_INPUT,
+        //     .pull_up_en = GPIO_PULLUP_ENABLE,  // 需要上拉，因为这些引脚是开漏输出
+        //     .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        //     .intr_type = GPIO_INTR_DISABLE
+        // };
+        // ESP_ERROR_CHECK(gpio_config(&io_conf2));
     }
 
     void InitializeButtons() {
@@ -231,25 +220,13 @@ private:
         ESP_LOGI(TAG, "first_level: %d", first_level);
 
         boot_button_.OnClick([this]() {
-
-            if (Application::GetInstance().IsFactoryTestMode()) {
-                // 通过按键测试
-                display_->UpdateTestItem("key", 1);
-                return;
-            }
-
-
             if (CheckAndHandleEnterSleepMode()) {
                 // 交给休眠逻辑托管
                 ESP_LOGI(TAG, "长按唤醒");
                 return;
             }
             auto& app = Application::GetInstance();
-            // if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
-            //     InnerResetWifiConfiguration();
-            // }
             app.ToggleChatState();
-            // display_->TestNextEmotion();
         });
         boot_button_.OnLongPress([this]() {
             ESP_LOGI(TAG, "boot_button_.OnLongPress");
@@ -266,10 +243,6 @@ private:
                 ESP_LOGI(TAG, "首次上电5秒内，忽略长按操作");
             } else {
                 ESP_LOGI(TAG, "执行关机操作");
-                // vTaskDelay(pdMS_TO_TICKS(200));
-                // auto codec = GetAudioCodec();
-                // codec->EnableOutput(true);
-                // Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
                 this->GetBacklight()->SetBrightness(0, false);
                 need_power_off_ = true;
             }
@@ -342,25 +315,6 @@ private:
         return app.GetDeviceState() != kDeviceStateIdle;
     }
 
-    // LIS2HH12 I2C读写成员函数
-    uint8_t lis2hh12_read_reg(uint8_t reg) {
-        uint8_t data = 0;
-        esp_err_t ret = i2c_master_transmit_receive(lis2hh12_dev_, &reg, 1, &data, 1, pdMS_TO_TICKS(500));
-        if (ret != ESP_OK) {
-            // ESP_LOGE(TAG, "LIS2HH12 read reg 0x%02X failed: %s", reg, esp_err_to_name(ret));
-            return 0;
-        }
-        return data;
-    }
-    
-    void lis2hh12_write_reg(uint8_t reg, uint8_t value) {
-        uint8_t buf[2] = {reg, value};
-        esp_err_t ret = i2c_master_transmit(lis2hh12_dev_, buf, 2, pdMS_TO_TICKS(100));
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "LIS2HH12 write reg 0x%02X failed: %s", reg, esp_err_to_name(ret));
-        }
-    }
-
     virtual bool NeedPlayProcessVoice() override {
         return true;
     }
@@ -424,7 +378,7 @@ private:
     }
 
 public:
-    MovecallMojiESP32S3() : audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO), boot_button_(BOOT_BUTTON_GPIO) { 
+    MovecallMojiESP32S3() : boot_button_(BOOT_BUTTON_GPIO),audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO) { 
         // 记录上电时间
         power_on_time_ = esp_timer_get_time() / 1000; // 转换为毫秒
         ESP_LOGI(TAG, "设备启动，上电时间戳: %lld ms", power_on_time_);
@@ -436,8 +390,7 @@ public:
 
         InitializeGpio(POWER_GPIO, true);
 
-        InitializeGpio(AUDIO_CODEC_PA_PIN, true);
-        // InitializeGpio(DISPLAY_BACKLIGHT_PIN, false);
+        // InitializeGpio(AUDIO_CODEC_PA_PIN, true);
         InitializeSpi();
         InitializeGc9a01Display();
         
@@ -458,63 +411,18 @@ public:
             5,                         // 优先级
             NULL                       // 任务句柄
         );
-
-        if (Application::GetInstance().IsFactoryTestMode()) {
-            display_->EnterTestMode();
-            display_->SetTestItems(test_items);
-            // 开始产测模式
-
-            Application::GetInstance().Schedule([this]() {
-                display_->StartRGBTest();
-                vTaskDelay(pdMS_TO_TICKS(9000));
-                display_->StopRGBTest();
-            }, "factory_test_mode");
-
-            Application::GetInstance().Schedule([this]() {
-                // 尝试连接产测路由wifi
-                auto& wifi_station = WifiStation::GetInstance();
-                wifi_station.Start();
-
-                ESP_LOGI(TAG, "产测模式临时连接产测路由器");
-                auto& wifi_manager = WifiConnectionManager::GetInstance();
-                esp_err_t ret = wifi_manager.Connect(CONFIG_PRODUCT_TEST_WIFI, CONFIG_PRODUCT_TEST_WIFI_PASSWORD);
-                ESP_LOGI(TAG, "产测模式临时连接产测路由器 ret: %d", ret);
-                if (ret == ESP_OK) {
-                    display_->UpdateTestItemStatus("wifi", 1);
-                } else {
-                    // 设置失败
-                    display_->UpdateTestItemStatus("wifi", 2);
-                }
-            }, "factory_test_mode");
-
-            Application::GetInstance().Schedule([this]() {
-                // ADC 电池检测
-                vTaskDelay(pdMS_TO_TICKS(1000));
-                int level = 0;
-                bool charging = false;
-                bool discharging = false;
-                GetBatteryLevel(level, charging, discharging);
-                // 合理范围：1..100 认为有效（0 可能意味着未接电池/异常）
-                if (level >= 1 && level <= 100) {
-                    display_->UpdateTestItemStatus("battery", 1);
-                } else {
-                    display_->UpdateTestItemStatus("battery", 2);
-                }
-            }, "adc_test");
-        }
     }
 
     virtual void PowerOff() override {
         gpio_set_level(POWER_GPIO, 0);
     }
 
-    virtual void WakeWordDetected() override {
-        ESP_LOGI(TAG, "WakeWordDetected");
-        display_->UpdateTestItemStatus("mic", 1);
+    // virtual void WakeWordDetected() override {
+    //     ESP_LOGI(TAG, "WakeWordDetected");
 
-        GetAudioCodec()->EnableOutput(true);
-        Application::GetInstance().PlaySound(Lang::Sounds::P3_SUCCESS);
-    }
+    //     GetAudioCodec()->EnableOutput(true);
+    //     Application::GetInstance().PlaySound(Lang::Sounds::P3_SUCCESS);
+    // }
 
     bool CheckAndHandleEnterSleepMode() {
         auto& app = Application::GetInstance();
@@ -573,8 +481,6 @@ public:
         return &audio_codec;
     }
 
-    // 公开I2C读寄存器方法供任务调用
-    uint8_t lis2hh12_read_reg_pub(uint8_t reg) { return this->lis2hh12_read_reg(reg); }
 };
 
 DECLARE_BOARD(MovecallMojiESP32S3);
