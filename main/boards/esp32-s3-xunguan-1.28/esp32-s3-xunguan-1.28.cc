@@ -7,10 +7,12 @@
 #include "power_manager.h"
 #include "assets/lang_config.h"
 #include "font_awesome_symbols.h"
+#include "wifi_connection_manager.h"
+
 
 #include "led/single_led.h"
-#include "xunguan_display.h"
-// #include "display/eye_display.h"
+// #include "xunguan_display.h"
+#include "display/eye_display.h"
 #include "display/display.h"
 
 #include <wifi_station.h>
@@ -41,7 +43,7 @@ class MovecallMojiESP32S3 : public WifiBoard {
 private:
     Button boot_button_;
     Button touch_button_;
-    XunguanDisplay* display_;
+    EyeDisplay* display_;
     bool need_power_off_ = false;
     i2c_master_bus_handle_t i2c_bus_;
     // LIS2HH12专用I2C
@@ -52,6 +54,15 @@ private:
     TickType_t last_touch_time_ = 0;  // 上次抚摸触发时间
     PowerSaveTimer* power_save_timer_;
     bool is_charging_sleep_ = false;
+
+    std::vector<TestItem> test_items = {
+        {"lcd", "LCD测试", 1},
+        {"key", "按键测试", 0},
+        {"wifi", "WiFi连接测试", 0},
+        {"sensor", "陀螺仪测试", 0},
+        {"battery", "电池检测", 0},
+        {"mic", "麦克风检测", 0},
+    };
 
 
     void InitializePowerSaveTimer() {
@@ -131,13 +142,19 @@ private:
                         ESP_LOGI("LIS2HH12", "Shake detected! ax=%.2f ay=%.2f az=%.2f", ax, ay, az);
                         last_shake_time = current_time; // 更新上次触发时间
                         shake_count = 0; // 触发后清零
-                        // 这里可以触发你的摇晃事件
-                        if (board->ChannelIsOpen()) {
-                            board->display_->SetEmotion("vertigo");
-                            Application::GetInstance().SendTextToAI("用户正在摇晃你");
+
+                        if (Application::GetInstance().IsFactoryTestMode()) {
+                            board->display_->UpdateTestItem("sensor", 1);
                         } else {
-                            ESP_LOGI("LIS2HH12", "Channel is not open");
+                            // 这里可以触发你的摇晃事件
+                            if (board->ChannelIsOpen()) {
+                                board->display_->SetEmotion("vertigo");
+                                Application::GetInstance().SendTextToAI("用户正在摇晃你");
+                            } else {
+                                ESP_LOGI("LIS2HH12", "Channel is not open");
+                            }
                         }
+
                     } else {
                         ESP_LOGI("LIS2HH12", "Shake detected but in cooldown period");
                         shake_count = 0; // 重置计数但不触发
@@ -250,19 +267,15 @@ private:
             return;
         }
         
-        // display_ = new XunguanDisplay(panel_io, panel,
-        //     DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
-        //     DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y,
-        //     &qrcode_img,
-        //     {
-        //         .text_font = &font_puhui_20_4,
-        //         .icon_font = &font_awesome_20_4,
-        //         .emoji_font = font_emoji_64_init(),
-        //     });
-        display_ = new XunguanDisplay();
-        if (!display_->Initialize(panel_io, panel)) {
-            ESP_LOGE(TAG, "Failed to initialize XunguanDisplay");
-        }
+        display_ = new EyeDisplay(panel_io, panel,
+            DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
+            DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y,
+            &qrcode_img,
+            {
+                .text_font = &font_puhui_20_4,
+                .icon_font = &font_awesome_20_4,
+                .emoji_font = font_emoji_64_init(),
+            });
     }
 
     int MaxBacklightBrightness() {
@@ -293,36 +306,44 @@ private:
         static int first_level = gpio_get_level(BOOT_BUTTON_GPIO);
         ESP_LOGI(TAG, "first_level: %d", first_level);
 
-        touch_button_.OnPressDown([this]() {
+        // touch_button_.OnPressDown([this]() {
           
-            ESP_LOGI(TAG, "touch_button_.OnPressDown");
+        //     ESP_LOGI(TAG, "touch_button_.OnPressDown");
 
-            TickType_t current_time = xTaskGetTickCount();
-            const TickType_t touch_cooldown = pdMS_TO_TICKS(5000); // 5秒冷却时间
+        //     TickType_t current_time = xTaskGetTickCount();
+        //     const TickType_t touch_cooldown = pdMS_TO_TICKS(5000); // 5秒冷却时间
             
-            // 检查是否已经过了冷却时间
-            if (current_time - last_touch_time_ >= touch_cooldown) {
-                last_touch_time_ = current_time; // 更新上次触发时间
+        //     // 检查是否已经过了冷却时间
+        //     if (current_time - last_touch_time_ >= touch_cooldown) {
+        //         last_touch_time_ = current_time; // 更新上次触发时间
 
-                //切换表情
-                if (CheckAndHandleEnterSleepMode()) {
-                    // 交给休眠逻辑托管
-                    ESP_LOGI(TAG, "触摸唤醒");
-                    return;
-                }
-                display_->SetEmotion("loving");
-                if (ChannelIsOpen()) {
-                    Application::GetInstance().SendTextToAI("用户正在抚摸你");
-                } else {
-                    ESP_LOGI("touch", "Channel is not open");
-                    Application::GetInstance().ToggleChatState();
-                }
-            } else {
-                ESP_LOGI("touch", "Touch detected but in cooldown period");
-            }
-        });
+        //         //切换表情
+        //         if (CheckAndHandleEnterSleepMode()) {
+        //             // 交给休眠逻辑托管
+        //             ESP_LOGI(TAG, "触摸唤醒");
+        //             return;
+        //         }
+        //         display_->SetEmotion("loving");
+        //         if (ChannelIsOpen()) {
+        //             Application::GetInstance().SendTextToAI("用户正在抚摸你");
+        //         } else {
+        //             ESP_LOGI("touch", "Channel is not open");
+        //             Application::GetInstance().ToggleChatState();
+        //         }
+        //     } else {
+        //         ESP_LOGI("touch", "Touch detected but in cooldown period");
+        //     }
+        // });
 
         boot_button_.OnClick([this]() {
+
+            if (Application::GetInstance().IsFactoryTestMode()) {
+                // 通过按键测试
+                display_->UpdateTestItem("key", 1);
+                return;
+            }
+
+
             if (CheckAndHandleEnterSleepMode()) {
                 // 交给休眠逻辑托管
                 ESP_LOGI(TAG, "长按唤醒");
@@ -510,7 +531,7 @@ private:
         // 注册充电状态改变回调
         power_manager_->SetChargingStatusCallback([this](bool is_charging) {
             ESP_LOGI(TAG, "充电状态改变: %s", is_charging ? "开始充电" : "停止充电");
-            XunguanDisplay* xunguan_display = static_cast<XunguanDisplay*>(GetDisplay());
+            // XunguanDisplay* xunguan_display = static_cast<XunguanDisplay*>(GetDisplay());
             if (is_charging) {
                 // 充电开始时的处理逻辑
                 ESP_LOGI(TAG, "检测到开始充电");
@@ -519,32 +540,32 @@ private:
                 
                 // 设置充电时的自定义帧率：100-125Hz (8-10ms延迟)
                 // 需要强制转换成 XunguanDisplay 类型
-                if (xunguan_display) {
-                    if (xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL)) {
-                    // if (xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::POWER_SAVE)) {
-                        ESP_LOGI(TAG, "充电帧率设置成功");
-                    } else {
-                        ESP_LOGE(TAG, "充电帧率设置失败");
-                    }
-                } else {
-                    ESP_LOGE(TAG, "无法获取 XunguanDisplay 对象");
-                }
+                // if (xunguan_display) {
+                //     if (xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL)) {
+                //     // if (xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::POWER_SAVE)) {
+                //         ESP_LOGI(TAG, "充电帧率设置成功");
+                //     } else {
+                //         ESP_LOGE(TAG, "充电帧率设置失败");
+                //     }
+                // } else {
+                //     ESP_LOGE(TAG, "无法获取 XunguanDisplay 对象");
+                // }
             } else {
                 // 充电停止时的处理逻辑
                 ESP_LOGI(TAG, "检测到停止充电");
                 
                 // 恢复正常帧率模式
                 // 需要强制转换成 XunguanDisplay 类型
-                if (xunguan_display) {
-                    ESP_LOGI(TAG, "停止充电，恢复正常帧率模式");
-                    if (xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL)) {
-                        ESP_LOGI(TAG, "正常帧率模式恢复成功");
-                    } else {
-                        ESP_LOGE(TAG, "正常帧率模式恢复失败");
-                    }
-                } else {
-                    ESP_LOGE(TAG, "无法获取 XunguanDisplay 对象");
-                }
+                // if (xunguan_display) {
+                //     ESP_LOGI(TAG, "停止充电，恢复正常帧率模式");
+                //     if (xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL)) {
+                //         ESP_LOGI(TAG, "正常帧率模式恢复成功");
+                //     } else {
+                //         ESP_LOGE(TAG, "正常帧率模式恢复失败");
+                //     }
+                // } else {
+                //     ESP_LOGE(TAG, "无法获取 XunguanDisplay 对象");
+                // }
 
                 if (this->is_charging_sleep_) {
                     ESP_LOGI(TAG, "充电停止，关机");
@@ -597,6 +618,7 @@ public:
             power_manager_->CheckBatteryStatusImmediately();
             ESP_LOGI(TAG, "启动时立即检测电量: %d", power_manager_->GetBatteryLevel());
         }
+
         xTaskCreate(
             RestoreBacklightTask,      // 任务函数
             "restore_backlight",       // 名字
@@ -605,10 +627,62 @@ public:
             5,                         // 优先级
             NULL                       // 任务句柄
         );
+
+        if (Application::GetInstance().IsFactoryTestMode()) {
+            display_->EnterTestMode();
+            display_->SetTestItems(test_items);
+            // 开始产测模式
+
+            Application::GetInstance().Schedule([this]() {
+                display_->StartRGBTest();
+                vTaskDelay(pdMS_TO_TICKS(9000));
+                display_->StopRGBTest();
+            }, "factory_test_mode");
+
+            Application::GetInstance().Schedule([this]() {
+                // 尝试连接产测路由wifi
+                auto& wifi_station = WifiStation::GetInstance();
+                wifi_station.Start();
+
+                ESP_LOGI(TAG, "产测模式临时连接产测路由器");
+                auto& wifi_manager = WifiConnectionManager::GetInstance();
+                esp_err_t ret = wifi_manager.Connect(CONFIG_PRODUCT_TEST_WIFI, CONFIG_PRODUCT_TEST_WIFI_PASSWORD);
+                ESP_LOGI(TAG, "产测模式临时连接产测路由器 ret: %d", ret);
+                if (ret == ESP_OK) {
+                    display_->UpdateTestItemStatus("wifi", 1);
+                } else {
+                    // 设置失败
+                    display_->UpdateTestItemStatus("wifi", 2);
+                }
+            }, "factory_test_mode");
+
+            Application::GetInstance().Schedule([this]() {
+                // ADC 电池检测
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                int level = 0;
+                bool charging = false;
+                bool discharging = false;
+                GetBatteryLevel(level, charging, discharging);
+                // 合理范围：1..100 认为有效（0 可能意味着未接电池/异常）
+                if (level >= 1 && level <= 100) {
+                    display_->UpdateTestItemStatus("battery", 1);
+                } else {
+                    display_->UpdateTestItemStatus("battery", 2);
+                }
+            }, "adc_test");
+        }
     }
 
     virtual void PowerOff() override {
         gpio_set_level(POWER_GPIO, 0);
+    }
+
+    virtual void WakeWordDetected() override {
+        ESP_LOGI(TAG, "WakeWordDetected");
+        display_->UpdateTestItemStatus("mic", 1);
+
+        GetAudioCodec()->EnableOutput(true);
+        Application::GetInstance().PlaySound(Lang::Sounds::P3_SUCCESS);
     }
 
     bool CheckAndHandleEnterSleepMode() {
@@ -626,18 +700,18 @@ public:
         int level;
         bool charging, discharging;
         self->GetBatteryLevel(level, charging, discharging);
-        XunguanDisplay* xunguan_display = static_cast<XunguanDisplay*>(self->GetDisplay());
+        // XunguanDisplay* xunguan_display = static_cast<XunguanDisplay*>(self->GetDisplay());
         self->GetBacklight()->RestoreBrightness();
 
         // xunguan_display->StartAutoTest(1000);
 
-        if (charging) {
-            // 降低发热            
-            // xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::POWER_SAVE);
-            xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL);
-        } else {
-            xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL);
-        }
+        // if (charging) {
+        //     // 降低发热            
+        //     // xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::POWER_SAVE);
+        //     xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL);
+        // } else {
+        //     xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL);
+        // }
         vTaskDelete(NULL); // 任务结束时删除自己
     }
 
