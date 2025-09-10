@@ -179,16 +179,18 @@ private:
             ESP_LOGE(TAG, "Panel display on failed: %s", esp_err_to_name(ret));
             return;
         }
+
+        DisplayFonts fonts = {
+            .text_font = &font_puhui_20_4,
+            .icon_font = nullptr,
+            .emoji_font = nullptr,  // 延迟初始化，避免在 LVGL 初始化前调用
+        };
         
         display_ = new EyeDisplay(panel_io, panel,
             DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
             DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y,
             &qrcode_img,
-            {
-                .text_font = &font_puhui_20_4,
-                .icon_font = &font_awesome_20_4,
-                .emoji_font = font_emoji_64_init(),
-            });
+            fonts);
     }
 
     int MaxBacklightBrightness() {

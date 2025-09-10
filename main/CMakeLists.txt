@@ -15,6 +15,7 @@ set(SOURCES "audio/audio_codec.cc"
             "display/oled_display.cc"
             "display/eye_toy_single_display.cc"
             "display/eye_toy_display.cc"
+            "display/eye_display.cc"
             "display/lottie_display.cc"
             "display/lv_mem_psram.c"
             "protocols/protocol.cc"
@@ -246,6 +247,10 @@ if(CONFIG_IDF_TARGET_ESP32)
                              )
 endif()
 
+if(CONFIG_IDF_TARGET_ESP32C2)
+    list(REMOVE_ITEM SOURCES "display/lv_mem_psram.c")
+endif()
+                            
 if(CONFIG_USE_EYE_STYLE_VB6824 OR CONFIG_USE_AUDIO_CODEC_DECODE_OPUS)
     list(APPEND SOURCES "audio/codecs/vb6824_audio_codec.cc")
     list(REMOVE_ITEM SOURCES "audio/codecs/box_audio_codec.cc"
@@ -254,7 +259,6 @@ if(CONFIG_USE_EYE_STYLE_VB6824 OR CONFIG_USE_AUDIO_CODEC_DECODE_OPUS)
                             "audio/codecs/es8374_audio_codec.cc"
                             "audio/codecs/es8389_audio_codec.cc"
                             "display/lottie_display.cc"
-                            "display/lv_mem_psram.c"
                             "audio/codecs/es8388_audio_codec.cc")
 endif()
 
