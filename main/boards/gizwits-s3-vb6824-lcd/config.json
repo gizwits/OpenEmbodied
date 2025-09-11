@@ -12,8 +12,10 @@
                 "CONFIG_VB6824_UART_TASK_STACK_SIZE=8192",
                 "CONFIG_VB6824_SEND_USE_TASK=y",
                 "CONFIG_VB6824_SEND_TASK_STACK_SIZE=4096",
-                "CONFIG_ESP_TIMER_TASK_STACK_SIZE=4096"
+                "CONFIG_ESP_TIMER_TASK_STACK_SIZE=4096",
+                "CONFIG_USE_AFE_WAKE_WORD=n"
             ]
         }
     ]
 }
+

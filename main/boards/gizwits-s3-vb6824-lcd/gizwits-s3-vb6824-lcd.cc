@@ -47,6 +47,17 @@ private:
     TickType_t last_touch_time_ = 0;  // 上次抚摸触发时间
     PowerSaveTimer* power_save_timer_;
     bool is_charging_sleep_ = false;
+
+    // 唤醒词列表
+    std::vector<std::string> wake_words_ = {"你好小智", "你好小云", "合养精灵", "嗨小火人"};
+    std::vector<std::string> network_config_words_ = {"开始配网"};
+
+
+    // 检查命令是否在列表中
+    bool IsCommandInList(const std::string& command, const std::vector<std::string>& command_list) {
+        return std::find(command_list.begin(), command_list.end(), command) != command_list.end();
+    }
+
     void InitializePowerSaveTimer() {
         // 20 分钟进休眠
         // 30 分钟 关机
@@ -250,8 +261,6 @@ private:
             }
         });
         boot_button_.OnPressUp([this]() {
-            // InnerResetWifiConfiguration();
-
             first_level = 1;
             ESP_LOGI(TAG, "boot_button_.OnPressUp");
             if (need_power_off_) {
@@ -404,6 +413,20 @@ public:
             power_manager_->CheckBatteryStatusImmediately();
             ESP_LOGI(TAG, "启动时立即检测电量: %d", power_manager_->GetBatteryLevel());
         }
+
+
+
+        audio_codec.OnWakeUp([this](const std::string& command) {
+            ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());
+            if (IsCommandInList(command, wake_words_)){
+                ESP_LOGE(TAG, "vb6824 recv cmd: %d", Application::GetInstance().GetDeviceState());
+                // if(Application::GetInstance().GetDeviceState() != kDeviceStateListening){
+                // }
+                Application::GetInstance().WakeWordInvoke("你好小智");
+            } else if (IsCommandInList(command, network_config_words_)) {
+                ResetWifiConfiguration();
+            }
+        });
 
         xTaskCreate(
             RestoreBacklightTask,      // 任务函数
