@@ -138,7 +138,12 @@ public:
         SLEEPING,
         SILLY,
         VERTIGO,
-        CONFUSED
+        CONFUSED,
+        HAPPY_FACE,
+        SAD_EMOJI,  // 新的悲伤表情，包含眉毛和眼泪
+        SHOCKED_EMOJI,  // 新的震惊表情，包含向上挑的眉毛、椭圆嘴巴和三条竖线
+        STAR_LOVING, // 喜爱表情，使用五角星作为眼睛
+        NEUTRAL_FACE // 中性表情
     };
 
     EyeDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
@@ -196,7 +201,11 @@ private:
     void StartSillyAnimation();
     void StartConfusedAnimation();
     void StartVertigoAnimation();
-
+    void StartHappyFaceAnimation();
+    void StartSadEmojiAnimation();
+    void StartShockedEmojiAnimation();
+    void StartLovingEmojiAnimation();
+    void StartNeutralFaceAnimation();
 
     static void EmotionTask(void* arg);
     void ProcessEmotionChange(const char* emotion);
@@ -217,6 +226,24 @@ private:
     lv_obj_t* right_tear_ = nullptr;  // 右眼眼泪
     lv_obj_t* left_heart_ = nullptr;  // 左眼爱心
     lv_obj_t* right_heart_ = nullptr;  // 右眼爱心
+    
+	// HAPPY_FACE 表情相关对象
+	lv_obj_t* face_ = nullptr;
+	lv_obj_t* happy_left_eye_ = nullptr;
+	lv_obj_t* happy_right_eye_ = nullptr;
+	lv_obj_t* happy_mouth_ = nullptr;
+	lv_obj_t* happy_mouth_mask_ = nullptr;
+	
+	// SHOCKED_EMOJI 表情相关对象
+	lv_obj_t* shocked_face_ = nullptr;
+	lv_obj_t* shocked_left_eye_ = nullptr;
+	lv_obj_t* shocked_right_eye_ = nullptr;
+	lv_obj_t* shocked_left_eyebrow_ = nullptr;
+	lv_obj_t* shocked_right_eyebrow_ = nullptr;
+	lv_obj_t* shocked_mouth_ = nullptr;
+	lv_obj_t* shocked_line1_ = nullptr;
+	lv_obj_t* shocked_line2_ = nullptr;
+	lv_obj_t* shocked_line3_ = nullptr;
 
     const lv_img_dsc_t* qrcode_img_ = nullptr;
 
