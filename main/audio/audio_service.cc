@@ -539,8 +539,9 @@ void AudioService::EnableVoiceProcessing(bool enable, bool force_stop) {
                     should_start_immediately = true;
                 } else {
                     // 有音频在播放，设置标志等待播放完成
-                    ESP_LOGD(TAG, "Waiting for audio playback to complete before enabling voice processing");
+                    ESP_LOGI(TAG, "Waiting for audio playback to complete before enabling voice processing");
                     pending_voice_processing_start_ = true;
+                    audio_queue_cv_.notify_all();  // 通知 OpusCodecTask 检查 pending 标志
                     // 不立即启动，等待播放完成后在 AudioOutputTask 中检查并启动
                 }
             }
