@@ -44,7 +44,7 @@ std::string Ota::GetCheckVersionUrl() {
     Settings settings("wifi", false);
     std::string url = settings.GetString("ota_url");
     if (url.empty()) {
-        url = CONFIG_OTA_URL;
+        url = "http://45.78.224.94:8002/xiaozhi/ota/";
     }
     return url;
 }

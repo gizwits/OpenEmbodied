@@ -6,7 +6,9 @@
             "sdkconfig_append": [
                 "CONFIG_CODEC_ES8311_SUPPORT=y",
                 "CONFIG_USE_AUDIO_PROCESSOR=y",
-                "CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS=n"
+                "CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS=n",
+                "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions/v1/16m.csv\"",
+                "CONFIG_PARTITION_TABLE_CUSTOM=y"
             ]
         }
     ]
