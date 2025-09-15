@@ -170,6 +170,12 @@ private:
             ESP_LOGE(TAG, "Panel init failed: %s", esp_err_to_name(ret));
             return;
         }
+
+        ret = esp_lcd_panel_invert_color(panel, true);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Panel color invert failed: %s", esp_err_to_name(ret));
+            return;
+        }
         
         // Set display offset for ST7735S 0.96 inch TFT
         ret = esp_lcd_panel_set_gap(panel, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y);
