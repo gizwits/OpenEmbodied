@@ -583,10 +583,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     uint32_t random_value = esp_random();
     snprintf(event_id, sizeof(event_id), "%lu", random_value);
     Settings settings("wifi", true);
-    Board& board = Board::GetInstance();
-    int speed = board.GetSpeed();
-
-
+    int speed = Board::GetInstance().GetVoiceSpeed();
     int chat_mode = Application::GetInstance().GetChatMode();
     
     std::string codec = "opus";

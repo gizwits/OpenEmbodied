@@ -285,7 +285,7 @@ public:
         Settings settings("wifi", true);
         return settings.GetInt("speed", 0);
     }
-    int GetSpeed() {
+    int GetVoiceSpeed() {
         int speed = GetSpeed_();
         return speed - 50;
     }
@@ -295,6 +295,8 @@ public:
         Settings settings("wifi", true);
         settings.SetInt("speed", clamped_speed);
         ESP_LOGI(TAG, "Speed set to: %d", clamped_speed);
+
+        MqttClient::getInstance().getRoomInfo();
     }
 
     // 数据点相关方法实现

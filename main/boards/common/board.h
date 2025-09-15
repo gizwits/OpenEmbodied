@@ -72,6 +72,7 @@ public:
     virtual std::string GetBoardJson() = 0;
     virtual std::string GetDeviceStatusJson() = 0;
     virtual int MaxVolume() { return 100; }
+    virtual int GetVoiceSpeed() { return 0; }
     virtual uint8_t GetBrightness() { return 0; }
     virtual void SetBrightness(uint8_t brightness) { }
     virtual uint8_t GetDefaultBrightness() { return 0; }
