@@ -1,0 +1,19 @@
+{
+  "target": "esp32s3",
+  "builds": [
+      {
+          "name": "gizwits-s3-vb6824-st7735s",
+          "sdkconfig_append": [
+              "CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y",
+              "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions.csv\"",
+              "CONFIG_LV_FONT_MONTSERRAT_22=y",
+              "CONFIG_USE_EYE_STYLE_VB6824=y",
+              "CONFIG_USE_AUDIO_PROCESSOR=n",
+              "CONFIG_VB6824_UART_TASK_STACK_SIZE=8192",
+              "CONFIG_VB6824_SEND_USE_TASK=y",
+              "CONFIG_VB6824_SEND_TASK_STACK_SIZE=4096",
+              "CONFIG_ESP_TIMER_TASK_STACK_SIZE=4096"
+          ]
+      }
+  ]
+}
