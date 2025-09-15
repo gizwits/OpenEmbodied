@@ -1189,12 +1189,12 @@ void EyeDisplay::StartHappyFaceAnimation() {
     lv_obj_set_style_bg_opa(face_, LV_OPA_TRANSP, 0);
     lv_obj_align(face_, LV_ALIGN_CENTER, 0, -VERTICAL_OFFSET);
 
-    // 嘴巴：使用白色圆形 + 黑色上半遮罩，形成半圆笑嘴
+    // 嘴巴：使用主题色圆形 + 黑色上半遮罩，形成半圆笑嘴
     happy_mouth_ = lv_obj_create(face_);
     lv_obj_remove_style_all(happy_mouth_);
     lv_obj_set_size(happy_mouth_, MOUTH_SIZE, MOUTH_SIZE);
     lv_obj_set_style_radius(happy_mouth_, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(happy_mouth_, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(happy_mouth_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(happy_mouth_, LV_OPA_COVER, 0);
     lv_obj_set_pos(happy_mouth_, (SCREEN_WIDTH - MOUTH_SIZE) / 2, MOUTH_Y_POS);
 
@@ -1216,7 +1216,7 @@ void EyeDisplay::StartHappyFaceAnimation() {
     lv_obj_remove_style_all(happy_left_eye_);
     lv_obj_set_size(happy_left_eye_, EYE_SIZE, EYE_SIZE);
     lv_obj_set_style_radius(happy_left_eye_, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(happy_left_eye_, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(happy_left_eye_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(happy_left_eye_, LV_OPA_COVER, 0);
     lv_obj_align(happy_left_eye_, LV_ALIGN_LEFT_MID, EYE_SPACING, -VERTICAL_OFFSET);
 
@@ -1225,7 +1225,7 @@ void EyeDisplay::StartHappyFaceAnimation() {
     lv_obj_remove_style_all(happy_right_eye_);
     lv_obj_set_size(happy_right_eye_, EYE_SIZE, EYE_SIZE);
     lv_obj_set_style_radius(happy_right_eye_, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(happy_right_eye_, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(happy_right_eye_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(happy_right_eye_, LV_OPA_COVER, 0);
     lv_obj_align(happy_right_eye_, LV_ALIGN_RIGHT_MID, -EYE_SPACING, -VERTICAL_OFFSET);
 
@@ -1309,7 +1309,7 @@ void EyeDisplay::StartSadEmojiAnimation() {
     lv_obj_remove_style_all(left_eye);
     lv_obj_set_size(left_eye, EYE_SIZE, EYE_SIZE);
     lv_obj_set_style_radius(left_eye, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(left_eye, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(left_eye, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(left_eye, LV_OPA_COVER, 0);
     lv_obj_align(left_eye, LV_ALIGN_LEFT_MID, EYE_SPACING, -VERTICAL_OFFSET);
     
@@ -1318,7 +1318,7 @@ void EyeDisplay::StartSadEmojiAnimation() {
     lv_obj_remove_style_all(right_eye);
     lv_obj_set_size(right_eye, EYE_SIZE, EYE_SIZE);
     lv_obj_set_style_radius(right_eye, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(right_eye, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(right_eye, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(right_eye, LV_OPA_COVER, 0);
     lv_obj_align(right_eye, LV_ALIGN_RIGHT_MID, -EYE_SPACING, -VERTICAL_OFFSET);
     
@@ -1336,8 +1336,8 @@ void EyeDisplay::StartSadEmojiAnimation() {
     // 背景弧隐藏到黑色背景
     lv_obj_set_style_arc_color(left_eyebrow, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_style_arc_width(left_eyebrow, 8, LV_PART_MAIN);
-    // 指示弧使用白色，形成可见弧线
-    lv_obj_set_style_arc_color(left_eyebrow, lv_color_white(), LV_PART_INDICATOR);
+    // 指示弧使用主题色，形成可见弧线
+    lv_obj_set_style_arc_color(left_eyebrow, lv_color_hex(EYE_COLOR), LV_PART_INDICATOR);
     lv_obj_set_style_arc_width(left_eyebrow, 8, LV_PART_INDICATOR);
     
     // 右眉毛（斜向下弯曲的弧形）
@@ -1353,8 +1353,8 @@ void EyeDisplay::StartSadEmojiAnimation() {
     // 背景弧隐藏到黑色背景
     lv_obj_set_style_arc_color(right_eyebrow, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_style_arc_width(right_eyebrow, 8, LV_PART_MAIN);
-    // 指示弧使用白色，形成可见弧线
-    lv_obj_set_style_arc_color(right_eyebrow, lv_color_white(), LV_PART_INDICATOR);
+    // 指示弧使用主题色，形成可见弧线
+    lv_obj_set_style_arc_color(right_eyebrow, lv_color_hex(EYE_COLOR), LV_PART_INDICATOR);
     lv_obj_set_style_arc_width(right_eyebrow, 8, LV_PART_INDICATOR);
     
     // 嘴巴（反向、中空弧形：使用圆弧控件绘制上半圆）
@@ -1370,8 +1370,8 @@ void EyeDisplay::StartSadEmojiAnimation() {
     // 背景弧隐藏到黑色背景
     lv_obj_set_style_arc_color(mouth, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_style_arc_width(mouth, 12, LV_PART_MAIN);
-    // 指示弧使用白色，形成可见弧线
-    lv_obj_set_style_arc_color(mouth, lv_color_white(), LV_PART_INDICATOR);
+    // 指示弧使用主题色，形成可见弧线
+    lv_obj_set_style_arc_color(mouth, lv_color_hex(EYE_COLOR), LV_PART_INDICATOR);
     lv_obj_set_style_arc_width(mouth, 12, LV_PART_INDICATOR);
     
     // 创建2个眼泪对象，实现连续下落效果
@@ -1379,7 +1379,7 @@ void EyeDisplay::StartSadEmojiAnimation() {
     lv_obj_remove_style_all(right_tear1);
     lv_obj_set_size(right_tear1, TEAR_SIZE, TEAR_SIZE * 2);
     lv_obj_set_style_radius(right_tear1, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(right_tear1, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(right_tear1, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(right_tear1, LV_OPA_COVER, 0);
     lv_obj_align(right_tear1, LV_ALIGN_RIGHT_MID, -EYE_SPACING + 5, 10 - VERTICAL_OFFSET);
     
@@ -1387,7 +1387,7 @@ void EyeDisplay::StartSadEmojiAnimation() {
     lv_obj_remove_style_all(right_tear2);
     lv_obj_set_size(right_tear2, TEAR_SIZE, TEAR_SIZE * 2);
     lv_obj_set_style_radius(right_tear2, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(right_tear2, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(right_tear2, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(right_tear2, LV_OPA_COVER, 0);
     lv_obj_align(right_tear2, LV_ALIGN_LEFT_MID, EYE_SPACING - 5, 10 - VERTICAL_OFFSET);  // 左眼泪位置
     
@@ -1538,7 +1538,7 @@ void EyeDisplay::StartShockedEmojiAnimation() {
     lv_obj_remove_style_all(shocked_left_eye_);
     lv_obj_set_size(shocked_left_eye_, EYE_SIZE, EYE_SIZE);
     lv_obj_set_style_radius(shocked_left_eye_, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(shocked_left_eye_, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(shocked_left_eye_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(shocked_left_eye_, LV_OPA_COVER, 0);
     lv_obj_align(shocked_left_eye_, LV_ALIGN_LEFT_MID, EYE_SPACING, -VERTICAL_OFFSET-5);
     
@@ -1547,7 +1547,7 @@ void EyeDisplay::StartShockedEmojiAnimation() {
     lv_obj_remove_style_all(shocked_right_eye_);
     lv_obj_set_size(shocked_right_eye_, EYE_SIZE, EYE_SIZE);
     lv_obj_set_style_radius(shocked_right_eye_, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(shocked_right_eye_, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(shocked_right_eye_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(shocked_right_eye_, LV_OPA_COVER, 0);
     lv_obj_align(shocked_right_eye_, LV_ALIGN_RIGHT_MID, -EYE_SPACING, -VERTICAL_OFFSET-5);
     
@@ -1564,7 +1564,7 @@ void EyeDisplay::StartShockedEmojiAnimation() {
     // 隐藏背景弧，只显示指示弧
     lv_obj_set_style_arc_color(shocked_left_eyebrow_, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_style_arc_width(shocked_left_eyebrow_, 0, LV_PART_MAIN);  // 背景弧宽度设为0
-    lv_obj_set_style_arc_color(shocked_left_eyebrow_, lv_color_white(), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(shocked_left_eyebrow_, lv_color_hex(EYE_COLOR), LV_PART_INDICATOR);
     lv_obj_set_style_arc_width(shocked_left_eyebrow_, 8, LV_PART_INDICATOR);
 
     // 右眉毛（向上翘的弧形）
@@ -1579,7 +1579,7 @@ void EyeDisplay::StartShockedEmojiAnimation() {
     // 隐藏背景弧，只显示指示弧
     lv_obj_set_style_arc_color(shocked_right_eyebrow_, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_style_arc_width(shocked_right_eyebrow_, 0, LV_PART_MAIN);  // 背景弧宽度设为0
-    lv_obj_set_style_arc_color(shocked_right_eyebrow_, lv_color_white(), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(shocked_right_eyebrow_, lv_color_hex(EYE_COLOR), LV_PART_INDICATOR);
     lv_obj_set_style_arc_width(shocked_right_eyebrow_, 8, LV_PART_INDICATOR);
 
     // 嘴巴（椭圆形状）
@@ -1587,7 +1587,7 @@ void EyeDisplay::StartShockedEmojiAnimation() {
     lv_obj_remove_style_all(shocked_mouth_);
     lv_obj_set_size(shocked_mouth_, 45, 45);  // 初始圆形嘴巴（45x45）
     lv_obj_set_style_radius(shocked_mouth_, LV_RADIUS_CIRCLE, 0);  // 圆形
-    lv_obj_set_style_bg_color(shocked_mouth_, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(shocked_mouth_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(shocked_mouth_, LV_OPA_COVER, 0);
     lv_obj_align(shocked_mouth_, LV_ALIGN_CENTER, 0, 75 - VERTICAL_OFFSET);  // 往上移动15像素
     
@@ -1596,7 +1596,7 @@ void EyeDisplay::StartShockedEmojiAnimation() {
     lv_obj_remove_style_all(shocked_line1_);
     lv_obj_set_size(shocked_line1_, 4, 13);  // 最短 (19*2/3=12.7≈13)
     lv_obj_set_style_radius(shocked_line1_, 2, 0);
-    lv_obj_set_style_bg_color(shocked_line1_, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(shocked_line1_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(shocked_line1_, LV_OPA_COVER, 0);
     lv_obj_align(shocked_line1_, LV_ALIGN_RIGHT_MID, -EYEBROW_SPACING - 6, -VERTICAL_OFFSET - 25);  // 向左移动19，向上移动10
     
@@ -1604,7 +1604,7 @@ void EyeDisplay::StartShockedEmojiAnimation() {
     lv_obj_remove_style_all(shocked_line2_);
     lv_obj_set_size(shocked_line2_, 4, 18);  // 中等长度 (27*2/3=18)
     lv_obj_set_style_radius(shocked_line2_, 2, 0);
-    lv_obj_set_style_bg_color(shocked_line2_, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(shocked_line2_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(shocked_line2_, LV_OPA_COVER, 0);
     lv_obj_align(shocked_line2_, LV_ALIGN_RIGHT_MID, -EYEBROW_SPACING + 1, -VERTICAL_OFFSET - 25);  // 间距增加7，向左移动19，向上移动10
     
@@ -1612,7 +1612,7 @@ void EyeDisplay::StartShockedEmojiAnimation() {
     lv_obj_remove_style_all(shocked_line3_);
     lv_obj_set_size(shocked_line3_, 4, 25);  // 最长 (38*2/3=25.3≈25)
     lv_obj_set_style_radius(shocked_line3_, 2, 0);
-    lv_obj_set_style_bg_color(shocked_line3_, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(shocked_line3_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(shocked_line3_, LV_OPA_COVER, 0);
     lv_obj_align(shocked_line3_, LV_ALIGN_RIGHT_MID, -EYEBROW_SPACING + 8, -VERTICAL_OFFSET - 25);  // 间距增加7，向左移动19，向上移动10
     
@@ -1772,21 +1772,21 @@ void EyeDisplay::StartLovingEmojiAnimation() {
     // 创建左眼五角星图片
     lv_obj_t* left_star = lv_img_create(lv_screen_active());
     lv_img_set_src(left_star, &star_img_32);
-    lv_obj_set_style_img_recolor(left_star, lv_color_white(), 0);  // 设置为白色
+    lv_obj_set_style_img_recolor(left_star, lv_color_hex(EYE_COLOR), 0);  // 设置为主题色
     lv_obj_set_style_img_recolor_opa(left_star, LV_OPA_COVER, 0);  // 完全不透明
     lv_obj_align(left_star, LV_ALIGN_LEFT_MID, 50, -DISPLAY_VERTICAL_OFFSET - 10);  // 左眼位置，向右移动45像素，向上移动10像素
     
     // 创建右眼五角星图片
     lv_obj_t* right_star = lv_img_create(lv_screen_active());
     lv_img_set_src(right_star, &star_img_32);
-    lv_obj_set_style_img_recolor(right_star, lv_color_white(), 0);  // 设置为白色
+    lv_obj_set_style_img_recolor(right_star, lv_color_hex(EYE_COLOR), 0);  // 设置为主题色
     lv_obj_set_style_img_recolor_opa(right_star, LV_OPA_COVER, 0);  // 完全不透明
     lv_obj_align(right_star, LV_ALIGN_RIGHT_MID, -50, -DISPLAY_VERTICAL_OFFSET - 10);  // 右眼位置，向左移动45像素，向上移动10像素
     
     // 创建嘴巴图片对象
     lv_obj_t* mouth = lv_img_create(lv_screen_active());
     lv_img_set_src(mouth, &mouth_open_img);  // 使用嘴巴图片资源
-    lv_obj_set_style_img_recolor(mouth, lv_color_white(), 0);  // 设置为白色
+    lv_obj_set_style_img_recolor(mouth, lv_color_hex(EYE_COLOR), 0);  // 设置为主题色
     lv_obj_set_style_img_recolor_opa(mouth, LV_OPA_COVER, 0);  // 完全不透明
     lv_obj_align(mouth, LV_ALIGN_CENTER, 0, 80 - DISPLAY_VERTICAL_OFFSET);  // 嘴巴位置，在眼睛下方
     
@@ -1862,12 +1862,12 @@ void EyeDisplay::StartNeutralFaceAnimation() {
     lv_obj_set_style_bg_opa(neutral_face, LV_OPA_TRANSP, 0);
     lv_obj_align(neutral_face, LV_ALIGN_CENTER, 0, -VERTICAL_OFFSET);
 
-    // 左右眼（白色圆形，局部变量）
+    // 左右眼（主题色圆形，局部变量）
     lv_obj_t* neutral_left_eye = lv_obj_create(neutral_face);
     lv_obj_remove_style_all(neutral_left_eye);
     lv_obj_set_size(neutral_left_eye, EYE_SIZE, EYE_SIZE);
     lv_obj_set_style_radius(neutral_left_eye, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(neutral_left_eye, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(neutral_left_eye, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(neutral_left_eye, LV_OPA_COVER, 0);
     lv_obj_align(neutral_left_eye, LV_ALIGN_LEFT_MID, EYE_SPACING, -VERTICAL_OFFSET + 25);
 
@@ -1875,7 +1875,7 @@ void EyeDisplay::StartNeutralFaceAnimation() {
     lv_obj_remove_style_all(neutral_right_eye);
     lv_obj_set_size(neutral_right_eye, EYE_SIZE, EYE_SIZE);
     lv_obj_set_style_radius(neutral_right_eye, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(neutral_right_eye, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(neutral_right_eye, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(neutral_right_eye, LV_OPA_COVER, 0);
     lv_obj_align(neutral_right_eye, LV_ALIGN_RIGHT_MID, -EYE_SPACING, -VERTICAL_OFFSET + 25);
 
