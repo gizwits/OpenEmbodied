@@ -9,18 +9,12 @@
 #define CODEC_TX_GPIO           GPIO_NUM_3
 #define CODEC_RX_GPIO           GPIO_NUM_9
 
-// VB6824 Audio Codec pins
-#define VB6824_TX_PIN           GPIO_NUM_3
-#define VB6824_RX_PIN           GPIO_NUM_9
-
 // Power management pins
-#define CHARGING_PIN            GPIO_NUM_15
-#define BAT_LED_PIN             GPIO_NUM_10
 
-#define POWER_GPIO              GPIO_NUM_15
-#define BUILTIN_LED_GPIO        GPIO_NUM_10
-#define BOOT_BUTTON_GPIO        GPIO_NUM_46
-#define SLEEP_GOIO              GPIO_NUM_14
+#define POWER_HOLD_GPIO              GPIO_NUM_42
+#define BOOT_BUTTON_GPIO        GPIO_NUM_2
+#define POWER_BUTTON_GPIO GPIO_NUM_41
+
 
 // 使用单独串口 UART_NUM_2
 #define FACTORY_TEST_UART_NUM       UART_NUM_2
@@ -43,10 +37,10 @@
 #define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
 
 // ST7735S SPI pins (根据实际硬件配置)
-#define DISPLAY_SPI_SCLK_PIN    GPIO_NUM_2
-#define DISPLAY_SPI_MOSI_PIN    GPIO_NUM_1
-#define DISPLAY_SPI_CS_PIN      GPIO_NUM_42
-#define DISPLAY_SPI_DC_PIN      GPIO_NUM_47
+#define DISPLAY_SPI_SCLK_PIN    GPIO_NUM_48
+#define DISPLAY_SPI_MOSI_PIN    GPIO_NUM_40
+#define DISPLAY_SPI_CS_PIN      GPIO_NUM_38
+#define DISPLAY_SPI_DC_PIN      GPIO_NUM_39
 #define DISPLAY_SPI_RESET_PIN   GPIO_NUM_21
 
 // Start very low like MicroPython test (then raise later)

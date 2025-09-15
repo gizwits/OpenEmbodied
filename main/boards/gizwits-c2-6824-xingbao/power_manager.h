@@ -1,22 +1,20 @@
 #ifndef __POWER_MANAGER_H__
 #define __POWER_MANAGER_H__
 
+#include <driver/gpio.h>
 #include <esp_adc/adc_oneshot.h>
 #include <esp_log.h>
 #include <esp_timer.h>
-#include "vb6824.h"
-#include <esp_sleep.h>
-#include <driver/rtc_io.h>
-#include "driver/gpio.h"
-
-// Battery ADC configuration
-#define BAT_ADC_CHANNEL  ADC_CHANNEL_3  // Battery voltage ADC channel
-#define BAT_ADC_ATTEN    ADC_ATTEN_DB_11 // ADC attenuation
-#define BAT_ADC_UNIT     ADC_UNIT_1
-#define POWER_CHARGE_LED_PIN GPIO_NUM_NC
+#include <functional>
 
 class PowerManager {
 private:
+    // 电池电量区间-分压电阻为2个100k
+    static constexpr struct {
+        uint16_t adc;
+        uint8_t level;
+    } BATTERY_LEVELS[] = {{1750, 0}, {2010, 100}};
+    static constexpr size_t BATTERY_LEVELS_COUNT = 2;
     static constexpr size_t ADC_VALUES_COUNT = 10;
 
     esp_timer_handle_t timer_handle_ = nullptr;
@@ -24,12 +22,10 @@ private:
     gpio_num_t bat_led_pin_;
     adc_unit_t adc_unit_;
     adc_channel_t adc_channel_;
-    int adc_value;
     uint16_t adc_values_[ADC_VALUES_COUNT];
     size_t adc_values_index_ = 0;
     size_t adc_values_count_ = 0;
     uint8_t battery_level_ = 100;
-    uint32_t average_adc = 0;
     bool is_charging_ = false;
 
     static constexpr uint8_t MAX_CHANGE_COUNT = 8;
@@ -40,78 +36,45 @@ private:
 
     adc_oneshot_unit_handle_t adc_handle_;
 
-    // 电压-电量对照表
-    static constexpr struct VoltageSocPair {
-        uint16_t adcValue; // ADC value
-        uint8_t soc;       // State of Charge (percentage of battery capacity)
-    } dischargeCurve[] = {
-        {4140, 100}, // 100%
-        {4104, 95},  // 下降36mV
-        {4068, 90},  // 下降36mV
-        {4032, 85},  // 下降36mV
-        {3996, 80},  // 下降36mV
-        {3960, 75},  // 下降36mV
-        {3924, 70},  // 下降36mV
-        {3888, 65},  // 下降36mV
-        {3852, 60},  // 下降36mV
-        {3829, 55},  // 下降23mV（过渡段开始）
-        {3808, 50},  // 下降21mV
-        {3787, 45},  // 下降21mV
-        {3766, 40},  // 下降21mV
-        {3745, 35},  // 下降21mV
-        {3724, 30},  // 下降21mV
-        {3703, 25},  // 下降21mV
-        {3672, 20},  // 下降31mV
-        {3570, 15},  // 下降102mV
-        {3420, 10},  // 下降150mV（低电量段开始）
-        {3220, 5},   // 下降200mV
-        {3000, 0}    // 下降220mV
-    };
-
-    // 查表函数
-    uint8_t estimate_soc(uint16_t voltage) {
-        uint16_t closest_voltage = dischargeCurve[0].adcValue;
-        uint8_t closest_soc = dischargeCurve[0].soc;
-        uint16_t min_diff = abs(voltage - closest_voltage);
-
-        for (size_t i = 1; i < sizeof(dischargeCurve) / sizeof(dischargeCurve[0]); i++) {
-            uint16_t diff = abs(voltage - dischargeCurve[i].adcValue);
-            if (diff < min_diff) {
-                min_diff = diff;
-                closest_voltage = dischargeCurve[i].adcValue;
-                closest_soc = dischargeCurve[i].soc;
-            }
-        }
-        return closest_soc;
-    }
+    // 充电状态改变回调函数
+    std::function<void(bool)> charging_status_callback_ = nullptr;
 
     void CheckBatteryStatus() {
+        uint64_t current_time = esp_timer_get_time(); // 获取当前时间（微秒）
 
-        ReadBatteryAdcData();
+        // 如果时间间隔超过2秒，则重置状态变化计数
+        if (current_time - last_change_time_ > TIME_LIMIT) {
+            change_count_ = 0;
+        }
 
-        #define BATTERY_FULL_VOLTAGE 4300
-        #define BATTERY_NOT_CHARGING_VOLTAGE 4200
+        // 先读取一次并更新平均值、电量，再基于平均值判定充电状态
+        uint32_t average_adc = ReadBatteryAdcData();
 
-        static uint8_t not_charging_count = 0;
-        uint32_t voltage = average_adc == 0 ? adc_value*2 : average_adc*2;
-        if (voltage > BATTERY_FULL_VOLTAGE) {
-            is_charging_ = true;
-            not_charging_count = 0; // 重置计数器
-        } else if (voltage < BATTERY_NOT_CHARGING_VOLTAGE) {
-            if (is_charging_) {
-                not_charging_count++;
-                if (not_charging_count >= 20) {
-                    is_charging_ = false;
-                    not_charging_count = 0;
+        if (change_count_ < MAX_CHANGE_COUNT) {
+            // 基于电压阈值判断是否在充电：电池端电压 >= 4.8V 视为充电中
+            // 分压为 1:1 → ADC 端阈值电压为 2.4V。
+            // 以经验点 2.1V ≈ raw 2010 估算计数/伏：2010 / 2.1 ≈ 957 counts/V
+            // 阈值 raw ≈ 2.4V * 957 ≈ 2297
+            static constexpr uint32_t ADC_RAW_THRESHOLD_CHARGING = 2297;
+
+            bool new_is_charging = average_adc >= ADC_RAW_THRESHOLD_CHARGING;
+
+            // 如果状态有变化
+            if (new_is_charging != is_charging_) {
+                bool old_charging_status = is_charging_;
+                is_charging_ = new_is_charging;
+                change_count_++;  // 增加变化次数
+                last_change_time_ = current_time;  // 更新最后变化时间
+                
+                // 调用充电状态改变回调
+                if (charging_status_callback_) {
+                    charging_status_callback_(is_charging_);
                 }
             }
         }
-
     }
-
-    
-    void ReadBatteryAdcData() {
-        static uint8_t times = 0;
+    uint32_t ReadBatteryAdcData() {
+        int adc_value;
         ESP_ERROR_CHECK(adc_oneshot_read(adc_handle_, adc_channel_, &adc_value));
 
         adc_values_[adc_values_index_] = adc_value;
@@ -119,32 +82,37 @@ private:
         if (adc_values_count_ < ADC_VALUES_COUNT) {
             adc_values_count_++;
         }
-        average_adc = 0;
+
+        uint32_t average_adc = 0;
         for (size_t i = 0; i < adc_values_count_; i++) {
             average_adc += adc_values_[i];
-
         }
         average_adc /= adc_values_count_;
 
-        // ESP_LOGI("PowerManager", "adc_values_{ %d, %d, %d, %d, %d, %d, %d, %d, %d, %d}", 
-        //          adc_values_[0], adc_values_[1], adc_values_[2], adc_values_[3], adc_values_[4], 
-        //          adc_values_[5], adc_values_[6], adc_values_[7], adc_values_[8], adc_values_[9]);
+        CalculateBatteryLevel(average_adc);
 
-        CalculateBatteryLevel(average_adc*2);
 
-        // if(times++ % 50 == 0){
-        //     ESP_LOGI("PowerManager", "adc: %d adc_avg: %ld, VBAT: %ld, battery_level_: %u%%", 
-        //         adc_value, average_adc, average_adc*2, battery_level_);
-        // }
+        ESP_LOGI("PowerManager", "ADC值: %d 平均值: %ld 电量: %u%%", adc_value, average_adc,
+                 battery_level_);
+        return average_adc;
     }
 
     void CalculateBatteryLevel(uint32_t average_adc) {
-        battery_level_ = estimate_soc(average_adc);
+        if (average_adc <= BATTERY_LEVELS[0].adc) {
+            battery_level_ = 0;
+        } else if (average_adc >= BATTERY_LEVELS[BATTERY_LEVELS_COUNT - 1].adc) {
+            battery_level_ = 100;
+        } else {
+            float ratio = static_cast<float>(average_adc - BATTERY_LEVELS[0].adc) /
+                          (BATTERY_LEVELS[1].adc - BATTERY_LEVELS[0].adc);
+            battery_level_ = ratio * 100;
+        }
     }
 
 public:
-    PowerManager()
-        : charging_pin_(GPIO_NUM_NC), bat_led_pin_(GPIO_NUM_NC), adc_unit_(BAT_ADC_UNIT), adc_channel_(BAT_ADC_CHANNEL) {
+    PowerManager(gpio_num_t charging_pin, gpio_num_t bat_led_pin, adc_unit_t adc_unit = ADC_UNIT_2,
+                 adc_channel_t adc_channel = ADC_CHANNEL_3)
+        : charging_pin_(charging_pin), bat_led_pin_(bat_led_pin), adc_unit_(adc_unit), adc_channel_(adc_channel) {
 
         // 配置充电引脚
         gpio_config_t io_conf = {};
@@ -173,11 +141,10 @@ public:
             .skip_unhandled_events = true,
         };
         ESP_ERROR_CHECK(esp_timer_create(&timer_args, &timer_handle_));
-        ESP_ERROR_CHECK(esp_timer_start_periodic(timer_handle_, 100000));  // 5秒
+        ESP_ERROR_CHECK(esp_timer_start_periodic(timer_handle_, 500000));  // 5秒
 
         // 初始化ADC
         InitializeAdc();
-
     }
 
     void InitializeAdc() {
@@ -214,11 +181,10 @@ public:
         CheckBatteryStatus();
     }
 
-    static PowerManager& GetInstance() {
-        static PowerManager instance; // 使用默认构造函数初始化对象
-        return instance;
+    // 设置充电状态改变回调函数
+    void SetChargingStatusCallback(std::function<void(bool)> callback) {
+        charging_status_callback_ = callback;
     }
-
     void EnterDeepSleepIfNotCharging() {
         // 不在充电就真休眠
         if (is_charging_ == 0) {
@@ -236,8 +202,6 @@ public:
             
             // esp_deep_sleep_start();
         }
-}
-
-    
+    }
 };
 #endif  // __POWER_MANAGER_H__
