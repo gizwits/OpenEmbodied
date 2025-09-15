@@ -17,7 +17,7 @@
 #include "assets/lang_config.h"
 #include "vb6824.h"
 #include <esp_wifi.h>
-#include "data_point_manager.h"
+#include "lvlin_data_point_manager.h"
 
 #include <esp_lcd_panel_vendor.h>
 #include <driver/spi_common.h>
@@ -27,6 +27,7 @@
 #include "driver/ledc.h"
 #include "led_signal.h"
 #include "power_manager.h"
+#include <algorithm>
 
 #define TAG "CustomBoard"
 
@@ -154,8 +155,8 @@ private:
     }
 
     void InitializeDataPointManager() {
-        // 设置 DataPointManager 的回调函数
-        DataPointManager::GetInstance().SetCallbacks(
+        // 设置 LvlinDataPointManager 的回调函数
+        LvlinDataPointManager::GetInstance().SetCallbacks(
             [this]() -> bool { return IsCharging(); },
             []() -> int { return Application::GetInstance().GetChatMode(); },
             [](int value) { Application::GetInstance().SetChatMode(value); },
@@ -175,7 +176,9 @@ private:
                 return 0;
             },
             [this]() -> int { return GetBrightness(); },
-            [this](int value) { SetBrightness(value); }
+            [this](int value) { SetBrightness(value); },
+            [this]() -> int { return GetSpeed_(); },
+            [this](int value) { SetSpeed(value); }
         );
     }
 
@@ -276,29 +279,47 @@ public:
         return LedSignal::GetInstance().GetDefaultBrightness();
     }
 
+    // 语速相关方法
+    int GetSpeed_() {
+        // 从设置中获取语速，默认值为0（对应正常语速）
+        Settings settings("wifi", true);
+        return settings.GetInt("speed", 0);
+    }
+    int GetSpeed() {
+        int speed = GetSpeed_();
+        return speed - 50;
+    }
+    void SetSpeed(int speed) {
+        // 限制语速值在有效范围内 (0-200, 对应-50%到150%)
+        int clamped_speed = std::max(0, std::min(200, speed));
+        Settings settings("wifi", true);
+        settings.SetInt("speed", clamped_speed);
+        ESP_LOGI(TAG, "Speed set to: %d", clamped_speed);
+    }
+
     // 数据点相关方法实现
     const char* GetGizwitsProtocolJson() const override {
-        return DataPointManager::GetInstance().GetGizwitsProtocolJson();
+        return LvlinDataPointManager::GetInstance().GetGizwitsProtocolJson();
     }
 
     size_t GetDataPointCount() const override {
-        return DataPointManager::GetInstance().GetDataPointCount();
+        return LvlinDataPointManager::GetInstance().GetDataPointCount();
     }
 
     bool GetDataPointValue(const std::string& name, int& value) const override {
-        return DataPointManager::GetInstance().GetDataPointValue(name, value);
+        return LvlinDataPointManager::GetInstance().GetDataPointValue(name, value);
     }
 
     bool SetDataPointValue(const std::string& name, int value) override {
-        return DataPointManager::GetInstance().SetDataPointValue(name, value);
+        return LvlinDataPointManager::GetInstance().SetDataPointValue(name, value);
     }
 
     void GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) override {
-        DataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
+        LvlinDataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
     }
 
     void ProcessDataPointValue(const std::string& name, int value) override {
-        DataPointManager::GetInstance().ProcessDataPointValue(name, value);
+        LvlinDataPointManager::GetInstance().ProcessDataPointValue(name, value);
     }
 
 };

@@ -582,6 +582,9 @@ bool WebsocketProtocol::OpenAudioChannel() {
     char event_id[32];
     uint32_t random_value = esp_random();
     snprintf(event_id, sizeof(event_id), "%lu", random_value);
+    Settings settings("wifi", true);
+    Board& board = Board::GetInstance();
+    int speed = board.GetSpeed();
 
 
     int chat_mode = Application::GetInstance().GetChatMode();
@@ -663,7 +666,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
 #endif
     message += "}";
     message += "},";
-    message += "\"speech_rate\":0,";
+    message += "\"speech_rate\":" + std::to_string(speed) + ",";
     message += "\"voice_id\":\"" + std::string(room_params_.voice_id) + "\"";
     message += "}";
     message += "}";
