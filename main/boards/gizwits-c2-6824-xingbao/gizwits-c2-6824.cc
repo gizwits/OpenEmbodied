@@ -69,15 +69,19 @@ private:
         }
         application.QuitTalking();
 
-        // 检查不在充电就真休眠
         PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
     }
 
     void InitializeButtons() {
 
         const int chat_mode = Application::GetInstance().GetChatMode();
+        boot_button_.OnPressDown([this]() {
+            ESP_LOGI(TAG, "boot_button_.OnPressDown");
+            // 开灯
+            gpio_set_level(BUILTIN_LED_GPIO, 0);
+        });
         boot_button_.OnLongPress([this]() {
-            // ESP_LOGI(TAG, "boot_button_.OnClick");
+            ESP_LOGI(TAG, "boot_button_.OnLongPress");
             // auto &app = Application::GetInstance();
             // app.ToggleChatState();
             ResetWifiConfiguration();
@@ -93,11 +97,14 @@ private:
 
     void initPowerButton() {
         static int first_level = gpio_get_level(POWER_BUTTON_GPIO);
-
+        ESP_LOGI(TAG, "initPowerButton");
         power_button_.OnPressDown([this]() {
             ESP_LOGI(TAG, "power_button_.OnPressDown");
             auto& app = Application::GetInstance();
             app.ToggleChatState();
+            // 开灯
+            gpio_set_level(BUILTIN_LED_GPIO, 0);
+
         });
         
         power_button_.OnLongPress([this]() {
@@ -138,7 +145,7 @@ private:
                 xTaskCreate([](void* arg) {
                     auto* board = static_cast<CustomBoard*>(arg);
                     Application::GetInstance().SetDeviceState(kDeviceStateIdle);
-                    run_sleep_mode(false);
+                    board->run_sleep_mode(false);
 
                     vTaskDelete(NULL);
                 }, "power_off_task", 4028, this, 10, NULL);
@@ -259,6 +266,7 @@ public:
                 // if(Application::GetInstance().GetDeviceState() != kDeviceStateListening){
                 // }
                 Application::GetInstance().WakeWordInvoke("你好小智");
+                gpio_set_level(BUILTIN_LED_GPIO, 0);
             } else if (IsCommandInList(command, network_config_words_)) {
                 ResetWifiConfiguration();
             }

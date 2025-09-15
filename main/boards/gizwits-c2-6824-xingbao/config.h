@@ -3,11 +3,11 @@
 
 #include <driver/gpio.h>
 
-#define BOOT_BUTTON_GPIO        GPIO_NUM_1
+#define BOOT_BUTTON_GPIO        GPIO_NUM_7
 // #define BOOT_BUTTON_GPIO        GPIO_NUM_9
 
 #define POWER_HOLD_GPIO GPIO_NUM_0
-#define POWER_BUTTON_GPIO GPIO_NUM_2
+#define POWER_BUTTON_GPIO GPIO_NUM_8
 
 #define CODEC_TX_GPIO           GPIO_NUM_10
 #define CODEC_RX_GPIO           GPIO_NUM_18
