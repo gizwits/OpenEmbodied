@@ -1121,7 +1121,6 @@ void MqttClient::ReportTimer() {
         ESP_LOGW(TAG, "Board does not support data points, skipping report");
         return;
     }
-    ESP_LOGI(TAG, "ready ReportTimer");
     
     uint8_t binary_data[500];  // 固定500字节缓冲区，足够容纳各种数据
     size_t data_size = 0;
