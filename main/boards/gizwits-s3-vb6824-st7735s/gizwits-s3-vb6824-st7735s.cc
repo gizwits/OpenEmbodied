@@ -12,7 +12,7 @@
 #include <esp_lcd_st7735s.h>
 #include "data_point_manager.h"
 #include "led/single_led.h"
-#include "display/eye_display.h"
+#include "display/eye_display_horizontal.h"
 #include "display/display.h"
 
 #include <wifi_station.h>
@@ -42,9 +42,10 @@ LV_FONT_DECLARE(font_awesome_20_4);
 class MovecallMojiESP32S3 : public WifiBoard {
 private:
     Button boot_button_;
+    
     Button power_button_;
-    EyeDisplay* display_;
     VbAduioCodec audio_codec;
+    EyeDisplayHorizontal* display_;
     bool need_power_off_ = false;
     int64_t power_on_time_ = 0;  // 记录上电时间
     PowerManager* power_manager_;
@@ -186,9 +187,9 @@ private:
         
         // 创建并初始化 LottieDisplay（与 gizwits-lottie 一致），但面板为 ST7735S
         DisplayFonts fonts = { .text_font = &font_puhui_20_4, .icon_font = nullptr, .emoji_font = nullptr };
-        display_ = new EyeDisplay(panel_io, panel,
+        display_ = new EyeDisplayHorizontal(panel_io, panel,
             DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
-            DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y,
+            DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY,
             fonts);
     }
 
@@ -220,6 +221,9 @@ private:
         boot_button_.OnPressDown([this]() {
             ESP_LOGI(TAG, "boot_button_.OnPressDown");
             // 开灯
+            if (display_) {
+                display_->TestNextEmotion();
+            }
         });
         boot_button_.OnLongPress([this]() {
             ResetWifiConfiguration();

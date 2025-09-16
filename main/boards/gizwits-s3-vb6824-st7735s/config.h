@@ -22,11 +22,12 @@
 #define FACTORY_TEST_UART_RX_PIN    GPIO_NUM_44
 
 // ST7735S display configuration (根据实际屏幕尺寸)
-#define DISPLAY_WIDTH   128
-#define DISPLAY_HEIGHT  160
-#define DISPLAY_MIRROR_X false
-#define DISPLAY_MIRROR_Y false
-#define DISPLAY_SWAP_XY false
+// For landscape mode, swap the dimensions
+#define DISPLAY_WIDTH   160
+#define DISPLAY_HEIGHT  128
+#define DISPLAY_MIRROR_X true
+#define DISPLAY_MIRROR_Y true
+#define DISPLAY_SWAP_XY true
 
 // ST7735S display offset (for 128x160 TFT)
 // Match test.py/ST7735S.py behavior first
