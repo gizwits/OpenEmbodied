@@ -505,6 +505,22 @@ void EyeDisplayHorizontal::StartSadAnimation() {
     // 确保眼睛可见
     lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
+    // 禁用屏幕滚动与滚动条，保留眼泪上下浮动但不出现滚动条
+    {
+        lv_obj_t* screen = lv_screen_active();
+        if (screen) {
+            lv_obj_clear_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_set_scrollbar_mode(screen, LV_SCROLLBAR_MODE_OFF);
+        }
+    }
+    // 禁用容器滚动与滚动条，避免容器上下移动
+    {
+        lv_obj_t* container = lv_obj_get_parent(left_eye_);
+        if (container) {
+            lv_obj_clear_flag(container, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_set_scrollbar_mode(container, LV_SCROLLBAR_MODE_OFF);
+        }
+    }
     // 将眼睛整体上移30像素（在原基础上再上移20）
     {
         lv_obj_t* container = lv_obj_get_parent(left_eye_);
@@ -556,9 +572,12 @@ void EyeDisplayHorizontal::StartSadAnimation() {
     lv_obj_set_style_pad_all(right_tear_, 0, 0);
     lv_obj_set_style_shadow_width(right_tear_, 0, 0);
     lv_obj_set_style_outline_width(right_tear_, 0, 0);
+    // 禁用眼泪对象滚动与滚动条
+    lv_obj_clear_flag(right_tear_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(right_tear_, LV_SCROLLBAR_MODE_OFF);
 
-    // 将眼泪对齐到右眼下方（相对于右眼定位，避免左右颠倒）
-    lv_obj_align_to(right_tear_, left_eye_, LV_ALIGN_OUT_BOTTOM_MID, 0, 0);
+    // 将眼泪对齐到右眼下方（相对于左眼基准向右偏移60像素）
+    lv_obj_align_to(right_tear_, left_eye_, LV_ALIGN_OUT_BOTTOM_MID, 100, 0);
     // 记录基线Y，用于动画
     int base_y = lv_obj_get_y(right_tear_);
     // 添加下落动画（围绕当前对齐位置上下浮动）
@@ -805,7 +824,7 @@ void EyeDisplayHorizontal::StartShockedAnimation() {
     lv_obj_set_style_pad_all(mouth_, 0, 0);
     lv_obj_set_style_shadow_width(mouth_, 0, 0);
     lv_obj_set_style_outline_width(mouth_, 0, 0);
-    lv_obj_set_pos(mouth_, (width_ - 30) / 2, height_ - 70 - DISPLAY_VERTICAL_OFFSET);  // 居中显示
+    lv_obj_set_pos(mouth_, (width_ - 30) / 2, height_ - 70 - DISPLAY_VERTICAL_OFFSET + 45);  // 居中显示，向下移动30像素
     
     // 为嘴巴添加大小动画，模拟震惊的效果
     static lv_anim_t mouth_size_anim;
@@ -814,9 +833,10 @@ void EyeDisplayHorizontal::StartShockedAnimation() {
     lv_anim_set_values(&mouth_size_anim, 20, 35);  // 从小到大变化
     lv_anim_set_time(&mouth_size_anim, 800);
     lv_anim_set_exec_cb(&mouth_size_anim, [](void* obj, int32_t value) {
-        lv_obj_set_size((lv_obj_t*)obj, value, value);
-        // 重新居中
-        lv_obj_set_x((lv_obj_t*)obj, (240 - value) / 2);
+        lv_obj_t* o = (lv_obj_t*)obj;
+        lv_obj_set_size(o, value, value);
+        // 重新居中：使用配置的屏幕水平分辨率
+        lv_obj_set_x(o, ((int)LV_HOR_RES - value) / 2);
     });
     lv_anim_set_path_cb(&mouth_size_anim, lv_anim_path_ease_in_out);
     lv_anim_set_repeat_count(&mouth_size_anim, LV_ANIM_REPEAT_INFINITE);
@@ -913,9 +933,10 @@ void EyeDisplayHorizontal::StartAngryAnimation() {
     lv_anim_set_values(&mouth_width_anim, 16, 30);  // 增大幅度：更明显的开合
     lv_anim_set_time(&mouth_width_anim, 550);       // 拉长时长以更平滑
     lv_anim_set_exec_cb(&mouth_width_anim, [](void* obj, int32_t value) {
-        lv_obj_set_width((lv_obj_t*)obj, value);
-        // 重新居中，使用屏幕宽度160而不是硬编码240
-        lv_obj_set_x((lv_obj_t*)obj, (160 - value) / 2);
+        lv_obj_t* o = (lv_obj_t*)obj;
+        lv_obj_set_width(o, value);
+        // 重新居中：使用配置的屏幕水平分辨率
+        lv_obj_set_x(o, ((int)LV_HOR_RES - value) / 2);
     });
     lv_anim_set_path_cb(&mouth_width_anim, lv_anim_path_linear); // 线性路径更稳定
     lv_anim_set_repeat_count(&mouth_width_anim, LV_ANIM_REPEAT_INFINITE);
