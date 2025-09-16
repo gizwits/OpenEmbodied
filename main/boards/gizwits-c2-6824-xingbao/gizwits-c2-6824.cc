@@ -69,7 +69,7 @@ private:
         }
         application.QuitTalking();
 
-        PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
+        power_manager_->EnterDeepSleepIfNotCharging();
     }
 
     void InitializeButtons() {
@@ -194,9 +194,7 @@ private:
             Application::GetInstance().Schedule([this]() {
                 // 通知 mqtt 
                 auto& mqtt_client = MqttClient::getInstance();
-                if (mqtt_client) {
-                    mqtt_client.ReportTimer();
-                }
+                mqtt_client.ReportTimer();
             });
 
         });
@@ -300,7 +298,6 @@ public:
         });
 
         power_manager_->CheckBatteryStatusImmediately();
-        ESP_LOGI(TAG, "Immediately check the battery level upon startup: %d", PowerManager::GetInstance().GetBatteryLevel());
 
 
         ESP_LOGI(TAG, "Initializing Data Point Manager...");
@@ -315,18 +312,18 @@ public:
     };
 
     bool GetBatteryLevel(int &level, bool& charging, bool& discharging) override {
-        level = power_manager_.GetBatteryLevel();
-        charging = power_manager_.IsCharging();
+        level = power_manager_->GetBatteryLevel();
+        charging = power_manager_->IsCharging();
         discharging = !charging;
         return true;
     }
 
     bool IsCharging() override {
-        return power_manager_.IsCharging();
+        return power_manager_->IsCharging();
     }
 
     void EnterDeepSleepIfNotCharging() {
-        power_manager_.EnterDeepSleepIfNotCharging();
+        power_manager_->EnterDeepSleepIfNotCharging();
     }
 
     virtual AudioCodec* GetAudioCodec() override {
