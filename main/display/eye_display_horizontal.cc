@@ -483,7 +483,7 @@ void EyeDisplayHorizontal::StartHappyAnimation() {
     // 创建嘴巴图片对象
     mouth_ = lv_img_create(lv_scr_act());
     lv_img_set_src(mouth_, &down_image);
-    lv_obj_set_pos(mouth_, (width_ - 24) / 2, height_ - 40 - DISPLAY_VERTICAL_OFFSET + 15);  // 适配横屏，happy表情嘴巴往下调15像素（10+5）
+    lv_obj_set_pos(mouth_, (width_ - 30) / 2, height_ - 40 - DISPLAY_VERTICAL_OFFSET + 15);  // 适配横屏，happy表情嘴巴往下调15像素（10+5）
     lv_obj_set_style_img_recolor(mouth_, lv_color_hex(EYE_COLOR), 0);  // 设置青色
     lv_obj_set_style_img_recolor_opa(mouth_, LV_OPA_COVER, 0);  // 设置不透明度
 
