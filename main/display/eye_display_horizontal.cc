@@ -505,11 +505,11 @@ void EyeDisplayHorizontal::StartSadAnimation() {
     // 确保眼睛可见
     lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
-    // 将眼睛整体上移10像素
+    // 将眼睛整体上移30像素（在原基础上再上移20）
     {
         lv_obj_t* container = lv_obj_get_parent(left_eye_);
         if (container) {
-            lv_obj_set_style_pad_top(container, -DISPLAY_VERTICAL_OFFSET - 10, 0);
+            lv_obj_set_style_pad_top(container, -DISPLAY_VERTICAL_OFFSET - 30, 0);
         }
     }
     // 保持左右眼原始顺序；哭泣仅显示右眼的眼泪
@@ -523,7 +523,7 @@ void EyeDisplayHorizontal::StartSadAnimation() {
     // 创建嘴巴图片对象
     mouth_ = lv_img_create(lv_scr_act());
     lv_img_set_src(mouth_, &down_image);
-    lv_obj_set_pos(mouth_, (width_ - 24) / 2, height_ - 40 - DISPLAY_VERTICAL_OFFSET + 50);  // sad表情：整体下移50像素
+    lv_obj_set_pos(mouth_, (width_ - 24) / 2, height_ - 40 - DISPLAY_VERTICAL_OFFSET + 30);  // sad表情：整体上移20像素
     lv_obj_set_style_img_recolor(mouth_, lv_color_hex(EYE_COLOR), 0);  // 设置青色
     lv_obj_set_style_img_recolor_opa(mouth_, LV_OPA_COVER, 0);  // 设置不透明度
     
@@ -531,12 +531,12 @@ void EyeDisplayHorizontal::StartSadAnimation() {
     lv_obj_set_style_transform_angle(mouth_, 1800, 0);  // 180度 = 1800 * 0.1度
     
     // 重新调整位置，确保旋转后仍然居中
-    lv_obj_set_pos(mouth_, (width_ + 32) / 2, height_ - 32 - DISPLAY_VERTICAL_OFFSET + 50);
+    lv_obj_set_pos(mouth_, (width_ + 32) / 2, height_ - 32 - DISPLAY_VERTICAL_OFFSET + 30);
 
     // 创建嘴巴动画
     lv_anim_init(&mouth_anim_);
     lv_anim_set_var(&mouth_anim_, mouth_);
-    lv_anim_set_values(&mouth_anim_, height_ - 30 - DISPLAY_VERTICAL_OFFSET + 50, height_ - 40 - DISPLAY_VERTICAL_OFFSET + 50);  // sad表情：动画基线下移50
+    lv_anim_set_values(&mouth_anim_, height_ - 30 - DISPLAY_VERTICAL_OFFSET + 30, height_ - 40 - DISPLAY_VERTICAL_OFFSET + 30);  // sad表情：整体上移20像素
     lv_anim_set_time(&mouth_anim_, 1200);
     lv_anim_set_delay(&mouth_anim_, 0);
     lv_anim_set_exec_cb(&mouth_anim_, (lv_anim_exec_xcb_t)lv_obj_set_y);
@@ -558,12 +558,12 @@ void EyeDisplayHorizontal::StartSadAnimation() {
     lv_obj_set_style_outline_width(right_tear_, 0, 0);
 
     // 固定在屏幕右侧眼睛下方的原位置
-    lv_obj_set_pos(right_tear_, 60, height_ / 2 + 20 - DISPLAY_VERTICAL_OFFSET);
+    lv_obj_set_pos(right_tear_, 15, height_ / 2 - DISPLAY_VERTICAL_OFFSET);
     // 添加下落动画（恢复原上下范围）
     static lv_anim_t tear_anim;
     lv_anim_init(&tear_anim);
     lv_anim_set_var(&tear_anim, right_tear_);
-    lv_anim_set_values(&tear_anim, height_ / 2 + 40 - DISPLAY_VERTICAL_OFFSET, height_ / 2 + 20 - DISPLAY_VERTICAL_OFFSET);
+    lv_anim_set_values(&tear_anim, height_ / 2 + 20 - DISPLAY_VERTICAL_OFFSET, height_ / 2 - DISPLAY_VERTICAL_OFFSET);
     lv_anim_set_time(&tear_anim, 1000);
     lv_anim_set_repeat_count(&tear_anim, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_playback_time(&tear_anim, 1000);
