@@ -12,7 +12,7 @@
 #include <esp_lcd_st7735s.h>
 
 #include "led/single_led.h"
-#include "display/eye_display.h"
+#include "display/eye_display_horizontal.h"
 #include "display/display.h"
 
 #include <wifi_station.h>
@@ -39,7 +39,7 @@ LV_FONT_DECLARE(font_awesome_20_4);
 class MovecallMojiESP32S3 : public WifiBoard {
 private:
     Button boot_button_;
-    EyeDisplay* display_;
+    EyeDisplayHorizontal* display_;
     VbAduioCodec audio_codec;
     bool need_power_off_ = false;
     int64_t power_on_time_ = 0;  // 记录上电时间
@@ -200,9 +200,9 @@ private:
         
         // 创建并初始化 LottieDisplay（与 gizwits-lottie 一致），但面板为 ST7735S
         DisplayFonts fonts = { .text_font = &font_puhui_20_4, .icon_font = nullptr, .emoji_font = nullptr };
-        display_ = new EyeDisplay(panel_io, panel,
+        display_ = new EyeDisplayHorizontal(panel_io, panel,
             DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
-            DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y,
+            DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY,
             fonts);
     }
     // GC9A01初始化
@@ -276,7 +276,7 @@ private:
     //         .emoji_font = nullptr,  // 延迟初始化，避免在 LVGL 初始化前调用
     //     };
         
-    //     display_ = new EyeDisplay(panel_io, panel,
+    //     display_ = new EyeDisplayHorizontal(panel_io, panel,
     //         DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
     //         DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y,
     //         &qrcode_img,
@@ -360,6 +360,11 @@ private:
                     }
                     vTaskDelete(NULL);
                 }, "power_off_task", 4028, this, 10, NULL);
+            } else {
+                // 正常按键，切换表情
+                if (display_) {
+                    display_->TestNextEmotion();
+                }
             }
         });
 
