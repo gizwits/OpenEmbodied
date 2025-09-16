@@ -75,7 +75,7 @@ EyeDisplayHorizontal::EyeDisplayHorizontal(esp_lcd_panel_io_handle_t panel_io, e
         .rotation = {
             .swap_xy = swap_xy,
             .mirror_x = mirror_x,
-            .mirror_y = mirror_y,
+            .mirror_y = false,
         },
         .color_format = LV_COLOR_FORMAT_RGB565,
         .flags = {
@@ -719,33 +719,44 @@ void EyeDisplayHorizontal::StartSleepingAnimation() {
     lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
     
+    // 眼睛整体下移15像素
+    {
+        lv_obj_t* container = lv_obj_get_parent(left_eye_);
+        if (container) {
+            lv_obj_set_style_pad_top(container, -DISPLAY_VERTICAL_OFFSET + 15, 0);
+        }
+    }
+    
     // 设置眼睛为水平长条
     lv_obj_set_size(left_eye_, 45, 15);  // 适配横屏尺寸
     lv_obj_set_size(right_eye_, 45, 15);  // 适配横屏尺寸
     lv_obj_set_style_radius(left_eye_, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_radius(right_eye_, LV_RADIUS_CIRCLE, 0);
 
-    // 创建三个 z 标签
+    // 创建三个 z 标签（缩小尺寸、缩短左右间距）
     zzz1_ = lv_label_create(lv_screen_active());
     lv_obj_set_style_text_font(zzz1_, fonts_.text_font, 0);  // 使用文本字体
     lv_obj_set_style_text_color(zzz1_, lv_color_hex(EYE_COLOR), 0);  // 黄色
     lv_label_set_text(zzz1_, "z");
-    lv_obj_align(zzz1_, LV_ALIGN_TOP_MID, -40, 50 - DISPLAY_VERTICAL_OFFSET);  // 调整垂直位置到 50
-    lv_obj_set_style_text_letter_space(zzz1_, 2, 0);  // 增加字间距
+    lv_obj_align(zzz1_, LV_ALIGN_TOP_MID, -30, 50 - DISPLAY_VERTICAL_OFFSET);  // 左侧更靠近中心
+    lv_obj_set_style_text_letter_space(zzz1_, 1, 0);  // 缩短字间距
+    lv_obj_set_style_transform_zoom(zzz1_, 205, 0);   // 约0.8x缩放（256为1.0）
 
     zzz2_ = lv_label_create(lv_screen_active());
     lv_obj_set_style_text_font(zzz2_, fonts_.text_font, 0);  // 使用文本字体
     lv_obj_set_style_text_color(zzz2_, lv_color_hex(EYE_COLOR), 0);  // 黄色
     lv_label_set_text(zzz2_, "z");
-    lv_obj_align(zzz2_, LV_ALIGN_TOP_MID, 0, 40 - DISPLAY_VERTICAL_OFFSET);  // 调整垂直位置到 40
-    lv_obj_set_style_text_letter_space(zzz2_, 2, 0);  // 增加字间距
+    lv_obj_align(zzz2_, LV_ALIGN_TOP_MID, 0, 40 - DISPLAY_VERTICAL_OFFSET);   // 中间
+    lv_obj_set_style_text_letter_space(zzz2_, 1, 0);  // 缩短字间距
+    lv_obj_set_style_transform_zoom(zzz2_, 205, 0);   // 约0.8x缩放
 
     zzz3_ = lv_label_create(lv_screen_active());
     lv_obj_set_style_text_font(zzz3_, fonts_.text_font, 0);  // 使用文本字体
     lv_obj_set_style_text_color(zzz3_, lv_color_hex(EYE_COLOR), 0);  // 黄色
     lv_label_set_text(zzz3_, "z");
-    lv_obj_align(zzz3_, LV_ALIGN_TOP_MID, 40, 30 - DISPLAY_VERTICAL_OFFSET);  // 调整垂直位置到 30
-    lv_obj_set_style_text_letter_space(zzz3_, 2, 0);  // 增加字间距
+    lv_obj_align(zzz3_, LV_ALIGN_TOP_MID, 30, 30 - DISPLAY_VERTICAL_OFFSET);  // 右侧更靠近中心
+    lv_obj_set_style_text_letter_space(zzz3_, 1, 0);  // 缩短字间距
+    lv_obj_set_style_transform_zoom(zzz3_, 205, 0);   // 约0.8x缩放
 }
 
 void EyeDisplayHorizontal::StartShockedAnimation() {
