@@ -585,14 +585,14 @@ void EyeDisplayHorizontal::StartVertigoAnimation() {
     lv_img_set_src(left_heart, &spiral_img_64);
     lv_obj_set_style_img_recolor(left_heart, lv_color_hex(EYE_COLOR), 0);  // 设置为白色
     lv_obj_set_style_img_recolor_opa(left_heart, LV_OPA_COVER, 0);  // 完全不透明
-    lv_obj_align(left_heart, LV_ALIGN_LEFT_MID, 0, -DISPLAY_VERTICAL_OFFSET);  // 左眼位置，适配横屏
+    lv_obj_align(left_heart, LV_ALIGN_LEFT_MID, -20, -DISPLAY_VERTICAL_OFFSET);  // 左眼位置，适配横屏
     
     // 创建右眼爱心图片
     lv_obj_t* right_heart = lv_img_create(lv_screen_active());
     lv_img_set_src(right_heart, &spiral_img_64);
     lv_obj_set_style_img_recolor(right_heart, lv_color_hex(EYE_COLOR), 0);  // 设置为白色
     lv_obj_set_style_img_recolor_opa(right_heart, LV_OPA_COVER, 0);  // 完全不透明
-    lv_obj_align(right_heart, LV_ALIGN_RIGHT_MID, -0, -DISPLAY_VERTICAL_OFFSET);  // 右眼位置，适配横屏
+    lv_obj_align(right_heart, LV_ALIGN_RIGHT_MID, 20, -DISPLAY_VERTICAL_OFFSET);  // 右眼位置，适配横屏
     
     // 缩小图片 - 适配横屏
     lv_img_set_zoom(left_heart, 86);  // 适配横屏尺寸

@@ -164,13 +164,6 @@ private:
             return;
         }
         
-        // Set display offset for ST7735S 0.96 inch TFT
-        ret = esp_lcd_panel_set_gap(panel, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Panel set gap failed: %s", esp_err_to_name(ret));
-            return;
-        }
-        
         // Mirror display if needed
         ret = esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
         if (ret != ESP_OK) {
