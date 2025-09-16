@@ -8,9 +8,9 @@
 #include "assets/lang_config.h"
 #include "font_awesome_symbols.h"
 #include "wifi_connection_manager.h"
-
+#include "settings.h"
 #include <esp_lcd_st7735s.h>
-
+#include "data_point_manager.h"
 #include "led/single_led.h"
 #include "display/eye_display_horizontal.h"
 #include "display/display.h"
@@ -32,6 +32,9 @@
 
 #define TAG "MovecallMojiESP32S3"
 
+#define SLEEP_TIME_SEC 60 * 10
+
+
 LV_FONT_DECLARE(font_puhui_20_4);
 LV_FONT_DECLARE(font_awesome_20_4);
 
@@ -39,8 +42,10 @@ LV_FONT_DECLARE(font_awesome_20_4);
 class MovecallMojiESP32S3 : public WifiBoard {
 private:
     Button boot_button_;
-    EyeDisplayHorizontal* display_;
+    
+    Button power_button_;
     VbAduioCodec audio_codec;
+    EyeDisplayHorizontal* display_;
     bool need_power_off_ = false;
     int64_t power_on_time_ = 0;  // 记录上电时间
     PowerManager* power_manager_;
@@ -59,38 +64,16 @@ private:
     }
 
     void InitializePowerSaveTimer() {
-        // 20 分钟进休眠
-        // 30 分钟 关机
-        power_save_timer_ = new PowerSaveTimer(-1, 60 * 20, 60 * 30);
-        // power_save_timer_ = new PowerSaveTimer(-1, 20 * 1, 60 * 2);
+        power_save_timer_ = new PowerSaveTimer(-1, SLEEP_TIME_SEC, portMAX_DELAY);  // peter mark 休眠时间
         power_save_timer_->OnEnterSleepMode([this]() {
-            ESP_LOGE(TAG, "Enabling sleep mode");
-            if(IsCharging()) {
-                // 充电中
-                is_charging_sleep_ = true;
-                Application::GetInstance().Schedule([this]() {
-                    Application::GetInstance().QuitTalking();
-                    Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
-
-                    // 在这个场景里要切换成睡觉表情 
-                    // display_->SetEmotion("sleepy");
-                }, "EnterSleepMode_QuitTalking");
-
-            } else {
-                // 关闭 wifi，进入待机模式
-                Application::GetInstance().EnterSleepMode();
-            }
+            ESP_LOGI(TAG, "Enabling sleep mode");
+            run_sleep_mode(true);
         });
         power_save_timer_->OnExitSleepMode([this]() {
-            ESP_LOGE(TAG, "退出休眠模式");
+            ESP_LOGI(TAG, "Shutting down");
         });
         power_save_timer_->OnShutdownRequest([this]() {
-            // 关机
-            if (IsCharging()) {
-                // 充电模式下不管
-            } else {
-                PowerOff();
-            }
+            
         });
         power_save_timer_->SetEnabled(true);
     }
@@ -109,6 +92,10 @@ private:
     };
 
 
+
+    void EnterDeepSleepIfNotCharging() {
+        power_manager_->EnterDeepSleepIfNotCharging();
+    }
     // SPI初始化
     void InitializeSpi() {
         spi_bus_config_t buscfg = {
@@ -205,6 +192,7 @@ private:
             DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY,
             fonts);
     }
+<<<<<<< HEAD
     // GC9A01初始化
     // void InitializeGc9a01Display() {
     //     esp_lcd_panel_io_spi_config_t io_config = {
@@ -282,6 +270,8 @@ private:
     //         &qrcode_img,
     //         fonts);
     // }
+=======
+>>>>>>> c06a39446cad49e6087065af1939f3c4323b0254
 
     int MaxBacklightBrightness() {
         return 8;
@@ -308,37 +298,14 @@ private:
     }
 
     void InitializeButtons() {
-        static int first_level = gpio_get_level(BOOT_BUTTON_GPIO);
-        ESP_LOGI(TAG, "first_level: %d", first_level);
-
-        boot_button_.OnClick([this]() {
-            if (CheckAndHandleEnterSleepMode()) {
-                // 交给休眠逻辑托管
-                ESP_LOGI(TAG, "长按唤醒");
-                return;
-            }
-            auto& app = Application::GetInstance();
-            app.ToggleChatState();
+        boot_button_.OnPressDown([this]() {
+            ESP_LOGI(TAG, "boot_button_.OnPressDown");
+            // 开灯
         });
         boot_button_.OnLongPress([this]() {
-            ESP_LOGI(TAG, "boot_button_.OnLongPress");
-            auto& app = Application::GetInstance();
-            // 计算设备运行时间
-            int64_t current_time = esp_timer_get_time() / 1000; // 转换为毫秒
-            int64_t uptime_ms = current_time - power_on_time_;
-            ESP_LOGI(TAG, "设备运行时间: %lld ms", uptime_ms);
-            
-            // 首次上电5秒内且first_level==0才忽略
-            const int64_t MIN_UPTIME_MS = 5000; // 5秒
-            if (first_level == 0 && uptime_ms < MIN_UPTIME_MS) {
-                first_level = 1;
-                ESP_LOGI(TAG, "首次上电5秒内，忽略长按操作");
-            } else {
-                ESP_LOGI(TAG, "执行关机操作");
-                this->GetBacklight()->SetBrightness(0, false);
-                need_power_off_ = true;
-            }
+            ResetWifiConfiguration();
         });
+<<<<<<< HEAD
         boot_button_.OnPressUp([this]() {
             first_level = 1;
             ESP_LOGI(TAG, "boot_button_.OnPressUp");
@@ -371,6 +338,8 @@ private:
         boot_button_.OnMultipleClick([this]() {
             InnerResetWifiConfiguration();
         }, 3);
+=======
+>>>>>>> c06a39446cad49e6087065af1939f3c4323b0254
     }
 
     // 物联网初始化，添加对 AI 可见设备
@@ -415,11 +384,35 @@ private:
     }
 
 
-    void InitializePowerManager() {
-        power_manager_ =
-            new PowerManager(GPIO_NUM_NC, GPIO_NUM_NC, BAT_ADC_UNIT, BAT_ADC_CHANNEL);
+    void InitializeDataPointManager() {
         
+        // 设置 DataPointManager 的回调函数
+        DataPointManager::GetInstance().SetCallbacks(
+            [this]() -> bool { return IsCharging(); },
+            []() -> int { return Application::GetInstance().GetChatMode(); },
+            [](int value) { Application::GetInstance().SetChatMode(value); },
+            [this]() -> int { 
+                int level = 0;
+                bool charging = false, discharging = false;
+                GetBatteryLevel(level, charging, discharging);
+                return level;
+            },
+            [this]() -> int { return GetAudioCodec()->output_volume(); },
+            [this](int value) { GetAudioCodec()->SetOutputVolume(value); },
+            []() -> int { 
+                wifi_ap_record_t ap_info;
+                if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+                    return 100 - (uint8_t)abs(ap_info.rssi);
+                }
+                return 0;
+            },
+            [this]() -> int { return GetBrightness(); },
+            [this](int value) { SetBrightness(value); }
+        );
+    }
 
+    void InitializePowerManager() {
+        power_manager_ = new PowerManager(GPIO_NUM_NC, GPIO_NUM_NC, BAT_ADC_UNIT, BAT_ADC_CHANNEL);
         // 注册充电状态改变回调
         power_manager_->SetChargingStatusCallback([this](bool is_charging) {
             ESP_LOGI(TAG, "充电状态改变: %s", is_charging ? "开始充电" : "停止充电");
@@ -428,52 +421,101 @@ private:
                 // 充电开始时的处理逻辑
                 ESP_LOGI(TAG, "检测到开始充电");
                 // 降低发热                
-                GetBacklight()->SetBrightness(5, false);
+                // GetBacklight()->SetBrightness(5, false);
                 
-                // 设置充电时的自定义帧率：100-125Hz (8-10ms延迟)
-                // 需要强制转换成 XunguanDisplay 类型
-                // if (xunguan_display) {
-                //     if (xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL)) {
-                //     // if (xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::POWER_SAVE)) {
-                //         ESP_LOGI(TAG, "充电帧率设置成功");
-                //     } else {
-                //         ESP_LOGE(TAG, "充电帧率设置失败");
-                //     }
-                // } else {
-                //     ESP_LOGE(TAG, "无法获取 XunguanDisplay 对象");
-                // }
             } else {
                 // 充电停止时的处理逻辑
                 ESP_LOGI(TAG, "检测到停止充电");
                 
-                // 恢复正常帧率模式
-                // 需要强制转换成 XunguanDisplay 类型
-                // if (xunguan_display) {
-                //     ESP_LOGI(TAG, "停止充电，恢复正常帧率模式");
-                //     if (xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL)) {
-                //         ESP_LOGI(TAG, "正常帧率模式恢复成功");
-                //     } else {
-                //         ESP_LOGE(TAG, "正常帧率模式恢复失败");
-                //     }
-                // } else {
-                //     ESP_LOGE(TAG, "无法获取 XunguanDisplay 对象");
-                // }
-
-                if (this->is_charging_sleep_) {
-                    ESP_LOGI(TAG, "充电停止，关机");
+                ESP_LOGI(TAG, "检测到停止充电");
+                auto state = Application::GetInstance().GetDeviceState();
+                // 待机状态，直接关机
+                if (state == kDeviceStateIdle) {
                     PowerOff();
                 }
             }
 
-            // 通知 mqtt 
-            auto& mqtt_client = MqttClient::getInstance();
-            mqtt_client.ReportTimer();
+            Application::GetInstance().Schedule([this]() {
+                // 通知 mqtt 
+                auto& mqtt_client = MqttClient::getInstance();
+                mqtt_client.ReportTimer();
+            });
 
         });
     }
 
+
+    void run_sleep_mode(bool need_delay = true){
+        auto& application = Application::GetInstance();
+        if (need_delay) {
+            application.Alert("", "", "", Lang::Sounds::P3_SLEEP);
+            vTaskDelay(pdMS_TO_TICKS(1500));
+            ESP_LOGI(TAG, "Sleep mode");
+        }
+        application.QuitTalking();
+
+        EnterDeepSleepIfNotCharging();
+    }
+
+    void initPowerButton() {
+        static int first_level = gpio_get_level(POWER_BUTTON_GPIO);
+        ESP_LOGI(TAG, "initPowerButton");
+        power_button_.OnPressDown([this]() {
+            ESP_LOGI(TAG, "power_button_.OnPressDown");
+            auto& app = Application::GetInstance();
+            app.ToggleChatState();
+            // 开灯
+
+        });
+        
+        power_button_.OnLongPress([this]() {
+            ESP_LOGI(TAG, "power_button_.OnLongPress");
+            auto& app = Application::GetInstance();
+            // 计算设备运行时间
+            int64_t current_time = esp_timer_get_time() / 1000; // 转换为毫秒
+            int64_t uptime_ms = current_time - power_on_time_;
+            ESP_LOGI(TAG, "设备运行时间: %lld ms", uptime_ms);
+            
+            // 首次上电5秒内且first_level==0才忽略
+            const int64_t MIN_UPTIME_MS = 5000; // 5秒
+            if (first_level == 0 && uptime_ms < MIN_UPTIME_MS) {
+                first_level = 1;
+                ESP_LOGI(TAG, "首次上电5秒内，忽略长按操作");
+            } else {
+                // 提前播放音频
+                // 非休眠模式才播报
+                if (!is_charging_sleep_) {
+                    ESP_LOGI(TAG, "执行关机操作");
+                    Application::GetInstance().QuitTalking();
+                    vTaskDelay(pdMS_TO_TICKS(200));
+                    auto codec = GetAudioCodec();
+                    codec->EnableOutput(true);
+                    Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
+                    need_power_off_ = true;
+                }
+                
+            }
+        });
+        power_button_.OnPressUp([this]() {
+            first_level = 1;
+            ESP_LOGI(TAG, "power_button_.OnPressUp");
+            if (need_power_off_) {
+                need_power_off_ = false;
+                // 使用静态函数来避免lambda捕获问题
+                xTaskCreate([](void* arg) {
+                    auto* board = static_cast<MovecallMojiESP32S3*>(arg);
+                    Application::GetInstance().SetDeviceState(kDeviceStateIdle);
+                    board->run_sleep_mode(false);
+
+                    vTaskDelete(NULL);
+                }, "power_off_task", 4028, this, 10, NULL);
+            }
+        });
+    }
+
+
 public:
-    MovecallMojiESP32S3() : boot_button_(BOOT_BUTTON_GPIO),audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO) { 
+    MovecallMojiESP32S3() : boot_button_(BOOT_BUTTON_GPIO), power_button_(POWER_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO) { 
         // 记录上电时间
         power_on_time_ = esp_timer_get_time() / 1000; // 转换为毫秒
         ESP_LOGI(TAG, "设备启动，上电时间戳: %lld ms", power_on_time_);
@@ -481,22 +523,30 @@ public:
         // 设置I2C master日志级别为ERROR，忽略I2C事务失败的日志
         esp_log_level_set("i2c.master", ESP_LOG_ERROR);
         
-        InitializeGpio(POWER_GPIO, true);
+        InitializeGpio(POWER_HOLD_GPIO, true);
 
         InitializeSpi();
         InitializeST7735SDisplay();
-        
-        InitializeButtons();
-        InitializeIot();
-        InitializePowerManager();
-        InitializePowerSaveTimer();
-        if (power_manager_) {
-            power_manager_->CheckBatteryStatusImmediately();
-            ESP_LOGI(TAG, "启动时立即检测电量: %d", power_manager_->GetBatteryLevel());
+
+        Settings settings("wifi", true);
+        auto s_factory_test_mode = settings.GetInt("ft_mode", 0);
+
+        if (s_factory_test_mode == 0) {
+            // 不在产测模式才启动，不然有问题
+            InitializeButtons();
+            initPowerButton();
         }
 
-
-
+        InitializeIot();
+        InitializePowerManager();
+        InitializeDataPointManager();
+        InitializePowerSaveTimer();
+        if (power_manager_) {
+            ESP_LOGI(TAG, "Before CheckBatteryStatusImmediately");
+            power_manager_->CheckBatteryStatusImmediately();
+            ESP_LOGI(TAG, "After CheckBatteryStatusImmediately, battery: %d", power_manager_->GetBatteryLevel());
+        }
+        ESP_LOGI(TAG, "Power Manager initialized.");
         audio_codec.OnWakeUp([this](const std::string& command) {
             ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());
             if (IsCommandInList(command, wake_words_)){
@@ -520,7 +570,7 @@ public:
     }
 
     virtual void PowerOff() override {
-        gpio_set_level(POWER_GPIO, 0);
+        gpio_set_level(POWER_HOLD_GPIO, 0);
     }
 
     // virtual void WakeWordDetected() override {
@@ -569,22 +619,49 @@ public:
         return &backlight;
     }
 
-    // virtual bool IsCharging() override {
-    //     int chrg = gpio_get_level(CHARGING_PIN);
-    //     int standby = gpio_get_level(STANDBY_PIN);
-    //     // return false;
-    //     return chrg == 0 || standby == 0;
-    // }
+    virtual bool IsCharging() override {
+        return power_manager_->IsCharging();
+    }
 
-    // virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
-    //     charging = IsCharging();
-    //     discharging = !charging;
-    //     level = power_manager_->GetBatteryLevel();
-    //     ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
-    //     return true;
-    // }
+    virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
+        charging = IsCharging();
+        discharging = !charging;
+        level = power_manager_->GetBatteryLevel();
+        // ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
+        return true;
+    }
     virtual AudioCodec* GetAudioCodec() override {
         return &audio_codec;
+    }
+
+
+
+    void SetPowerSaveTimer(bool enable) {
+        power_save_timer_->SetEnabled(enable);
+    }
+    // 数据点相关方法实现
+    const char* GetGizwitsProtocolJson() const override {
+        return DataPointManager::GetInstance().GetGizwitsProtocolJson();
+    }
+
+    size_t GetDataPointCount() const override {
+        return DataPointManager::GetInstance().GetDataPointCount();
+    }
+
+    bool GetDataPointValue(const std::string& name, int& value) const override {
+        return DataPointManager::GetInstance().GetDataPointValue(name, value);
+    }
+
+    bool SetDataPointValue(const std::string& name, int value) override {
+        return DataPointManager::GetInstance().SetDataPointValue(name, value);
+    }
+
+    void GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) override {
+        DataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
+    }
+
+    void ProcessDataPointValue(const std::string& name, int value) override {
+        DataPointManager::GetInstance().ProcessDataPointValue(name, value);
     }
 
 };

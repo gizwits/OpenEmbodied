@@ -1116,9 +1116,9 @@ bool MqttClient::uploadP0Data(const void* data, size_t data_len) {
 
 void MqttClient::ReportTimer() {
     // 检查 board 是否支持数据点
-    if (!Board::GetInstance().GetGizwitsProtocolJson()) {
+    if (Board::GetInstance().GetGizwitsProtocolJson() == nullptr) {
         // 如果 board 不支持数据点，直接返回，不上报
-        ESP_LOGD(TAG, "Board does not support data points, skipping report");
+        ESP_LOGW(TAG, "Board does not support data points, skipping report");
         return;
     }
     

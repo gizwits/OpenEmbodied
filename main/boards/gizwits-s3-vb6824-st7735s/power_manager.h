@@ -28,7 +28,7 @@ private:
     uint8_t battery_level_ = 100;
     bool is_charging_ = false;
 
-    static constexpr uint8_t MAX_CHANGE_COUNT = 8;
+    static constexpr uint8_t MAX_CHANGE_COUNT = 3;
     static constexpr uint32_t TIME_LIMIT = 2000000; // 2 seconds in microseconds
 
     uint8_t change_count_ = 0;  // 记录状态变化次数
@@ -41,39 +41,33 @@ private:
 
     void CheckBatteryStatus() {
         uint64_t current_time = esp_timer_get_time(); // 获取当前时间（微秒）
+        // 先读取一次并更新平均值、电量，再基于平均值判定充电状态
+        uint32_t average_adc = ReadBatteryAdcData();
 
-        // 如果时间间隔超过2秒，则重置状态变化计数
-        if (current_time - last_change_time_ > TIME_LIMIT) {
-            change_count_ = 0;
-        }
+        // 基于电压阈值判断是否在充电
+        // 分压为 1:1 → ADC 端阈值电压为 2.8V。
+        static constexpr uint32_t ADC_RAW_THRESHOLD_CHARGING = 2400;
 
-        if (change_count_ < MAX_CHANGE_COUNT) {
-            bool new_is_charging = gpio_get_level(bat_led_pin_) != 0;  // 检查LED引脚状态
+        bool new_is_charging = average_adc >= ADC_RAW_THRESHOLD_CHARGING;
 
-            // 判断充电引脚状态
-            if (new_is_charging) {
-                new_is_charging = gpio_get_level(charging_pin_) == 1;
-            }
-
-            // 如果状态有变化
-            if (new_is_charging != is_charging_) {
-                bool old_charging_status = is_charging_;
-                is_charging_ = new_is_charging;
-                change_count_++;  // 增加变化次数
-                last_change_time_ = current_time;  // 更新最后变化时间
-                
-                // 调用充电状态改变回调
-                if (charging_status_callback_) {
-                    charging_status_callback_(is_charging_);
-                }
+        // ESP_LOGI("PowerManager", "new_is_charging: %d, is_charging_: %d, average_adc: %u", new_is_charging, is_charging_, (unsigned)average_adc);
+        // 如果状态有变化
+        if (new_is_charging != is_charging_) {
+            bool old_charging_status = is_charging_;
+            is_charging_ = new_is_charging;
+            change_count_++;  // 增加变化次数
+            last_change_time_ = current_time;  // 更新最后变化时间
+            
+            // 调用充电状态改变回调
+            if (charging_status_callback_) {
+                charging_status_callback_(is_charging_);
             }
         }
-
-        ReadBatteryAdcData();
     }
-    void ReadBatteryAdcData() {
+    uint32_t ReadBatteryAdcData() {
         int adc_value;
-        ESP_ERROR_CHECK(adc_oneshot_read(adc_handle_, adc_channel_, &adc_value));
+        esp_err_t err = adc_oneshot_read(adc_handle_, adc_channel_, &adc_value);
+        ESP_ERROR_CHECK(err);
 
         adc_values_[adc_values_index_] = adc_value;
         adc_values_index_ = (adc_values_index_ + 1) % ADC_VALUES_COUNT;
@@ -92,6 +86,7 @@ private:
 
         // ESP_LOGI("PowerManager", "ADC值: %d 平均值: %ld 电量: %u%%", adc_value, average_adc,
         //          battery_level_);
+        return average_adc;
     }
 
     void CalculateBatteryLevel(uint32_t average_adc) {
@@ -111,19 +106,25 @@ public:
                  adc_channel_t adc_channel = ADC_CHANNEL_3)
         : charging_pin_(charging_pin), bat_led_pin_(bat_led_pin), adc_unit_(adc_unit), adc_channel_(adc_channel) {
 
-        // 配置充电引脚
         gpio_config_t io_conf = {};
-        io_conf.intr_type = GPIO_INTR_DISABLE;
-        io_conf.mode = GPIO_MODE_INPUT;
-        io_conf.pin_bit_mask = (1ULL << charging_pin_);
-        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-        io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
-        gpio_config(&io_conf);
 
-        // 配置状态引脚
-        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-        io_conf.pin_bit_mask = (1ULL << bat_led_pin_);
-        gpio_config(&io_conf);
+        if (charging_pin_ != GPIO_NUM_NC) {
+            // 配置充电引脚
+            io_conf.intr_type = GPIO_INTR_DISABLE;
+            io_conf.mode = GPIO_MODE_INPUT;
+            io_conf.pin_bit_mask = (1ULL << charging_pin_);
+            io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+            io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+            gpio_config(&io_conf);
+        }
+        
+
+        if (bat_led_pin_ != GPIO_NUM_NC) {
+            // 配置状态引脚
+            io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+            io_conf.pin_bit_mask = (1ULL << bat_led_pin_);
+            gpio_config(&io_conf);
+        }
 
         // 定时器配置
         esp_timer_create_args_t timer_args = {
@@ -138,7 +139,7 @@ public:
             .skip_unhandled_events = true,
         };
         ESP_ERROR_CHECK(esp_timer_create(&timer_args, &timer_handle_));
-        ESP_ERROR_CHECK(esp_timer_start_periodic(timer_handle_, 500000));  // 5秒
+        ESP_ERROR_CHECK(esp_timer_start_periodic(timer_handle_, 100000));  // 5秒
 
         // 初始化ADC
         InitializeAdc();
@@ -181,6 +182,25 @@ public:
     // 设置充电状态改变回调函数
     void SetChargingStatusCallback(std::function<void(bool)> callback) {
         charging_status_callback_ = callback;
+    }
+    void EnterDeepSleepIfNotCharging() {
+        ESP_LOGI("PowerManager", "EnterDeepSleepIfNotCharging");
+        // 不在充电就真休眠
+        if (is_charging_ == 0) {
+            // 非充电 直接关机
+            gpio_set_level(POWER_HOLD_GPIO, 0);
+        } else {
+            // 充电中，进休眠
+            // vb6824_shutdown();
+            // vTaskDelay(pdMS_TO_TICKS(200));
+            // // 配置唤醒源 只有电源域是VDD3P3_RTC的才能唤醒深睡
+            // uint64_t wakeup_pins = (BIT(POWER_BUTTON_GPIO));
+            // esp_deep_sleep_enable_gpio_wakeup(wakeup_pins, ESP_GPIO_WAKEUP_GPIO_LOW);
+            // ESP_LOGI("PowerMgr", "ready to esp_deep_sleep_start");
+            // vTaskDelay(pdMS_TO_TICKS(10));
+            
+            // esp_deep_sleep_start();
+        }
     }
 };
 #endif  // __POWER_MANAGER_H__

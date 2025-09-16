@@ -8,6 +8,7 @@
                 "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions.csv\"",
                 "CONFIG_LV_FONT_MONTSERRAT_22=y",
                 "CONFIG_USE_EYE_STYLE_VB6824=y",
+                "CONFIG_USE_AFE_WAKE_WORD=n",
                 "CONFIG_USE_AUDIO_PROCESSOR=n",
                 "CONFIG_VB6824_UART_TASK_STACK_SIZE=8192",
                 "CONFIG_VB6824_SEND_USE_TASK=y",

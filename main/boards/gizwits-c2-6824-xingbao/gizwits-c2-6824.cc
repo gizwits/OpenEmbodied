@@ -39,7 +39,7 @@ private:
     int64_t power_on_time_ = 0;  // 记录上电时间
     bool is_sleep_ = false;
 
-    // PowerManager* power_manager_;
+    PowerManager* power_manager_;
     
     // 唤醒词列表
     std::vector<std::string> wake_words_ = {"你好小智", "你好小云", "合养精灵", "嗨小火人"};
@@ -170,7 +170,36 @@ private:
     }
 
     void InitializePowerManager() {
-        PowerManager::GetInstance();
+        power_manager_ =
+            new PowerManager(GPIO_NUM_NC, GPIO_NUM_NC, BAT_ADC_UNIT, BAT_ADC_CHANNEL);
+        
+        // 注册充电状态改变回调
+        power_manager_->SetChargingStatusCallback([this](bool is_charging) {
+            ESP_LOGI(TAG, "充电状态改变: %s", is_charging ? "开始充电" : "停止充电");
+            // XunguanDisplay* xunguan_display = static_cast<XunguanDisplay*>(GetDisplay());
+            if (is_charging) {
+                // 充电开始时的处理逻辑
+                ESP_LOGI(TAG, "检测到开始充电");
+            } else {
+                // 充电停止时的处理逻辑
+                ESP_LOGI(TAG, "检测到停止充电");
+                auto state = Application::GetInstance().GetDeviceState();
+                // 待机状态，直接关机
+                if (state == kDeviceStateIdle) {
+                    gpio_set_level(POWER_HOLD_GPIO, 0);
+                }
+            }
+
+            
+            Application::GetInstance().Schedule([this]() {
+                // 通知 mqtt 
+                auto& mqtt_client = MqttClient::getInstance();
+                if (mqtt_client) {
+                    mqtt_client.ReportTimer();
+                }
+            });
+
+        });
     }
 
     void InitializeDataPointManager() {
@@ -257,8 +286,6 @@ public:
         InitializePowerManager();
         ESP_LOGI(TAG, "Power Manager initialized.");
 
-
-
         audio_codec.OnWakeUp([this](const std::string& command) {
             ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());
             if (IsCommandInList(command, wake_words_)){
@@ -272,7 +299,7 @@ public:
             }
         });
 
-        PowerManager::GetInstance().CheckBatteryStatusImmediately();
+        power_manager_->CheckBatteryStatusImmediately();
         ESP_LOGI(TAG, "Immediately check the battery level upon startup: %d", PowerManager::GetInstance().GetBatteryLevel());
 
 
@@ -288,18 +315,18 @@ public:
     };
 
     bool GetBatteryLevel(int &level, bool& charging, bool& discharging) override {
-        level = PowerManager::GetInstance().GetBatteryLevel();
-        charging = PowerManager::GetInstance().IsCharging();
+        level = power_manager_.GetBatteryLevel();
+        charging = power_manager_.IsCharging();
         discharging = !charging;
         return true;
     }
 
     bool IsCharging() override {
-        return PowerManager::GetInstance().IsCharging();
+        return power_manager_.IsCharging();
     }
 
     void EnterDeepSleepIfNotCharging() {
-        PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
+        power_manager_.EnterDeepSleepIfNotCharging();
     }
 
     virtual AudioCodec* GetAudioCodec() override {

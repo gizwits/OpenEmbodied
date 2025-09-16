@@ -1132,7 +1132,7 @@ void Application::StartReportTimer() {
         .skip_unhandled_events = true
     };
     esp_timer_create(&report_timer_args, &report_timer_handle_);
-    esp_timer_start_periodic(report_timer_handle_, 2000000); // 3秒
+    esp_timer_start_periodic(report_timer_handle_, 2000000);
 #endif
 }
 
@@ -1151,7 +1151,7 @@ bool Application::CheckBatteryLevel() {
     bool charging = false;
     bool discharging = false;
     if (Board::GetInstance().GetBatteryLevel(level, charging, discharging)) {
-        ESP_LOGI(TAG, "current Battery level: %d, charging: %d, discharging: %d", level, charging, discharging);
+        // ESP_LOGI(TAG, "current Battery level: %d, charging: %d, discharging: %d", level, charging, discharging);
         if (level <= 15 && discharging) {
             // 电量
             Alert(Lang::Strings::ERROR, Lang::Strings::ERROR, "sad", Lang::Sounds::P3_BATTLE_LOW);
