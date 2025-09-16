@@ -19,5 +19,9 @@
 #define FACTORY_TEST_UART_TX_PIN    GPIO_NUM_20
 #define FACTORY_TEST_UART_RX_PIN    GPIO_NUM_19
 
+#define BAT_ADC_CHANNEL  ADC_CHANNEL_3  // Battery voltage ADC channel
+#define BAT_ADC_ATTEN    ADC_ATTEN_DB_11 // ADC attenuation
+#define BAT_ADC_UNIT     ADC_UNIT_1
+#define POWER_CHARGE_LED_PIN GPIO_NUM_NC
 
 #endif // _BOARD_CONFIG_H_
