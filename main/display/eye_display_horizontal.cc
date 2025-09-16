@@ -483,7 +483,7 @@ void EyeDisplayHorizontal::StartHappyAnimation() {
     // 创建嘴巴图片对象
     mouth_ = lv_img_create(lv_scr_act());
     lv_img_set_src(mouth_, &down_image);
-    lv_obj_set_pos(mouth_, (width_ - 30) / 2, height_ - 40 - DISPLAY_VERTICAL_OFFSET + 15);  // 适配横屏，happy表情嘴巴往下调15像素（10+5）
+    lv_obj_set_pos(mouth_, (width_ - 36) / 2, height_ - 40 - DISPLAY_VERTICAL_OFFSET + 15);  // 适配横屏，happy表情嘴巴往下调15像素（10+5）
     lv_obj_set_style_img_recolor(mouth_, lv_color_hex(EYE_COLOR), 0);  // 设置青色
     lv_obj_set_style_img_recolor_opa(mouth_, LV_OPA_COVER, 0);  // 设置不透明度
 
@@ -523,7 +523,7 @@ void EyeDisplayHorizontal::StartSadAnimation() {
     // 创建嘴巴图片对象
     mouth_ = lv_img_create(lv_scr_act());
     lv_img_set_src(mouth_, &down_image);
-    lv_obj_set_pos(mouth_, (width_ - 24) / 2, height_ - 40 - DISPLAY_VERTICAL_OFFSET + 30);  // sad表情：整体上移20像素
+    lv_obj_set_pos(mouth_, (width_ - 28) / 2, height_ - 40 - DISPLAY_VERTICAL_OFFSET + 30);  // sad表情：整体上移20像素
     lv_obj_set_style_img_recolor(mouth_, lv_color_hex(EYE_COLOR), 0);  // 设置青色
     lv_obj_set_style_img_recolor_opa(mouth_, LV_OPA_COVER, 0);  // 设置不透明度
     
@@ -805,7 +805,7 @@ void EyeDisplayHorizontal::StartShockedAnimation() {
     lv_obj_set_style_pad_all(mouth_, 0, 0);
     lv_obj_set_style_shadow_width(mouth_, 0, 0);
     lv_obj_set_style_outline_width(mouth_, 0, 0);
-    lv_obj_set_pos(mouth_, (width_ - 30) / 2, height_ - 70 - DISPLAY_VERTICAL_OFFSET);  // 居中显示
+    lv_obj_set_pos(mouth_, (width_ - 32) / 2, height_ - 70 - DISPLAY_VERTICAL_OFFSET);  // 居中显示
     
     // 为嘴巴添加大小动画，模拟震惊的效果
     static lv_anim_t mouth_size_anim;
@@ -923,6 +923,7 @@ void EyeDisplayHorizontal::StartAngryAnimation() {
     lv_anim_start(&mouth_width_anim);
 }
 
+
 void EyeDisplayHorizontal::StartThinkingAnimation() {
     // 确保眼睛可见
     lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
@@ -956,7 +957,7 @@ void EyeDisplayHorizontal::StartThinkingAnimation() {
     // 创建嘴巴图片对象
     mouth_ = lv_img_create(lv_scr_act());
     lv_img_set_src(mouth_, &down_image);
-    lv_obj_set_pos(mouth_, (width_ - 32) / 2, height_ - 90 - DISPLAY_VERTICAL_OFFSET);
+    lv_obj_set_pos(mouth_, (width_ - 36) / 2, height_ - 30 - DISPLAY_VERTICAL_OFFSET);
     lv_obj_set_style_img_recolor(mouth_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_img_recolor_opa(mouth_, LV_OPA_COVER, 0);
 
@@ -966,20 +967,22 @@ void EyeDisplayHorizontal::StartThinkingAnimation() {
     lv_img_set_src(left_hand_, &hand_img);
     lv_obj_set_style_img_recolor(left_hand_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_img_recolor_opa(left_hand_, LV_OPA_COVER, 0);
-    lv_obj_set_pos(left_hand_, 15, height_ - 40 - DISPLAY_VERTICAL_OFFSET);  // 适配横屏
+    lv_obj_set_pos(left_hand_, 20, height_ - 20 - DISPLAY_VERTICAL_OFFSET);
+    lv_img_set_zoom(left_hand_, 256 * 0.6);
 
     // 创建右手图片
     right_hand_ = lv_img_create(lv_scr_act());
     lv_img_set_src(right_hand_, &hand_right_img);
     lv_obj_set_style_img_recolor(right_hand_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_img_recolor_opa(right_hand_, LV_OPA_COVER, 0);
+    lv_img_set_zoom(right_hand_, 256 * 0.6);
     // 设置右手位置
-    lv_obj_set_pos(right_hand_, width_ - 55, height_ - 40 - DISPLAY_VERTICAL_OFFSET);  // 适配横屏
+    lv_obj_set_pos(right_hand_, width_ - 74, height_ - 20 - DISPLAY_VERTICAL_OFFSET);
     // 左手左右移动动画
     static lv_anim_t left_hand_anim;
     lv_anim_init(&left_hand_anim);
     lv_anim_set_var(&left_hand_anim, left_hand_);
-    lv_anim_set_values(&left_hand_anim, 30, 45);  // 适配横屏
+    lv_anim_set_values(&left_hand_anim, 20, 40);
     lv_anim_set_time(&left_hand_anim, 1000);
     lv_anim_set_delay(&left_hand_anim, 0);
     lv_anim_set_exec_cb(&left_hand_anim, (lv_anim_exec_xcb_t)lv_obj_set_x);
@@ -993,7 +996,7 @@ void EyeDisplayHorizontal::StartThinkingAnimation() {
     static lv_anim_t right_hand_anim;
     lv_anim_init(&right_hand_anim);
     lv_anim_set_var(&right_hand_anim, right_hand_);
-    lv_anim_set_values(&right_hand_anim, width_ - 55, width_ - 75);  // 适配横屏
+    lv_anim_set_values(&right_hand_anim, width_ - 60, width_ - 80);
     lv_anim_set_time(&right_hand_anim, 1000);
     lv_anim_set_delay(&right_hand_anim, 0);
     lv_anim_set_exec_cb(&right_hand_anim, (lv_anim_exec_xcb_t)lv_obj_set_x);
