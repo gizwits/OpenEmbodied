@@ -192,86 +192,6 @@ private:
             DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY,
             fonts);
     }
-<<<<<<< HEAD
-    // GC9A01初始化
-    // void InitializeGc9a01Display() {
-    //     esp_lcd_panel_io_spi_config_t io_config = {
-    //         .cs_gpio_num = DISPLAY_SPI_CS_PIN,
-    //         .dc_gpio_num = DISPLAY_SPI_DC_PIN,
-    //         .spi_mode = 0,
-    //         .pclk_hz = DISPLAY_SPI_SCLK_HZ,
-    //         .trans_queue_depth = 10,
-    //         .lcd_cmd_bits = 8,
-    //         .lcd_param_bits = 8,
-    //     };
-        
-    //     esp_lcd_panel_io_handle_t panel_io = nullptr;
-    //     esp_err_t ret = esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_config, &panel_io);
-    //     if (ret != ESP_OK) {
-    //         ESP_LOGE(TAG, "Panel IO creation failed: %s", esp_err_to_name(ret));
-    //         return;
-    //     }
-        
-    //     esp_lcd_panel_dev_config_t panel_config = {
-    //         .reset_gpio_num = DISPLAY_SPI_RESET_PIN,
-    //         .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR,
-    //         .bits_per_pixel = 16,
-    //     };
-        
-    //     esp_lcd_panel_handle_t panel = nullptr;
-    //     ret = esp_lcd_new_panel_gc9a01(panel_io, &panel_config, &panel);
-    //     if (ret != ESP_OK) {
-    //         ESP_LOGE(TAG, "Panel creation failed: %s", esp_err_to_name(ret));
-    //         return;
-    //     }
-        
-    //     ret = esp_lcd_panel_reset(panel);
-    //     if (ret != ESP_OK) {
-    //         ESP_LOGE(TAG, "Panel reset failed: %s", esp_err_to_name(ret));
-    //         return;
-    //     }
-        
-    //     ret = esp_lcd_panel_init(panel);
-    //     if (ret != ESP_OK) {
-    //         ESP_LOGE(TAG, "Panel init failed: %s", esp_err_to_name(ret));
-    //         return;
-    //     }
-        
-    //     // Invert colors for GC9A01
-    //     ret = esp_lcd_panel_invert_color(panel, true);
-    //     if (ret != ESP_OK) {
-    //         ESP_LOGE(TAG, "Panel color invert failed: %s", esp_err_to_name(ret));
-    //         return;
-    //     }
-        
-    //     // Mirror display
-    //     ret = esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
-    //     if (ret != ESP_OK) {
-    //         ESP_LOGE(TAG, "Panel mirror failed: %s", esp_err_to_name(ret));
-    //         return;
-    //     }
-        
-    //     // Turn on display
-    //     ret = esp_lcd_panel_disp_on_off(panel, true);
-    //     if (ret != ESP_OK) {
-    //         ESP_LOGE(TAG, "Panel display on failed: %s", esp_err_to_name(ret));
-    //         return;
-    //     }
-
-    //     DisplayFonts fonts = {
-    //         .text_font = &font_puhui_20_4,
-    //         .icon_font = nullptr,
-    //         .emoji_font = nullptr,  // 延迟初始化，避免在 LVGL 初始化前调用
-    //     };
-        
-    //     display_ = new EyeDisplayHorizontal(panel_io, panel,
-    //         DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
-    //         DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y,
-    //         &qrcode_img,
-    //         fonts);
-    // }
-=======
->>>>>>> c06a39446cad49e6087065af1939f3c4323b0254
 
     int MaxBacklightBrightness() {
         return 8;
@@ -301,45 +221,13 @@ private:
         boot_button_.OnPressDown([this]() {
             ESP_LOGI(TAG, "boot_button_.OnPressDown");
             // 开灯
+            if (display_) {
+                display_->TestNextEmotion();
+            }
         });
         boot_button_.OnLongPress([this]() {
             ResetWifiConfiguration();
         });
-<<<<<<< HEAD
-        boot_button_.OnPressUp([this]() {
-            first_level = 1;
-            ESP_LOGI(TAG, "boot_button_.OnPressUp");
-            if (need_power_off_) {
-                need_power_off_ = false;
-                // 使用静态函数来避免lambda捕获问题
-                xTaskCreate([](void* arg) {
-                    auto* board = static_cast<MovecallMojiESP32S3*>(arg);
-                    board->display_->SetEmotion("neutral");
-
-                    if (board->IsCharging()) {
-                        // 充电中，只关闭背光
-                        board->GetBacklight()->SetBrightness(0, false);
-                        board->is_charging_sleep_ = true;
-                        Application::GetInstance().QuitTalking();
-                    } else {
-                        // 没有充电，关机
-                        board->PowerOff();
-                    }
-                    vTaskDelete(NULL);
-                }, "power_off_task", 4028, this, 10, NULL);
-            } else {
-                // 正常按键，切换表情
-                if (display_) {
-                    display_->TestNextEmotion();
-                }
-            }
-        });
-
-        boot_button_.OnMultipleClick([this]() {
-            InnerResetWifiConfiguration();
-        }, 3);
-=======
->>>>>>> c06a39446cad49e6087065af1939f3c4323b0254
     }
 
     // 物联网初始化，添加对 AI 可见设备
