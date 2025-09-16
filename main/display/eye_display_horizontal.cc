@@ -519,7 +519,6 @@ void EyeDisplayHorizontal::StartSadAnimation() {
     lv_obj_set_size(right_eye_, 45, 10);  // 厚度由15降到12
     lv_obj_set_style_radius(left_eye_, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_radius(right_eye_, LV_RADIUS_CIRCLE, 0);
-    
 
     // 创建嘴巴图片对象
     mouth_ = lv_img_create(lv_scr_act());
@@ -558,15 +557,13 @@ void EyeDisplayHorizontal::StartSadAnimation() {
     lv_obj_set_style_shadow_width(right_tear_, 0, 0);
     lv_obj_set_style_outline_width(right_tear_, 0, 0);
 
-    // 将眼泪对齐到右眼下方（相对于右眼定位，避免左右颠倒）
-    lv_obj_align_to(right_tear_, right_eye_, LV_ALIGN_OUT_BOTTOM_MID, 0, 8);
-    // 记录基线Y，用于动画
-    int base_y = lv_obj_get_y(right_tear_);
-    // 添加下落动画（围绕当前对齐位置上下浮动）
+    // 固定在屏幕右侧眼睛下方的原位置
+    lv_obj_set_pos(right_tear_, 60, height_ / 2 + 20 - DISPLAY_VERTICAL_OFFSET);
+    // 添加下落动画（恢复原上下范围）
     static lv_anim_t tear_anim;
     lv_anim_init(&tear_anim);
     lv_anim_set_var(&tear_anim, right_tear_);
-    lv_anim_set_values(&tear_anim, base_y + 12, base_y);  // 自下向上
+    lv_anim_set_values(&tear_anim, height_ / 2 + 40 - DISPLAY_VERTICAL_OFFSET, height_ / 2 + 20 - DISPLAY_VERTICAL_OFFSET);
     lv_anim_set_time(&tear_anim, 1000);
     lv_anim_set_repeat_count(&tear_anim, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_playback_time(&tear_anim, 1000);
