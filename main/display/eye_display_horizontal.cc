@@ -532,12 +532,12 @@ void EyeDisplayHorizontal::StartSadAnimation() {
     lv_obj_set_style_transform_angle(mouth_, 1800, 0);  // 180度 = 1800 * 0.1度
     
     // 重新调整位置，确保旋转后仍然居中
-    lv_obj_set_pos(mouth_, (width_ + 32) / 2, height_ - 32 - DISPLAY_VERTICAL_OFFSET + 50);
+    lv_obj_set_pos(mouth_, (width_ + 32) / 2, height_ - 32 - DISPLAY_VERTICAL_OFFSET + 30);
 
     // 创建嘴巴动画
     lv_anim_init(&mouth_anim_);
     lv_anim_set_var(&mouth_anim_, mouth_);
-    lv_anim_set_values(&mouth_anim_, height_ - 30 - DISPLAY_VERTICAL_OFFSET + 50, height_ - 40 - DISPLAY_VERTICAL_OFFSET + 50);  // sad表情：动画基线下移50
+    lv_anim_set_values(&mouth_anim_, height_ - 40 - DISPLAY_VERTICAL_OFFSET + 50, height_ - 50 - DISPLAY_VERTICAL_OFFSET + 50);  // sad表情：动画基线下移50
     lv_anim_set_time(&mouth_anim_, 1200);
     lv_anim_set_delay(&mouth_anim_, 0);
     lv_anim_set_exec_cb(&mouth_anim_, (lv_anim_exec_xcb_t)lv_obj_set_y);
@@ -559,14 +559,14 @@ void EyeDisplayHorizontal::StartSadAnimation() {
     lv_obj_set_style_outline_width(right_tear_, 0, 0);
 
     // 将眼泪对齐到右眼下方（相对于右眼定位，避免左右颠倒）
-    lv_obj_align_to(right_tear_, right_eye_, LV_ALIGN_OUT_BOTTOM_MID, 0, 8);
+    lv_obj_align_to(right_tear_, left_eye_, LV_ALIGN_OUT_BOTTOM_MID, 0, 0);
     // 记录基线Y，用于动画
     int base_y = lv_obj_get_y(right_tear_);
     // 添加下落动画（围绕当前对齐位置上下浮动）
     static lv_anim_t tear_anim;
     lv_anim_init(&tear_anim);
     lv_anim_set_var(&tear_anim, right_tear_);
-    lv_anim_set_values(&tear_anim, base_y + 12, base_y);  // 自下向上
+    lv_anim_set_values(&tear_anim, base_y + 58, base_y + 78);  // 自下向上
     lv_anim_set_time(&tear_anim, 1000);
     lv_anim_set_repeat_count(&tear_anim, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_playback_time(&tear_anim, 1000);
@@ -595,8 +595,8 @@ void EyeDisplayHorizontal::StartVertigoAnimation() {
     lv_obj_align(right_heart, LV_ALIGN_RIGHT_MID, -0, -DISPLAY_VERTICAL_OFFSET);  // 右眼位置，适配横屏
     
     // 缩小图片 - 适配横屏
-    lv_img_set_zoom(left_heart, 96);  // 适配横屏尺寸
-    lv_img_set_zoom(right_heart, 96);  // 适配横屏尺寸
+    lv_img_set_zoom(left_heart, 86);  // 适配横屏尺寸
+    lv_img_set_zoom(right_heart, 86);  // 适配横屏尺寸
 
     // 保存爱心对象指针，以便在状态切换时清理
     left_heart_ = left_heart;
@@ -630,6 +630,9 @@ void EyeDisplayHorizontal::StartLovingAnimation() {
     // 清空整个屏幕，删除所有子对象
     auto screen = lv_screen_active();
     lv_obj_clean(screen);
+    // 禁用屏幕滚动与滚动条
+    lv_obj_clear_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(screen, LV_SCROLLBAR_MODE_OFF);
     
     // 重新设置屏幕背景色
     lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
@@ -644,6 +647,9 @@ void EyeDisplayHorizontal::StartLovingAnimation() {
     lv_obj_set_flex_flow(container, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(container, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_top(container, -DISPLAY_VERTICAL_OFFSET, 0);
+    // 禁用容器滚动与滚动条，防止子项溢出触发滚动
+    lv_obj_clear_flag(container, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(container, LV_SCROLLBAR_MODE_OFF);
     
     // 重新创建眼睛对象（隐藏状态）
     left_eye_ = lv_obj_create(container);
@@ -682,14 +688,14 @@ void EyeDisplayHorizontal::StartLovingAnimation() {
     lv_obj_set_style_img_recolor(left_heart, lv_color_hex(EYE_COLOR), 0);  // 设置为白色
     lv_obj_set_style_img_recolor_opa(left_heart, LV_OPA_COVER, 0);  // 完全不透明
     lv_obj_align(left_heart, LV_ALIGN_LEFT_MID, -20, -DISPLAY_VERTICAL_OFFSET);  // 左眼位置，向左偏移18像素增加间距
-    
+ 
     // 创建右眼爱心图片
     lv_obj_t* right_heart = lv_img_create(lv_screen_active());
     lv_img_set_src(right_heart, &hart_img);
     lv_obj_set_style_img_recolor(right_heart, lv_color_hex(EYE_COLOR), 0);  // 设置为白色
     lv_obj_set_style_img_recolor_opa(right_heart, LV_OPA_COVER, 0);  // 完全不透明
     lv_obj_align(right_heart, LV_ALIGN_RIGHT_MID, 20, -DISPLAY_VERTICAL_OFFSET);  // 右眼位置，向右偏移18像素增加间距
-    
+ 
     // 保存爱心对象指针，以便在状态切换时清理
     left_heart_ = left_heart;
     right_heart_ = right_heart;
