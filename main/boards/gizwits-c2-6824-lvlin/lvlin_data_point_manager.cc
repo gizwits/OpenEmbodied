@@ -354,15 +354,16 @@ void LvlinDataPointManager::GenerateReportData(uint8_t* buffer, size_t buffer_si
     buffer[6] = 0x00;
     buffer[7] = 0x93;
     
-    // 数据长度
+    // sn
     buffer[8] = 0x00;
     buffer[9] = 0x00;
     buffer[10] = 0x00;
     buffer[11] = 0x02;
     
-    // 数据类型
+    // flag
     buffer[12] = 0x14;
-    buffer[13] = 0x01;
+    // 
+    buffer[13] = 0x03;
     buffer[14] = 0xff;
 
     // 状态字节
