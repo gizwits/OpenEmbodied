@@ -869,6 +869,12 @@ void EyeDisplayHorizontal::StartSillyAnimation() {
     lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
     
+    // 进入时刷新位置，上移 20 像素
+    lv_obj_t* container = lv_obj_get_parent(left_eye_);
+    if (container) {
+        lv_obj_set_style_pad_top(container, -DISPLAY_VERTICAL_OFFSET - 20, 0);
+    }
+    
     lv_anim_init(&left_anim_);
     lv_anim_set_var(&left_anim_, left_eye_);
     lv_anim_set_values(&left_anim_, 30, 60);  // 适配横屏尺寸
@@ -1113,8 +1119,11 @@ void EyeDisplayHorizontal::TestNextEmotion() {
     static const char* emotions[] = {
         "neutral",      // IDLE
         "happy",        // HAPPY
+        "silly",        // SILLY
         "laughing",     // LAUGHING
+        "thinking",     // THINKING
         "sad",          // SAD
+        "thinking",     // THINKING
         "angry",        // ANGRY
         "crying",       // CRYING
         "loving",       // LOVING
