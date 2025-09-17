@@ -135,7 +135,7 @@ private:
         
         esp_lcd_panel_dev_config_t panel_config = {
             .reset_gpio_num = DISPLAY_SPI_RESET_PIN,
-            .rgb_endian = LCD_RGB_ENDIAN_BGR,
+            .rgb_endian = LCD_RGB_ENDIAN_RGB,
             .bits_per_pixel = 16,
         };
         
@@ -346,6 +346,9 @@ private:
             auto& app = Application::GetInstance();
             app.ToggleChatState();
             // 开灯
+            if (display_) {
+                display_->TestNextEmotion();
+            }
 
         });
         
