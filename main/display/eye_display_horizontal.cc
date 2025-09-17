@@ -422,6 +422,12 @@ void EyeDisplayHorizontal::StartIdleAnimation() {
     lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
     
+    // 次重新设置位置，上移 20
+    lv_obj_t* container = lv_obj_get_parent(left_eye_);
+    if (container) {
+        lv_obj_set_style_pad_top(container, -DISPLAY_VERTICAL_OFFSET - 20, 0);
+    }
+    
     lv_anim_init(&left_anim_);
     lv_anim_set_var(&left_anim_, left_eye_);
     lv_anim_set_values(&left_anim_, 30, 60);  // 适配横屏尺寸
@@ -791,6 +797,20 @@ void EyeDisplayHorizontal::StartShockedAnimation() {
     lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
     
+    // 每次进入都重设容器位置（上移 20）
+    lv_obj_t* container = lv_obj_get_parent(left_eye_);
+    if (container) {
+        lv_obj_set_style_pad_top(container, -DISPLAY_VERTICAL_OFFSET - 20, 0);
+    }
+
+    // 清理旧动画与旧对象，避免叠加影响
+    lv_anim_del(left_eye_, nullptr);
+    lv_anim_del(right_eye_, nullptr);
+    if (mouth_) {
+        lv_obj_del(mouth_);
+        mouth_ = nullptr;
+    }
+
     lv_anim_init(&left_anim_);
     lv_anim_set_var(&left_anim_, left_eye_);
     lv_anim_set_values(&left_anim_, 30, 60);  // 适配横屏尺寸
