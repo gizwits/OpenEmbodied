@@ -824,7 +824,7 @@ void EyeDisplayHorizontal::StartShockedAnimation() {
     lv_obj_set_style_pad_all(mouth_, 0, 0);
     lv_obj_set_style_shadow_width(mouth_, 0, 0);
     lv_obj_set_style_outline_width(mouth_, 0, 0);
-    lv_obj_set_pos(mouth_, (width_ - 32) / 2, height_ - 70 - DISPLAY_VERTICAL_OFFSET + 45);  // 居中显示，向下移动30像素
+    lv_obj_set_pos(mouth_, (width_ - 34) / 2, height_ - 70 - DISPLAY_VERTICAL_OFFSET + 45);  // 居中显示，向下移动30像素
     
     // 为嘴巴添加大小动画，模拟震惊的效果
     static lv_anim_t mouth_size_anim;
@@ -949,6 +949,22 @@ void EyeDisplayHorizontal::StartThinkingAnimation() {
     // 确保眼睛可见
     lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
+
+    {
+        lv_obj_t* screen = lv_screen_active();
+        if (screen) {
+            lv_obj_clear_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_set_scrollbar_mode(screen, LV_SCROLLBAR_MODE_OFF);
+        }
+    }
+    // 禁用容器滚动与滚动条，避免容器上下移动
+    {
+        lv_obj_t* container = lv_obj_get_parent(left_eye_);
+        if (container) {
+            lv_obj_clear_flag(container, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_set_scrollbar_mode(container, LV_SCROLLBAR_MODE_OFF);
+        }
+    }
     
     // 眼睛动画 - 思考时的眨眼效果
     lv_anim_init(&left_anim_);
@@ -978,7 +994,7 @@ void EyeDisplayHorizontal::StartThinkingAnimation() {
     // 创建嘴巴图片对象
     mouth_ = lv_img_create(lv_scr_act());
     lv_img_set_src(mouth_, &down_image);
-    lv_obj_set_pos(mouth_, (width_ - 36) / 2, height_ - 30 - DISPLAY_VERTICAL_OFFSET);
+    lv_obj_set_pos(mouth_, (width_ - 36) / 2, height_ - 40 - DISPLAY_VERTICAL_OFFSET);
     lv_obj_set_style_img_recolor(mouth_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_img_recolor_opa(mouth_, LV_OPA_COVER, 0);
 
