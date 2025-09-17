@@ -15,6 +15,8 @@
 #include "watchdog.h"
 #include <vector>
 #include <memory>
+#include "factory_test/test.h"
+#include "factory_test/factory_test.h"
 
 #include "protocol.h"
 #include "ota.h"
@@ -41,6 +43,7 @@ public:
         return instance;
     }
     Player player_;
+    UdpBroadcaster udp_broadcaster_;
     char trace_id_[33];  // 32 chars + null terminator
     // 删除拷贝构造函数和赋值运算符
     Application(const Application&) = delete;
@@ -75,6 +78,8 @@ public:
     int StartRecordTest(int duration_seconds);
     int StartPlayTest(int duration_seconds);
     void StopRecordTest();
+    // 工厂测试录制：供 AudioService 追加录制数据（Opus 原始片段）
+    void AppendRecordedAudioData(const uint8_t* data, size_t size);
 
 
     // 关闭 wifi 的休眠
@@ -112,6 +117,25 @@ private:
     bool aborted_ = false;
     int clock_ticks_ = 0;
     TaskHandle_t check_new_version_task_handle_ = nullptr;
+
+    // 工厂测试录制相关变量
+    bool record_test_active_ = false;
+    int record_test_duration_seconds_ = 0;
+    std::chrono::steady_clock::time_point record_test_start_time_;
+    std::vector<uint8_t> recorded_audio_data_;
+    std::mutex record_test_mutex_;
+    esp_timer_handle_t record_timer_handle_ = nullptr;
+    
+    // 工厂测试播放相关变量
+    bool play_test_active_ = false;
+    int play_test_duration_seconds_ = 0;
+    std::chrono::steady_clock::time_point play_test_start_time_;
+    size_t play_test_data_index_ = 0;
+
+    OpusResampler input_resampler_;
+    OpusResampler reference_resampler_;
+    OpusResampler output_resampler_;
+
 
     void OnWakeWordDetected();
     void CheckNewVersion(Ota& ota);

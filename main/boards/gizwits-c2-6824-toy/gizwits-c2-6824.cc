@@ -236,13 +236,19 @@ public:
         };
         ESP_ERROR_CHECK(esp_timer_create(&timer_args, &power_counter_timer_));
 
-        InitializeButtons();
-        InitializeIot();
-        InitializeDataPointManager();
-        InitializePowerSaveTimer();
+        Settings settings("wifi", true);
+        auto s_factory_test_mode = settings.GetInt("ft_mode", 0);
 
-        ESP_LOGI(TAG, "Initializing Data Point Manager...");
-        ESP_LOGI(TAG, "Data Point Manager initialized.");
+        if (s_factory_test_mode == 0) {
+            // 不在产测模式才启动，不然有问题
+            InitializeButtons();
+            InitializeIot();
+            InitializeDataPointManager();
+            InitializePowerSaveTimer();
+            // 检查上电计数
+            CheckPowerCount();
+        }
+
 
         InitializeGpio(POWER_GPIO, true);
 
@@ -254,9 +260,6 @@ public:
         io_conf.intr_type = GPIO_INTR_DISABLE;
         gpio_config(&io_conf);
         gpio_set_level(LED_GPIO, 0);
-
-        // 检查上电计数
-        CheckPowerCount();
 
         audio_codec.OnWakeUp([this](const std::string& command) {
             ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());
