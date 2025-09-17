@@ -211,13 +211,13 @@ private:
     }
 
     void InitializeButtons() {
-        boot_button_.OnPressDown([this]() {
-            ESP_LOGI(TAG, "boot_button_.OnPressDown");
-            // 开灯
-            if (display_) {
-                display_->TestNextEmotion();
-            }
-        });
+        // boot_button_.OnPressDown([this]() {
+        //     ESP_LOGI(TAG, "boot_button_.OnPressDown");
+        //     // 开灯
+        //     if (display_) {
+        //         display_->TestNextEmotion();
+        //     }
+        // });
         boot_button_.OnLongPress([this]() {
             ResetWifiConfiguration();
         });
