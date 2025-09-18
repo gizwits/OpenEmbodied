@@ -12,7 +12,7 @@
 #include <esp_lcd_st7735s.h>
 #include "data_point_manager.h"
 #include "led/single_led.h"
-#include "display/eye_display_horizontal.h"
+#include "display/eye_display_horizontal_emojis.h"
 #include "display/display.h"
 
 #include <wifi_station.h>
@@ -45,7 +45,7 @@ private:
     
     Button power_button_;
     VbAduioCodec audio_codec;
-    EyeDisplayHorizontal* display_;
+    EyeDisplayHorizontalEmo* display_;
     bool need_power_off_ = false;
     int64_t power_on_time_ = 0;  // 记录上电时间
     PowerManager* power_manager_;
@@ -180,7 +180,7 @@ private:
         
         // 创建并初始化 LottieDisplay（与 gizwits-lottie 一致），但面板为 ST7735S
         DisplayFonts fonts = { .text_font = &font_puhui_20_4, .icon_font = nullptr, .emoji_font = nullptr };
-        display_ = new EyeDisplayHorizontal(panel_io, panel,
+        display_ = new EyeDisplayHorizontalEmo(panel_io, panel,
             DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
             DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY,
             fonts);
@@ -211,15 +211,19 @@ private:
     }
 
     void InitializeButtons() {
-        // boot_button_.OnPressDown([this]() {
-        //     ESP_LOGI(TAG, "boot_button_.OnPressDown");
-        //     // 开灯
-        //     if (display_) {
-        //         display_->TestNextEmotion();
-        //     }
-        // });
+        // BOOT 按键事件：短按、长按、松开打印
+        boot_button_.OnClick([this]() {
+            ESP_LOGI(TAG, "BOOT 按键短按");
+        });
         boot_button_.OnLongPress([this]() {
+            ESP_LOGI(TAG, "BOOT 按键长按，进入配网");
+            // 硬件方式关闭背光（非PWM调光）：将背光引脚直接拉低
+            gpio_set_direction(DISPLAY_BACKLIGHT_PIN, GPIO_MODE_OUTPUT);
+            gpio_set_level(DISPLAY_BACKLIGHT_PIN, 0);
             ResetWifiConfiguration();
+        });
+        boot_button_.OnPressUp([this]() {
+            ESP_LOGI(TAG, "BOOT 按键松开");
         });
     }
 
