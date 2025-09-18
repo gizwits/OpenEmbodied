@@ -5,6 +5,7 @@
 #include "audio_codec.h"
 #include "server/giz_mqtt.h"
 #include "websocket_protocol.h"
+#include "ssid_manager.h"
 #include "font_awesome_symbols.h"
 #include "assets/lang_config.h"
 #include "mcp_server.h"
@@ -254,7 +255,7 @@ void Application::ToggleChatState() {
         // SetDeviceState(kDeviceStateAudioTesting);
         return;
     } else if (device_state_ == kDeviceStateAudioTesting) {
-        audio_service_.EnableAudioTesting(false);
+        // audio_service_.EnableAudioTesting(false);
         SetDeviceState(kDeviceStateWifiConfiguring);
         return;
     }
@@ -414,6 +415,26 @@ void Application::Start() {
         audio_service_.PlaySound(Lang::Sounds::P3_SUCCESS);
     }
 
+
+    bool wifi_config_mode_ = board.IsWifiConfigMode();
+    auto& ssid_manager = SsidManager::GetInstance();
+    auto ssid_list = ssid_manager.GetSsidList();
+
+    factory_test_init();
+
+    ESP_LOGI(TAG, "Factory test is enabled: %d", wifi_config_mode_);
+    if (wifi_config_mode_ || ssid_list.empty() || factory_test_is_enabled()) {
+        ESP_LOGI(TAG, "Factory test start");
+        factory_test_start();
+        ESP_LOGI(TAG, "Factory test is enabled");
+    
+        if (factory_test_is_enabled()) {
+            ESP_LOGW(TAG, "Factory test is enabled");
+            PlaySound(Lang::Sounds::P3_TEST_MODE);
+            udp_broadcaster_.async_start();
+            return;
+        }
+    }
     /* Wait for the network to be ready */
     board.StartNetwork();
 
@@ -729,11 +750,16 @@ void Application::MainEventLoop() {
             lock.unlock();
             for (auto& task : tasks) {
                 watchdog.Reset();
-                ESP_LOGI(TAG, "Executing scheduled task: %s", task.first.c_str());
+                const auto& name = task.first;
+                if (name != "unknown") {
+                    ESP_LOGI(TAG, "Executing scheduled task: %s", name.c_str());
+                }
                 auto task_start = esp_timer_get_time();
                 task.second();
                 auto task_end = esp_timer_get_time();
-                ESP_LOGI(TAG, "Scheduled task completed: %s, took %lld us", task.first.c_str(), task_end - task_start);
+                if (name != "unknown") {
+                    ESP_LOGI(TAG, "Scheduled task completed: %s, took %lld us", name.c_str(), task_end - task_start);
+                }
             }
         }
         
@@ -964,6 +990,9 @@ bool Application::CanEnterSleepMode() {
     // if (device_state_ != kDeviceStateIdle) {
     //     return false;
     // }
+    if (factory_test_is_enabled()) {
+        return false;
+    }
 
     if (protocol_ && protocol_->IsAudioCanEnterSleepMode()) {
         return false;
@@ -1332,4 +1361,136 @@ void Application::GenerateTraceId() {
     }
     trace_id_[32] = '\0';
     ESP_LOGI(TAG, "Generated trace ID: %s", trace_id_);
+}
+
+
+// 工厂测试录制相关方法实现
+int Application::StartRecordTest(int duration_seconds) {
+    ESP_LOGI(TAG, "StartRecordTest: duration=%d seconds", duration_seconds);
+    
+    std::lock_guard<std::mutex> lock(record_test_mutex_);
+    
+    if (record_test_active_) {
+        ESP_LOGW(TAG, "Record test already active");
+        return -1;
+    }
+    
+    // 初始化录制参数
+    record_test_active_ = true;
+    record_test_duration_seconds_ = duration_seconds;
+    record_test_start_time_ = std::chrono::steady_clock::now();
+    recorded_audio_data_.clear();
+    // 开始录制：打开音频测试分支，使 AudioInputTask 采集并追加数据
+    audio_service_.EnableAudioTesting(true);
+    // 启动超时计时器，到时自动停止录制
+    if (record_timer_handle_) {
+        esp_timer_stop(record_timer_handle_);
+        esp_timer_delete(record_timer_handle_);
+        record_timer_handle_ = nullptr;
+    }
+    esp_timer_create_args_t args = {
+        .callback = [](void* arg){
+            Application::GetInstance().StopRecordTest();
+        },
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "record_timeout",
+        .skip_unhandled_events = true,
+    };
+    esp_timer_create(&args, &record_timer_handle_);
+    esp_timer_start_once(record_timer_handle_, (uint64_t)duration_seconds * 1000000ULL);
+    
+    ESP_LOGI(TAG, "Record test started, will record for %d seconds", duration_seconds);
+    return 0;
+}
+
+int Application::StartPlayTest(int duration_seconds) {
+    ESP_LOGI(TAG, "StartPlayTest: duration=%d seconds", duration_seconds);
+
+    
+    if (play_test_active_) {
+        ESP_LOGW(TAG, "Play test already active");
+        return -1;
+    }
+    
+    if (recorded_audio_data_.empty()) {
+        ESP_LOGW(TAG, "No recorded audio data to play");
+        return -1;
+    }
+    
+    // 初始化播放参数
+    play_test_active_ = true;
+    play_test_duration_seconds_ = duration_seconds;
+    play_test_start_time_ = std::chrono::steady_clock::now();
+    play_test_data_index_ = 0;
+    
+    // 使用 AudioService 的解码队列播放，避免本地再次创建解码器
+    const int frame_duration_ms = 20;   // VB6824 录制固定 20ms 一包
+    const int sample_rate_hz = 16000;
+    ESP_LOGI(TAG, "Total recorded data size: %zu bytes", recorded_audio_data_.size());
+
+    size_t opus_packet_size = 40; // 每包40字节
+    size_t total_packets = recorded_audio_data_.size() / opus_packet_size;
+    ESP_LOGI(TAG, "Using opus packet size: %u bytes, total packets: %u", (unsigned)opus_packet_size, (unsigned)total_packets);
+
+    auto& audio_service = GetAudioService();
+    size_t enqueued = 0;
+    for (size_t i = 0; i + opus_packet_size <= recorded_audio_data_.size(); i += opus_packet_size) {
+        auto packet = std::make_unique<AudioStreamPacket>();
+        packet->sample_rate = sample_rate_hz;
+        packet->frame_duration = frame_duration_ms;
+        packet->timestamp = 0;
+        packet->payload.resize(opus_packet_size);
+        memcpy(packet->payload.data(), &recorded_audio_data_[i], opus_packet_size);
+        if (audio_service.PushPacketToDecodeQueue(std::move(packet), true)) {
+            ++enqueued;
+            vTaskDelay(pdMS_TO_TICKS(15));
+        } else {
+            ESP_LOGW(TAG, "Decode queue full, packet dropped at index %u", (unsigned)i);
+        }
+    }
+    ESP_LOGI(TAG, "Enqueued %u/%u packets to decode queue", (unsigned)enqueued, (unsigned)total_packets);
+    
+    play_test_active_ = false;
+    return 0;
+}
+
+void Application::StopRecordTest() {
+    ESP_LOGI(TAG, "StopRecordTest");
+    
+    std::lock_guard<std::mutex> lock(record_test_mutex_);
+    
+    if (!record_test_active_) {
+        ESP_LOGW(TAG, "Record test not active");
+        return;
+    }
+    
+    record_test_active_ = false;
+    // 结束录制：关闭音频测试分支，停止采集
+    audio_service_.EnableAudioTesting(false);
+    if (record_timer_handle_) {
+        esp_timer_stop(record_timer_handle_);
+        esp_timer_delete(record_timer_handle_);
+        record_timer_handle_ = nullptr;
+    }
+    
+    // 输出录制结果
+    
+    // 计算录制的实际时长
+    auto end_time = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::seconds>(end_time - record_test_start_time_).count();
+    ESP_LOGI(TAG, "Actual recording duration");
+    
+    // 保留录制数据，便于后续播放测试
+}
+
+void Application::AppendRecordedAudioData(const uint8_t* data, size_t size) {
+    if (data == nullptr || size == 0) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(record_test_mutex_);
+    if (!record_test_active_) {
+        return;
+    }
+    recorded_audio_data_.insert(recorded_audio_data_.end(), data, data + size);
 }

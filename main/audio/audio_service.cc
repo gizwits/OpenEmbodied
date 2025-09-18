@@ -1,6 +1,7 @@
 #include "audio_service.h"
 #include <esp_log.h>
 #include <esp_heap_caps.h>
+#include "application.h"
 
 #if CONFIG_USE_AUDIO_PROCESSOR
 #include "processors/afe_audio_processor.h"
@@ -298,7 +299,10 @@ void AudioService::AudioInputTask() {
             std::vector<uint8_t> data;
             int samples = OPUS_FRAME_DURATION_MS * 16000 / 1000;
             if (ReadAudioData(data, 16000, samples)) {
-                // TODO
+                // 录制测试：将读取到的 Opus 原始数据追加到应用层缓冲
+                Application::GetInstance().Schedule([data]() {
+                    Application::GetInstance().AppendRecordedAudioData(data.data(), data.size());
+                });
                 continue;
             }
         }
@@ -540,12 +544,13 @@ void AudioService::OpusCodecTask() {
 }
 
 void AudioService::SetDecodeSampleRate(int sample_rate, int frame_duration) {
-    // opus 编码不需要设置
-#ifndef CONFIG_USE_EYE_STYLE_VB6824
     if (opus_decoder_->sample_rate() == sample_rate && opus_decoder_->duration_ms() == frame_duration) {
         return;
     }
 
+    
+
+#ifndef CONFIG_USE_EYE_STYLE_VB6824
     opus_decoder_.reset();
     opus_decoder_ = std::make_unique<OpusDecoderWrapper>(sample_rate, 1, frame_duration);
 
@@ -554,6 +559,8 @@ void AudioService::SetDecodeSampleRate(int sample_rate, int frame_duration) {
         ESP_LOGI(TAG, "Resampling audio from %d to %d", opus_decoder_->sample_rate(), codec->output_sample_rate());
         output_resampler_.Configure(opus_decoder_->sample_rate(), codec->output_sample_rate());
     }
+#else
+    opus_decoder_->Config(sample_rate, 1, frame_duration);
 #endif
 }
 
