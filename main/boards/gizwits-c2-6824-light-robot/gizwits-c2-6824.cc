@@ -146,6 +146,7 @@ private:
         ESP_LOGI(TAG, "IoT components initialization complete.");
     }
 
+    
     void InitializePowerManager() {
         PowerManager::GetInstance();
     }
@@ -198,12 +199,11 @@ public:
             InitializeButtons();
         }
         InitializeGpio(POWER_HOLD_GPIO, true);
+        InitializeGpio(LIGHT_POWER_GPIO, true);
 
         ESP_LOGI(TAG, "Initializing Power Manager...");
         InitializePowerManager();
         ESP_LOGI(TAG, "Power Manager initialized.");
-
-
 
         audio_codec.OnWakeUp([this](const std::string& command) {
             ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());
@@ -222,12 +222,12 @@ public:
 
 
         ESP_LOGI(TAG, "Initializing Data Point Manager...");
-        InitializeDataPointManager();
+        // InitializeDataPointManager();
         ESP_LOGI(TAG, "Data Point Manager initialized.");
 
         // 初始化灯带，设置默认亮度与颜色
-        strip_led_.SetBrightness(50);
-        strip_led_.SetColor(0, 0, 64);
+        strip_led_.StartBreathing(0, 255, 0);
+
     }
 
 

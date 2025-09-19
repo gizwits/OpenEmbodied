@@ -4,7 +4,7 @@
 #include <driver/gpio.h>
 
 #define VOLUME_BUTTON_GPIO GPIO_NUM_7
-#define CONFIG_BUTTON_GPIO GPIO_NUM_4
+#define LIGHT_POWER_GPIO GPIO_NUM_5
 
 #define BOOT_BUTTON_GPIO        GPIO_NUM_1
 
@@ -19,6 +19,6 @@
 
 #define POWER_HOLD_GPIO GPIO_NUM_2
 
-#define LED_GPIO GPIO_NUM_5
+#define LED_GPIO GPIO_NUM_4
 
 #endif // _BOARD_CONFIG_H_
