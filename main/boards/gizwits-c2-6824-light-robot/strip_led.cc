@@ -17,7 +17,7 @@ StripLed::StripLed(gpio_num_t gpio, uint8_t led_count) : led_count_(led_count) {
     led_strip_spi_config_t spi_config = {};
     spi_config.clk_src = SPI_CLK_SRC_DEFAULT;
     spi_config.spi_bus = SPI2_HOST; // C2 支持 SPI2_HOST
-    spi_config.flags.with_dma = 0;
+    spi_config.flags.with_dma = 0;  // 关闭DMA节省内存
 
     ESP_ERROR_CHECK(led_strip_new_spi_device(&strip_config, &spi_config, &led_strip_));
     led_strip_clear(led_strip_);

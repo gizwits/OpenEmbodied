@@ -24,7 +24,7 @@
 #include <vector>
 #include <string>
 #include "power_manager.h"
-#include "strip_led.h"
+#include "minimal_ws2812.h"
 
 #define TAG "CustomBoard"
 
@@ -38,7 +38,7 @@ private:
     // Button* rec_button_ = nullptr;
     PowerSaveTimer* power_save_timer_;
     VbAduioCodec audio_codec;
-    StripLed strip_led_;
+    MinimalWS2812 led_strip_;
     bool sleep_flag_ = false;
     // PowerManager* power_manager_;
 
@@ -225,8 +225,10 @@ public:
         // InitializeDataPointManager();
         ESP_LOGI(TAG, "Data Point Manager initialized.");
 
-        // 初始化灯带，设置默认亮度与颜色
-        strip_led_.StartBreathing(0, 255, 0);
+        // 初始化灯带，设置默认颜色（简化版本，节省内存）
+        led_strip_.SetColor(0, 255, 0);
+        // strip_led_.StartBreathing(0, 255, 0);  // 绿色
+        ESP_LOGI(TAG, "LED strip initialized with simplified version");
 
     }
 
@@ -277,29 +279,29 @@ public:
         power_save_timer_->SetEnabled(enable);
     }
     // 数据点相关方法实现
-    const char* GetGizwitsProtocolJson() const override {
-        return DataPointManager::GetInstance().GetGizwitsProtocolJson();
-    }
+    // const char* GetGizwitsProtocolJson() const override {
+    //     return DataPointManager::GetInstance().GetGizwitsProtocolJson();
+    // }
 
-    size_t GetDataPointCount() const override {
-        return DataPointManager::GetInstance().GetDataPointCount();
-    }
+    // size_t GetDataPointCount() const override {
+    //     return DataPointManager::GetInstance().GetDataPointCount();
+    // }
 
-    bool GetDataPointValue(const std::string& name, int& value) const override {
-        return DataPointManager::GetInstance().GetDataPointValue(name, value);
-    }
+    // bool GetDataPointValue(const std::string& name, int& value) const override {
+    //     return DataPointManager::GetInstance().GetDataPointValue(name, value);
+    // }
 
-    bool SetDataPointValue(const std::string& name, int value) override {
-        return DataPointManager::GetInstance().SetDataPointValue(name, value);
-    }
+    // bool SetDataPointValue(const std::string& name, int value) override {
+    //     return DataPointManager::GetInstance().SetDataPointValue(name, value);
+    // }
 
-    void GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) override {
-        DataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
-    }
+    // void GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) override {
+    //     DataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
+    // }
 
-    void ProcessDataPointValue(const std::string& name, int value) override {
-        DataPointManager::GetInstance().ProcessDataPointValue(name, value);
-    }
+    // void ProcessDataPointValue(const std::string& name, int value) override {
+    //     DataPointManager::GetInstance().ProcessDataPointValue(name, value);
+    // }
 
 };
 

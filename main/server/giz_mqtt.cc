@@ -22,7 +22,7 @@ void MqttClient::InitAttrsFromJson() {
     // 从 board 获取协议配置
     const char* protocol_json = Board::GetInstance().GetGizwitsProtocolJson();
     if (!protocol_json) {
-        ESP_LOGD(TAG, "Board does not support data points, skipping attribute initialization");
+        // ESP_LOGD(TAG, "Board does not support data points, skipping attribute initialization");
         return;
     }
     
@@ -281,9 +281,12 @@ bool MqttClient::initialize() {
         return false;
     }
 
-    // Create tasks
+    // 不再创建独立任务，改为在主循环中调用
+    // 非C2 上才创建任务
+#ifndef CONFIG_IDF_TARGET_ESP32C2
     xTaskCreate(messageReceiveHandler, "mqtt_rcv", MQTT_TASK_STACK_SIZE_RCV, this, 1, nullptr);
     xTaskCreate(sendTask, "mqtt_send", MQTT_TASK_STACK_SIZE_RESEND, this, 1, nullptr);
+#endif
 
     // 打印内存使用情况
     printMemoryUsage();
@@ -507,6 +510,9 @@ int MqttClient::getPublishedId() {
 
 
 void MqttClient::sendTraceLog(const char* level, const char* message) {
+
+    // C2 先不上报
+#ifndef CONFIG_IDF_TARGET_ESP32C2
     // ESP_LOGI(TAG, "sendTraceLog: %s", message);
     
     // Format the topic - 优化：减少缓冲区大小
@@ -549,6 +555,7 @@ void MqttClient::sendTraceLog(const char* level, const char* message) {
     if (!publish(topic, std::string(payload))) {
         ESP_LOGE(TAG, "Failed to publish log message");
     }
+#endif
 }
 
 void MqttClient::sendOtaProgressReport(int progress, const char* status) {
@@ -637,6 +644,20 @@ void MqttClient::messageReceiveHandler(void* arg) {
     }
 }
 
+void MqttClient::processMessageQueue() {
+    mqtt_msg_t msg;
+    
+    // 非阻塞地检查消息队列
+    while (xQueueReceive(message_queue_, &msg, 0) == pdTRUE) {
+        ESP_LOGI(TAG, "processMessageQueue: %s", msg.topic);
+        handleMqttMessage(&msg);
+        // 恢复内存释放
+        free(msg.topic);
+        free(msg.payload);
+        free(msg.data);
+    }
+}
+
 void MqttClient::sendTask(void* arg) {
     MqttClient* client = static_cast<MqttClient*>(arg);
     mqtt_send_msg_t msg;
@@ -681,6 +702,41 @@ void MqttClient::sendTask(void* arg) {
                 if (msg.topic) free(msg.topic);
                 if (msg.payload) free(msg.payload);
             }
+        }
+    }
+}
+
+void MqttClient::processSendQueue() {
+    mqtt_send_msg_t msg;
+    
+    // 非阻塞地检查发送队列
+    while (xQueueReceive(send_queue_, &msg, 0) == pdTRUE) {
+        if (msg.qos == MQTT_SEND_CONTROL_ROOMINFO) {
+            // 处理房间信息请求的超时重试
+            if (++mqtt_request_failure_count_ > MQTT_REQUEST_FAILURE_COUNT) {
+                if (timer_) {
+                    xTimerDelete(timer_, 0);
+                    timer_ = nullptr;
+                }
+            } else {
+                GetRoomInfo();
+            }
+        } else if (msg.qos == MQTT_SEND_CONTROL_TOKEN_REFRESH) {
+            // 处理 token 刷新请求
+            ESP_LOGI(TAG, "Processing token refresh in main loop");
+            GetRoomInfo(false);
+        } else {
+            // 正常发送MQTT消息
+            if (mqtt_) {
+                std::string topic_str = msg.topic ? msg.topic : "";
+                // 使用 payload_len 而不是依赖字符串的 \0 终止符
+                std::string payload_str = msg.payload ? std::string(msg.payload, msg.payload_len) : "";
+                ESP_LOGI(TAG, "processSendQueue: topic='%s', payload length=%zu", topic_str.c_str(), payload_str.length());
+                
+                mqtt_->Publish(topic_str, payload_str);
+            }
+            if (msg.topic) free(msg.topic);
+            if (msg.payload) free(msg.payload);
         }
     }
 }

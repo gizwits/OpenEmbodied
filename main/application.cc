@@ -438,8 +438,8 @@ void Application::Start() {
     /* Wait for the network to be ready */
     board.StartNetwork();
 
-    auto json = board.GetJson();
-    ESP_LOGI(TAG, "json: %s", json.c_str());
+    // auto json = board.GetJson();
+    // ESP_LOGI(TAG, "json: %s", json.c_str());
 
     bool battery_ok = CheckBatteryLevel();
     if (!battery_ok) {
@@ -483,10 +483,8 @@ void Application::Start() {
 
     protocol_->OnNetworkError([this](const std::string& message) {
         ESP_LOGE(TAG, "OnNetworkError: %s", message.c_str());
-        Schedule([this, message]() {
-            std::string messageData = "socket 通道错误: " + message;
-            MqttClient::getInstance().sendTraceLog("info", messageData.c_str());
-        }, "OnNetworkError");
+        std::string messageData = "socket 通道错误: " + message;
+        MqttClient::getInstance().sendTraceLog("info", messageData.c_str());
         last_error_message_ = message;
     });
     protocol_->OnIncomingAudio([this](AudioStreamPacket&& packet) {
@@ -501,9 +499,8 @@ void Application::Start() {
             ESP_LOGW(TAG, "Server sample rate %d does not match device output sample rate %d, resampling may cause distortion",
                 protocol_->server_sample_rate(), codec->output_sample_rate());
         }
-        Schedule([this]() {
-            MqttClient::getInstance().sendTraceLog("info", "socket 通道打开");
-        }, "OnAudioChannelOpened");
+        MqttClient::getInstance().sendTraceLog("info", "socket 通道打开");
+
     });
     protocol_->OnAudioChannelClosed([this, &board](bool is_clean) {
         ESP_LOGW("OnAudioChannelClosed", "is_clean: %d", is_clean);
@@ -679,17 +676,33 @@ void Application::Schedule(std::function<void()> callback, const std::string& ta
 // they should use Schedule to call this function
 void Application::MainEventLoop() {
     auto& watchdog = Watchdog::GetInstance();
-    const TickType_t timeout = pdMS_TO_TICKS(3000);
+    const TickType_t timeout = pdMS_TO_TICKS(300);  // 减少到100ms，提高响应性
     // Raise the priority of the main event loop to avoid being interrupted by background tasks (which has priority 2)
     vTaskPrioritySet(NULL, 3);
 
+    static int loop_counter = 0;
+    
     while (true) {
         auto loop_start = esp_timer_get_time();
         watchdog.Reset();
+        loop_counter++;
 
-        // Process NTP sync
-        auto& ntp_client = NtpClient::GetInstance();
-        ntp_client.ProcessSync();
+        // Process NTP sync - 每10次循环执行一次
+        if (loop_counter % 10 == 0) {
+            auto& ntp_client = NtpClient::GetInstance();
+            ntp_client.ProcessSync();
+        }
+
+#if CONFIG_IDF_TARGET_ESP32C2
+        // 处理 MQTT 消息队列（替代独立任务）
+        // 这样做的好处：
+        // 1. 减少内存占用 - 不需要为每个任务分配独立的栈空间
+        // 2. 简化任务管理 - 减少任务切换的开销
+        // 3. 更好的控制 - 在主循环中可以更好地控制执行频率
+        auto& mqtt_client = MqttClient::getInstance();
+        mqtt_client.processMessageQueue();  // 处理接收到的消息
+        mqtt_client.processSendQueue();     // 处理待发送的消息
+#endif
 
         // 每分钟检查一次电量
         auto now = std::chrono::steady_clock::now();
@@ -765,6 +778,12 @@ void Application::MainEventLoop() {
         
         // 打印整个循环的执行时间
         auto loop_end = esp_timer_get_time();
+        auto loop_duration = loop_end - loop_start;
+        
+        // 只在循环时间超过10ms时打印，避免日志过多
+        if (loop_duration > 10000) {  // 10ms
+            ESP_LOGD(TAG, "Main loop took %lld us (%.2f ms)", loop_duration, loop_duration / 1000.0);
+        }
     }
 }
 
@@ -1045,10 +1064,7 @@ void Application::initGizwitsServer() {
                 }
             }
         }
-
-        Schedule([this]() {
-            MqttClient::getInstance().sendTraceLog("info", "获取配置智能体成功");
-        }, "initGizwitsServer_SendTraceLog");
+        MqttClient::getInstance().sendTraceLog("info", "获取配置智能体成功");
         
         protocol_->UpdateRoomParams(params);
         if((device_state_ == kDeviceStateSleeping || !is_normal_reset_) && chat_mode_ != 0) {
