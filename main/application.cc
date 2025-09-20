@@ -251,11 +251,11 @@ void Application::ToggleChatState() {
         SetDeviceState(kDeviceStateIdle);
         return;
     } else if (device_state_ == kDeviceStateWifiConfiguring) {
-        audio_service_.EnableAudioTesting(true);
+        // audio_service_.EnableAudioTesting(true);
         SetDeviceState(kDeviceStateAudioTesting);
         return;
     } else if (device_state_ == kDeviceStateAudioTesting) {
-        audio_service_.EnableAudioTesting(false);
+        // audio_service_.EnableAudioTesting(false);
         SetDeviceState(kDeviceStateWifiConfiguring);
         return;
     }
