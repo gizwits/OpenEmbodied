@@ -272,6 +272,9 @@ private:
     bool vertigo_locked_ = false;
     int64_t vertigo_unlock_time_ = 0; // us
     esp_timer_handle_t vertigo_timer_ = nullptr;
+    
+    // OTA和配网模式禁用表情切换
+    bool emotion_disabled_ = false;
 };
 
 #endif // EYE_DISPLAY_H 

@@ -154,6 +154,12 @@ void EyeDisplay::SetEmotion(const char* emotion) {
         return;
     }
 
+    // 检查是否禁用表情切换
+    if (emotion_disabled_) {
+        ESP_LOGI(TAG, "Emotion disabled, ignore: %s", emotion);
+        return;
+    }
+
     // 将表情字符串复制到队列中
     char* emotion_copy = static_cast<char*>(pvPortMalloc(MAX_EMOTION_LENGTH));
     if (emotion_copy == nullptr) {
@@ -1011,6 +1017,10 @@ void EyeDisplay::TestNextEmotion() {
 
 void EyeDisplay::EnterWifiConfig() {
     ESP_LOGI(TAG, "EnterWifiConfig");
+    
+    // 禁用表情切换
+    emotion_disabled_ = true;
+    
     if (qrcode_img_) {
         ESP_LOGI(TAG, "EnterWifiConfig qrcode_img_ is not null");
         DisplayLockGuard lock(this);
@@ -1031,6 +1041,9 @@ void EyeDisplay::EnterWifiConfig() {
 
 void EyeDisplay::EnterOTAMode() {
     ESP_LOGI(TAG, "EnterOTAMode");
+    
+    // 禁用表情切换
+    emotion_disabled_ = true;
     
     DisplayLockGuard lock(this);
     

@@ -811,7 +811,13 @@ void Application::SetDeviceState(DeviceState state) {
 
     if (state != kDeviceStateIdle) {
         // 防止黑屏讲话
-        board.GetBacklight()->RestoreBrightness();
+        Schedule([this]() {
+            auto& board = Board::GetInstance();
+            auto backlight = board.GetBacklight();
+            if (backlight) {
+                backlight->RestoreBrightness();
+            }
+        }, "SetDeviceState_RestoreBrightness");
     }
 
     switch (state) {

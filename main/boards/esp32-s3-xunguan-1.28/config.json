@@ -8,6 +8,8 @@
                 "CONFIG_USE_AUDIO_PROCESSOR=y",
                 "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions.csv\"",
                 "CONFIG_LV_FONT_MONTSERRAT_22=y",
+                "CONFIG_SR_WN_WN9_NIHAOXIAOZHI_TTS=n",
+                "CONFIG_SR_WN_WN9_NIHAOXIAOXIN_TTS=n",
                 "CONFIG_SR_WN_WN9_HILILI_TTS=y",
                 "CONFIG_PRODUCT_TEST_WIFI=\"XUNGUAN_TEST#@#@\"",
                 "CONFIG_PRODUCT_TEST_WIFI_PASSWORD=\"12345678\""
