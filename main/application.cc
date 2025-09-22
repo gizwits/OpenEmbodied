@@ -358,6 +358,8 @@ void Application::Start() {
     PlaySound(Lang::Sounds::OGG_SUCCESS);
     board.StartNetwork();
 
+    PlaySound(Lang::Sounds::OGG_CONNECT_SUCCESS);
+
     // Update the status bar immediately to show the network state
     display->UpdateStatusBar(true);
 

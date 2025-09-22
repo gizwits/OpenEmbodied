@@ -8,7 +8,10 @@
                 "CONFIG_USE_AUDIO_PROCESSOR=y",
                 "CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS=n",
                 "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions/v1/16m.csv\"",
-                "CONFIG_PARTITION_TABLE_CUSTOM=y"
+                "CONFIG_PARTITION_TABLE_CUSTOM=y",
+                "CONFIG_LANGUAGE_EN_US=y",
+                "CONFIG_USE_AFE_WAKE_WORD=n",
+                "CONFIG_OTA_URL=\"http://rf-openembodied.iotsdk.com:8002/xiaozhi/ota/\""
             ]
         }
     ]
