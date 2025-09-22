@@ -27,6 +27,7 @@
 #include "driver/ledc.h"
 #include "led_signal.h"
 #include "power_manager.h"
+#include <esp_timer.h>
 
 #define TAG "CustomBoard"
 
@@ -36,14 +37,20 @@
 class CustomBoard : public WifiBoard {
 private:
     Button boot_button_;
+    Button collision_button;
     Button* rec_button_ = nullptr;
     PowerSaveTimer* power_save_timer_;
     VbAduioCodec audio_codec;
     bool sleep_flag_ = false;
     // PowerManager* power_manager_;
+    // 碰撞连续触发检测
+    int64_t collision_last_ts_us_ = 0;
+    int64_t collision_accum_us_ = 0;
+    static constexpr int64_t COLLISION_MAX_INTERVAL_US = 300000;   // 300ms
+    static constexpr int64_t COLLISION_THRESHOLD_US    = 3000000;  // 3s
     
     // 唤醒词列表
-    std::vector<std::string> wake_words_ = {"你好小智", "你好小云", "合养精灵", "嗨小火人"};
+    std::vector<std::string> wake_words_ = {"你好小智", "你好小云", "合养精灵", "嗨小火人", "你好冬冬"};
     std::vector<std::string> network_config_words_ = {"开始配网"};
 
     void InitializePowerSaveTimer() {
@@ -100,6 +107,25 @@ private:
             });
         }
 
+        collision_button.OnClick([this]() {
+            // 连续触发 3s，间隔<=300ms 视为有效
+            int64_t now = esp_timer_get_time();
+            if (collision_last_ts_us_ != 0 && (now - collision_last_ts_us_) <= COLLISION_MAX_INTERVAL_US) {
+                collision_accum_us_ += (now - collision_last_ts_us_);
+            } else {
+                // 超时或首次触发，重置累计
+                collision_accum_us_ = 0;
+            }
+            collision_last_ts_us_ = now;
+
+            if (collision_accum_us_ >= COLLISION_THRESHOLD_US) {
+                collision_accum_us_ = 0;
+                collision_last_ts_us_ = 0;
+                auto &app = Application::GetInstance();
+                app.ToggleChatState();
+            }
+        });
+
         boot_button_.OnPressRepeat([this](uint16_t count) {
             ESP_LOGI(TAG, "boot_button_.OnPressRepeat: %d", count);
             if(count >= RESET_WIFI_CONFIGURATION_COUNT){
@@ -142,6 +168,62 @@ private:
         PowerManager::GetInstance();
     }
 
+    // 低功耗唤醒后，若由碰撞 GPIO 唤醒，则等待 3s 连续摇晃（间隔≤300ms）
+    // 若在 OVERALL_TIMEOUT_US 内未达成，则重新进入深睡
+    void WaitForCollisionShakeOrSleepIfWokenByCollision() {
+        esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+        if (cause != ESP_SLEEP_WAKEUP_GPIO) {
+            return;
+        }
+        uint64_t status = esp_sleep_get_gpio_wakeup_status();
+        if (!(status & (1ULL << COLLISION_BUTTON_GPIO))) {
+            return;
+        }
+
+        // 临时配置为输入以进行轮询检测
+        gpio_config_t cfg = {};
+        cfg.pin_bit_mask = (1ULL << COLLISION_BUTTON_GPIO);
+        cfg.mode = GPIO_MODE_INPUT;
+        cfg.pull_up_en = GPIO_PULLUP_ENABLE;
+        cfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        cfg.intr_type = GPIO_INTR_DISABLE;
+        gpio_config(&cfg);
+
+        ESP_LOGI(TAG, "Woken by collision GPIO, waiting for 3s continuous shake...");
+        int last_level = gpio_get_level(COLLISION_BUTTON_GPIO);
+        int64_t last_edge_ts = 0;
+        int64_t accum_us = 0;
+        const int64_t overall_start = esp_timer_get_time();
+        const int64_t OVERALL_TIMEOUT_US = 8000000; // 8s 超时重新休眠
+
+        while (true) {
+            int level = gpio_get_level(COLLISION_BUTTON_GPIO);
+            if (level != last_level) {
+                int64_t now = esp_timer_get_time();
+                if (last_edge_ts != 0 && (now - last_edge_ts) <= COLLISION_MAX_INTERVAL_US) {
+                    accum_us += (now - last_edge_ts);
+                } else {
+                    accum_us = 0;
+                }
+                last_edge_ts = now;
+                last_level = level;
+
+                if (accum_us >= COLLISION_THRESHOLD_US) {
+                    ESP_LOGI(TAG, "Collision shake confirmed (>=3s), continuing boot");
+                    break;
+                }
+            }
+            // 超时则重新休眠
+            int64_t now2 = esp_timer_get_time();
+            if (now2 - overall_start >= OVERALL_TIMEOUT_US) {
+                ESP_LOGW(TAG, "Collision shake timeout, re-enter deep sleep");
+                PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
+                vTaskDelay(pdMS_TO_TICKS(100));
+            }
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+    }
+
     void InitializeDataPointManager() {
         // 设置 DataPointManager 的回调函数
         DataPointManager::GetInstance().SetCallbacks(
@@ -169,7 +251,7 @@ private:
     }
 
 public:
-    CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO){      
+    CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), collision_button(COLLISION_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO){      
         gpio_config_t io_conf = {};
         io_conf.pin_bit_mask = (1ULL << BUILTIN_LED_GPIO);
         io_conf.mode = GPIO_MODE_OUTPUT;
@@ -178,6 +260,9 @@ public:
         io_conf.intr_type = GPIO_INTR_DISABLE;
         gpio_config(&io_conf);
         gpio_set_level(BUILTIN_LED_GPIO, 0);
+
+        // 如果是从深度睡眠被碰撞 GPIO 唤醒，则先等待稳定摇晃，否则重新睡眠
+        WaitForCollisionShakeOrSleepIfWokenByCollision();
 
         ESP_LOGI(TAG, "Initializing Power Save Timer...");
         InitializePowerSaveTimer();

@@ -2,6 +2,7 @@
 #define __POWER_MANAGER_H__
 
 #include <driver/gpio.h>
+#include "config.h"
 #include <esp_adc/adc_oneshot.h>
 #include <esp_log.h>
 #include <esp_timer.h>
@@ -226,7 +227,7 @@ public:
             vb6824_shutdown();
             vTaskDelay(pdMS_TO_TICKS(200));
             // 配置唤醒源 只有电源域是VDD3P3_RTC的才能唤醒深睡
-            uint64_t wakeup_pins = (BIT(GPIO_NUM_1));
+            uint64_t wakeup_pins = (BIT(GPIO_NUM_1) | BIT(COLLISION_BUTTON_GPIO));
             esp_deep_sleep_enable_gpio_wakeup(wakeup_pins, ESP_GPIO_WAKEUP_GPIO_LOW);
             ESP_LOGI("PowerMgr", "ready to esp_deep_sleep_start");
             vTaskDelay(pdMS_TO_TICKS(10));

@@ -27,7 +27,7 @@ public:
 private:
 
     LedSignal(gpio_num_t red_gpio = GPIO_NUM_2, ledc_channel_t red_channel = LEDC_CHANNEL_0, 
-              gpio_num_t green_gpio = GPIO_NUM_4, ledc_channel_t green_channel = LEDC_CHANNEL_1, 
+              gpio_num_t green_gpio = GPIO_NUM_NC, ledc_channel_t green_channel = LEDC_CHANNEL_1, 
               gpio_num_t blue_gpio = GPIO_NUM_5, ledc_channel_t blue_channel = LEDC_CHANNEL_2);
     // led_signal_->CycleColorsWithFade(300, 100);
     ~LedSignal();
