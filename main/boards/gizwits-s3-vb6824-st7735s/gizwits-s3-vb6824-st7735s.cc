@@ -187,7 +187,7 @@ private:
     }
 
     int MaxBacklightBrightness() {
-        return 8;
+        return 100;
     }
 
     void InitializeChargingGpio() {

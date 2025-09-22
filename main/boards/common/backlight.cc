@@ -60,13 +60,13 @@ void Backlight::SetBrightness(uint8_t brightness, bool permanent) {
         settings.SetInt("brightness", brightness);
     }
 
-    ESP_LOGI(TAG, "IsCharging: %d", board.IsCharging());
+    // ESP_LOGI(TAG, "IsCharging: %d", board.IsCharging());
     // 充电中 强制降低亮度
-    if (board.IsCharging() && brightness > 5) {
-        target_brightness_ = 5;
-    } else {
-        target_brightness_ = brightness;
-    }
+    // if (board.IsCharging() && brightness > 5) {
+    //     target_brightness_ = 5;
+    // } else {
+    //     target_brightness_ = brightness;
+    // }
 
     step_ = (target_brightness_ > brightness_) ? 1 : -1;
 
