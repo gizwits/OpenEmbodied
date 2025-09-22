@@ -11,6 +11,7 @@
 #include <wifi_station.h>
 #include <esp_log.h>
 #include "assets/lang_config.h"
+#include "power_manager.h"
 #include "vb6824.h"
 #include <esp_wifi.h>
 #include "data_point_manager.h"
@@ -206,7 +207,10 @@ private:
             []() -> int { return Application::GetInstance().GetChatMode(); },
             [](int value) { Application::GetInstance().SetChatMode(value); },
             [this]() -> int { 
-                return 100; // 固定电量 100%
+                int level = 0;
+                bool charging = false, discharging = false;
+                GetBatteryLevel(level, charging, discharging);
+                return level;
             },
             [this]() -> int { return GetAudioCodec()->output_volume(); },
             [this](int value) { GetAudioCodec()->SetOutputVolume(value); },
@@ -230,6 +234,12 @@ private:
             }
         );
     }
+
+
+    void InitializePowerManager() {
+        PowerManager::GetInstance();
+    }
+
 
 public:
     CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO),
@@ -257,6 +267,8 @@ public:
             // 检查上电计数
             CheckPowerCount();
         }
+
+        InitializePowerManager();
 
         InitializeGpio(POWER_GPIO, true);
 
@@ -327,6 +339,18 @@ public:
 
     virtual AudioCodec* GetAudioCodec() override {
         return &audio_codec;
+    }
+
+
+    virtual bool GetBatteryLevel(int &level, bool& charging, bool& discharging) override {
+        level = PowerManager::GetInstance().GetBatteryLevel();
+        charging = PowerManager::GetInstance().IsCharging();
+        discharging = !charging;
+        return true;
+    }
+
+    virtual bool IsCharging() override {
+        return PowerManager::GetInstance().IsCharging();
     }
 
     // 数据点相关方法实现

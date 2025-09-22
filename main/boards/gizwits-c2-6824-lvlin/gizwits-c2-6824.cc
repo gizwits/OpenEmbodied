@@ -325,7 +325,7 @@ public:
     }
 
     int GetDefaultChatMode() override {
-        return 0;
+        return 1;
     }
 
     void EnterDeepSleepIfNotCharging() {
