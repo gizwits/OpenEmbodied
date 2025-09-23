@@ -95,6 +95,13 @@ private:
                 gpio_set_level(POWER_HOLD_GPIO, 0);
             }
         });
+
+        boot_button_.OnPressRepeat([this](uint16_t count) {
+            ESP_LOGI(TAG, "boot_button_.OnPressRepeat: %d", count);
+            if(count >= RESET_WIFI_CONFIGURATION_COUNT){
+                ResetWifiConfiguration();
+            }
+        });
         boot_button_.OnLongPress([this]() {
             
             // 计算设备运行时间

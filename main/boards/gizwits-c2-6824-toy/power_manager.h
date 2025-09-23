@@ -47,17 +47,24 @@ private:
         uint16_t adcValue; // ADC value
         uint8_t soc;       // State of Charge (percentage of battery capacity)
     } dischargeCurve[] = {
-        {4140, 100}, // 100%
-        {4104, 90},  // 下降36mV
-        {4068, 80},  // 下降36mV
-        {4032, 70},  // 下降36mV
-        {3996, 60},  // 下降36mV
-        {3960, 50},  // 下降36mV
-        {3924, 40},  // 下降36mV
-        {3888, 30},  // 下降36mV
-        {3852, 20},  // 下降36mV
-        {3829, 10},  // 下降23mV（过渡段开始）
-        {3808, 0},  // 下降21mV
+        {4200, 100}, // 满电压附近
+        {4160, 95},
+        {4120, 90},
+        {4080, 85},
+        {4040, 80},
+        {4000, 75},
+        {3960, 70},
+        {3920, 60},
+        {3880, 50},
+        {3850, 40},
+        {3820, 35},
+        {3790, 30},
+        {3760, 25},
+        {3720, 20},
+        {3680, 15},
+        {3600, 10},
+        {3500, 5},
+        {3400, 0},
     };
 
     // 查表函数
@@ -210,21 +217,6 @@ public:
         static PowerManager instance; // 使用默认构造函数初始化对象
         return instance;
     }
-
-    void EnterDeepSleepIfNotCharging() {
-        // 不在充电就真休眠
-        if (is_charging_ == 0) {
-            vb6824_shutdown();
-            vTaskDelay(pdMS_TO_TICKS(200));
-            // 配置唤醒源 只有电源域是VDD3P3_RTC的才能唤醒深睡
-            uint64_t wakeup_pins = (BIT(GPIO_NUM_1) | BIT(COLLISION_BUTTON_GPIO));
-            esp_deep_sleep_enable_gpio_wakeup(wakeup_pins, ESP_GPIO_WAKEUP_GPIO_LOW);
-            ESP_LOGI("PowerMgr", "ready to esp_deep_sleep_start");
-            vTaskDelay(pdMS_TO_TICKS(10));
-            
-            esp_deep_sleep_start();
-        }
-}
 
     
 };

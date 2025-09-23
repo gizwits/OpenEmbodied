@@ -443,9 +443,10 @@ void Application::Start() {
 
     bool battery_ok = CheckBatteryLevel();
     if (!battery_ok) {
+        // 播放提示
         vTaskDelay(pdMS_TO_TICKS(3000));
-        Board::GetInstance().PowerOff();
-        return;
+        // Board::GetInstance().PowerOff();
+        // return;
     }
 
     audio_service_.ResetDecoder();
@@ -1199,7 +1200,7 @@ bool Application::CheckBatteryLevel() {
         // ESP_LOGI(TAG, "current Battery level: %d, charging: %d, discharging: %d", level, charging, discharging);
         if (level <= 15 && discharging) {
             // 电量
-            Alert(Lang::Strings::ERROR, Lang::Strings::ERROR, "sad", Lang::Sounds::P3_BATTLE_LOW);
+            PlaySound(Lang::Sounds::P3_BATTLE_LOW);
             return false;
         }
     }

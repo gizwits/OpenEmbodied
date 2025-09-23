@@ -28,6 +28,7 @@
 #include "led_signal.h"
 #include "power_manager.h"
 #include <esp_timer.h>
+#include <inttypes.h>
 
 #define TAG "CustomBoard"
 
@@ -47,7 +48,8 @@ private:
     int64_t collision_last_ts_us_ = 0;
     int64_t collision_accum_us_ = 0;
     static constexpr int64_t COLLISION_MAX_INTERVAL_US = 300000;   // 300ms
-    static constexpr int64_t COLLISION_THRESHOLD_US    = 3000000;  // 3s
+    static constexpr int64_t COLLISION_THRESHOLD_US    = 600000;  // 600ms
+    static constexpr int64_t COLLISION_WAKE_THRESHOLD_US    = 1000000;  // 600ms
     
     // 唤醒词列表
     std::vector<std::string> wake_words_ = {"你好小智", "你好小云", "合养精灵", "嗨小火人", "你好冬冬"};
@@ -107,8 +109,9 @@ private:
             });
         }
 
-        collision_button.OnClick([this]() {
-            // 连续触发 3s，间隔<=300ms 视为有效
+        collision_button.OnPressDown([this]() {
+            ESP_LOGI(TAG, "collision_button.OnClick");
+            // 连续触发 1.5s，间隔<=300ms 视为有效
             int64_t now = esp_timer_get_time();
             if (collision_last_ts_us_ != 0 && (now - collision_last_ts_us_) <= COLLISION_MAX_INTERVAL_US) {
                 collision_accum_us_ += (now - collision_last_ts_us_);
@@ -172,29 +175,24 @@ private:
     // 若在 OVERALL_TIMEOUT_US 内未达成，则重新进入深睡
     void WaitForCollisionShakeOrSleepIfWokenByCollision() {
         esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+        ESP_LOGW(TAG, "cause: %d", cause);
         if (cause != ESP_SLEEP_WAKEUP_GPIO) {
             return;
         }
         uint64_t status = esp_sleep_get_gpio_wakeup_status();
+        ESP_LOGW(TAG, "status=0x%" PRIx64, status);
+
+
         if (!(status & (1ULL << COLLISION_BUTTON_GPIO))) {
             return;
         }
 
-        // 临时配置为输入以进行轮询检测
-        gpio_config_t cfg = {};
-        cfg.pin_bit_mask = (1ULL << COLLISION_BUTTON_GPIO);
-        cfg.mode = GPIO_MODE_INPUT;
-        cfg.pull_up_en = GPIO_PULLUP_ENABLE;
-        cfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
-        cfg.intr_type = GPIO_INTR_DISABLE;
-        gpio_config(&cfg);
-
-        ESP_LOGI(TAG, "Woken by collision GPIO, waiting for 3s continuous shake...");
+        ESP_LOGW(TAG, "Woken by collision GPIO, waiting for 3s continuous shake...");
         int last_level = gpio_get_level(COLLISION_BUTTON_GPIO);
         int64_t last_edge_ts = 0;
         int64_t accum_us = 0;
         const int64_t overall_start = esp_timer_get_time();
-        const int64_t OVERALL_TIMEOUT_US = 8000000; // 8s 超时重新休眠
+        const int64_t OVERALL_TIMEOUT_US = COLLISION_WAKE_THRESHOLD_US + 600000;
 
         while (true) {
             int level = gpio_get_level(COLLISION_BUTTON_GPIO);
@@ -208,8 +206,8 @@ private:
                 last_edge_ts = now;
                 last_level = level;
 
-                if (accum_us >= COLLISION_THRESHOLD_US) {
-                    ESP_LOGI(TAG, "Collision shake confirmed (>=3s), continuing boot");
+                if (accum_us >= COLLISION_WAKE_THRESHOLD_US) {
+                    ESP_LOGW(TAG, "Collision shake confirmed (>=3s), continuing boot");
                     break;
                 }
             }
@@ -217,8 +215,16 @@ private:
             int64_t now2 = esp_timer_get_time();
             if (now2 - overall_start >= OVERALL_TIMEOUT_US) {
                 ESP_LOGW(TAG, "Collision shake timeout, re-enter deep sleep");
-                PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
-                vTaskDelay(pdMS_TO_TICKS(100));
+                
+                vb6824_shutdown();
+                vTaskDelay(pdMS_TO_TICKS(200));
+                // 配置唤醒源 只有电源域是VDD3P3_RTC的才能唤醒深睡
+                uint64_t wakeup_pins = (BIT(GPIO_NUM_1) | BIT(COLLISION_BUTTON_GPIO));
+                esp_deep_sleep_enable_gpio_wakeup(wakeup_pins, ESP_GPIO_WAKEUP_GPIO_LOW);
+                ESP_LOGI("PowerMgr", "ready to esp_deep_sleep_start");
+                vTaskDelay(pdMS_TO_TICKS(10));
+                
+                esp_deep_sleep_start();
             }
             vTaskDelay(pdMS_TO_TICKS(10));
         }
@@ -252,6 +258,23 @@ private:
 
 public:
     CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), collision_button(COLLISION_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO){      
+        InitializePowerManager();
+        Settings settings("wifi", true);
+        auto s_factory_test_mode = settings.GetInt("ft_mode", 0);
+
+        if (s_factory_test_mode == 0) {
+            // 不在产测模式才启动，不然有问题
+            InitializeButtons();
+        }
+
+        // 如果是从深度睡眠被碰撞 GPIO 唤醒，则先等待稳定摇晃，否则重新睡眠
+        WaitForCollisionShakeOrSleepIfWokenByCollision();
+
+        if (s_factory_test_mode == 0) {
+            InitializeLedSignal();
+        }
+
+        
         gpio_config_t io_conf = {};
         io_conf.pin_bit_mask = (1ULL << BUILTIN_LED_GPIO);
         io_conf.mode = GPIO_MODE_OUTPUT;
@@ -261,30 +284,12 @@ public:
         gpio_config(&io_conf);
         gpio_set_level(BUILTIN_LED_GPIO, 0);
 
-        // 如果是从深度睡眠被碰撞 GPIO 唤醒，则先等待稳定摇晃，否则重新睡眠
-        WaitForCollisionShakeOrSleepIfWokenByCollision();
-
         ESP_LOGI(TAG, "Initializing Power Save Timer...");
         InitializePowerSaveTimer();
-
-        ESP_LOGI(TAG, "Initializing Buttons...");
-        Settings settings("wifi", true);
-        auto s_factory_test_mode = settings.GetInt("ft_mode", 0);
-
-        if (s_factory_test_mode == 0) {
-            // 不在产测模式才启动，不然有问题
-            InitializeButtons();
-            ESP_LOGI(TAG, "Initializing LED Signal...");
-            InitializeLedSignal();
-        }
 
         ESP_LOGI(TAG, "Initializing IoT components...");
         InitializeIot();
 
-
-        ESP_LOGI(TAG, "Initializing Power Manager...");
-        InitializePowerManager();
-        ESP_LOGI(TAG, "Power Manager initialized.");
 
 
         audio_codec.OnWakeUp([this](const std::string& command) {
