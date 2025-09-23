@@ -73,6 +73,7 @@ public:
     int GetChatMode() const { return chat_mode_; }
     void CancelPlayMusic();
     void SendTextToAI(const std::string& text);
+    bool IsTmpFactoryTestMode() const { return tmp_ft_mode_; }
     
     // 工厂测试相关方法
     int StartRecordTest(int duration_seconds);
@@ -110,6 +111,7 @@ private:
     esp_timer_handle_t report_timer_handle_ = nullptr;
     int chat_mode_ = 1;
     bool has_emotion_ = false;
+    bool tmp_ft_mode_ = false;
     std::chrono::steady_clock::time_point last_battery_check_time_;
 
     bool has_server_time_ = false;
@@ -143,6 +145,7 @@ private:
     void OnClockTimer();
     void initGizwitsServer();
     bool CheckBatteryLevel();
+    void ProductTestCheck();
     void StartReportTimer();
 
     void SetListeningMode(ListeningMode mode);

@@ -414,27 +414,8 @@ void Application::Start() {
         // 播放上电提示音
         audio_service_.PlaySound(Lang::Sounds::P3_SUCCESS);
     }
+    ProductTestCheck();
 
-
-    bool wifi_config_mode_ = board.IsWifiConfigMode();
-    auto& ssid_manager = SsidManager::GetInstance();
-    auto ssid_list = ssid_manager.GetSsidList();
-
-    factory_test_init();
-
-    ESP_LOGI(TAG, "Factory test is enabled: %d", wifi_config_mode_);
-    if (wifi_config_mode_ || ssid_list.empty() || factory_test_is_enabled()) {
-        ESP_LOGI(TAG, "Factory test start");
-        factory_test_start();
-        ESP_LOGI(TAG, "Factory test is enabled");
-    
-        if (factory_test_is_enabled()) {
-            ESP_LOGW(TAG, "Factory test is enabled");
-            PlaySound(Lang::Sounds::P3_TEST_MODE);
-            udp_broadcaster_.async_start();
-            return;
-        }
-    }
     /* Wait for the network to be ready */
     board.StartNetwork();
 
@@ -649,6 +630,77 @@ void Application::Start() {
     StartReportTimer();
 }
 
+void Application::ProductTestCheck() {
+
+    auto& board = Board::GetInstance();
+    bool wifi_config_mode_ = board.IsWifiConfigMode();
+    auto& ssid_manager = SsidManager::GetInstance();
+    auto ssid_list = ssid_manager.GetSsidList();
+
+    /**
+    * 生产厂产测模式
+     */
+    factory_test_init();
+    ESP_LOGI(TAG, "Factory test is enabled: %d", wifi_config_mode_);
+    if (wifi_config_mode_ || ssid_list.empty() || factory_test_is_enabled()) {
+        ESP_LOGI(TAG, "Factory test start");
+        factory_test_start();
+        ESP_LOGI(TAG, "Factory test is enabled");
+    
+        if (factory_test_is_enabled()) {
+            ESP_LOGW(TAG, "Factory test is enabled");
+            PlaySound(Lang::Sounds::P3_TEST_MODE);
+            udp_broadcaster_.async_start();
+            return;
+        }
+    }
+    /**
+    * 生产厂产测模式
+    */
+
+#ifdef CONFIG_TMP_PRODUCT_TEST_WIFI
+    /**
+    * 简化的整机厂产测模式
+    */
+    Settings settings("wifi", true);
+    tmp_ft_mode_ = settings.GetInt("tmp_ft_mode", 1);
+    if (tmp_ft_mode_ == 1) {
+        // 消费掉flag
+        settings.SetInt("tmp_ft_mode", 0);
+        vTaskDelay(pdMS_TO_TICKS(500));
+        PlaySound(Lang::Sounds::P3_TEST_MODE);
+        audio_service_.EnableWakeWordDetection(true);
+        audio_service_.EnableVoiceProcessing(false);    
+
+        // 临时连接WiFi
+        auto& wifi_station = WifiStation::GetInstance();
+        
+        // 设置连接回调
+        wifi_station.OnConnect([](const std::string& ssid) {
+            ESP_LOGI(TAG, "Connecting to test WiFi: %s", ssid.c_str());
+        });
+        
+        wifi_station.OnConnected([](const std::string& ssid) {
+            ESP_LOGI(TAG, "Connected to test WiFi: %s", ssid.c_str());
+        });
+        
+        // 启动WiFi模块
+        wifi_station.Start();
+        
+        // 临时连接到产测WiFi（不保存凭据）
+        if (wifi_station.ConnectToWifiAndWait(CONFIG_TMP_PRODUCT_TEST_WIFI, CONFIG_TMP_PRODUCT_TEST_WIFI_PASSWORD, 15000)) {
+            ESP_LOGI(TAG, "Successfully connected to test WiFi: %s", CONFIG_TMP_PRODUCT_TEST_WIFI);
+            ESP_LOGI(TAG, "IP Address: %s", wifi_station.GetIpAddress().c_str());
+            audio_service_.PlaySound(Lang::Sounds::P3_CONNECT_SUCCESS);
+        } else {
+            ESP_LOGE(TAG, "Failed to connect to test WiFi: %s", CONFIG_TMP_PRODUCT_TEST_WIFI);
+        }
+    }
+    /**
+    * 简化的整机厂产测模式
+    */
+#endif
+}
 void Application::OnClockTimer() {
     clock_ticks_++;
 

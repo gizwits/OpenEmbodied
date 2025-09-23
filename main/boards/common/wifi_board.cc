@@ -97,6 +97,24 @@ void WifiBoard::StartNetwork() {
         auto display = Board::GetInstance().GetDisplay();
         display->ShowNotification(Lang::Strings::SCANNING_WIFI, 30000);
     });
+#ifdef CONFIG_TMP_PRODUCT_TEST_WIFI
+    ESP_LOGI(TAG, "PRODUCT_TEST_WIFI");
+    wifi_station.OnScanResults([this](const std::vector<std::string>& ssids) {
+        // 打印扫描到的 SSID 列表
+        ESP_LOGI("WifiBoard", "Scanned SSIDs: count=%zu", ssids.size());
+        for (const auto& s : ssids) {
+            ESP_LOGI("WifiBoard", "  SSID: %s", s.c_str());
+        }
+        
+        if (std::find(ssids.begin(), ssids.end(), CONFIG_TMP_PRODUCT_TEST_WIFI) != ssids.end()) {
+            // 存在产测wifi
+            Settings settings("wifi", true);
+            settings.SetInt("tmp_ft_mode", 1);
+            vTaskDelay(pdMS_TO_TICKS(500));
+            esp_restart();
+        }
+    });
+#endif
     wifi_station.OnConnect([this](const std::string& ssid) {
         auto display = Board::GetInstance().GetDisplay();
         std::string notification = Lang::Strings::CONNECT_TO;
