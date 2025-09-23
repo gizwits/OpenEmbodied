@@ -14,6 +14,7 @@
 #include "led/single_led.h"
 #include "display/eye_display_horizontal_emojis.h"
 #include "display/display.h"
+#include <esp_lvgl_port.h>
 
 #include <wifi_station.h>
 #include "power_save_timer.h"
@@ -27,6 +28,7 @@
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_timer.h"
+#include <esp_system.h>
 
 #include <math.h>
 
@@ -116,6 +118,14 @@ private:
     
     // ST7735S初始化
     void InitializeST7735SDisplay() {
+        // 上电先关闭背光
+        gpio_set_direction(DISPLAY_BACKLIGHT_PIN, GPIO_MODE_OUTPUT);
+#if DISPLAY_BACKLIGHT_OUTPUT_INVERT
+        gpio_set_level(DISPLAY_BACKLIGHT_PIN, 1);
+#else
+        gpio_set_level(DISPLAY_BACKLIGHT_PIN, 0);
+#endif
+
         esp_lcd_panel_io_spi_config_t io_config = {
             .cs_gpio_num = DISPLAY_SPI_CS_PIN,
             .dc_gpio_num = DISPLAY_SPI_DC_PIN,
@@ -146,18 +156,25 @@ private:
             return;
         }
         
+        // 按手册保证 reset 低保持与上电稳定时间
+        vTaskDelay(pdMS_TO_TICKS(10));
         ret = esp_lcd_panel_reset(panel);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Panel reset failed: %s", esp_err_to_name(ret));
             return;
         }
-        
+        // 复位后等待面板内部稳定
+        vTaskDelay(pdMS_TO_TICKS(120));
         ret = esp_lcd_panel_init(panel);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Panel init failed: %s", esp_err_to_name(ret));
             return;
         }
 
+        // 恢复 gap 为 0，避免错误偏移导致角落未覆盖
+        esp_lcd_panel_set_gap(panel, 0, 0);
+
+        // 恢复反色设置为 true，避免背景变白
         ret = esp_lcd_panel_invert_color(panel, true);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Panel color invert failed: %s", esp_err_to_name(ret));
@@ -171,19 +188,32 @@ private:
             return;
         }
         
-        // Turn on display
+        // 打开显示，但仍保持背光关闭
         ret = esp_lcd_panel_disp_on_off(panel, true);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Panel display on failed: %s", esp_err_to_name(ret));
             return;
         }
         
-        // 创建并初始化 LottieDisplay（与 gizwits-lottie 一致），但面板为 ST7735S
+        // 创建显示对象
         DisplayFonts fonts = { .text_font = &font_puhui_20_4, .icon_font = nullptr, .emoji_font = nullptr };
         display_ = new EyeDisplayHorizontalEmo(panel_io, panel,
             DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
             DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY,
             fonts);
+
+        // 让 LVGL 完成首次界面创建并强制刷新 1~2 帧
+        if (lvgl_port_lock(100)) {
+            lv_timer_handler();
+            lvgl_port_unlock();
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+        if (lvgl_port_lock(100)) {
+            lv_timer_handler();
+            lvgl_port_unlock();
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+        // 背光控制完全交给PWM，不在这里手动控制GPIO
     }
 
     int MaxBacklightBrightness() {
@@ -217,9 +247,6 @@ private:
         });
         boot_button_.OnLongPress([this]() {
             ESP_LOGI(TAG, "BOOT 按键长按，进入配网");
-            // 硬件方式关闭背光（非PWM调光）：将背光引脚直接拉低
-            gpio_set_direction(DISPLAY_BACKLIGHT_PIN, GPIO_MODE_OUTPUT);
-            gpio_set_level(DISPLAY_BACKLIGHT_PIN, 0);
             ResetWifiConfiguration();
         });
         boot_button_.OnPressUp([this]() {
@@ -349,7 +376,7 @@ private:
             ESP_LOGI(TAG, "power_button_.OnPressDown");
             auto& app = Application::GetInstance();
             app.ToggleChatState();
-            // 开灯
+            // 按键切换表情
             if (display_) {
                 display_->TestNextEmotion();
             }
@@ -429,6 +456,14 @@ public:
         InitializePowerManager();
         InitializeDataPointManager();
         InitializePowerSaveTimer();
+
+        // 注册关机回调，确保任何重启路径都会先关闭背光
+        esp_register_shutdown_handler([](){
+            ESP_LOGI(TAG, "Shutdown handler: TurnOffBacklight before restart");
+            gpio_set_direction(DISPLAY_BACKLIGHT_PIN, GPIO_MODE_OUTPUT);
+            gpio_set_level(DISPLAY_BACKLIGHT_PIN, 0);
+        });
+
         if (power_manager_) {
             ESP_LOGI(TAG, "Before CheckBatteryStatusImmediately");
             power_manager_->CheckBatteryStatusImmediately();
