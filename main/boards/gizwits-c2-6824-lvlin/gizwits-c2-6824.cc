@@ -38,7 +38,7 @@
 class CustomBoard : public WifiBoard {
 private:
     Button boot_button_;
-    Button collision_button;
+    // Button collision_button;
     Button* rec_button_ = nullptr;
     PowerSaveTimer* power_save_timer_;
     VbAduioCodec audio_codec;
@@ -74,7 +74,7 @@ private:
         auto& application = Application::GetInstance();
         if (need_delay) {
             application.Alert("", "", "", Lang::Sounds::P3_SLEEP);
-            vTaskDelay(pdMS_TO_TICKS(1500));
+            vTaskDelay(pdMS_TO_TICKS(3000));
             ESP_LOGI(TAG, "Sleep mode");
         }
         application.QuitTalking();
@@ -109,25 +109,25 @@ private:
             });
         }
 
-        collision_button.OnPressDown([this]() {
-            ESP_LOGI(TAG, "collision_button.OnClick");
-            // 连续触发 1.5s，间隔<=300ms 视为有效
-            int64_t now = esp_timer_get_time();
-            if (collision_last_ts_us_ != 0 && (now - collision_last_ts_us_) <= COLLISION_MAX_INTERVAL_US) {
-                collision_accum_us_ += (now - collision_last_ts_us_);
-            } else {
-                // 超时或首次触发，重置累计
-                collision_accum_us_ = 0;
-            }
-            collision_last_ts_us_ = now;
+        // collision_button.OnPressDown([this]() {
+        //     ESP_LOGI(TAG, "collision_button.OnClick");
+        //     // 连续触发 1.5s，间隔<=300ms 视为有效
+        //     int64_t now = esp_timer_get_time();
+        //     if (collision_last_ts_us_ != 0 && (now - collision_last_ts_us_) <= COLLISION_MAX_INTERVAL_US) {
+        //         collision_accum_us_ += (now - collision_last_ts_us_);
+        //     } else {
+        //         // 超时或首次触发，重置累计
+        //         collision_accum_us_ = 0;
+        //     }
+        //     collision_last_ts_us_ = now;
 
-            if (collision_accum_us_ >= COLLISION_THRESHOLD_US) {
-                collision_accum_us_ = 0;
-                collision_last_ts_us_ = 0;
-                auto &app = Application::GetInstance();
-                app.ToggleChatState();
-            }
-        });
+        //     if (collision_accum_us_ >= COLLISION_THRESHOLD_US) {
+        //         collision_accum_us_ = 0;
+        //         collision_last_ts_us_ = 0;
+        //         auto &app = Application::GetInstance();
+        //         app.ToggleChatState();
+        //     }
+        // });
 
         boot_button_.OnPressRepeat([this](uint16_t count) {
             ESP_LOGI(TAG, "boot_button_.OnPressRepeat: %d", count);
@@ -173,62 +173,62 @@ private:
 
     // 低功耗唤醒后，若由碰撞 GPIO 唤醒，则等待 3s 连续摇晃（间隔≤300ms）
     // 若在 OVERALL_TIMEOUT_US 内未达成，则重新进入深睡
-    void WaitForCollisionShakeOrSleepIfWokenByCollision() {
-        esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
-        ESP_LOGW(TAG, "cause: %d", cause);
-        if (cause != ESP_SLEEP_WAKEUP_GPIO) {
-            return;
-        }
-        uint64_t status = esp_sleep_get_gpio_wakeup_status();
-        ESP_LOGW(TAG, "status=0x%" PRIx64, status);
+    // void WaitForCollisionShakeOrSleepIfWokenByCollision() {
+    //     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+    //     ESP_LOGW(TAG, "cause: %d", cause);
+    //     if (cause != ESP_SLEEP_WAKEUP_GPIO) {
+    //         return;
+    //     }
+    //     uint64_t status = esp_sleep_get_gpio_wakeup_status();
+    //     ESP_LOGW(TAG, "status=0x%" PRIx64, status);
 
 
-        if (!(status & (1ULL << COLLISION_BUTTON_GPIO))) {
-            return;
-        }
+    //     if (!(status & (1ULL << COLLISION_BUTTON_GPIO))) {
+    //         return;
+    //     }
 
-        ESP_LOGW(TAG, "Woken by collision GPIO, waiting for 3s continuous shake...");
-        int last_level = gpio_get_level(COLLISION_BUTTON_GPIO);
-        int64_t last_edge_ts = 0;
-        int64_t accum_us = 0;
-        const int64_t overall_start = esp_timer_get_time();
-        const int64_t OVERALL_TIMEOUT_US = COLLISION_WAKE_THRESHOLD_US + 600000;
+    //     ESP_LOGW(TAG, "Woken by collision GPIO, waiting for 3s continuous shake...");
+    //     int last_level = gpio_get_level(COLLISION_BUTTON_GPIO);
+    //     int64_t last_edge_ts = 0;
+    //     int64_t accum_us = 0;
+    //     const int64_t overall_start = esp_timer_get_time();
+    //     const int64_t OVERALL_TIMEOUT_US = COLLISION_WAKE_THRESHOLD_US + 600000;
 
-        while (true) {
-            int level = gpio_get_level(COLLISION_BUTTON_GPIO);
-            if (level != last_level) {
-                int64_t now = esp_timer_get_time();
-                if (last_edge_ts != 0 && (now - last_edge_ts) <= COLLISION_MAX_INTERVAL_US) {
-                    accum_us += (now - last_edge_ts);
-                } else {
-                    accum_us = 0;
-                }
-                last_edge_ts = now;
-                last_level = level;
+    //     while (true) {
+    //         int level = gpio_get_level(COLLISION_BUTTON_GPIO);
+    //         if (level != last_level) {
+    //             int64_t now = esp_timer_get_time();
+    //             if (last_edge_ts != 0 && (now - last_edge_ts) <= COLLISION_MAX_INTERVAL_US) {
+    //                 accum_us += (now - last_edge_ts);
+    //             } else {
+    //                 accum_us = 0;
+    //             }
+    //             last_edge_ts = now;
+    //             last_level = level;
 
-                if (accum_us >= COLLISION_WAKE_THRESHOLD_US) {
-                    ESP_LOGW(TAG, "Collision shake confirmed (>=3s), continuing boot");
-                    break;
-                }
-            }
-            // 超时则重新休眠
-            int64_t now2 = esp_timer_get_time();
-            if (now2 - overall_start >= OVERALL_TIMEOUT_US) {
-                ESP_LOGW(TAG, "Collision shake timeout, re-enter deep sleep");
+    //             if (accum_us >= COLLISION_WAKE_THRESHOLD_US) {
+    //                 ESP_LOGW(TAG, "Collision shake confirmed (>=3s), continuing boot");
+    //                 break;
+    //             }
+    //         }
+    //         // 超时则重新休眠
+    //         int64_t now2 = esp_timer_get_time();
+    //         if (now2 - overall_start >= OVERALL_TIMEOUT_US) {
+    //             ESP_LOGW(TAG, "Collision shake timeout, re-enter deep sleep");
                 
-                vb6824_shutdown();
-                vTaskDelay(pdMS_TO_TICKS(200));
-                // 配置唤醒源 只有电源域是VDD3P3_RTC的才能唤醒深睡
-                uint64_t wakeup_pins = (BIT(GPIO_NUM_1) | BIT(COLLISION_BUTTON_GPIO));
-                esp_deep_sleep_enable_gpio_wakeup(wakeup_pins, ESP_GPIO_WAKEUP_GPIO_LOW);
-                ESP_LOGI("PowerMgr", "ready to esp_deep_sleep_start");
-                vTaskDelay(pdMS_TO_TICKS(10));
+    //             vb6824_shutdown();
+    //             vTaskDelay(pdMS_TO_TICKS(200));
+    //             // 配置唤醒源 只有电源域是VDD3P3_RTC的才能唤醒深睡
+    //             uint64_t wakeup_pins = (BIT(GPIO_NUM_1) | BIT(COLLISION_BUTTON_GPIO));
+    //             esp_deep_sleep_enable_gpio_wakeup(wakeup_pins, ESP_GPIO_WAKEUP_GPIO_LOW);
+    //             ESP_LOGI("PowerMgr", "ready to esp_deep_sleep_start");
+    //             vTaskDelay(pdMS_TO_TICKS(10));
                 
-                esp_deep_sleep_start();
-            }
-            vTaskDelay(pdMS_TO_TICKS(10));
-        }
-    }
+    //             esp_deep_sleep_start();
+    //         }
+    //         vTaskDelay(pdMS_TO_TICKS(10));
+    //     }
+    // }
 
     void InitializeDataPointManager() {
         // 设置 DataPointManager 的回调函数
@@ -257,7 +257,7 @@ private:
     }
 
 public:
-    CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), collision_button(COLLISION_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO){      
+    CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO){      
         InitializePowerManager();
         Settings settings("wifi", true);
         auto s_factory_test_mode = settings.GetInt("ft_mode", 0);
@@ -268,7 +268,7 @@ public:
         }
 
         // 如果是从深度睡眠被碰撞 GPIO 唤醒，则先等待稳定摇晃，否则重新睡眠
-        WaitForCollisionShakeOrSleepIfWokenByCollision();
+        // WaitForCollisionShakeOrSleepIfWokenByCollision();
 
         if (s_factory_test_mode == 0) {
             InitializeLedSignal();
