@@ -409,12 +409,16 @@ void Application::Start() {
 
     /* Start the clock timer to update the status bar */
     esp_timer_start_periodic(clock_timer_handle_, 1000000);
+    tmp_ft_mode_ = settings.GetInt("tmp_ft_mode", 0);
 
-    if (is_normal_reset_) {
+    if (is_normal_reset_ && tmp_ft_mode_ == 0) {
         // 播放上电提示音
         audio_service_.PlaySound(Lang::Sounds::P3_SUCCESS);
     }
-    ProductTestCheck();
+    bool can_next = ProductTestCheck();
+    if (!can_next) {
+        return;
+    }
 
     /* Wait for the network to be ready */
     board.StartNetwork();
@@ -630,7 +634,7 @@ void Application::Start() {
     StartReportTimer();
 }
 
-void Application::ProductTestCheck() {
+bool Application::ProductTestCheck() {
 
     auto& board = Board::GetInstance();
     bool wifi_config_mode_ = board.IsWifiConfigMode();
@@ -639,21 +643,25 @@ void Application::ProductTestCheck() {
 
     /**
     * 生产厂产测模式
+      临时产测就不需要进工厂产测了
      */
-    factory_test_init();
-    ESP_LOGI(TAG, "Factory test is enabled: %d", wifi_config_mode_);
-    if (wifi_config_mode_ || ssid_list.empty() || factory_test_is_enabled()) {
-        ESP_LOGI(TAG, "Factory test start");
-        factory_test_start();
-        ESP_LOGI(TAG, "Factory test is enabled");
-    
-        if (factory_test_is_enabled()) {
-            ESP_LOGW(TAG, "Factory test is enabled");
-            PlaySound(Lang::Sounds::P3_TEST_MODE);
-            udp_broadcaster_.async_start();
-            return;
+    if (tmp_ft_mode_ == 0) {
+        factory_test_init();
+        ESP_LOGI(TAG, "Factory test is enabled: %d", wifi_config_mode_);
+        if (wifi_config_mode_ || ssid_list.empty() || factory_test_is_enabled()) {
+            ESP_LOGI(TAG, "Factory test start");
+            factory_test_start();
+            ESP_LOGI(TAG, "Factory test is enabled");
+        
+            if (factory_test_is_enabled()) {
+                ESP_LOGW(TAG, "Factory test is enabled");
+                PlaySound(Lang::Sounds::P3_TEST_MODE);
+                udp_broadcaster_.async_start();
+                return false;
+            }
         }
     }
+    
     /**
     * 生产厂产测模式
     */
@@ -662,44 +670,33 @@ void Application::ProductTestCheck() {
     /**
     * 简化的整机厂产测模式
     */
-    Settings settings("wifi", true);
-    tmp_ft_mode_ = settings.GetInt("tmp_ft_mode", 1);
     if (tmp_ft_mode_ == 1) {
         // 消费掉flag
+        Settings settings("wifi", true);
         settings.SetInt("tmp_ft_mode", 0);
-        vTaskDelay(pdMS_TO_TICKS(500));
-        PlaySound(Lang::Sounds::P3_TEST_MODE);
+        // PlaySound(Lang::Sounds::P3_TEST_MODE);
         audio_service_.EnableWakeWordDetection(true);
         audio_service_.EnableVoiceProcessing(false);    
-
         // 临时连接WiFi
         auto& wifi_station = WifiStation::GetInstance();
-        
-        // 设置连接回调
-        wifi_station.OnConnect([](const std::string& ssid) {
-            ESP_LOGI(TAG, "Connecting to test WiFi: %s", ssid.c_str());
-        });
-        
-        wifi_station.OnConnected([](const std::string& ssid) {
-            ESP_LOGI(TAG, "Connected to test WiFi: %s", ssid.c_str());
-        });
-        
         // 启动WiFi模块
         wifi_station.Start();
-        
         // 临时连接到产测WiFi（不保存凭据）
         if (wifi_station.ConnectToWifiAndWait(CONFIG_TMP_PRODUCT_TEST_WIFI, CONFIG_TMP_PRODUCT_TEST_WIFI_PASSWORD, 15000)) {
-            ESP_LOGI(TAG, "Successfully connected to test WiFi: %s", CONFIG_TMP_PRODUCT_TEST_WIFI);
-            ESP_LOGI(TAG, "IP Address: %s", wifi_station.GetIpAddress().c_str());
+          
             audio_service_.PlaySound(Lang::Sounds::P3_CONNECT_SUCCESS);
         } else {
             ESP_LOGE(TAG, "Failed to connect to test WiFi: %s", CONFIG_TMP_PRODUCT_TEST_WIFI);
         }
+
+        return false;
     }
     /**
     * 简化的整机厂产测模式
     */
 #endif
+
+    return true;
 }
 void Application::OnClockTimer() {
     clock_ticks_++;
@@ -746,15 +743,18 @@ void Application::MainEventLoop() {
             ntp_client.ProcessSync();
         }
 
+        
 #if CONFIG_IDF_TARGET_ESP32C2
-        // 处理 MQTT 消息队列（替代独立任务）
-        // 这样做的好处：
-        // 1. 减少内存占用 - 不需要为每个任务分配独立的栈空间
-        // 2. 简化任务管理 - 减少任务切换的开销
-        // 3. 更好的控制 - 在主循环中可以更好地控制执行频率
-        auto& mqtt_client = MqttClient::getInstance();
-        mqtt_client.processMessageQueue();  // 处理接收到的消息
-        mqtt_client.processSendQueue();     // 处理待发送的消息
+// 处理 MQTT 消息队列（替代独立任务）
+// 这样做的好处：
+// 1. 减少内存占用 - 不需要为每个任务分配独立的栈空间
+// 2. 简化任务管理 - 减少任务切换的开销
+// 3. 更好的控制 - 在主循环中可以更好地控制执行频率
+auto& mqtt_client = MqttClient::getInstance();
+if (mqtt_client.isInitialized()) {
+    mqtt_client.processMessageQueue();  // 处理接收到的消息
+    mqtt_client.processSendQueue();     // 处理待发送的消息
+}
 #endif
 
         // 每分钟检查一次电量
@@ -1005,7 +1005,14 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     auto& mqtt_client = MqttClient::getInstance();
     mqtt_client.sendTraceLog("info", "唤醒词触发");
 #endif
-    ESP_LOGI(TAG, "Wake word invoke: %s", wake_word.c_str());
+    ESP_LOGI(TAG, "Wake word invoke: %s device_state_: %s chat_mode_: %d", wake_word.c_str(), STATE_STRINGS[device_state_], chat_mode_);
+    
+    if (IsTmpFactoryTestMode()) {
+        // 临时测试模式，播放提示音
+        PlaySound(Lang::Sounds::P3_SUCCESS);
+        return;
+    }
+    
     // 内部会判断
     CancelPlayMusic();
      // 按钮模式

@@ -130,6 +130,10 @@ public:
     // 新增：用于主循环调用的非阻塞函数
     void processMessageQueue();
     void processSendQueue();
+    // 判断是否已初始化（内部对象和队列均可用）
+    bool isInitialized() const {
+        return mqtt_ != nullptr && message_queue_ != nullptr && send_queue_ != nullptr;
+    }
     
     // 内存优化相关函数
     void printMemoryUsage();
