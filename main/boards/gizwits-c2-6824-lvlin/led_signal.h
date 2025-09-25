@@ -26,15 +26,13 @@ public:
     uint8_t GetDefaultBrightness() const { return LED_DEFAULT_BRIGHTNESS; }
 private:
 
-    LedSignal(gpio_num_t red_gpio = GPIO_NUM_2, ledc_channel_t red_channel = LEDC_CHANNEL_0, 
-              gpio_num_t green_gpio = GPIO_NUM_4, ledc_channel_t green_channel = LEDC_CHANNEL_1, 
+    LedSignal(gpio_num_t red_gpio = GPIO_NUM_2, ledc_channel_t red_channel = LEDC_CHANNEL_0,
               gpio_num_t blue_gpio = GPIO_NUM_5, ledc_channel_t blue_channel = LEDC_CHANNEL_2);
     // led_signal_->CycleColorsWithFade(300, 100);
     ~LedSignal();
     void InitializeLeds();
 
     GpioLed* red_led_;
-    GpioLed* green_led_;
     GpioLed* blue_led_;
     uint8_t brightness_ = LED_DEFAULT_BRIGHTNESS; // Brightness level for the LED
 };

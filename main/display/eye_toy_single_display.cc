@@ -86,6 +86,7 @@ EyeToySingleDisplay::EyeToySingleDisplay(esp_lcd_panel_io_handle_t panel_io, esp
             .buff_dma = 1,
             .buff_spiram = 0,
             .sw_rotate = 0,
+            .swap_bytes = 1,
             .full_refresh = 0,
             .direct_mode = 0,
         },
@@ -329,6 +330,9 @@ void EyeToySingleDisplay::SetupUI() {
     // 设置屏幕
     auto screen = lv_screen_active();
     lv_obj_set_style_bg_color(screen, current_theme.background, 0);
+    // 禁用屏幕滚动与滚动条
+    lv_obj_clear_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(screen, LV_SCROLLBAR_MODE_OFF);
 
     // 创建眼睛
     CreateEye(screen);
@@ -341,12 +345,17 @@ void EyeToySingleDisplay::CreateEye(lv_obj_t* parent) {
     int vertical_padding = height_ * 0.17;    // 垂直方向留出 17% 的边距
 
     lv_obj_t* eye_outer = lv_obj_create(parent);
-    lv_obj_set_size(eye_outer, width_, height_);
+    lv_obj_set_size(eye_outer, width_ + 4, height_ + 4);
     lv_obj_set_style_radius(eye_outer, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(eye_outer, lv_color_hex(0x6B5B27), 0); // 棕色
     lv_obj_set_style_border_width(eye_outer, 0, 0);
     lv_obj_set_style_pad_all(eye_outer, 0, 0);
     lv_obj_center(eye_outer);
+    // 细调整体垂直偏移，向上轻微移动以消除顶部可见边缘
+    lv_obj_set_y(eye_outer, lv_obj_get_y(eye_outer) - 2);
+    // 禁用外圈滚动与滚动条
+    lv_obj_clear_flag(eye_outer, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(eye_outer, LV_SCROLLBAR_MODE_OFF);
 
     // 2. 眼球（纯黑色），比外圈小一些，保持椭圆形
     int ball_w = (width_ - 2 * horizontal_padding) * 0.6;
@@ -359,6 +368,9 @@ void EyeToySingleDisplay::CreateEye(lv_obj_t* parent) {
     lv_obj_set_style_pad_all(eye_ball, 0, 0);
     lv_obj_center(eye_ball);
     lv_obj_set_y(eye_ball, lv_obj_get_y(eye_ball) - 20); // 整体上移 20 像素
+    // 禁用眼球滚动与滚动条
+    lv_obj_clear_flag(eye_ball, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(eye_ball, LV_SCROLLBAR_MODE_OFF);
 
     // 3. 高光1（大白点）
     lv_obj_t* highlight1 = lv_obj_create(eye_ball);
@@ -368,7 +380,10 @@ void EyeToySingleDisplay::CreateEye(lv_obj_t* parent) {
     lv_obj_set_style_border_width(highlight1, 0, 0);
     lv_obj_set_style_pad_all(highlight1, 0, 0);
     lv_obj_set_style_bg_opa(highlight1, LV_OPA_COVER, 0);
-    lv_obj_set_pos(highlight1, ball_w * 0.10, ball_h * 0.10);
+    // 向下微调高光，避免与顶部黄色边缘产生对比
+    lv_obj_set_pos(highlight1, ball_w * 0.10, ball_h * 0.12);
+    lv_obj_clear_flag(highlight1, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(highlight1, LV_SCROLLBAR_MODE_OFF);
 
     // 4. 高光2（小白点）
     lv_obj_t* highlight2 = lv_obj_create(eye_ball);
@@ -378,7 +393,9 @@ void EyeToySingleDisplay::CreateEye(lv_obj_t* parent) {
     lv_obj_set_style_border_width(highlight2, 0, 0);
     lv_obj_set_style_pad_all(highlight2, 0, 0);
     lv_obj_set_style_bg_opa(highlight2, LV_OPA_COVER, 0);
-    lv_obj_set_pos(highlight2, ball_w * 0.45, ball_h * 0.22);
+    lv_obj_set_pos(highlight2, ball_w * 0.45, ball_h * 0.24);
+    lv_obj_clear_flag(highlight2, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(highlight2, LV_SCROLLBAR_MODE_OFF);
 
     // 5. 创建眨眼遮罩层
     lv_obj_t* blink_mask = lv_obj_create(eye_outer);
@@ -389,6 +406,8 @@ void EyeToySingleDisplay::CreateEye(lv_obj_t* parent) {
     lv_obj_set_style_pad_all(blink_mask, 0, 0);
     lv_obj_set_pos(blink_mask, 0, -height_);  // 初始位置在眼睛上方
     lv_obj_set_style_bg_opa(blink_mask, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(blink_mask, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(blink_mask, LV_SCROLLBAR_MODE_OFF);
 
     // 保存高光对象供状态切换使用
     left_highlight_ = highlight1;

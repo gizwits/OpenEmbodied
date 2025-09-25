@@ -126,6 +126,14 @@ public:
     MqttClient(const MqttClient&) = delete;
     MqttClient& operator=(const MqttClient&) = delete;
     void ReportTimer();
+
+    // 新增：用于主循环调用的非阻塞函数
+    void processMessageQueue();
+    void processSendQueue();
+    // 判断是否已初始化（内部对象和队列均可用）
+    bool isInitialized() const {
+        return mqtt_ != nullptr && message_queue_ != nullptr && send_queue_ != nullptr;
+    }
     
     // 内存优化相关函数
     void printMemoryUsage();
@@ -155,6 +163,7 @@ private:
 
     static void messageReceiveHandler(void* arg);
     static void sendTask(void* arg);
+    
     void app2devMsgHandler(const uint8_t *data, int32_t len);
     static void timerCallback(TimerHandle_t xTimer);
     static void tokenRefreshTimerCallback(TimerHandle_t xTimer);  // Token 刷新定时器回调

@@ -11,6 +11,7 @@
 #include <wifi_station.h>
 #include <esp_log.h>
 #include "assets/lang_config.h"
+#include "power_manager.h"
 #include "vb6824.h"
 #include <esp_wifi.h>
 #include "data_point_manager.h"
@@ -29,7 +30,7 @@ private:
     VbAduioCodec audio_codec;
     Button volume_up_button_;
     Button volume_down_button_;
-    Button prev_button_;
+    // Button prev_button_;
     Button next_button_;
     // Minimal idle power-save (no heap, no std::function)
     esp_timer_handle_t idle_timer_ = nullptr;
@@ -141,21 +142,21 @@ private:
             }
         });
 
-        prev_button_.OnClick([this]() {
-            int64_t now = esp_timer_get_time();
-            if (Application::GetInstance().GetDeviceState() == DeviceState::kDeviceStateIdle) {
-                Application::GetInstance().CancelPlayMusic();
-                Application::GetInstance().ToggleChatState();
-                vTaskDelay(pdMS_TO_TICKS(2000));
-                Application::GetInstance().SendTextToAI("给我播放一首歌");
-            } else {
-                if (now - prev_last_click_time_ > 10* 1000000) { // 5秒
-                    prev_last_click_time_ = now;
-                    Application::GetInstance().SendTextToAI("给我播放一首歌");
-                }
-            }
+        // prev_button_.OnClick([this]() {
+        //     int64_t now = esp_timer_get_time();
+        //     if (Application::GetInstance().GetDeviceState() == DeviceState::kDeviceStateIdle) {
+        //         Application::GetInstance().CancelPlayMusic();
+        //         Application::GetInstance().ToggleChatState();
+        //         vTaskDelay(pdMS_TO_TICKS(2000));
+        //         Application::GetInstance().SendTextToAI("给我播放一首歌");
+        //     } else {
+        //         if (now - prev_last_click_time_ > 10* 1000000) { // 5秒
+        //             prev_last_click_time_ = now;
+        //             Application::GetInstance().SendTextToAI("给我播放一首歌");
+        //         }
+        //     }
             
-        });
+        // });
 
         next_button_.OnClick([this]() {
             int64_t now = esp_timer_get_time();
@@ -206,7 +207,10 @@ private:
             []() -> int { return Application::GetInstance().GetChatMode(); },
             [](int value) { Application::GetInstance().SetChatMode(value); },
             [this]() -> int { 
-                return 100; // 固定电量 100%
+                int level = 0;
+                bool charging = false, discharging = false;
+                GetBatteryLevel(level, charging, discharging);
+                return level;
             },
             [this]() -> int { return GetAudioCodec()->output_volume(); },
             [this](int value) { GetAudioCodec()->SetOutputVolume(value); },
@@ -218,14 +222,29 @@ private:
                 return 0;
             },
             [this]() -> int { return 100; }, // 固定亮度 100%
-            [this](int value) { /* toy 版本可能没有亮度调节 */ }
+            [this](int value) { 
+                /* toy 版本可能没有亮度调节 */
+                // 只处理 0 和 100
+                if (value == 0) {
+                    gpio_set_level(EXTRA_LIGHT_GPIO, 0);
+                } 
+                if (value == 100) {
+                    gpio_set_level(EXTRA_LIGHT_GPIO, 1);
+                }
+            }
         );
     }
+
+
+    void InitializePowerManager() {
+        PowerManager::GetInstance();
+    }
+
 
 public:
     CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO),
     volume_up_button_(VOLUME_UP_BUTTON_GPIO), volume_down_button_(VOLUME_DOWN_BUTTON_GPIO),
-    prev_button_(PREV_BUTTON_GPIO), next_button_(NEXT_BUTTON_GPIO),
+    next_button_(NEXT_BUTTON_GPIO),
     power_counter_settings_("power_counter", true) {      
 
         // 初始化上电计数器定时器
@@ -249,8 +268,22 @@ public:
             CheckPowerCount();
         }
 
+        InitializePowerManager();
 
         InitializeGpio(POWER_GPIO, true);
+
+        // 根据缓存亮度决定是否点亮灯
+        int cached_brightness = -1;
+        bool extra_light_on = true;  // 未设置过时默认打开
+        {
+            Settings dp_settings("datapoint", false);
+            cached_brightness = dp_settings.GetInt("brightness", -1);
+            if (cached_brightness != -1) {
+                extra_light_on = cached_brightness > 0;
+            }
+        }
+        InitializeGpio(EXTRA_LIGHT_GPIO, extra_light_on);
+        
 
         gpio_config_t io_conf = {};
         io_conf.pin_bit_mask = (1ULL << LED_GPIO);
@@ -306,6 +339,18 @@ public:
 
     virtual AudioCodec* GetAudioCodec() override {
         return &audio_codec;
+    }
+
+
+    virtual bool GetBatteryLevel(int &level, bool& charging, bool& discharging) override {
+        level = PowerManager::GetInstance().GetBatteryLevel();
+        charging = PowerManager::GetInstance().IsCharging();
+        discharging = !charging;
+        return true;
+    }
+
+    virtual bool IsCharging() override {
+        return PowerManager::GetInstance().IsCharging();
     }
 
     // 数据点相关方法实现

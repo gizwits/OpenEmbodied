@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstring>
 #include "wifi_station.h"
+#include "settings.h"
 
 #define TAG "DataPointManager"
 
@@ -304,6 +305,12 @@ bool DataPointManager::GetDataPointValue(const std::string& name, int& value) co
 
 // 标准实现：设置数据点值
 bool DataPointManager::SetDataPointValue(const std::string& name, int value) {
+    // 写入缓存与存储
+    cache_[name] = value;
+    // 使用 NVS 进行持久化
+    Settings settings("datapoint", true);
+    settings.SetInt(name, value);
+
     if (name == "chat_mode") {
         if (set_chat_mode_callback_) {
             set_chat_mode_callback_(value);
@@ -445,4 +452,50 @@ void DataPointManager::SetCallbacks(
     get_rssi_callback_ = get_rssi_callback;
     get_brightness_callback_ = get_brightness_callback;
     set_brightness_callback_ = set_brightness_callback;
+}
+
+void DataPointManager::InitFromStorage() {
+    // 加载已知可写数据点
+    Settings settings("datapoint", false);
+
+    // chat_mode, volume_set, brightness 为可写数据点
+    int v;
+    v = settings.GetInt("chat_mode", -1);
+    if (v != -1) {
+        cache_["chat_mode"] = v;
+        if (set_chat_mode_callback_) {
+            set_chat_mode_callback_(v);
+        }
+    }
+
+    v = settings.GetInt("volume_set", -1);
+    if (v != -1) {
+        cache_["volume_set"] = v;
+        if (set_volume_callback_) {
+            set_volume_callback_(v);
+        }
+    }
+
+    v = settings.GetInt("brightness", -1);
+    if (v != -1) {
+        cache_["brightness"] = v;
+        if (set_brightness_callback_) {
+            set_brightness_callback_(v);
+        }
+    }
+}
+
+bool DataPointManager::GetCachedDataPoint(const std::string& name, int& value) const {
+    auto it = cache_.find(name);
+    if (it == cache_.end()) {
+        return false;
+    }
+    value = it->second;
+    return true;
+}
+
+void DataPointManager::SetCachedDataPoint(const std::string& name, int value) {
+    cache_[name] = value;
+    Settings settings("datapoint", true);
+    settings.SetInt(name, value);
 }

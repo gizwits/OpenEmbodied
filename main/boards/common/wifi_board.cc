@@ -51,7 +51,6 @@ void WifiBoard::EnterWifiConfigMode() {
     hint += "\n\n";
     application.Alert(Lang::Strings::WIFI_CONFIG_MODE, hint.c_str(), "", Lang::Sounds::P3_WIFICONFIG);
 
-    vTaskDelay(pdMS_TO_TICKS(2500));
 
     auto display = Board::GetInstance().GetDisplay();
     display->EnterWifiConfig();
@@ -62,6 +61,8 @@ void WifiBoard::EnterWifiConfigMode() {
     wifi_config.RegisterCallback(OnWifiConfigEvent);
 
     wifi_config.Initialize(Auth::getInstance().getProductKey(), "XPG-GAgent");
+
+    CheckTmpFactoryTestModeWithWifiConfig();
 
     // Wait forever until reset after configuration
     while (true) {
@@ -74,6 +75,37 @@ void WifiBoard::EnterWifiConfigMode() {
 
 bool WifiBoard::IsWifiConfigMode() {
     return wifi_config_mode_;
+}
+
+void WifiBoard::CheckTmpFactoryTestModeWithWifiConfig() {
+#ifdef CONFIG_TMP_PRODUCT_TEST_WIFI
+    WifiConnectionManager::GetInstance().OnScanResults([](const std::vector<std::string>& ssids){
+        if (std::find(ssids.begin(), ssids.end(), CONFIG_TMP_PRODUCT_TEST_WIFI) != ssids.end()) {
+            // 存在产测wifi
+            Settings settings("wifi", true);
+            settings.SetInt("tmp_ft_mode", 1);
+            vTaskDelay(pdMS_TO_TICKS(100));
+            esp_restart();
+        }
+    });
+#endif
+}
+
+void WifiBoard::CheckTmpFactoryTestMode() {
+#ifdef CONFIG_TMP_PRODUCT_TEST_WIFI
+    ESP_LOGI(TAG, "PRODUCT_TEST_WIFI");
+    auto& wifi_station = WifiStation::GetInstance();
+    wifi_station.OnScanResults([this](const std::vector<std::string>& ssids) {
+        // 打印扫描到的 SSID 列表
+        if (std::find(ssids.begin(), ssids.end(), CONFIG_TMP_PRODUCT_TEST_WIFI) != ssids.end()) {
+            // 存在产测wifi
+            Settings settings("wifi", true);
+            settings.SetInt("tmp_ft_mode", 1);
+            vTaskDelay(pdMS_TO_TICKS(500));
+            esp_restart();
+        }
+    });
+#endif
 }
 
 void WifiBoard::StartNetwork() {
@@ -97,6 +129,9 @@ void WifiBoard::StartNetwork() {
         auto display = Board::GetInstance().GetDisplay();
         display->ShowNotification(Lang::Strings::SCANNING_WIFI, 30000);
     });
+
+    // CheckTmpFactoryTestMode();
+
     wifi_station.OnConnect([this](const std::string& ssid) {
         auto display = Board::GetInstance().GetDisplay();
         std::string notification = Lang::Strings::CONNECT_TO;

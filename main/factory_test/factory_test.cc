@@ -348,6 +348,11 @@ void save_factory_test_mode_task(void *arg) {
     if (mode == 0) {
         // 退出产测
         if (ret == ESP_OK) {
+#ifdef CONFIG_TMP_PRODUCT_TEST_WIFI
+            // 进入临时产测模式
+            Settings settings("wifi", true);
+            settings.SetInt("tmp_ft_mode", 1);
+#endif
             factory_test_send("+EXIT_TEST OK", strlen("+EXIT_TEST OK"));
         } else {
             factory_test_send("+EXIT_TEST ERROR", strlen("+EXIT_TEST ERROR"));
