@@ -7,6 +7,10 @@
 #include "application.h"
 #include <math.h>
 
+#define EYE_COLOR 0x40E0D0  // Tiffany Blue color for eyes
+
+#define TAG "EyeDisplayHorizontalEmo"
+
 void EyeDisplayHorizontalEmo::ClearEmojiScene() {
     // 清理可能存在的爱心对象（无论从什么状态切换）
     if (left_heart_) {
@@ -54,6 +58,12 @@ void EyeDisplayHorizontalEmo::ClearEmojiScene() {
         happy_mouth_mask_ = nullptr;
     }
 
+    // 清理可能存在的独立嘴巴对象（如 loving 表情在 screen 下创建的）
+    if (happy_mouth_) {
+        lv_obj_del(happy_mouth_);
+        happy_mouth_ = nullptr;
+    }
+
     // 清理可能存在的震惊表情对象
     if (shocked_face_) {
         lv_obj_del(shocked_face_);
@@ -67,19 +77,16 @@ void EyeDisplayHorizontalEmo::ClearEmojiScene() {
         shocked_line2_ = nullptr;
         shocked_line3_ = nullptr;
     }
+
+    // 清理可能存在的震惊嘴巴对象
+    if (shocked_mouth_) {
+        lv_obj_del(shocked_mouth_);
+        shocked_mouth_ = nullptr;
+    }
+
+    // neutral face动画使用静态对象，在ClearEmojiScene中不需要清理
+    // 动画会在下次调用StartNeutralFaceAnimation时自动停止
 }
-#include "eye_display_horizontal_emojis.h"
-#include <esp_log.h>
-#include <esp_err.h>
-#include <esp_lvgl_port.h>
-#include <cstring>
-#include <esp_timer.h>
-#include "application.h"
-#include <math.h>
-
-#define EYE_COLOR 0x40E0D0  // Tiffany Blue color for eyes
-
-#define TAG "EyeDisplayHorizontalEmo"
 
 EyeDisplayHorizontalEmo::EyeDisplayHorizontalEmo(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
     int width, int height, int offset_x, int offset_y,
@@ -1337,19 +1344,20 @@ void EyeDisplayHorizontalEmo::StartHappyFaceAnimation() {
     const int SCREEN_WIDTH = LV_HOR_RES;
     const int SCREEN_HEIGHT = LV_VER_RES;
     const float SCALE = (float)std::min(SCREEN_WIDTH, SCREEN_HEIGHT) / 240.0f;
-    const int EYE_SIZE = (int)(56 * SCALE);
-    const int EYE_SPACING = (int)(50 * SCALE);
-    const int MOUTH_SIZE = (int)(96 * SCALE);
-    const int MOUTH_MASK_HEIGHT = (int)(48 * SCALE); // 口罩高度
-    const int VERTICAL_OFFSET = (int)(20 * SCALE);
-    const int MOUTH_Y_POS = (int)(115 * SCALE);
+    const int EYE_SIZE = (int)(40 * SCALE); 
+    const int EYE_SPACING = (int)(65 * SCALE); // 眼睛间距
+    const int MOUTH_SIZE = (int)(110 * SCALE); // 增大嘴巴：从96增加到110
+    const int MOUTH_MASK_HEIGHT = (int)(55 * SCALE); // 相应增大遮罩高度 
+    // 计算居中位置：让整个表情在屏幕正中间
+    const int EYE_Y_OFFSET = (int)(-40 * SCALE); // 眼睛在中心上方35像素（增加5像素距离）
+    const int MOUTH_Y_OFFSET = (int)(30 * SCALE); // 嘴巴在中心下方35像素（增加5像素距离）
 
     // 容器便于整体管理/动画
     face_ = lv_obj_create(screen);
     lv_obj_remove_style_all(face_);
     lv_obj_set_size(face_, SCREEN_WIDTH, SCREEN_HEIGHT);
     lv_obj_set_style_bg_opa(face_, LV_OPA_TRANSP, 0);
-    lv_obj_align(face_, LV_ALIGN_CENTER, 0, -VERTICAL_OFFSET);
+    lv_obj_align(face_, LV_ALIGN_CENTER, 0, 0); // 容器完全居中
 
     // 嘴巴：使用主题色圆形 + 黑色上半遮罩，形成半圆笑嘴
     happy_mouth_ = lv_obj_create(face_);
@@ -1358,7 +1366,7 @@ void EyeDisplayHorizontalEmo::StartHappyFaceAnimation() {
     lv_obj_set_style_radius(happy_mouth_, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(happy_mouth_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(happy_mouth_, LV_OPA_COVER, 0);
-    lv_obj_set_pos(happy_mouth_, (SCREEN_WIDTH - MOUTH_SIZE) / 2, MOUTH_Y_POS);
+    lv_obj_align(happy_mouth_, LV_ALIGN_CENTER, 0, MOUTH_Y_OFFSET);
 
     // 黑色遮罩（覆盖圆形上半部分，留下底部半圆）
     happy_mouth_mask_ = lv_obj_create(happy_mouth_);
@@ -1380,7 +1388,7 @@ void EyeDisplayHorizontalEmo::StartHappyFaceAnimation() {
     lv_obj_set_style_radius(happy_left_eye_, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(happy_left_eye_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(happy_left_eye_, LV_OPA_COVER, 0);
-    lv_obj_align(happy_left_eye_, LV_ALIGN_LEFT_MID, EYE_SPACING, -VERTICAL_OFFSET);
+    lv_obj_align(happy_left_eye_, LV_ALIGN_LEFT_MID, EYE_SPACING, EYE_Y_OFFSET);
 
     // 右眼（圆形）- 放在嘴巴后面创建，确保在嘴巴上面
     happy_right_eye_ = lv_obj_create(face_);
@@ -1389,23 +1397,26 @@ void EyeDisplayHorizontalEmo::StartHappyFaceAnimation() {
     lv_obj_set_style_radius(happy_right_eye_, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(happy_right_eye_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(happy_right_eye_, LV_OPA_COVER, 0);
-    lv_obj_align(happy_right_eye_, LV_ALIGN_RIGHT_MID, -EYE_SPACING, -VERTICAL_OFFSET);
+    lv_obj_align(happy_right_eye_, LV_ALIGN_RIGHT_MID, -EYE_SPACING, EYE_Y_OFFSET);
 
 
     // 定义动画常量
     const int MOUTH_ANIM_OFFSET = 8;
     const int MOUTH_ANIM_TIME = 900;
-    const int EYE_ANIM_MIN_SIZE = 52;
-    const int EYE_ANIM_MAX_SIZE = 58;
+    const int EYE_ANIM_MIN_SIZE = 33; // 减小5：36-5=31
+    const int EYE_ANIM_MAX_SIZE = 38; // 减小5：44-5=39
     const int EYE_ANIM_TIME = MOUTH_ANIM_TIME; // 与嘴巴动画时长同步
 
     // 简单动画：嘴巴轻微上下跳动，双眼轻微缩放
     lv_anim_init(&mouth_anim_);
     lv_anim_set_var(&mouth_anim_, happy_mouth_);
-    // 直接使用MOUTH_Y_POS而不是获取当前位置，确保动画基于我们设置的位置
-    lv_anim_set_values(&mouth_anim_, MOUTH_Y_POS, MOUTH_Y_POS - MOUTH_ANIM_OFFSET);
+    // 使用相对位置进行动画
+    lv_anim_set_values(&mouth_anim_, MOUTH_Y_OFFSET, MOUTH_Y_OFFSET - MOUTH_ANIM_OFFSET);
     lv_anim_set_time(&mouth_anim_, MOUTH_ANIM_TIME);
-    lv_anim_set_exec_cb(&mouth_anim_, (lv_anim_exec_xcb_t)lv_obj_set_y);
+    lv_anim_set_exec_cb(&mouth_anim_, [](void* obj, int32_t v){
+        lv_obj_t* mouth = (lv_obj_t*)obj;
+        lv_obj_align(mouth, LV_ALIGN_CENTER, 0, v); // 保持水平居中，只改变垂直位置
+    });
     lv_anim_set_path_cb(&mouth_anim_, lv_anim_path_ease_in_out);
     lv_anim_set_repeat_count(&mouth_anim_, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_playback_time(&mouth_anim_, MOUTH_ANIM_TIME);
@@ -1454,19 +1465,19 @@ void EyeDisplayHorizontalEmo::StartSadEmojiAnimation() {
     const int SCREEN_WIDTH = LV_HOR_RES;
     const int SCREEN_HEIGHT = LV_VER_RES;
     const float SCALE = (float)std::min(SCREEN_WIDTH, SCREEN_HEIGHT) / 240.0f;
-    const int EYE_SIZE = (int)(45 * SCALE);      // 眼睛大小
-    const int EYE_SPACING = (int)(40 * SCALE);   // 眼睛间距
+    const int EYE_SIZE = (int)(55 * SCALE);      // 眼睛大小增大到50
+    const int EYE_SPACING = (int)(60 * SCALE);    // 眼睛间距缩短40：40-40=0
     // 眉毛间距（当前未用）
     // int EYEBROW_SPACING = 35;
-    const int TEAR_SIZE = 8;       // 眼泪大小
-    const int VERTICAL_OFFSET = 10; // 垂直偏移量
+    const int TEAR_SIZE = 4;       // 眼泪大小缩小一半：8/2=4
+    const int VERTICAL_OFFSET = 20; // 垂直偏移量，缩短10：10+10=20
     
     // 创建面部容器
     lv_obj_t* face = lv_obj_create(screen);
     lv_obj_remove_style_all(face);
     lv_obj_set_size(face, SCREEN_WIDTH, SCREEN_HEIGHT);
     lv_obj_set_style_bg_opa(face, LV_OPA_TRANSP, 0);
-    lv_obj_align(face, LV_ALIGN_CENTER, 0, -VERTICAL_OFFSET);
+    lv_obj_align(face, LV_ALIGN_CENTER, 0, 0); // 容器完全居中
     
     // 左眼（圆形）
     lv_obj_t* left_eye = lv_obj_create(face);
@@ -1475,7 +1486,7 @@ void EyeDisplayHorizontalEmo::StartSadEmojiAnimation() {
     lv_obj_set_style_radius(left_eye, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(left_eye, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(left_eye, LV_OPA_COVER, 0);
-    lv_obj_align(left_eye, LV_ALIGN_LEFT_MID, EYE_SPACING, -VERTICAL_OFFSET);
+    lv_obj_align(left_eye, LV_ALIGN_LEFT_MID, EYE_SPACING, -20); // 眼睛在中心上方20像素（往下移动10）
     
     // 右眼（圆形）
     lv_obj_t* right_eye = lv_obj_create(face);
@@ -1484,48 +1495,48 @@ void EyeDisplayHorizontalEmo::StartSadEmojiAnimation() {
     lv_obj_set_style_radius(right_eye, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(right_eye, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(right_eye, LV_OPA_COVER, 0);
-    lv_obj_align(right_eye, LV_ALIGN_RIGHT_MID, -EYE_SPACING, -VERTICAL_OFFSET);
+    lv_obj_align(right_eye, LV_ALIGN_RIGHT_MID, -EYE_SPACING, -20); // 眼睛在中心上方20像素（往下移动10）
     
     // 左眉毛（斜向下弯曲的弧形）
-    const int EYEBROW_ARC_SIZE = 60;  // 眉毛弧形大小（更长）
+    const int EYEBROW_ARC_SIZE = 30;  // 眉毛弧形大小缩小一半：60/2=30
     lv_obj_t* left_eyebrow = lv_arc_create(face);
     lv_obj_set_size(left_eyebrow, EYEBROW_ARC_SIZE, EYEBROW_ARC_SIZE);
     // 左眉毛与左眼同心（向左侧同心）：水平偏移与左眼一致，再向左移动10像素
-    lv_obj_align(left_eyebrow, LV_ALIGN_LEFT_MID, EYE_SPACING - 10, -VERTICAL_OFFSET-5);
-    lv_arc_set_bg_angles(left_eyebrow, 220, 290);              // 眉毛：70度弧长，更短
+    lv_obj_align(left_eyebrow, LV_ALIGN_LEFT_MID, EYE_SPACING-3, -25); // 眉毛再往上移动15像素
+    lv_arc_set_bg_angles(left_eyebrow, 204, 294);              // 眉毛：左边下垂，右边上翘，保持90度长度
     lv_arc_set_rotation(left_eyebrow, 0);                      // 角度基准不旋转
     lv_arc_set_value(left_eyebrow, 100);                       // 指示弧覆盖整个弧
     lv_obj_remove_style(left_eyebrow, NULL, LV_PART_KNOB);     // 移除旋钮
     lv_obj_clear_flag(left_eyebrow, LV_OBJ_FLAG_CLICKABLE);    // 不可点击
     // 背景弧隐藏到黑色背景
     lv_obj_set_style_arc_color(left_eyebrow, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_arc_width(left_eyebrow, 8, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(left_eyebrow, 4, LV_PART_MAIN);  // 眉毛厚度缩小一半：8/2=4
     // 指示弧使用主题色，形成可见弧线
     lv_obj_set_style_arc_color(left_eyebrow, lv_color_hex(EYE_COLOR), LV_PART_INDICATOR);
-    lv_obj_set_style_arc_width(left_eyebrow, 8, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(left_eyebrow, 4, LV_PART_INDICATOR);  // 眉毛厚度缩小一半：8/2=4
     
     // 右眉毛（斜向下弯曲的弧形）
     lv_obj_t* right_eyebrow = lv_arc_create(face);
     lv_obj_set_size(right_eyebrow, EYEBROW_ARC_SIZE, EYEBROW_ARC_SIZE);
     // 右眉毛与右眼同心（向右侧同心）：水平偏移与右眼一致，再向右移动10像素
-    lv_obj_align(right_eyebrow, LV_ALIGN_RIGHT_MID, -EYE_SPACING + 13, -VERTICAL_OFFSET + 2);
-    lv_arc_set_bg_angles(right_eyebrow, 260, 330);              // 与左眉毛相同的角度范围
+    lv_obj_align(right_eyebrow, LV_ALIGN_RIGHT_MID, -EYE_SPACING + 3, -25); // 与左眉毛镜像位置
+    lv_arc_set_bg_angles(right_eyebrow, 240, 330);              // 左眉毛的镜像角度，保持90度长度
     lv_arc_set_rotation(right_eyebrow, 0);                      // 角度基准不旋转
     lv_arc_set_value(right_eyebrow, 100);                       // 指示弧覆盖整个弧
     lv_obj_remove_style(right_eyebrow, NULL, LV_PART_KNOB);     // 移除旋钮
     lv_obj_clear_flag(right_eyebrow, LV_OBJ_FLAG_CLICKABLE);    // 不可点击
     // 背景弧隐藏到黑色背景
     lv_obj_set_style_arc_color(right_eyebrow, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_arc_width(right_eyebrow, 8, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(right_eyebrow, 4, LV_PART_MAIN);  // 眉毛厚度缩小一半：8/2=4
     // 指示弧使用主题色，形成可见弧线
     lv_obj_set_style_arc_color(right_eyebrow, lv_color_hex(EYE_COLOR), LV_PART_INDICATOR);
-    lv_obj_set_style_arc_width(right_eyebrow, 8, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(right_eyebrow, 4, LV_PART_INDICATOR);  // 眉毛厚度缩小一半：8/2=4
     
     // 嘴巴（反向、中空弧形：使用圆弧控件绘制上半圆）
-    const int MOUTH_ARC_SIZE = 88;
+    const int MOUTH_ARC_SIZE = 53;  // 嘴巴大小缩小一半：88/2=44
     lv_obj_t* mouth = lv_arc_create(face);
     lv_obj_set_size(mouth, MOUTH_ARC_SIZE, MOUTH_ARC_SIZE);
-    lv_obj_align(mouth, LV_ALIGN_CENTER, 0, 100 - VERTICAL_OFFSET); // 嘴巴位置60
+    lv_obj_align(mouth, LV_ALIGN_CENTER, 0, 55); // 嘴巴在中心下方55像素（往下移动10）
     lv_arc_set_bg_angles(mouth, 210, 330);              // 背景弧：上方约1/3圆
     lv_arc_set_rotation(mouth, 0);                      // 角度基准不旋转
     lv_arc_set_value(mouth, 100);                       // 指示弧覆盖整个上半圆
@@ -1533,10 +1544,10 @@ void EyeDisplayHorizontalEmo::StartSadEmojiAnimation() {
     lv_obj_clear_flag(mouth, LV_OBJ_FLAG_CLICKABLE);    // 不可点击
     // 背景弧隐藏到黑色背景
     lv_obj_set_style_arc_color(mouth, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_arc_width(mouth, 12, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(mouth, 6, LV_PART_MAIN);  // 嘴巴厚度缩小一半：12/2=6
     // 指示弧使用主题色，形成可见弧线
     lv_obj_set_style_arc_color(mouth, lv_color_hex(EYE_COLOR), LV_PART_INDICATOR);
-    lv_obj_set_style_arc_width(mouth, 12, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(mouth, 7, LV_PART_INDICATOR);  // 嘴巴厚度缩小一半：12/2=6
     
     // 创建2个眼泪对象，实现连续下落效果
     lv_obj_t* right_tear1 = lv_obj_create(face);
@@ -1545,7 +1556,7 @@ void EyeDisplayHorizontalEmo::StartSadEmojiAnimation() {
     lv_obj_set_style_radius(right_tear1, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(right_tear1, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(right_tear1, LV_OPA_COVER, 0);
-    lv_obj_align(right_tear1, LV_ALIGN_RIGHT_MID, -EYE_SPACING + 5, 10 - VERTICAL_OFFSET);
+    lv_obj_align(right_tear1, LV_ALIGN_RIGHT_MID, -EYE_SPACING + 5, 10); // 眼泪在中心下方10像素（往下移动10）
     
     lv_obj_t* right_tear2 = lv_obj_create(face);
     lv_obj_remove_style_all(right_tear2);
@@ -1553,7 +1564,7 @@ void EyeDisplayHorizontalEmo::StartSadEmojiAnimation() {
     lv_obj_set_style_radius(right_tear2, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(right_tear2, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(right_tear2, LV_OPA_COVER, 0);
-    lv_obj_align(right_tear2, LV_ALIGN_LEFT_MID, EYE_SPACING - 5, 10 - VERTICAL_OFFSET);  // 左眼泪位置
+    lv_obj_align(right_tear2, LV_ALIGN_LEFT_MID, EYE_SPACING - 5, 10);  // 左眼泪在中心下方10像素（往下移动10）
     
     // 保存对象指针以便清理
     face_ = face;
@@ -1582,9 +1593,9 @@ void EyeDisplayHorizontalEmo::StartSadEmojiAnimation() {
         lv_obj_t* tear = (lv_obj_t*)obj;
         int32_t progress = value;  // 0-100
         
-        // 计算Y位置：从起始位置到终点位置
-        int32_t start_y = 10 - VERTICAL_OFFSET;
-        int32_t end_y = 80 - VERTICAL_OFFSET;
+        // 计算Y位置：从起始位置到终点位置（起始位置整体上移30，再下移5）
+        int32_t start_y = -15; // 上移30再下移5：10 -> -20 -> -15
+        int32_t end_y = 45;    // 同步下移5：40 -> 45
         int32_t current_y = start_y + (end_y - start_y) * progress / 100;
         lv_obj_set_y(tear, current_y);
         
@@ -1615,9 +1626,9 @@ void EyeDisplayHorizontalEmo::StartSadEmojiAnimation() {
         lv_obj_t* tear = (lv_obj_t*)obj;
         int32_t progress = value;  // 0-100
         
-        // 计算Y位置：从起始位置到终点位置（与右眼泪相同）
-        int32_t start_y = 10 - VERTICAL_OFFSET;
-        int32_t end_y = 80 - VERTICAL_OFFSET;
+        // 计算Y位置：从起始位置到终点位置（与右眼泪相同，起始位置整体上移30，再下移5）
+        int32_t start_y = -15; // 上移30再下移5：10 -> -20 -> -15
+        int32_t end_y = 45;    // 同步下移5：40 -> 45
         int32_t current_y = start_y + (end_y - start_y) * progress / 100;
         lv_obj_set_y(tear, current_y);
         
@@ -1642,7 +1653,7 @@ void EyeDisplayHorizontalEmo::StartSadEmojiAnimation() {
     static lv_anim_t left_eyebrow_anim;
     lv_anim_init(&left_eyebrow_anim);
     lv_anim_set_var(&left_eyebrow_anim, left_eyebrow);
-    lv_anim_set_values(&left_eyebrow_anim, -VERTICAL_OFFSET-7, -VERTICAL_OFFSET-14); // 缩短幅度5px
+    lv_anim_set_values(&left_eyebrow_anim, -26, -30); // 最低点上调3、最高点上调2
     lv_anim_set_time(&left_eyebrow_anim, 2000);
     lv_anim_set_repeat_count(&left_eyebrow_anim, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_playback_time(&left_eyebrow_anim, 2000);
@@ -1653,7 +1664,7 @@ void EyeDisplayHorizontalEmo::StartSadEmojiAnimation() {
     static lv_anim_t right_eyebrow_anim;
     lv_anim_init(&right_eyebrow_anim);
     lv_anim_set_var(&right_eyebrow_anim, right_eyebrow);
-    lv_anim_set_values(&right_eyebrow_anim, -VERTICAL_OFFSET-4, -VERTICAL_OFFSET-11); // 调整基准位置+3px
+    lv_anim_set_values(&right_eyebrow_anim, -26, -30); // 与左眉毛相同的动画范围
     lv_anim_set_time(&right_eyebrow_anim, 2000);
     lv_anim_set_repeat_count(&right_eyebrow_anim, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_playback_time(&right_eyebrow_anim, 2000);
@@ -1665,7 +1676,7 @@ void EyeDisplayHorizontalEmo::StartSadEmojiAnimation() {
     static lv_anim_t mouth_anim;
     lv_anim_init(&mouth_anim);
     lv_anim_set_var(&mouth_anim, mouth);
-    lv_anim_set_values(&mouth_anim, 100 - VERTICAL_OFFSET, 100 - VERTICAL_OFFSET - 8); // 与眉毛移动幅度相似
+    lv_anim_set_values(&mouth_anim, 50, 42); // 嘴巴动画整体上移5：55->50, 47->42
     lv_anim_set_time(&mouth_anim, 2000);
     lv_anim_set_repeat_count(&mouth_anim, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_playback_time(&mouth_anim, 2000);
@@ -1686,10 +1697,10 @@ void EyeDisplayHorizontalEmo::StartShockedEmojiAnimation() {
     const int SCREEN_WIDTH = LV_HOR_RES;
     const int SCREEN_HEIGHT = LV_VER_RES;
     const float SCALE = (float)std::min(SCREEN_WIDTH, SCREEN_HEIGHT) / 240.0f;
-    const int EYE_SIZE = (int)(45 * SCALE);
-    const int EYE_SPACING = (int)(50 * SCALE);
-    const int EYEBROW_SPACING = (int)(33 * SCALE);
-    const int VERTICAL_OFFSET = (int)(10 * SCALE);
+    const int EYE_SIZE = (int)(30 * SCALE);             // 缩小三分之一（2/3）
+    const int EYE_SPACING = (int)(57 * SCALE);          // 将原间距缩短一半（约 43 -> 21）
+    const int EYEBROW_SPACING = (int)(22 * SCALE);      // 33 -> 22
+    const int VERTICAL_OFFSET = (int)(17 * SCALE);      // 再下移5：22 -> 17
     
     // 创建面部容器
     shocked_face_ = lv_obj_create(screen);
@@ -1705,7 +1716,7 @@ void EyeDisplayHorizontalEmo::StartShockedEmojiAnimation() {
     lv_obj_set_style_radius(shocked_left_eye_, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(shocked_left_eye_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(shocked_left_eye_, LV_OPA_COVER, 0);
-    lv_obj_align(shocked_left_eye_, LV_ALIGN_LEFT_MID, EYE_SPACING, -VERTICAL_OFFSET-5);
+    lv_obj_align(shocked_left_eye_, LV_ALIGN_LEFT_MID, EYE_SPACING, -VERTICAL_OFFSET+2); // 下移 5 像素（-3 -> +2）
     
     // 右眼（圆形）
     shocked_right_eye_ = lv_obj_create(shocked_face_);
@@ -1714,15 +1725,18 @@ void EyeDisplayHorizontalEmo::StartShockedEmojiAnimation() {
     lv_obj_set_style_radius(shocked_right_eye_, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(shocked_right_eye_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(shocked_right_eye_, LV_OPA_COVER, 0);
-    lv_obj_align(shocked_right_eye_, LV_ALIGN_RIGHT_MID, -EYE_SPACING, -VERTICAL_OFFSET-5);
+    lv_obj_align(shocked_right_eye_, LV_ALIGN_RIGHT_MID, -EYE_SPACING, -VERTICAL_OFFSET+2);
     
     // 左眉毛（向上翘的弧形）
-    const int EYEBROW_ARC_SIZE = 80;  // 增大圆面积，在同样长度下弧度更小
+    const int EYEBROW_ARC_SIZE = 53;  // 80 -> 53 (≈2/3)
     shocked_left_eyebrow_ = lv_arc_create(shocked_face_);
     lv_obj_set_size(shocked_left_eyebrow_, EYEBROW_ARC_SIZE, EYEBROW_ARC_SIZE);
-    lv_obj_align(shocked_left_eyebrow_, LV_ALIGN_LEFT_MID, EYEBROW_SPACING + 20, -VERTICAL_OFFSET - 72); // 向上移动10像素
+    lv_obj_align(shocked_left_eyebrow_, LV_ALIGN_LEFT_MID, EYEBROW_SPACING + 23, -VERTICAL_OFFSET - 98); // 间距各内收10
+    // 使用样式平移，避免布局实时对齐覆盖
+    lv_obj_set_style_translate_y(shocked_left_eyebrow_, -50, 0);
     lv_arc_set_bg_angles(shocked_left_eyebrow_, 0, 0);                   // 隐藏背景弧
-    lv_arc_set_angles(shocked_left_eyebrow_, 115, 165);                  // 增加角度范围，增加眉毛长度
+    // 还原到之前的眉毛大小
+    lv_arc_set_angles(shocked_left_eyebrow_, 115, 165);
     lv_arc_set_rotation(shocked_left_eyebrow_, -27); // 整体逆时针旋转27度
     lv_obj_remove_style(shocked_left_eyebrow_, NULL, LV_PART_KNOB);
     lv_obj_clear_flag(shocked_left_eyebrow_, LV_OBJ_FLAG_CLICKABLE);
@@ -1730,14 +1744,15 @@ void EyeDisplayHorizontalEmo::StartShockedEmojiAnimation() {
     lv_obj_set_style_arc_color(shocked_left_eyebrow_, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_style_arc_width(shocked_left_eyebrow_, 0, LV_PART_MAIN);  // 背景弧宽度设为0
     lv_obj_set_style_arc_color(shocked_left_eyebrow_, lv_color_hex(EYE_COLOR), LV_PART_INDICATOR);
-    lv_obj_set_style_arc_width(shocked_left_eyebrow_, 8, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(shocked_left_eyebrow_, 5, LV_PART_INDICATOR); // 线宽 8 -> 5
 
     // 右眉毛（向上翘的弧形）
     shocked_right_eyebrow_ = lv_arc_create(shocked_face_);
     lv_obj_set_size(shocked_right_eyebrow_, EYEBROW_ARC_SIZE, EYEBROW_ARC_SIZE);
-    lv_obj_align(shocked_right_eyebrow_, LV_ALIGN_RIGHT_MID, -EYEBROW_SPACING - 20, -VERTICAL_OFFSET - 72); // 与左眉毛对称位置
+    lv_obj_align(shocked_right_eyebrow_, LV_ALIGN_RIGHT_MID, -EYEBROW_SPACING - 23, -VERTICAL_OFFSET - 98); // 间距各内收10
+    lv_obj_set_style_translate_y(shocked_right_eyebrow_, -50, 0);
     lv_arc_set_bg_angles(shocked_right_eyebrow_, 0, 0);                   // 隐藏背景弧
-    lv_arc_set_angles(shocked_right_eyebrow_, 15, 65);                  // 镜像左眉毛的角度范围
+    lv_arc_set_angles(shocked_right_eyebrow_, 15, 65);
     lv_arc_set_rotation(shocked_right_eyebrow_, 27); // 顺时针旋转27度，与左眉毛镜像
     lv_obj_remove_style(shocked_right_eyebrow_, NULL, LV_PART_KNOB);
     lv_obj_clear_flag(shocked_right_eyebrow_, LV_OBJ_FLAG_CLICKABLE);
@@ -1745,71 +1760,70 @@ void EyeDisplayHorizontalEmo::StartShockedEmojiAnimation() {
     lv_obj_set_style_arc_color(shocked_right_eyebrow_, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_style_arc_width(shocked_right_eyebrow_, 0, LV_PART_MAIN);  // 背景弧宽度设为0
     lv_obj_set_style_arc_color(shocked_right_eyebrow_, lv_color_hex(EYE_COLOR), LV_PART_INDICATOR);
-    lv_obj_set_style_arc_width(shocked_right_eyebrow_, 8, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(shocked_right_eyebrow_, 5, LV_PART_INDICATOR);
 
     // 嘴巴（椭圆形状）
     shocked_mouth_ = lv_obj_create(shocked_face_);
     lv_obj_remove_style_all(shocked_mouth_);
-    lv_obj_set_size(shocked_mouth_, 45, 45);  // 初始圆形嘴巴（45x45）
+    lv_obj_set_size(shocked_mouth_, 30, 30);  // 45 -> 30
     lv_obj_set_style_radius(shocked_mouth_, LV_RADIUS_CIRCLE, 0);  // 圆形
     lv_obj_set_style_bg_color(shocked_mouth_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(shocked_mouth_, LV_OPA_COVER, 0);
-    lv_obj_align(shocked_mouth_, LV_ALIGN_CENTER, 0, 75 - VERTICAL_OFFSET);  // 往上移动15像素
+    lv_obj_align(shocked_mouth_, LV_ALIGN_CENTER, 0, 50 - VERTICAL_OFFSET);  // 75 -> 50
     
     // 三条竖线（震惊标记）- 右边长，左边短，长度减小三分之一，间距增加7，整体向左移动19向上移动10
     shocked_line1_ = lv_obj_create(shocked_face_);
     lv_obj_remove_style_all(shocked_line1_);
-    lv_obj_set_size(shocked_line1_, 4, 13);  // 最短 (19*2/3=12.7≈13)
-    lv_obj_set_style_radius(shocked_line1_, 2, 0);
+    lv_obj_set_size(shocked_line1_, 3, 9);   // 宽 4->3，高 13->9
+    lv_obj_set_style_radius(shocked_line1_, 1, 0);
     lv_obj_set_style_bg_color(shocked_line1_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(shocked_line1_, LV_OPA_COVER, 0);
-    lv_obj_align(shocked_line1_, LV_ALIGN_RIGHT_MID, -EYEBROW_SPACING - 6, -VERTICAL_OFFSET - 25);  // 向左移动19，向上移动10
+    lv_obj_align(shocked_line1_, LV_ALIGN_RIGHT_MID, -EYEBROW_SPACING - 9, -VERTICAL_OFFSET - 17);  // 左移5
     
     shocked_line2_ = lv_obj_create(shocked_face_);
     lv_obj_remove_style_all(shocked_line2_);
-    lv_obj_set_size(shocked_line2_, 4, 18);  // 中等长度 (27*2/3=18)
-    lv_obj_set_style_radius(shocked_line2_, 2, 0);
+    lv_obj_set_size(shocked_line2_, 3, 12);  // 宽 4->3，高 18->12
+    lv_obj_set_style_radius(shocked_line2_, 1, 0);
     lv_obj_set_style_bg_color(shocked_line2_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(shocked_line2_, LV_OPA_COVER, 0);
-    lv_obj_align(shocked_line2_, LV_ALIGN_RIGHT_MID, -EYEBROW_SPACING + 1, -VERTICAL_OFFSET - 25);  // 间距增加7，向左移动19，向上移动10
+    lv_obj_align(shocked_line2_, LV_ALIGN_RIGHT_MID, -EYEBROW_SPACING - 4, -VERTICAL_OFFSET - 17);  // 左移5
     
     shocked_line3_ = lv_obj_create(shocked_face_);
     lv_obj_remove_style_all(shocked_line3_);
-    lv_obj_set_size(shocked_line3_, 4, 25);  // 最长 (38*2/3=25.3≈25)
-    lv_obj_set_style_radius(shocked_line3_, 2, 0);
+    lv_obj_set_size(shocked_line3_, 3, 17);  // 宽 4->3，高 25->17
+    lv_obj_set_style_radius(shocked_line3_, 1, 0);
     lv_obj_set_style_bg_color(shocked_line3_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(shocked_line3_, LV_OPA_COVER, 0);
-    lv_obj_align(shocked_line3_, LV_ALIGN_RIGHT_MID, -EYEBROW_SPACING + 8, -VERTICAL_OFFSET - 25);  // 间距增加7，向左移动19，向上移动10
+    lv_obj_align(shocked_line3_, LV_ALIGN_RIGHT_MID, -EYEBROW_SPACING + 0, -VERTICAL_OFFSET - 17);  // 左移5
     
     // 添加眉毛上下移动动画，与眼睛和嘴巴同步
     static lv_anim_t left_eyebrow_anim;
+    int base_y_left = lv_obj_get_y(shocked_left_eyebrow_);
     lv_anim_init(&left_eyebrow_anim);
     lv_anim_set_var(&left_eyebrow_anim, shocked_left_eyebrow_);
-    lv_anim_set_values(&left_eyebrow_anim, 0, 100);  // 0表示原始位置，100表示最高位置
-    lv_anim_set_time(&left_eyebrow_anim, 2000);  // 与眼睛和嘴巴同步
+    // 与嘴巴/双眼动画同步：周期 2000ms，往复，零延迟
+    lv_anim_set_values(&left_eyebrow_anim, base_y_left, base_y_left - 8);
+    lv_anim_set_time(&left_eyebrow_anim, 2000);
+    lv_anim_set_delay(&left_eyebrow_anim, 0);
     lv_anim_set_repeat_count(&left_eyebrow_anim, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_playback_time(&left_eyebrow_anim, 2000);
-    lv_anim_set_exec_cb(&left_eyebrow_anim, [](void* obj, int32_t v) {
-        lv_obj_t* eyebrow = (lv_obj_t*)obj;
-        int32_t base_y = lv_obj_get_y(eyebrow);
-        lv_obj_set_y(eyebrow, base_y - (v * 6) / 100);
-    });
+    lv_anim_set_playback_delay(&left_eyebrow_anim, 0);
+    lv_anim_set_exec_cb(&left_eyebrow_anim, (lv_anim_exec_xcb_t)lv_obj_set_y);
     lv_anim_set_path_cb(&left_eyebrow_anim, lv_anim_path_ease_in_out);
     lv_anim_start(&left_eyebrow_anim);
     
     // 右眉毛动画，与左眉毛同步
     static lv_anim_t right_eyebrow_anim;
+    int base_y_right = lv_obj_get_y(shocked_right_eyebrow_);
     lv_anim_init(&right_eyebrow_anim);
     lv_anim_set_var(&right_eyebrow_anim, shocked_right_eyebrow_);
-    lv_anim_set_values(&right_eyebrow_anim, 0, 100);  // 0表示原始位置，100表示最高位置
-    lv_anim_set_time(&right_eyebrow_anim, 2000);  // 与眼睛和嘴巴同步
+    lv_anim_set_values(&right_eyebrow_anim, base_y_right, base_y_right - 8);
+    lv_anim_set_time(&right_eyebrow_anim, 2000);
+    lv_anim_set_delay(&right_eyebrow_anim, 0);
     lv_anim_set_repeat_count(&right_eyebrow_anim, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_playback_time(&right_eyebrow_anim, 2000);
-    lv_anim_set_exec_cb(&right_eyebrow_anim, [](void* obj, int32_t v) {
-        lv_obj_t* eyebrow = (lv_obj_t*)obj;
-        int32_t base_y = lv_obj_get_y(eyebrow);
-        lv_obj_set_y(eyebrow, base_y - (v * 6) / 100);
-    });
+    lv_anim_set_playback_delay(&right_eyebrow_anim, 0);
+    lv_anim_set_exec_cb(&right_eyebrow_anim, (lv_anim_exec_xcb_t)lv_obj_set_y);
     lv_anim_set_path_cb(&right_eyebrow_anim, lv_anim_path_ease_in_out);
     lv_anim_start(&right_eyebrow_anim);
     
@@ -1823,11 +1837,9 @@ void EyeDisplayHorizontalEmo::StartShockedEmojiAnimation() {
     lv_anim_set_playback_time(&mouth_anim, 2000);
     lv_anim_set_exec_cb(&mouth_anim, [](void* obj, int32_t v) {
         lv_obj_t* mouth = (lv_obj_t*)obj;
-        // v从0到100，实现张嘴效果
-        // 宽度变化：45 + (0-12) = 45-57
-        // 高度变化：45 + (0-20) = 45-65（上下变化更多）
-        int32_t width = 45 + (v * 12) / 100;   // 45-57
-        int32_t height = 45 + (v * 20) / 100;  // 45-65
+        // 缩小三分之一（2/3）后的张嘴动画
+        int32_t width = 30 + (v * 8) / 100;    // 30-38
+        int32_t height = 30 + (v * 13) / 100;  // 30-43
         lv_obj_set_size(mouth, width, height);
     });
     lv_anim_set_path_cb(&mouth_anim, lv_anim_path_ease_in_out);
@@ -1843,9 +1855,7 @@ void EyeDisplayHorizontalEmo::StartShockedEmojiAnimation() {
     lv_anim_set_playback_time(&left_eye_anim, 2000);
     lv_anim_set_exec_cb(&left_eye_anim, [](void* obj, int32_t v) {
         lv_obj_t* eye = (lv_obj_t*)obj;
-        // v从0到100，实现眼睛变大效果
-        // 宽度和高度同时变化，保持圆形
-        int32_t size = 45 + (v * 12) / 100;   // 45-57，与嘴巴宽度变化相同
+        int32_t size = 30 + (v * 8) / 100;   // 30-38
         lv_obj_set_size(eye, size, size);
     });
     lv_anim_set_path_cb(&left_eye_anim, lv_anim_path_ease_in_out);
@@ -1861,9 +1871,7 @@ void EyeDisplayHorizontalEmo::StartShockedEmojiAnimation() {
     lv_anim_set_playback_time(&right_eye_anim, 2000);
     lv_anim_set_exec_cb(&right_eye_anim, [](void* obj, int32_t v) {
         lv_obj_t* eye = (lv_obj_t*)obj;
-        // v从0到100，实现眼睛变大效果
-        // 宽度和高度同时变化，保持圆形
-        int32_t size = 45 + (v * 12) / 100;   // 45-57，与嘴巴宽度变化相同
+        int32_t size = 30 + (v * 8) / 100;   // 30-38
         lv_obj_set_size(eye, size, size);
     });
     lv_anim_set_path_cb(&right_eye_anim, lv_anim_path_ease_in_out);
@@ -1879,10 +1887,8 @@ void EyeDisplayHorizontalEmo::StartShockedEmojiAnimation() {
     lv_anim_set_playback_time(&line1_anim, 2000);
     lv_anim_set_exec_cb(&line1_anim, [](void* obj, int32_t v) {
         lv_obj_t* line = (lv_obj_t*)obj;
-        // v从0到100，实现竖线上下变大效果
-        // 原始长度13，最大长度21，变化范围8 (19*2/3=12.7≈13, 32*2/3=21.3≈21)
-        int32_t height = 13 + (v * 8) / 100;  // 13-21
-        lv_obj_set_size(line, 4, height);
+        int32_t height = 9 + (v * 5) / 100;  // 9-14
+        lv_obj_set_size(line, 3, height);
     });
     lv_anim_set_path_cb(&line1_anim, lv_anim_path_ease_in_out);
     lv_anim_start(&line1_anim);
@@ -1897,10 +1903,8 @@ void EyeDisplayHorizontalEmo::StartShockedEmojiAnimation() {
     lv_anim_set_playback_time(&line2_anim, 2000);
     lv_anim_set_exec_cb(&line2_anim, [](void* obj, int32_t v) {
         lv_obj_t* line = (lv_obj_t*)obj;
-        // v从0到100，实现竖线上下变大效果
-        // 原始长度18，最大长度30，变化范围12 (27*2/3=18, 45*2/3=30)
-        int32_t height = 18 + (v * 12) / 100;  // 18-30
-        lv_obj_set_size(line, 4, height);
+        int32_t height = 12 + (v * 8) / 100;  // 12-20
+        lv_obj_set_size(line, 3, height);
     });
     lv_anim_set_path_cb(&line2_anim, lv_anim_path_ease_in_out);
     lv_anim_start(&line2_anim);
@@ -1915,10 +1919,8 @@ void EyeDisplayHorizontalEmo::StartShockedEmojiAnimation() {
     lv_anim_set_playback_time(&line3_anim, 2000);
     lv_anim_set_exec_cb(&line3_anim, [](void* obj, int32_t v) {
         lv_obj_t* line = (lv_obj_t*)obj;
-        // v从0到100，实现竖线上下变大效果
-        // 原始长度25，最大长度43，变化范围18 (38*2/3=25.3≈25, 64*2/3=42.7≈43)
-        int32_t height = 25 + (v * 18) / 100;  // 25-43
-        lv_obj_set_size(line, 4, height);
+        int32_t height = 17 + (v * 12) / 100;  // 17-29
+        lv_obj_set_size(line, 3, height);
     });
     lv_anim_set_path_cb(&line3_anim, lv_anim_path_ease_in_out);
     lv_anim_start(&line3_anim);
@@ -1929,64 +1931,83 @@ void EyeDisplayHorizontalEmo::StartLovingEmojiAnimation() {
     // 隐藏原来的圆形眼睛
     lv_obj_add_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
+    // 禁用当前屏幕滚动与滚动条
+    lv_obj_t* scr = lv_screen_active();
+    lv_obj_set_scrollbar_mode(scr, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_scroll_dir(scr, LV_DIR_NONE);
     
     // 创建左眼五角星图片
     lv_obj_t* left_star = lv_img_create(lv_screen_active());
     lv_img_set_src(left_star, &star_img_32_hor);
     lv_obj_set_style_img_recolor(left_star, lv_color_hex(EYE_COLOR), 0);  // 设置为主题色
     lv_obj_set_style_img_recolor_opa(left_star, LV_OPA_COVER, 0);  // 完全不透明
-    lv_obj_align(left_star, LV_ALIGN_LEFT_MID, 50, -DISPLAY_VERTICAL_OFFSET - 10);  // 左眼位置，向右移动45像素，向上移动10像素
+    // 设置图片抗锯齿，减少模糊
+    lv_obj_set_style_img_recolor_opa(left_star, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_transform_zoom(left_star, 256, 0);  // 初始缩放为100%
+    // 以屏幕中线为基准对称摆放（保证嘴巴在中间，双星镜像）
+    const int STAR_SPACING_X = 35;  // 缩小间距30（总间距-30，单侧-15）
+    // 整体下移 10 像素
+    lv_obj_align(left_star, LV_ALIGN_CENTER, -STAR_SPACING_X, -DISPLAY_VERTICAL_OFFSET);
     
     // 创建右眼五角星图片
     lv_obj_t* right_star = lv_img_create(lv_screen_active());
     lv_img_set_src(right_star, &star_img_32_hor);
     lv_obj_set_style_img_recolor(right_star, lv_color_hex(EYE_COLOR), 0);  // 设置为主题色
     lv_obj_set_style_img_recolor_opa(right_star, LV_OPA_COVER, 0);  // 完全不透明
-    lv_obj_align(right_star, LV_ALIGN_RIGHT_MID, -50, -DISPLAY_VERTICAL_OFFSET - 10);  // 右眼位置，向左移动45像素，向上移动10像素
+    // 设置图片抗锯齿，减少模糊
+    lv_obj_set_style_img_recolor_opa(right_star, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_transform_zoom(right_star, 256, 0);  // 初始缩放为100%
+    lv_obj_align(right_star, LV_ALIGN_CENTER, STAR_SPACING_X, -DISPLAY_VERTICAL_OFFSET);
     
     // 创建嘴巴图片对象
     lv_obj_t* mouth = lv_img_create(lv_screen_active());
     lv_img_set_src(mouth, &mouth_open_img);  // 使用嘴巴图片资源
     lv_obj_set_style_img_recolor(mouth, lv_color_hex(EYE_COLOR), 0);  // 设置为主题色
     lv_obj_set_style_img_recolor_opa(mouth, LV_OPA_COVER, 0);  // 完全不透明
-    lv_obj_align(mouth, LV_ALIGN_CENTER, 0, 80 - DISPLAY_VERTICAL_OFFSET);  // 嘴巴位置，在眼睛下方
+    // 设置图片抗锯齿，减少模糊
+    lv_obj_set_style_img_recolor_opa(mouth, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_transform_zoom(mouth, 256, 0);  // 初始缩放为100%
+    // 嘴巴上移更多，避免下边缘裁切（80 -> 50）
+    lv_obj_align(mouth, LV_ALIGN_CENTER, 0, 60 - DISPLAY_VERTICAL_OFFSET);
     
     // 保存对象指针，以便在状态切换时清理
     left_heart_ = left_star;
     right_heart_ = right_star;
     happy_mouth_ = mouth;
     
-    // 左眼五角星放大缩小动画
+    // 左眼五角星放大缩小动画 - 使用更平滑的缩放范围
     lv_anim_init(&left_anim_);
     lv_anim_set_var(&left_anim_, left_star);
-    lv_anim_set_values(&left_anim_, 370, 512);  // 从370%放大到640% (74*5=370, 128*5=640)
-    lv_anim_set_time(&left_anim_, 1000);        // 放大时间，参考StartShockedEmojiAnimation
-    lv_anim_set_playback_time(&left_anim_, 1000);// 缩小时间，参考StartShockedEmojiAnimation
+    // 缩小整体尺寸三分之一（相对之前 450-500）
+    lv_anim_set_values(&left_anim_, 90, 120);
+    lv_anim_set_time(&left_anim_, 1200);        // 稍微延长动画时间，更平滑
+    lv_anim_set_playback_time(&left_anim_, 1200);
     lv_anim_set_repeat_count(&left_anim_, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_exec_cb(&left_anim_, (lv_anim_exec_xcb_t)lv_img_set_zoom);
-    lv_anim_set_path_cb(&left_anim_, lv_anim_path_ease_in_out);  // 使用ease_in_out路径，更平滑
+    lv_anim_set_path_cb(&left_anim_, lv_anim_path_ease_in_out);
     lv_anim_start(&left_anim_);
 
-    // 右眼五角星放大缩小动画
+    // 右眼五角星放大缩小动画 - 使用更平滑的缩放范围
     lv_anim_init(&right_anim_);
     lv_anim_set_var(&right_anim_, right_star);
-    lv_anim_set_values(&right_anim_, 370, 512);  // 从370%放大到640% (74*5=370, 128*5=640)
-    lv_anim_set_time(&right_anim_, 1000);        // 放大时间，参考StartShockedEmojiAnimation
-    lv_anim_set_playback_time(&right_anim_, 1000);// 缩小时间，参考StartShockedEmojiAnimation
+    lv_anim_set_values(&right_anim_, 90, 120);
+    lv_anim_set_time(&right_anim_, 1200);        // 稍微延长动画时间，更平滑
+    lv_anim_set_playback_time(&right_anim_, 1200);
     lv_anim_set_repeat_count(&right_anim_, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_exec_cb(&right_anim_, (lv_anim_exec_xcb_t)lv_img_set_zoom);
-    lv_anim_set_path_cb(&right_anim_, lv_anim_path_ease_in_out);  // 使用ease_in_out路径，更平滑
+    lv_anim_set_path_cb(&right_anim_, lv_anim_path_ease_in_out);
     lv_anim_start(&right_anim_);
     
-    // 嘴巴缩放动画（与五角星同步）
+    // 嘴巴缩放动画（与五角星同步）- 使用更平滑的缩放范围
     static lv_anim_t mouth_anim;
     lv_anim_init(&mouth_anim);
     lv_anim_set_var(&mouth_anim, mouth);
-    lv_anim_set_values(&mouth_anim, 256, 384);  // 从100%到200%缩放 (256=100%, 512=200%)
-    lv_anim_set_time(&mouth_anim, 1000);        // 与五角星同步
+    // 嘴巴缩放：从更小到原始大小（78% -> 100%）
+    lv_anim_set_values(&mouth_anim, 200, 250);
+    lv_anim_set_time(&mouth_anim, 1200);        // 与五角星同步
     lv_anim_set_repeat_count(&mouth_anim, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_playback_time(&mouth_anim, 1000);
-    lv_anim_set_exec_cb(&mouth_anim, (lv_anim_exec_xcb_t)lv_img_set_zoom);  // 使用lv_img_set_zoom而不是自定义回调
+    lv_anim_set_playback_time(&mouth_anim, 1200);
+    lv_anim_set_exec_cb(&mouth_anim, (lv_anim_exec_xcb_t)lv_img_set_zoom);
     lv_anim_set_path_cb(&mouth_anim, lv_anim_path_ease_in_out);
     lv_anim_start(&mouth_anim);
 }
@@ -2009,69 +2030,117 @@ void EyeDisplayHorizontalEmo::StartNeutralFaceAnimation() {
 
     lv_obj_t* screen = lv_screen_active();
 
-    // 适配不同分辨率（以240x240为基准）
+    // 适配不同分辨率（以240x240为基准）- 参数与 StartHappyFaceAnimation 一致
     const int SCREEN_WIDTH = LV_HOR_RES;
     const int SCREEN_HEIGHT = LV_VER_RES;
     const float SCALE = (float)std::min(SCREEN_WIDTH, SCREEN_HEIGHT) / 240.0f;
-    const int EYE_SIZE = (int)(56 * SCALE);
-    const int EYE_SPACING = (int)(50 * SCALE);
-    const int VERTICAL_OFFSET = (int)(20 * SCALE);  // 轻微上偏
+    const int NEUTRAL_EYE_SIZE = (int)(40 * SCALE);
+    const int NEUTRAL_EYE_SPACING = (int)(65 * SCALE);
+    const int NEUTRAL_EYE_Y_OFFSET = (int)(-40 * SCALE);
 
     // 面部容器（局部变量）
     lv_obj_t* neutral_face = lv_obj_create(screen);
     lv_obj_remove_style_all(neutral_face);
     lv_obj_set_size(neutral_face, SCREEN_WIDTH, SCREEN_HEIGHT);
     lv_obj_set_style_bg_opa(neutral_face, LV_OPA_TRANSP, 0);
-    lv_obj_align(neutral_face, LV_ALIGN_CENTER, 0, -VERTICAL_OFFSET);
+    // 与 StartHappyFaceAnimation 保持容器完全居中（不再上移）
+    lv_obj_align(neutral_face, LV_ALIGN_CENTER, 0, 0);
 
     // 左右眼（主题色圆形，局部变量）
     lv_obj_t* neutral_left_eye = lv_obj_create(neutral_face);
     lv_obj_remove_style_all(neutral_left_eye);
-    lv_obj_set_size(neutral_left_eye, EYE_SIZE, EYE_SIZE);
+    lv_obj_set_size(neutral_left_eye, NEUTRAL_EYE_SIZE, NEUTRAL_EYE_SIZE);
     lv_obj_set_style_radius(neutral_left_eye, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(neutral_left_eye, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(neutral_left_eye, LV_OPA_COVER, 0);
-    lv_obj_align(neutral_left_eye, LV_ALIGN_LEFT_MID, EYE_SPACING, -VERTICAL_OFFSET + 25);
+    lv_obj_align(neutral_left_eye, LV_ALIGN_CENTER, -NEUTRAL_EYE_SPACING, NEUTRAL_EYE_Y_OFFSET);
 
     lv_obj_t* neutral_right_eye = lv_obj_create(neutral_face);
     lv_obj_remove_style_all(neutral_right_eye);
-    lv_obj_set_size(neutral_right_eye, EYE_SIZE, EYE_SIZE);
+    lv_obj_set_size(neutral_right_eye, NEUTRAL_EYE_SIZE, NEUTRAL_EYE_SIZE);
     lv_obj_set_style_radius(neutral_right_eye, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(neutral_right_eye, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(neutral_right_eye, LV_OPA_COVER, 0);
-    lv_obj_align(neutral_right_eye, LV_ALIGN_RIGHT_MID, -EYE_SPACING, -VERTICAL_OFFSET + 25);
+    lv_obj_align(neutral_right_eye, LV_ALIGN_CENTER, NEUTRAL_EYE_SPACING, NEUTRAL_EYE_Y_OFFSET);
 
-    // 轻微呼吸感动画：双眼高度52-58往复（局部目标）
-    const int EYE_ANIM_MIN_SIZE = 50;  // 原幅度增加一半：中心55，振幅3→约5
-    const int EYE_ANIM_MAX_SIZE = 60;
-    const int EYE_ANIM_TIME = 1200;
+    // 轻微呼吸感动画：对齐 StartHappyFaceAnimation（33-38，900ms）
+    const int NEUTRAL_EYE_ANIM_MIN = 33;
+    const int NEUTRAL_EYE_ANIM_MAX = 38;
+    const int NEUTRAL_EYE_ANIM_TIME = 900;
 
+    // 创建动画数据，包含位置信息
+    struct NeutralEyeAnimData {
+        lv_obj_t* eye;
+        int spacing;
+        int y_offset;
+        bool is_left;
+    };
+    
+    // 使用静态变量保存动画数据，确保动画回调能访问到有效数据
+    static NeutralEyeAnimData left_eye_data = {neutral_left_eye, NEUTRAL_EYE_SPACING, NEUTRAL_EYE_Y_OFFSET, true};
+    static NeutralEyeAnimData right_eye_data = {neutral_right_eye, NEUTRAL_EYE_SPACING, NEUTRAL_EYE_Y_OFFSET, false};
+    
+    // 更新静态数据中的对象指针
+    left_eye_data.eye = neutral_left_eye;
+    left_eye_data.spacing = NEUTRAL_EYE_SPACING;
+    left_eye_data.y_offset = NEUTRAL_EYE_Y_OFFSET;
+    left_eye_data.is_left = true;
+    
+    right_eye_data.eye = neutral_right_eye;
+    right_eye_data.spacing = NEUTRAL_EYE_SPACING;
+    right_eye_data.y_offset = NEUTRAL_EYE_Y_OFFSET;
+    right_eye_data.is_left = false;
+
+    // 使用静态动画对象，避免动态分配问题
     static lv_anim_t left_eye_anim;
+    static lv_anim_t right_eye_anim;
+    
+    // 先停止之前的动画，避免冲突
+    lv_anim_del(&left_eye_anim, nullptr);
+    lv_anim_del(&right_eye_anim, nullptr);
+    
     lv_anim_init(&left_eye_anim);
-    lv_anim_set_var(&left_eye_anim, neutral_left_eye);
-    lv_anim_set_values(&left_eye_anim, EYE_ANIM_MIN_SIZE, EYE_ANIM_MAX_SIZE);
-    lv_anim_set_time(&left_eye_anim, EYE_ANIM_TIME);
-    lv_anim_set_exec_cb(&left_eye_anim, [](void* obj, int32_t v){
-        lv_obj_t* eye = (lv_obj_t*)obj;
-        lv_obj_set_size(eye, v, v);
+    lv_anim_set_var(&left_eye_anim, &left_eye_data);
+    lv_anim_set_values(&left_eye_anim, NEUTRAL_EYE_ANIM_MIN, NEUTRAL_EYE_ANIM_MAX);
+    lv_anim_set_time(&left_eye_anim, NEUTRAL_EYE_ANIM_TIME);
+    lv_anim_set_exec_cb(&left_eye_anim, [](void* data, int32_t v){
+        NeutralEyeAnimData* anim_data = (NeutralEyeAnimData*)data;
+        // 检查对象是否仍然有效
+        if (anim_data->eye && lv_obj_is_valid(anim_data->eye)) {
+            lv_obj_set_size(anim_data->eye, v, v);
+            // 保持眼睛中心位置不变，向四周扩展
+            if (anim_data->is_left) {
+                lv_obj_align(anim_data->eye, LV_ALIGN_CENTER, -anim_data->spacing, anim_data->y_offset);
+            } else {
+                lv_obj_align(anim_data->eye, LV_ALIGN_CENTER, anim_data->spacing, anim_data->y_offset);
+            }
+        }
     });
     lv_anim_set_path_cb(&left_eye_anim, lv_anim_path_ease_in_out);
     lv_anim_set_repeat_count(&left_eye_anim, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_playback_time(&left_eye_anim, EYE_ANIM_TIME);
+    lv_anim_set_playback_time(&left_eye_anim, NEUTRAL_EYE_ANIM_TIME);
     lv_anim_start(&left_eye_anim);
 
-    static lv_anim_t right_eye_anim;
     lv_anim_init(&right_eye_anim);
-    lv_anim_set_var(&right_eye_anim, neutral_right_eye);
-    lv_anim_set_values(&right_eye_anim, EYE_ANIM_MIN_SIZE, EYE_ANIM_MAX_SIZE);
-    lv_anim_set_time(&right_eye_anim, EYE_ANIM_TIME);
-    lv_anim_set_exec_cb(&right_eye_anim, [](void* obj, int32_t v){
-        lv_obj_t* eye = (lv_obj_t*)obj;
-        lv_obj_set_size(eye, v, v);
+    lv_anim_set_var(&right_eye_anim, &right_eye_data);
+    lv_anim_set_values(&right_eye_anim, NEUTRAL_EYE_ANIM_MIN, NEUTRAL_EYE_ANIM_MAX);
+    lv_anim_set_time(&right_eye_anim, NEUTRAL_EYE_ANIM_TIME);
+    lv_anim_set_exec_cb(&right_eye_anim, [](void* data, int32_t v){
+        NeutralEyeAnimData* anim_data = (NeutralEyeAnimData*)data;
+        // 检查对象是否仍然有效
+        if (anim_data->eye && lv_obj_is_valid(anim_data->eye)) {
+            lv_obj_set_size(anim_data->eye, v, v);
+            // 保持眼睛中心位置不变，向四周扩展
+            if (anim_data->is_left) {
+                lv_obj_align(anim_data->eye, LV_ALIGN_CENTER, -anim_data->spacing, anim_data->y_offset);
+            } else {
+                lv_obj_align(anim_data->eye, LV_ALIGN_CENTER, anim_data->spacing, anim_data->y_offset);
+            }
+        }
     });
     lv_anim_set_path_cb(&right_eye_anim, lv_anim_path_ease_in_out);
     lv_anim_set_repeat_count(&right_eye_anim, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_playback_time(&right_eye_anim, EYE_ANIM_TIME);
+    lv_anim_set_playback_time(&right_eye_anim, NEUTRAL_EYE_ANIM_TIME);
     lv_anim_start(&right_eye_anim);
 
     // 保存容器指针，便于在切换表情时统一释放
