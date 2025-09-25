@@ -12,8 +12,9 @@
 #include <esp_lcd_st7735s.h>
 #include "data_point_manager.h"
 #include "led/single_led.h"
-#include "display/eye_display_horizontal.h"
+#include "display/eye_display_horizontal_emojis.h"
 #include "display/display.h"
+#include <esp_lvgl_port.h>
 
 #include <wifi_station.h>
 #include "power_save_timer.h"
@@ -27,6 +28,7 @@
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_timer.h"
+#include <esp_system.h>
 
 #include <math.h>
 
@@ -45,7 +47,7 @@ private:
     
     Button power_button_;
     VbAduioCodec audio_codec;
-    EyeDisplayHorizontal* display_;
+    EyeDisplayHorizontalEmo* display_;
     bool need_power_off_ = false;
     int64_t power_on_time_ = 0;  // 记录上电时间
     PowerManager* power_manager_;
@@ -116,6 +118,14 @@ private:
     
     // ST7735S初始化
     void InitializeST7735SDisplay() {
+        // 上电先关闭背光，确保开机时屏幕是黑的
+        gpio_set_direction(DISPLAY_BACKLIGHT_PIN, GPIO_MODE_OUTPUT);
+#if DISPLAY_BACKLIGHT_OUTPUT_INVERT
+        gpio_set_level(DISPLAY_BACKLIGHT_PIN, 1);
+#else
+        gpio_set_level(DISPLAY_BACKLIGHT_PIN, 0);
+#endif
+
         esp_lcd_panel_io_spi_config_t io_config = {
             .cs_gpio_num = DISPLAY_SPI_CS_PIN,
             .dc_gpio_num = DISPLAY_SPI_DC_PIN,
@@ -146,18 +156,25 @@ private:
             return;
         }
         
+        // 按手册保证 reset 低保持与上电稳定时间
+        vTaskDelay(pdMS_TO_TICKS(10));
         ret = esp_lcd_panel_reset(panel);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Panel reset failed: %s", esp_err_to_name(ret));
             return;
         }
-        
+        // 复位后等待面板内部稳定
+        vTaskDelay(pdMS_TO_TICKS(120));
         ret = esp_lcd_panel_init(panel);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Panel init failed: %s", esp_err_to_name(ret));
             return;
         }
 
+        // 恢复 gap 为 0，避免错误偏移导致角落未覆盖
+        esp_lcd_panel_set_gap(panel, 0, 0);
+
+        // 恢复反色设置为 true，避免背景变白
         ret = esp_lcd_panel_invert_color(panel, true);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Panel color invert failed: %s", esp_err_to_name(ret));
@@ -171,19 +188,46 @@ private:
             return;
         }
         
-        // Turn on display
+        // 打开显示，但仍保持背光关闭
         ret = esp_lcd_panel_disp_on_off(panel, true);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Panel display on failed: %s", esp_err_to_name(ret));
             return;
         }
         
-        // 创建并初始化 LottieDisplay（与 gizwits-lottie 一致），但面板为 ST7735S
+        // 创建显示对象
         DisplayFonts fonts = { .text_font = &font_puhui_20_4, .icon_font = nullptr, .emoji_font = nullptr };
-        display_ = new EyeDisplayHorizontal(panel_io, panel,
+        display_ = new EyeDisplayHorizontalEmo(panel_io, panel,
             DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
             DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY,
             fonts);
+
+        // 让 LVGL 完成首次界面创建并强制刷新 2~3 帧，确保显示内容完全准备好
+        if (lvgl_port_lock(100)) {
+            lv_timer_handler();
+            lvgl_port_unlock();
+        }
+        vTaskDelay(pdMS_TO_TICKS(30));
+        if (lvgl_port_lock(100)) {
+            lv_timer_handler();
+            lvgl_port_unlock();
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+        if (lvgl_port_lock(100)) {
+            lv_timer_handler();
+            lvgl_port_unlock();
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+        
+        // 显示内容准备好后，立即启动背光恢复任务
+        xTaskCreate(
+            RestoreBacklightTask,      // 任务函数
+            "restore_backlight",       // 名字
+            4096,                      // 栈大小
+            this,                      // 参数传递 this 指针
+            5,                         // 优先级
+            NULL                       // 任务句柄
+        );
     }
 
     int MaxBacklightBrightness() {
@@ -211,15 +255,16 @@ private:
     }
 
     void InitializeButtons() {
-        // boot_button_.OnPressDown([this]() {
-        //     ESP_LOGI(TAG, "boot_button_.OnPressDown");
-        //     // 开灯
-        //     if (display_) {
-        //         display_->TestNextEmotion();
-        //     }
-        // });
+        // BOOT 按键事件：短按、长按、松开打印
+        boot_button_.OnClick([this]() {
+            ESP_LOGI(TAG, "BOOT 按键短按");
+        });
         boot_button_.OnLongPress([this]() {
+            ESP_LOGI(TAG, "BOOT 按键长按，进入配网");
             ResetWifiConfiguration();
+        });
+        boot_button_.OnPressUp([this]() {
+            ESP_LOGI(TAG, "BOOT 按键松开");
         });
     }
 
@@ -345,7 +390,7 @@ private:
             ESP_LOGI(TAG, "power_button_.OnPressDown");
             auto& app = Application::GetInstance();
             app.ToggleChatState();
-            // 开灯
+            // 按键切换表情
             if (display_) {
                 display_->TestNextEmotion();
             }
@@ -425,6 +470,14 @@ public:
         InitializePowerManager();
         InitializeDataPointManager();
         InitializePowerSaveTimer();
+
+        // 注册关机回调，确保任何重启路径都会先关闭背光
+        esp_register_shutdown_handler([](){
+            ESP_LOGI(TAG, "Shutdown handler: TurnOffBacklight before restart");
+            gpio_set_direction(DISPLAY_BACKLIGHT_PIN, GPIO_MODE_OUTPUT);
+            gpio_set_level(DISPLAY_BACKLIGHT_PIN, 0);
+        });
+
         if (power_manager_) {
             ESP_LOGI(TAG, "Before CheckBatteryStatusImmediately");
             power_manager_->CheckBatteryStatusImmediately();
@@ -442,15 +495,6 @@ public:
                 ResetWifiConfiguration();
             }
         });
-
-        xTaskCreate(
-            RestoreBacklightTask,      // 任务函数
-            "restore_backlight",       // 名字
-            4096,                      // 栈大小
-            this,                      // 参数传递 this 指针
-            5,                         // 优先级
-            NULL                       // 任务句柄
-        );
     }
 
     virtual void PowerOff() override {
@@ -476,21 +520,19 @@ public:
 
     static void RestoreBacklightTask(void* arg) {
         auto* self = static_cast<MovecallMojiESP32S3*>(arg);
+        
+        // 确保显示内容已经完全渲染
+        vTaskDelay(pdMS_TO_TICKS(50));
+        
         int level;
         bool charging, discharging;
         self->GetBatteryLevel(level, charging, discharging);
-        // XunguanDisplay* xunguan_display = static_cast<XunguanDisplay*>(self->GetDisplay());
+        
+        ESP_LOGI(TAG, "Starting backlight restoration, charging: %d", charging);
+        
+        // 使用更平滑的背光恢复
         self->GetBacklight()->RestoreBrightness();
 
-        // xunguan_display->StartAutoTest(1000);
-
-        // if (charging) {
-        //     // 降低发热            
-        //     // xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::POWER_SAVE);
-        //     xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL);
-        // } else {
-        //     xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL);
-        // }
         vTaskDelete(NULL); // 任务结束时删除自己
     }
 
