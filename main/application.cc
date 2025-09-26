@@ -756,11 +756,11 @@ if (mqtt_client.isInitialized()) {
     mqtt_client.processSendQueue();     // 处理待发送的消息
 }
 #endif
-
-        // 每分钟检查一次电量
+        
+        // 每30秒检查一次电量
         auto now = std::chrono::steady_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::minutes>(now - last_battery_check_time_).count();
-        if (duration >= 2) {
+        auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - last_battery_check_time_).count();
+        if (duration >= 30) {
             CheckBatteryLevel();
             last_battery_check_time_ = now;
         }
