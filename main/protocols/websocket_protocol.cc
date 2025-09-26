@@ -263,6 +263,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     static bool is_first_packet_ = false;
     static bool is_start_progress_ = false;
     static bool is_detect_emotion_ = false;
+    static int audio_packet_count_ = 0;  // 音频包计数器
     error_occurred_ = false;
     busy_sending_audio_ = false;  // 重置音频发送标志
     std::string url = std::string("ws://") + room_params_.api_domain + std::string("/v1/chat") + std::string("?bot_id=") + std::string(room_params_.bot_id);
@@ -349,6 +350,15 @@ bool WebsocketProtocol::OpenAudioChannel() {
                         base64_content.length());
 
                     if (ret == 0 && actual_len > 0) {
+                        // 增加音频包计数器
+                        audio_packet_count_++;
+                        
+                        // 每接收到5包音频数据打印一个日志
+                        if (audio_packet_count_ % 5 == 0) {
+                            ESP_LOGI(TAG, "Received %d audio packets, current packet size: %d bytes", 
+                                     audio_packet_count_, actual_len);
+                        }
+                        
                         if (on_incoming_audio_ != nullptr) {
                             // 队列长度限制逻辑在下游
                             if (is_first_packet_ == true) {
@@ -438,6 +448,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 is_start_progress_ = true;
                 cached_packet_count_ = 0;
                 packet_cache_.clear();
+                audio_packet_count_ = 0;  // 重置音频包计数器
 
                 // 立即暂停上传
                 speech_stopped_recorded_ = true;
