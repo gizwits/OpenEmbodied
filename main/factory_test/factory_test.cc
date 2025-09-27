@@ -388,6 +388,8 @@ static void handle_at_command(char *cmd) {
     else if (strcmp(cmd, "AT+EXIT_TEST") == 0) {
         // 处理退出产测命令
         ESP_LOGI(TAG, "Received exit factory test command");
+        auto& wifi_station = WifiStation::GetInstance();
+        wifi_station.ClearAuth();
         xTaskCreate(save_factory_test_mode_task, "save_factory_test_mode", 1024*4,
                     reinterpret_cast<void*>(static_cast<intptr_t>(FACTORY_TEST_MODE_NONE)), 5, nullptr);
     }
