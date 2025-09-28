@@ -111,6 +111,8 @@ choice BOARD_TYPE
         bool "机智云ESP32-C2 6824 绿林"
     config BOARD_TYPE_GIZWITS_C2_6824_TOY
         bool "机智云ESP32-C2 6824 玩具"
+    config BOARD_TYPE_GIZWITS_C2_6824_MOTOR
+        bool "机智云ESP32-C2 6824 电机"
     config BOARD_TYPE_DOIT_AI_01_KIT
         bool "Doit ai 01 kit"
     config BOARD_TYPE_DOIT_AI_01_KIT_NFC
