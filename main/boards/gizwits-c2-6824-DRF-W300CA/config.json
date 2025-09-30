@@ -1,0 +1,23 @@
+{
+    "target": "esp32c2",
+    "builds": [
+        {
+            "name": "gizwits-c2-6824-DRF-W300CA",
+            "sdkconfig_append": [
+                "CONFIG_BOARD_TYPE_GIZWITS_C2_6824_DRF_W300CA=y",
+                "CONFIG_MQTT_USE_CUSTOM_CONFIG=y",
+                "CONFIG_ESPTOOLPY_FLASHSIZE_4MB=n",
+                "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=partitions_4M.csv",
+                "CONFIG_PARTITION_TABLE_FILENAME=partitions_4M.csv",
+                "CONFIG_ESP32C2_REV_MIN_200=200",
+                "CONFIG_ESP32C2_REV_MIN_FULL=200",
+                "CONFIG_ESP_REV_MIN_FULL=200",
+                "CONFIG_USE_EYE_STYLE_VB6824=y",
+                "CONFIG_USE_AUDIO_PROCESSOR=n",
+                "CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS=y"
+            ]
+        }
+    ]
+}
+
+
