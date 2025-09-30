@@ -5,18 +5,13 @@
 // 电机驱动板GPIO映射
 // io4  io2  io1  io7
 // in1  in3 in4 in2
-#define MOTOR_A_IN1_GPIO    GPIO_NUM_4   // 电机A控制1
-#define MOTOR_A_IN2_GPIO    GPIO_NUM_7   // 电机A控制2
-#define MOTOR_B_IN3_GPIO    GPIO_NUM_2   // 电机B控制1
-#define MOTOR_B_IN4_GPIO    GPIO_NUM_9   // 电机B控制2
-
 
 #define CODEC_TX_GPIO           GPIO_NUM_10
 #define CODEC_RX_GPIO           GPIO_NUM_18
 
-#define LED_GPIO        GPIO_NUM_6
+// #define LED_GPIO        GPIO_NUM_6
 #define EXTRA_LIGHT_GPIO GPIO_NUM_2
-#define POWER_GPIO GPIO_NUM_9
+// #define POWER_GPIO GPIO_NUM_9
 
 // 使用日志串口 UART_NUM_0
 #define FACTORY_TEST_UART_NUM UART_NUM_0

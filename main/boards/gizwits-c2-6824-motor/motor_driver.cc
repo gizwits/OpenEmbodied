@@ -55,6 +55,14 @@ bool MotorDriver::Initialize() {
         return false;
     }
 
+    // 配置电机C控制引脚
+    io_conf.pin_bit_mask = (1ULL << MOTOR_C_IN1) | (1ULL << MOTOR_C_IN2);
+    if (gpio_config(&io_conf) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to configure motor C GPIO pins");
+        return false;
+    }
+
+
     // 初始化PWM
     ledc_timer_config_t timer_conf = {};
     timer_conf.speed_mode = LEDC_LOW_SPEED_MODE;
@@ -126,6 +134,11 @@ bool MotorDriver::Initialize() {
 
     initialized_ = true;
     ESP_LOGI(TAG, "Motor driver initialized successfully");
+
+    // 启动电位器监控（默认200ms间隔）
+    // if (!StartPotentiometerMonitoring(100)) {
+    //     ESP_LOGW(TAG, "Failed to start potentiometer monitoring during initialization");
+    // }
     return true;
 }
 
@@ -243,11 +256,183 @@ void MotorDriver::SetMotorSpeed(MotorId motor_id, int speed) {
 void MotorDriver::StopAll() {
     SetMotorState(MOTOR_A, MOTOR_STOP, 0);
     SetMotorState(MOTOR_B, MOTOR_STOP, 0);
+    SetMotorCStop();
+    rear_leg_running_ = false;
 }
 
 void MotorDriver::BrakeAll() {
     SetMotorState(MOTOR_A, MOTOR_BRAKE, 0);
     SetMotorState(MOTOR_B, MOTOR_BRAKE, 0);
+}
+
+void MotorDriver::StopRearLeg() {
+    rear_leg_running_ = false;
+    SetMotorCStop();
+}
+
+void MotorDriver::SetMotorCStop() {
+    SetGpioLevel(MOTOR_C_IN1, 0);
+    SetGpioLevel(MOTOR_C_IN2, 0);
+}
+
+void MotorDriver::SetMotorCForward() {
+    SetGpioLevel(MOTOR_C_IN1, 1);
+    SetGpioLevel(MOTOR_C_IN2, 0);
+}
+
+void MotorDriver::SetMotorCReverse() {
+    SetGpioLevel(MOTOR_C_IN1, 0);
+    SetGpioLevel(MOTOR_C_IN2, 1);
+}
+
+bool MotorDriver::MoveRearLegToFrontmost(int timeout_ms) {
+    const int target = 900;
+    const int threshold = 20; // 允许的误差
+    int elapsed = 0;
+
+    // 朝前端运动
+    rear_leg_running_ = true;
+    SetMotorCForward();
+
+    while (elapsed < timeout_ms && rear_leg_running_) {
+        int adc_raw = ReadPotentiometerRaw();
+        // 已经在目标以下，视为已到达或越界到前端
+        if (adc_raw <= target - threshold) {
+            SetMotorCStop();
+            ESP_LOGI(TAG, "Rear leg already at/below frontmost: adc=%d", adc_raw);
+            rear_leg_running_ = false;
+            return true;
+        }
+        if (adc_raw >= target - threshold && adc_raw <= target + threshold) {
+            SetMotorCStop();
+            ESP_LOGI(TAG, "Rear leg reached frontmost: adc=%d", adc_raw);
+            rear_leg_running_ = false;
+            return true;
+        }
+        if ((elapsed % 100) == 0) {
+            ESP_LOGI(TAG, "后腿前进中：adc=%d (目标=%d±%d)", adc_raw, target, threshold);
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+        elapsed += 10;
+    }
+
+    SetMotorCStop();
+    int adc_last = ReadPotentiometerRaw();
+    if (!rear_leg_running_) {
+        ESP_LOGW(TAG, "后腿移动到最前端被打断，最后adc=%d", adc_last);
+    } else {
+        ESP_LOGW(TAG, "后腿移动到最前端超时，最后adc=%d，目标=%d±%d", adc_last, target, threshold);
+    }
+    rear_leg_running_ = false;
+    return false;
+}
+
+bool MotorDriver::MoveRearLegToBackmost(int timeout_ms) {
+    const int target = 2750;
+    const int threshold = 20; // 允许的误差
+    int elapsed = 0;
+
+    // 朝后端运动
+    rear_leg_running_ = true;
+    SetMotorCReverse();
+    {
+        int adc_start = ReadPotentiometerRaw();
+        ESP_LOGI(TAG, "后腿：开始向最后端移动，目标=%d，当前=%d", target, adc_start);
+    }
+
+    while (elapsed < timeout_ms && rear_leg_running_) {
+        int adc_raw = ReadPotentiometerRaw();
+        // 已经在目标以上，视为已到达或越界到后端
+        if (adc_raw >= target + threshold) {
+            SetMotorCStop();
+            ESP_LOGI(TAG, "Rear leg already at/above backmost: adc=%d", adc_raw);
+            rear_leg_running_ = false;
+            return true;
+        }
+        if (adc_raw >= target - threshold && adc_raw <= target + threshold) {
+            SetMotorCStop();
+            ESP_LOGI(TAG, "Rear leg reached backmost: adc=%d", adc_raw);
+            rear_leg_running_ = false;
+            return true;
+        }
+        if ((elapsed % 100) == 0) {
+            ESP_LOGI(TAG, "后腿后退中：adc=%d (目标=%d±%d)", adc_raw, target, threshold);
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+        elapsed += 10;
+    }
+
+    SetMotorCStop();
+    int adc_last = ReadPotentiometerRaw();
+    if (!rear_leg_running_) {
+        ESP_LOGW(TAG, "后腿移动到最后端被打断，最后adc=%d", adc_last);
+    } else {
+        ESP_LOGW(TAG, "后腿移动到最后端超时，最后adc=%d，目标=%d±%d", adc_last, target, threshold);
+    }
+    rear_leg_running_ = false;
+    return false;
+}
+
+bool MotorDriver::NormalizeRearLegPosition(int timeout_ms) {
+    const int front_target = 900;
+    const int back_target = 2750;
+    const int threshold = 20;
+    int adc = ReadPotentiometerRaw();
+    ESP_LOGI(TAG, "后腿规范位置：当前adc=%d (前=%d±%d, 后=%d±%d)", adc, front_target, threshold, back_target, threshold);
+
+    if (adc <= front_target - threshold) {
+        return MoveRearLegToFrontmost(timeout_ms);
+    }
+    if (adc >= back_target + threshold) {
+        return MoveRearLegToBackmost(timeout_ms);
+    }
+    ESP_LOGI(TAG, "后腿已在允许范围内，无需动作");
+    return true;
+}
+
+bool MotorDriver::MoveRearLegToMiddle(int timeout_ms) {
+    const int front_target = 900;
+    const int back_target = 2750;
+    const int target = (front_target + back_target) / 2; // 中点约 1825
+    const int threshold = 25; // 中点略放宽
+    int elapsed = 0;
+
+    rear_leg_running_ = true;
+
+    while (elapsed < timeout_ms && rear_leg_running_) {
+        int adc_raw = ReadPotentiometerRaw();
+        // 到位判定
+        if (adc_raw >= target - threshold && adc_raw <= target + threshold) {
+            SetMotorCStop();
+            ESP_LOGI(TAG, "后腿到中间：adc=%d(目标=%d±%d)", adc_raw, target, threshold);
+            rear_leg_running_ = false;
+            return true;
+        }
+
+        // 根据位置选择方向：小于目标则朝后端，大于目标则朝前端
+        if (adc_raw < target) {
+            SetMotorCReverse();
+        } else {
+            SetMotorCForward();
+        }
+
+        if ((elapsed % 100) == 0) {
+            ESP_LOGI(TAG, "后腿居中中：adc=%d -> 目标=%d±%d", adc_raw, target, threshold);
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(10));
+        elapsed += 10;
+    }
+
+    SetMotorCStop();
+    int adc_last = ReadPotentiometerRaw();
+    if (!rear_leg_running_) {
+        ESP_LOGW(TAG, "后腿居中被打断，最后adc=%d", adc_last);
+    } else {
+        ESP_LOGW(TAG, "后腿居中超时，最后adc=%d(目标=%d±%d)", adc_last, target, threshold);
+    }
+    rear_leg_running_ = false;
+    return false;
 }
 
 void MotorDriver::ExecuteAction(ActionType action_type, int duration_ms, int speed, 
@@ -519,13 +704,13 @@ void MotorDriver::PotentiometerMonitoringTask(void* arg) {
     int loop_count = 0;
     while (driver->potentiometer_monitoring_) {
         loop_count++;
-        ESP_LOGI(TAG, "Loop %d: monitoring=%d, interval=%d", 
-                 loop_count, driver->potentiometer_monitoring_, driver->potentiometer_interval_ms_);
+        // ESP_LOGI(TAG, "Loop %d: monitoring=%d, interval=%d", 
+        //          loop_count, driver->potentiometer_monitoring_, driver->potentiometer_interval_ms_);
         
         int adc_raw = driver->ReadPotentiometerRaw();
         float voltage = driver->ReadPotentiometerVoltage();
         
-        ESP_LOGI(TAG, "Potentiometer - ADC: %d, Voltage: %.3fV", adc_raw, voltage);
+        // ESP_LOGI(TAG, "Potentiometer - ADC: %d, Voltage: %.3fV", adc_raw, voltage);
         
         vTaskDelay(pdMS_TO_TICKS(driver->potentiometer_interval_ms_));
     }

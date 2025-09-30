@@ -140,20 +140,6 @@ private:
             ESP_LOGE(TAG, "Failed to initialize motor driver");
         } else {
             ESP_LOGI(TAG, "Motor driver initialized successfully");
-            
-            // 先测试一次电位器读取
-            ESP_LOGI(TAG, "Testing potentiometer read...");
-            int adc_raw = motor_driver.ReadPotentiometerRaw();
-            float voltage = motor_driver.ReadPotentiometerVoltage();
-            ESP_LOGI(TAG, "Initial test - ADC: %d, Voltage: %.3fV", adc_raw, voltage);
-            
-            // 启动电位器监控任务，每200ms读取一次
-            ESP_LOGI(TAG, "Starting potentiometer monitoring...");
-            if (motor_driver.StartPotentiometerMonitoring(200)) {
-                ESP_LOGI(TAG, "Potentiometer monitoring started");
-            } else {
-                ESP_LOGW(TAG, "Failed to start potentiometer monitoring");
-            }
         }
     }
     // 物联网初始化，添加对 AI 可见设备
@@ -198,9 +184,9 @@ private:
     }
 
 
-    void InitializePowerManager() {
-        PowerManager::GetInstance();
-    }
+    // void InitializePowerManager() {
+    //     PowerManager::GetInstance();
+    // }
 
 
 public:
@@ -217,12 +203,11 @@ public:
 
         Settings settings("wifi", true);
         auto s_factory_test_mode = settings.GetInt("ft_mode", 0);
-        ESP_LOGI(TAG, "Factory test mode: %d", s_factory_test_mode);
         if (s_factory_test_mode == 0) {
             // 不在产测模式才启动，不然有问题
-            ESP_LOGI(TAG, "Not in factory test mode, initializing components...");
+            ESP_LOGI(TAG, "非产测模式，开始初始化组件...");
             InitializeButtons();
-            ESP_LOGI(TAG, "Calling InitializeMotorDriver...");
+            ESP_LOGI(TAG, "调用电机驱动初始化...");
             InitializeMotorDriver();
             InitializeIot();
             InitializeDataPointManager();
@@ -230,15 +215,15 @@ public:
             // 检查上电计数
             CheckPowerCount();
         } else {
-            ESP_LOGI(TAG, "In factory test mode, skipping motor driver initialization");
+            ESP_LOGI(TAG, "处于产测模式，跳过电机驱动初始化");
         }
 
-        InitializePowerManager();
+        // InitializePowerManager();
 
         // 注册关机回调，确保任何重启路径都会先拉高IO9
         // 防止电机驱动翻车
         esp_register_shutdown_handler([](){
-            ESP_LOGI(TAG, "Shutdown handler: Set GPIO9 HIGH before restart");
+            ESP_LOGI(TAG, "关机回调：重启前将 GPIO9 置高");
             gpio_config_t io_conf = {};
             io_conf.pin_bit_mask = (1ULL << GPIO_NUM_9);
             io_conf.mode = GPIO_MODE_OUTPUT;
@@ -249,7 +234,7 @@ public:
             gpio_set_level(GPIO_NUM_9, 1);
         });
 
-        InitializeGpio(POWER_GPIO, true);
+        // InitializeGpio(POWER_GPIO, true);
 
         // 根据缓存亮度决定是否点亮灯
         int cached_brightness = -1;
@@ -264,45 +249,54 @@ public:
         InitializeGpio(EXTRA_LIGHT_GPIO, extra_light_on);
         
 
-        gpio_config_t io_conf = {};
-        io_conf.pin_bit_mask = (1ULL << LED_GPIO);
-        io_conf.mode = GPIO_MODE_OUTPUT;
-        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-        io_conf.intr_type = GPIO_INTR_DISABLE;
-        gpio_config(&io_conf);
-        gpio_set_level(LED_GPIO, 0);
+        // gpio_config_t io_conf = {};
+        // io_conf.pin_bit_mask = (1ULL << LED_GPIO);
+        // io_conf.mode = GPIO_MODE_OUTPUT;
+        // io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+        // io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        // io_conf.intr_type = GPIO_INTR_DISABLE;
+        // gpio_config(&io_conf);
+        // gpio_set_level(LED_GPIO, 0);
 
         audio_codec.OnWakeUp([this](const std::string& command) {
-            ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());
+            ESP_LOGE(TAG, "语音唤醒指令: %s", command.c_str());
             if (command == "你好小智" || command.find("小云") != std::string::npos){
-                ESP_LOGE(TAG, "vb6824 recv cmd: %d", Application::GetInstance().GetDeviceState());
+                ESP_LOGE(TAG, "设备状态: %d", Application::GetInstance().GetDeviceState());
                 Application::GetInstance().WakeWordInvoke("你好小智");
 
-                ESP_LOGI(TAG, "Motor test triggered by voice command");
+                // ESP_LOGI(TAG, "语音触发：执行电机测试");
                 // 在任务中执行测试，避免阻塞语音处理
-                xTaskCreate([](void* arg) {
-                    CustomBoard* board = static_cast<CustomBoard*>(arg);
-                    board->TestMotorActions();
-                    vTaskDelete(nullptr);
-                }, "motor_test", 4096, this, 5, nullptr);
+                // xTaskCreate([](void* arg) {
+                //     CustomBoard* board = static_cast<CustomBoard*>(arg);
+                //     board->TestMotorActions();
+                //     board->TestRearLeg();
+                //     vTaskDelete(nullptr);
+                // }, "motor_test", 4096, this, 5, nullptr);
             } else if (command == "开始配网") {
                 ResetWifiConfiguration();
-            } else if (command == "前进" || command.find("向前") != std::string::npos) {
-                ESP_LOGI(TAG, "Move forward triggered by voice command");
+            } else if (command == "前进" || command == "过来") {
+                ESP_LOGI(TAG, "语音触发：前进");
                 MoveForward(2000, 60);
-            } else if (command == "后退" || command.find("向后") != std::string::npos) {
-                ESP_LOGI(TAG, "Move backward triggered by voice command");
+            } else if (command == "后退" || command == "走开" || command == "滚开"|| command == "滚蛋") {
+                ESP_LOGI(TAG, "语音触发：后退");
                 MoveBackward(2000, 60);
-            } else if (command == "左转" || command.find("向左") != std::string::npos) {
-                ESP_LOGI(TAG, "Turn left triggered by voice command");
+            } else if (command == "左转" || command == "向左转") {
+                ESP_LOGI(TAG, "语音触发：左转");
                 TurnLeft(1500, 50);
-            } else if (command == "右转" || command.find("向右") != std::string::npos) {
-                ESP_LOGI(TAG, "Turn right triggered by voice command");
+            } else if (command == "右转" || command == "向右转") {
+                ESP_LOGI(TAG, "语音触发：右转");
                 TurnRight(1500, 50);
-            } else if (command == "停止" || command.find("停下") != std::string::npos) {
-                ESP_LOGI(TAG, "Stop triggered by voice command");
-                StopMotors();
+            } else if (command == "打个滚" || command == "转个圈" || command == "跳个舞" || command == "跳舞" || command == "转个圈") {
+                TurnLeft(6000, 50);
+            } else if (command == "趴下") {
+                // 后腿移动到最后面
+                motor_driver.MoveRearLegToBackmost(3000);
+            } else if (command == "坐下") {
+                // 后腿移动到最前面
+                motor_driver.MoveRearLegToFrontmost(3000);
+            } else if(command == "站起来" || command =="站立") {
+                // 后腿移动中间
+                motor_driver.MoveRearLegToMiddle(3000);
             }
         });
     }
@@ -344,16 +338,16 @@ public:
     }
 
 
-    virtual bool GetBatteryLevel(int &level, bool& charging, bool& discharging) override {
-        level = PowerManager::GetInstance().GetBatteryLevel();
-        charging = PowerManager::GetInstance().IsCharging();
-        discharging = !charging;
-        return true;
-    }
+    // virtual bool GetBatteryLevel(int &level, bool& charging, bool& discharging) override {
+    //     level = PowerManager::GetInstance().GetBatteryLevel();
+    //     charging = PowerManager::GetInstance().IsCharging();
+    //     discharging = !charging;
+    //     return true;
+    // }
 
-    virtual bool IsCharging() override {
-        return PowerManager::GetInstance().IsCharging();
-    }
+    // virtual bool IsCharging() override {
+    //     return PowerManager::GetInstance().IsCharging();
+    // }
 
     // 数据点相关方法实现
     const char* GetGizwitsProtocolJson() const override {
@@ -412,39 +406,39 @@ public:
 
     // 电机动作测试方法
     void TestMotorActions() {
-        ESP_LOGI(TAG, "Starting motor action test sequence...");
+        ESP_LOGI(TAG, "开始电机动作测试序列...");
         
         // 测试1: 前进2秒
-        ESP_LOGI(TAG, "Test 1: Moving forward for 2 seconds");
+        ESP_LOGI(TAG, "测试1：前进 2 秒");
         MoveForward(2000, 80);
         vTaskDelay(pdMS_TO_TICKS(3000)); // 等待动作完成
         
         // 测试2: 后退2秒
-        ESP_LOGI(TAG, "Test 2: Moving backward for 2 seconds");
+        ESP_LOGI(TAG, "测试2：后退 2 秒");
         MoveBackward(2000, 80);
         vTaskDelay(pdMS_TO_TICKS(3000));
         
         // 测试3: 左转1.5秒
-        ESP_LOGI(TAG, "Test 3: Turning left for 1.5 seconds");
+        ESP_LOGI(TAG, "测试3：左转 1.5 秒");
         TurnLeft(1500, 70);
         vTaskDelay(pdMS_TO_TICKS(2000));
         
         // 测试4: 右转1.5秒
-        ESP_LOGI(TAG, "Test 4: Turning right for 1.5 seconds");
+        ESP_LOGI(TAG, "测试4：右转 1.5 秒");
         TurnRight(1500, 70);
         vTaskDelay(pdMS_TO_TICKS(2000));
         
         // 测试5: 刹车测试
-        ESP_LOGI(TAG, "Test 5: Brake test");
+        ESP_LOGI(TAG, "测试5：刹车测试");
         MoveForward(1000, 60); // 先前进1秒
         vTaskDelay(pdMS_TO_TICKS(1200));
         BrakeMotors(); // 然后刹车
         vTaskDelay(pdMS_TO_TICKS(1000));
         
         // 测试6: 不同速度测试
-        ESP_LOGI(TAG, "Test 6: Speed variation test");
+        ESP_LOGI(TAG, "测试6：不同速度测试");
         for (int speed = 30; speed <= 100; speed += 20) {
-            ESP_LOGI(TAG, "Testing speed: %d%%", speed);
+            ESP_LOGI(TAG, "测试速度：%d%%", speed);
             MoveForward(1000, speed);
             vTaskDelay(pdMS_TO_TICKS(1200));
             StopMotors();
@@ -452,29 +446,42 @@ public:
         }
         
         // 测试7: 自定义动作测试
-        ESP_LOGI(TAG, "Test 7: Custom action test");
+        ESP_LOGI(TAG, "测试7：自定义动作");
         MotorDriver::Action custom_action;
         custom_action.type = MotorDriver::ACTION_CUSTOM;
         custom_action.duration_ms = 2000;
         custom_action.speed_a = 60;  // 电机A 60%速度
         custom_action.speed_b = 90;  // 电机B 90%速度
         custom_action.callback = []() {
-            ESP_LOGI(TAG, "Custom action completed!");
+            ESP_LOGI(TAG, "自定义动作完成!");
         };
         motor_driver.ExecuteCustomAction(custom_action);
         vTaskDelay(pdMS_TO_TICKS(2500));
         
         // 测试8: 停止所有电机
-        ESP_LOGI(TAG, "Test 8: Final stop");
+        ESP_LOGI(TAG, "测试8：全部停止");
         StopMotors();
         
-        ESP_LOGI(TAG, "Motor action test sequence completed!");
+        ESP_LOGI(TAG, "电机动作测试序列完成!");
     }
 
     // 简单的电机控制测试（用于语音命令等）
     void SimpleMotorTest() {
-        ESP_LOGI(TAG, "Simple motor test: forward 1 second");
+        ESP_LOGI(TAG, "简单测试：前进 1 秒");
         MoveForward(1000, 50);
+    }
+
+    // 后腿测试：先到最前，再到最后，各等待到位或超时
+    void TestRearLeg() {
+        ESP_LOGI(TAG, "后腿测试：移动到最前端(≈900)...");
+        bool ok1 = motor_driver.MoveRearLegToFrontmost(5000);
+        ESP_LOGI(TAG, "最前端结果：%s", ok1 ? "到位" : "超时");
+
+        vTaskDelay(pdMS_TO_TICKS(500));
+
+        ESP_LOGI(TAG, "后腿测试：移动到最后端(≈2790)...");
+        bool ok2 = motor_driver.MoveRearLegToBackmost(5000);
+        ESP_LOGI(TAG, "最后端结果：%s", ok2 ? "到位" : "超时");
     }
 };
 

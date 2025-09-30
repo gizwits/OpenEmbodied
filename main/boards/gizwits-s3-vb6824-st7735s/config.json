@@ -15,7 +15,9 @@
               "CONFIG_VB6824_SEND_TASK_STACK_SIZE=4096",
               "CONFIG_ESP_TIMER_TASK_STACK_SIZE=4096",
               "CONFIG_USE_AUDIO_PROCESSOR=n",
-              "CONFIG_USE_AFE_WAKE_WORD=n"
+              "CONFIG_USE_AFE_WAKE_WORD=n",
+              "CONFIG_PRODUCT_TEST_WIFI=\"XUNGUAN_TEST#@#@\"",
+              "CONFIG_PRODUCT_TEST_WIFI_PASSWORD=\"12345678\""
           ]
       }
   ]

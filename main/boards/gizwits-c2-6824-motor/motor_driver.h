@@ -62,7 +62,11 @@ private:
     static constexpr gpio_num_t MOTOR_A_IN1 = GPIO_NUM_4;  // 电机A控制1
     static constexpr gpio_num_t MOTOR_A_IN2 = GPIO_NUM_7;  // 电机A控制2
     static constexpr gpio_num_t MOTOR_B_IN3 = GPIO_NUM_2;  // 电机B控制1
-    static constexpr gpio_num_t MOTOR_B_IN4 = GPIO_NUM_1;  // 电机B控制2
+    static constexpr gpio_num_t MOTOR_B_IN4 = GPIO_NUM_6;  // 电机B控制2
+
+    static constexpr gpio_num_t MOTOR_C_IN1 = GPIO_NUM_5;  // 电机C控制1
+    static constexpr gpio_num_t MOTOR_C_IN2 = GPIO_NUM_19;  // 电机C控制1
+
 
     // PWM配置
     static constexpr ledc_channel_t MOTOR_A_PWM_CHANNEL = LEDC_CHANNEL_0;
@@ -91,6 +95,9 @@ private:
     TaskHandle_t potentiometer_task_handle_;
     bool potentiometer_monitoring_;
     int potentiometer_interval_ms_;  // 读取间隔(毫秒)
+
+    // 后腿动作运行标志（可被打断）
+    volatile bool rear_leg_running_ = false;
 
     // 静态定时器回调函数
     static void ActionTimerCallback(void* arg);
@@ -219,6 +226,41 @@ public:
     void Stop();
     void Brake();
 
+    // 后腿控制（电机C）
+    /**
+     * 将后腿移动到最前端（电位器原始值≈900）
+     * @param timeout_ms 超时时间，毫秒，默认4000
+     * @return true 达到目标，false 超时未到达
+     */
+    bool MoveRearLegToFrontmost(int timeout_ms = 4000);
+
+    /**
+     * 将后腿移动到最后端（电位器原始值≈2790）
+     * @param timeout_ms 超时时间，毫秒，默认4000
+     * @return true 达到目标，false 超时未到达
+     */
+    bool MoveRearLegToBackmost(int timeout_ms = 4000);
+
+    /**
+     * 将后腿移动到中间站立位置（约在前后目标中点）
+     * @param timeout_ms 超时时间，毫秒，默认4000
+     * @return true 达到目标，false 超时或被打断
+     */
+    bool MoveRearLegToMiddle(int timeout_ms = 4000);
+
+    /**
+     * 立即停止后腿运动（中断进行中的到位动作）
+     */
+    void StopRearLeg();
+
+    /**
+     * 规范后腿位置：
+     *  - adc < 900-阈值 时，移动到最前端
+     *  - adc > 2750+阈值 时，移动到最后端
+     *  - 否则不动作
+     */
+    bool NormalizeRearLegPosition(int timeout_ms = 5000);
+
 private:
     /**
      * 设置GPIO输出
@@ -245,6 +287,11 @@ private:
      * 执行动作定时器回调
      */
     void OnActionTimer();
+
+    // 后腿电机底层控制
+    void SetMotorCStop();
+    void SetMotorCForward();  // 朝向前端
+    void SetMotorCReverse();  // 朝向后端
 };
 
 #endif // _MOTOR_DRIVER_H_
