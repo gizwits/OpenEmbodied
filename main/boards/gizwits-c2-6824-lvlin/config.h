@@ -11,6 +11,7 @@
 #define CODEC_TX_GPIO           GPIO_NUM_10
 #define CODEC_RX_GPIO           GPIO_NUM_18
 #define BUILTIN_LED_GPIO        GPIO_NUM_6
+#define COLLISION_BUTTON_GPIO        GPIO_NUM_4
 #define BUILTIN_LED_NUM         1
 
 // 使用日志串口 UART_NUM_0

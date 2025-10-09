@@ -11,6 +11,16 @@
 #include "backlight.h"
 #include "camera.h"
 #include "servo.h"
+#include <network_interface.h>
+
+// 前向声明
+class PowerSaveTimer;
+//enum NetworkType
+enum class NetworkType {
+    WIFI,
+    ML307
+};
+
 
 void* create_board();
 
@@ -37,14 +47,13 @@ protected:
     // 软件生成的设备唯一标识
     std::string uuid_;
     
-    // 设备工作模式
-    DeviceMode device_mode_ = DeviceMode::BUTTON_MODE;
-
 public:
     static Board& GetInstance() {
         static Board* instance = static_cast<Board*>(create_board());
         return *instance;
     }
+
+    virtual NetworkType GetNetworkType() { return NetworkType::WIFI; }
 
     virtual ~Board() = default;
     virtual std::string GetBoardType() = 0;
@@ -58,42 +67,27 @@ public:
     virtual Servo* GetServo();
     virtual Display* GetDisplay();
     virtual Camera* GetCamera();
-    virtual Http* CreateHttp() = 0;
-    virtual WebSocket* CreateWebSocket() = 0;
-    virtual Mqtt* CreateMqtt() = 0;
-    virtual Udp* CreateUdp() = 0;
+    virtual NetworkInterface* GetNetwork() = 0;
     virtual void StartNetwork() = 0;
     virtual const char* GetNetworkStateIcon() = 0;
     virtual bool GetBatteryLevel(int &level, bool& charging, bool& discharging) { return false; }
-    virtual bool IsCharging() { return false; }
     virtual std::string GetJson();
     virtual void SetPowerSaveMode(bool enabled) = 0;
     virtual bool IsWifiConfigMode();
+    
     virtual std::string GetBoardJson() = 0;
     virtual std::string GetDeviceStatusJson() = 0;
     virtual int MaxVolume() { return 100; }
-    virtual int GetVoiceSpeed() { return 0; }
+    virtual int MaxBacklightBrightness() { return 100; }
+    virtual bool IsCharging() { return false; }
+    virtual void PowerOff() {};
+    virtual void ResetPowerSaveTimer() {};  // 新增：重置电源保存定时器
+    virtual void WakeUpPowerSaveTimer() {};
+    virtual PowerSaveTimer* GetPowerSaveTimer() { return nullptr; }  // 新增：获取电源保存定时器
     virtual uint8_t GetBrightness() { return 0; }
     virtual void SetBrightness(uint8_t brightness) { }
     virtual uint8_t GetDefaultBrightness() { return 0; }
     virtual void EnterDeepSleepIfNotCharging() { }
-    virtual void WakeUpPowerSaveTimer() { }
-    
-    // 设备模式相关方法
-    virtual DeviceMode GetDeviceMode() const { return device_mode_; }
-    virtual void SetDeviceMode(DeviceMode mode) { device_mode_ = mode; }
-    virtual std::string GetDeviceModeString() const {
-        switch (device_mode_) {
-            case DeviceMode::BUTTON_MODE:
-                return "button_mode";
-            case DeviceMode::WAKE_WORD_MODE:
-                return "wake_word_mode";
-            case DeviceMode::NATURAL_CHAT_MODE:
-                return "natural_chat_mode";
-            default:
-                return "unknown_mode";
-        }
-    }
     
     // 数据点相关方法
     virtual const char* GetGizwitsProtocolJson() const { return nullptr; }
@@ -102,6 +96,7 @@ public:
     virtual bool SetDataPointValue(const std::string& name, int value) { return false; }
     virtual void GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) { data_size = 0; }
     virtual void ProcessDataPointValue(const std::string& name, int value) {}
+
 };
 
 #define DECLARE_BOARD(BOARD_CLASS_NAME) \

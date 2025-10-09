@@ -18,7 +18,7 @@ void Protocol::OnAudioChannelOpened(std::function<void()> callback) {
     on_audio_channel_opened_ = callback;
 }
 
-void Protocol::OnAudioChannelClosed(std::function<void()> callback) {
+void Protocol::OnAudioChannelClosed(std::function<void(bool is_clean)> callback) {
     on_audio_channel_closed_ = callback;
 }
 
@@ -27,14 +27,19 @@ void Protocol::OnNetworkError(std::function<void(const std::string& message)> ca
 }
 
 void Protocol::SetError(const std::string& message) {
-    error_occurred_ = true;
+    // coze 不做错误判断，严重错误会自动重连
+    // error_occurred_ = true;
     if (on_network_error_ != nullptr) {
         on_network_error_(message);
     }
 }
 
 void Protocol::SendAbortSpeaking(AbortReason reason) {
-
+    // 记录打断AI说话的时间戳
+    abort_speaking_timestamp_ = std::chrono::steady_clock::now();
+    abort_speaking_recorded_ = true;
+    ESP_LOGI(TAG, "Abort speaking timestamp recorded, will ignore server audio for 1s");
+    
     char event_id[32];
     uint32_t random_value = esp_random();
     snprintf(event_id, sizeof(event_id), "%lu", random_value);
@@ -158,8 +163,8 @@ bool Protocol::IsTimeout() const {
     }
     else
     {
-        int t = duration.count();
-        ESP_LOGE(TAG, "[wt%d]", t);
+        // int t = duration.count();
+        // ESP_LOGE(TAG, "[wt%d]", t);
     }
     return timeout;
 }
@@ -176,7 +181,6 @@ void Protocol::UpdateRoomParams(const RoomParams& params) {
     ESP_LOGI(TAG, "  conv_id: %s", params.conv_id.c_str());
     ESP_LOGI(TAG, "  access_token: %s", params.access_token.c_str());
 
-    // 保存
     room_params_ = params;
 }
 

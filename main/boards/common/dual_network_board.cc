@@ -7,12 +7,13 @@
 
 static const char *TAG = "DualNetworkBoard";
 
-DualNetworkBoard::DualNetworkBoard(gpio_num_t ml307_tx_pin, gpio_num_t ml307_rx_pin, size_t ml307_rx_buffer_size, int32_t default_net_type) 
+DualNetworkBoard::DualNetworkBoard(gpio_num_t ml307_tx_pin, gpio_num_t ml307_rx_pin, gpio_num_t ml307_dtr_pin, int32_t default_net_type, uart_port_t uart_num) 
     : Board(), 
       ml307_tx_pin_(ml307_tx_pin), 
       ml307_rx_pin_(ml307_rx_pin), 
-      ml307_rx_buffer_size_(ml307_rx_buffer_size) {
-    
+      ml307_dtr_pin_(ml307_dtr_pin),
+      uart_num_(uart_num) {
+
     // 从Settings加载网络类型
     network_type_ = LoadNetworkTypeFromSettings(default_net_type);
     
@@ -35,7 +36,7 @@ void DualNetworkBoard::SaveNetworkTypeToSettings(NetworkType type) {
 void DualNetworkBoard::InitializeCurrentBoard() {
     if (network_type_ == NetworkType::ML307) {
         ESP_LOGI(TAG, "Initialize ML307 board");
-        current_board_ = std::make_unique<Ml307Board>(ml307_tx_pin_, ml307_rx_pin_, ml307_rx_buffer_size_);
+        current_board_ = std::make_unique<Ml307Board>(ml307_tx_pin_, ml307_rx_pin_, ml307_dtr_pin_, uart_num_);
     } else {
         ESP_LOGI(TAG, "Initialize WiFi board");
         current_board_ = std::make_unique<WifiBoard>();
@@ -62,30 +63,22 @@ std::string DualNetworkBoard::GetBoardType() {
 }
 
 void DualNetworkBoard::StartNetwork() {
+    ESP_LOGI(TAG, "开始启动网络连接...");
     auto display = Board::GetInstance().GetDisplay();
     
     if (network_type_ == NetworkType::WIFI) {
         display->SetStatus(Lang::Strings::CONNECTING);
+        ESP_LOGI(TAG, "当前使用WiFi网络");
     } else {
+        ESP_LOGI(TAG, "当前使用4G网络");
         display->SetStatus(Lang::Strings::DETECTING_MODULE);
     }
     current_board_->StartNetwork();
+    ESP_LOGI(TAG, "网络启动完成");
 }
 
-Http* DualNetworkBoard::CreateHttp() {
-    return current_board_->CreateHttp();
-}
-
-WebSocket* DualNetworkBoard::CreateWebSocket() {
-    return current_board_->CreateWebSocket();
-}
-
-Mqtt* DualNetworkBoard::CreateMqtt() {
-    return current_board_->CreateMqtt();
-}
-
-Udp* DualNetworkBoard::CreateUdp() {
-    return current_board_->CreateUdp();
+NetworkInterface* DualNetworkBoard::GetNetwork() {
+    return current_board_->GetNetwork();
 }
 
 const char* DualNetworkBoard::GetNetworkStateIcon() {

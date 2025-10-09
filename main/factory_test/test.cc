@@ -1,4 +1,5 @@
 #include "test.h"
+#include "factory_test.h"
 #include <iostream>
 #include <unistd.h>
 #include "settings.h"
@@ -236,7 +237,7 @@ void UdpBroadcaster::start() {
     xTaskCreatePinnedToCore([](void* arg) {
         UdpBroadcaster* broadcaster = static_cast<UdpBroadcaster*>(arg);
         broadcaster->process_command_thread();
-    }, "process_cmd", 8192, this, 5, &process_task_handle_, 0);
+    }, "process_cmd", 1024 * 6, this, 5, &process_task_handle_, 0);
     
     while (running_) {
         vTaskDelay(pdMS_TO_TICKS(1000));

@@ -9,12 +9,7 @@
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#include <esp_http.h>
-#include <esp_mqtt.h>
-#include <esp_udp.h>
-#include <tcp_transport.h>
-#include <tls_transport.h>
-#include <web_socket.h>
+#include <esp_network.h>
 #include <esp_log.h>
 
 #include <wifi_station.h>
@@ -56,7 +51,6 @@ void WifiBoard::EnterWifiConfigMode() {
     hint += "\n\n";
     application.Alert(Lang::Strings::WIFI_CONFIG_MODE, hint.c_str(), "", Lang::Sounds::P3_WIFICONFIG);
 
-    vTaskDelay(pdMS_TO_TICKS(2000));
 
     auto display = Board::GetInstance().GetDisplay();
     display->EnterWifiConfig();
@@ -68,17 +62,50 @@ void WifiBoard::EnterWifiConfigMode() {
 
     wifi_config.Initialize(Auth::getInstance().getProductKey(), "XPG-GAgent");
 
+    CheckTmpFactoryTestModeWithWifiConfig();
+
     // Wait forever until reset after configuration
     while (true) {
         int free_sram = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
         int min_free_sram = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
-        ESP_LOGI(TAG, "Free internal: %u minimal internal: %u", free_sram, min_free_sram);
+        ESP_LOGW(TAG, "Free internal: %u minimal internal: %u", free_sram, min_free_sram);
         vTaskDelay(pdMS_TO_TICKS(10000));
     }
 }
 
 bool WifiBoard::IsWifiConfigMode() {
     return wifi_config_mode_;
+}
+
+void WifiBoard::CheckTmpFactoryTestModeWithWifiConfig() {
+#ifdef CONFIG_TMP_PRODUCT_TEST_WIFI
+    WifiConnectionManager::GetInstance().OnScanResults([](const std::vector<std::string>& ssids){
+        if (std::find(ssids.begin(), ssids.end(), CONFIG_TMP_PRODUCT_TEST_WIFI) != ssids.end()) {
+            // 存在产测wifi
+            Settings settings("wifi", true);
+            settings.SetInt("tmp_ft_mode", 1);
+            vTaskDelay(pdMS_TO_TICKS(100));
+            esp_restart();
+        }
+    });
+#endif
+}
+
+void WifiBoard::CheckTmpFactoryTestMode() {
+#ifdef CONFIG_TMP_PRODUCT_TEST_WIFI
+    ESP_LOGI(TAG, "PRODUCT_TEST_WIFI");
+    auto& wifi_station = WifiStation::GetInstance();
+    wifi_station.OnScanResults([this](const std::vector<std::string>& ssids) {
+        // 打印扫描到的 SSID 列表
+        if (std::find(ssids.begin(), ssids.end(), CONFIG_TMP_PRODUCT_TEST_WIFI) != ssids.end()) {
+            // 存在产测wifi
+            Settings settings("wifi", true);
+            settings.SetInt("tmp_ft_mode", 1);
+            vTaskDelay(pdMS_TO_TICKS(500));
+            esp_restart();
+        }
+    });
+#endif
 }
 
 void WifiBoard::StartNetwork() {
@@ -102,6 +129,9 @@ void WifiBoard::StartNetwork() {
         auto display = Board::GetInstance().GetDisplay();
         display->ShowNotification(Lang::Strings::SCANNING_WIFI, 30000);
     });
+
+    // CheckTmpFactoryTestMode();
+
     wifi_station.OnConnect([this](const std::string& ssid) {
         auto display = Board::GetInstance().GetDisplay();
         std::string notification = Lang::Strings::CONNECT_TO;
@@ -116,9 +146,12 @@ void WifiBoard::StartNetwork() {
         display->ShowNotification(notification.c_str(), 30000);
     });
     wifi_station.Start();
+    
+    // 禁用 WiFi 省电模式以提高连接稳定性
+    wifi_station.SetPowerSaveMode(false);
 
     // Try to connect to WiFi, if failed, launch the WiFi configuration AP
-    if (!wifi_station.WaitForConnected(60 * 1000)) {
+    if (!wifi_station.WaitForConnected(20 * 1000)) {
         wifi_station.Stop();
         wifi_config_mode_ = true;
         EnterWifiConfigMode();
@@ -126,21 +159,10 @@ void WifiBoard::StartNetwork() {
     }
 }
 
-Http* WifiBoard::CreateHttp() {
-    return new EspHttp();
-}
 
-WebSocket* WifiBoard::CreateWebSocket() {
-    auto transport = new TcpTransport();
-    return new WebSocket(transport);
-}
-
-Mqtt* WifiBoard::CreateMqtt() {
-    return new EspMqtt();
-}
-
-Udp* WifiBoard::CreateUdp() {
-    return new EspUdp();
+NetworkInterface* WifiBoard::GetNetwork() {
+    static EspNetwork network;
+    return &network;
 }
 
 const char* WifiBoard::GetNetworkStateIcon() {
@@ -187,8 +209,11 @@ void WifiBoard::ResetWifiConfiguration() {
         Settings settings("wifi", true);
         settings.SetInt("force_ap", 1);
     }
+
+    MqttClient::getInstance().disconnect();
+
     GetDisplay()->ShowNotification(Lang::Strings::ENTERING_WIFI_CONFIG_MODE);
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    vTaskDelay(pdMS_TO_TICKS(500));
     // Reboot the device
     esp_restart();
 }

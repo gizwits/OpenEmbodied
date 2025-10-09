@@ -3,6 +3,7 @@
 
 #include <esp_log.h>
 #include <driver/ledc.h>
+#include "application.h"
 
 #define TAG "Backlight"
 
@@ -32,20 +33,23 @@ Backlight::~Backlight() {
 void Backlight::RestoreBrightness() {
     // Load brightness from settings
     Settings settings("display");  
-    int saved_brightness = settings.GetInt("brightness",50);
+    int saved_brightness = settings.GetInt("brightness", 30);  // 降低默认亮度，避免开机时过亮
     
     // 检查亮度值是否为0或过小，设置默认值
     if (saved_brightness <= 0) {
-        ESP_LOGW(TAG, "Brightness value (%d) is too small, setting to default (10)", saved_brightness);
-        saved_brightness = 10;  // 设置一个较低的默认值
+        ESP_LOGW(TAG, "Brightness value (%d) is too small, setting to default (15)", saved_brightness);
+        saved_brightness = 15;  // 设置一个较低的默认值，避免开机闪烁
     }
     
+    ESP_LOGI(TAG, "Restoring brightness to %d", saved_brightness);
     SetBrightness(saved_brightness);
 }
 
 void Backlight::SetBrightness(uint8_t brightness, bool permanent) {
-    if (brightness > 100) {
-        brightness = 100;
+    auto& board = Board::GetInstance();
+    auto max_brightness = board.MaxBacklightBrightness();
+    if (brightness > max_brightness) {
+        brightness = max_brightness;
     }
 
     if (brightness_ == brightness) {
@@ -57,12 +61,19 @@ void Backlight::SetBrightness(uint8_t brightness, bool permanent) {
         settings.SetInt("brightness", brightness);
     }
 
-    target_brightness_ = brightness;
+    // ESP_LOGI(TAG, "IsCharging: %d", board.IsCharging());
+    // 充电中 强制降低亮度
+    // if (board.IsCharging() && brightness > 5) {
+    //     target_brightness_ = 5;
+    // } else {
+    //     target_brightness_ = brightness;
+    // }
+
     step_ = (target_brightness_ > brightness_) ? 1 : -1;
 
     if (transition_timer_ != nullptr) {
-        // 启动定时器，每 5ms 更新一次
-        esp_timer_start_periodic(transition_timer_, 5 * 1000);
+        // 启动定时器，每 8ms 更新一次，使渐变更平滑
+        esp_timer_start_periodic(transition_timer_, 8 * 1000);
     }
     ESP_LOGI(TAG, "Set brightness to %d", brightness);
 }

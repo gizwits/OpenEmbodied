@@ -20,10 +20,10 @@
 // Start of Selection
 
 LedSignal::LedSignal(gpio_num_t red_gpio, ledc_channel_t red_channel, 
-                    gpio_num_t green_gpio, ledc_channel_t green_channel, 
+                    // gpio_num_t green_gpio, ledc_channel_t green_channel, 
                     gpio_num_t blue_gpio, ledc_channel_t blue_channel) 
     : red_led_(new GpioLed(red_gpio, 1, LEDC_TIMER_0, red_channel)),
-      green_led_(new GpioLed(green_gpio, 1, LEDC_TIMER_1, green_channel)),
+    //   green_led_(new GpioLed(green_gpio, 1, LEDC_TIMER_1, green_channel)),
       blue_led_(new GpioLed(blue_gpio, 1, LEDC_TIMER_2, blue_channel)) {
     InitializeLeds();
 }
@@ -41,14 +41,14 @@ void LedSignal::SetColor(uint8_t red, uint8_t green, uint8_t blue) {
     };
 
     setLedState(red_led_, red);
-    setLedState(green_led_, green);
+    // setLedState(green_led_, green);
     setLedState(blue_led_, blue);
 }
 
 void LedSignal::SetBrightness(uint8_t brightness) {
     brightness_ = brightness;
     if (red_led_) red_led_->SetBrightness(brightness);
-    if (green_led_) green_led_->SetBrightness(brightness);
+    // if (green_led_) green_led_->SetBrightness(brightness);
     if (blue_led_) blue_led_->SetBrightness(brightness);
     ESP_LOGI(TAG, "SetBrightness: %d", brightness_);
 }
@@ -62,10 +62,10 @@ void LedSignal::InitializeLeds() {
         red_led_->SetBrightness(brightness_);
         red_led_->TurnOff();
     }
-    if (green_led_) {
-        green_led_->SetBrightness(brightness_);
-        green_led_->TurnOff();
-    }
+    // if (green_led_) {
+    //     green_led_->SetBrightness(brightness_);
+    //     green_led_->TurnOff();
+    // }
     if (blue_led_) {
         blue_led_->SetBrightness(brightness_);
         blue_led_->TurnOff();
@@ -74,13 +74,13 @@ void LedSignal::InitializeLeds() {
 
 LedSignal::~LedSignal() {
     delete red_led_;
-    delete green_led_;
+    // delete green_led_;
     delete blue_led_;
 }
 
 void LedSignal::CycleColorsWithFade(uint32_t interval_ms, uint8_t max_brightness) {
 
-    if (red_led_ == nullptr && green_led_ == nullptr && blue_led_ == nullptr) {
+    if (red_led_ == nullptr && blue_led_ == nullptr) {
         ESP_LOGE(TAG, "LedSignal: CycleColorsWithFade failed, leds not initialized");
         return;
     }

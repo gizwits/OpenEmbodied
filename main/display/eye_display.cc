@@ -6,6 +6,8 @@
 #include <esp_timer.h>
 #include "application.h"
 
+#define EYE_COLOR 0x40E0D0  // Tiffany Blue color for eyes
+
 #define TAG "EyeDisplay"
 
 EyeDisplay::EyeDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
@@ -50,10 +52,13 @@ EyeDisplay::EyeDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_
         return;
     }
 
-    ESP_LOGI(TAG, "Initialize LVGL");
+    ESP_LOGI(TAG, "Initialize LVGL library");
+    lv_init();
+    
+    ESP_LOGI(TAG, "Initialize LVGL port");
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     port_cfg.task_priority = 1;
-    port_cfg.timer_period_ms = 80;
+    port_cfg.timer_period_ms = 24;
     lvgl_port_init(&port_cfg);
 
     ESP_LOGI(TAG, "Adding LCD screen");
@@ -61,7 +66,7 @@ EyeDisplay::EyeDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_
         .io_handle = panel_io_,
         .panel_handle = panel_,
         .control_handle = nullptr,
-        .buffer_size = static_cast<uint32_t>(width_ * 40),
+        .buffer_size = static_cast<uint32_t>(width_ * 20),
         .double_buffer = true,
         .trans_size = 0,
         .hres = static_cast<uint32_t>(width_),
@@ -72,10 +77,12 @@ EyeDisplay::EyeDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_
             .mirror_x = mirror_x,
             .mirror_y = mirror_y,
         },
+        .color_format = LV_COLOR_FORMAT_RGB565,
         .flags = {
             .buff_dma = 1,
             .buff_spiram = 0,
             .sw_rotate = 0,
+            .swap_bytes = 1,
             .full_refresh = 0,
             .direct_mode = 0,
         },
@@ -181,6 +188,7 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
     if (emotion == nullptr) {
         return;
     }
+    
     // VERTIGO锁定：如果正在锁定且不是VERTIGO请求，直接忽略
     if (vertigo_locked_ && strcmp(emotion, "vertigo") != 0) {
         ESP_LOGI(TAG, "VERTIGO locked, ignore emotion: %s", emotion);
@@ -197,7 +205,7 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
     } else if (strcmp(emotion, "sad") == 0) {
         new_state = EyeState::SAD;
     } else if (strcmp(emotion, "angry") == 0) {
-        new_state = EyeState::SAD;
+        new_state = EyeState::ANGRY;
     } else if (strcmp(emotion, "crying") == 0) {
         new_state = EyeState::SAD;
     } else if (strcmp(emotion, "loving") == 0) {
@@ -211,7 +219,7 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
     } else if (strcmp(emotion, "thinking") == 0) {
         new_state = EyeState::THINKING;
     } else if (strcmp(emotion, "winking") == 0) {
-        new_state = EyeState::HAPPY;
+        new_state = EyeState::WINKING;
     } else if (strcmp(emotion, "cool") == 0) {
         new_state = EyeState::HAPPY;
     } else if (strcmp(emotion, "relaxed") == 0) {
@@ -295,6 +303,10 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
     lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
     
+    // 重置眼睛旋转角度（特别是从生气状态切换出来时）
+    lv_obj_set_style_transform_angle(left_eye_, 0, 0);
+    lv_obj_set_style_transform_angle(right_eye_, 0, 0);
+    
     // 重置眼睛尺寸为默认值（除了睡眠状态）
     if (new_state != EyeState::SLEEPING) {
         lv_obj_set_size(left_eye_, 40, 80);
@@ -323,6 +335,8 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
             StartHappyAnimation();
             break;
         case EyeState::ANGRY:
+            StartAngryAnimation();
+            break;
         case EyeState::CRYING:
         case EyeState::SAD:
             StartSadAnimation();
@@ -352,7 +366,7 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
             break;
     }
 
-    if (current_state_ == EyeState::VERTIGO) {
+    if (current_state_ == EyeState::VERTIGO || current_state_ == EyeState::LOVING) {
         // 眩晕动画需要锁定
         vertigo_locked_ = true;
     }
@@ -404,24 +418,24 @@ void EyeDisplay::StartIdleAnimation() {
     lv_anim_init(&left_anim_);
     lv_anim_set_var(&left_anim_, left_eye_);
     lv_anim_set_values(&left_anim_, 40, 80);
-    lv_anim_set_time(&left_anim_, 1000);
+    lv_anim_set_time(&left_anim_, 600);
     lv_anim_set_delay(&left_anim_, 0);
     lv_anim_set_exec_cb(&left_anim_, (lv_anim_exec_xcb_t)lv_obj_set_height);
-    lv_anim_set_path_cb(&left_anim_, lv_anim_path_linear);
+    lv_anim_set_path_cb(&left_anim_, lv_anim_path_ease_in_out);
     lv_anim_set_repeat_count(&left_anim_, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_playback_time(&left_anim_, 1000);
+    lv_anim_set_playback_time(&left_anim_, 600);
     lv_anim_set_playback_delay(&left_anim_, 0);
     lv_anim_start(&left_anim_);
 
     lv_anim_init(&right_anim_);
     lv_anim_set_var(&right_anim_, right_eye_);
     lv_anim_set_values(&right_anim_, 40, 80);
-    lv_anim_set_time(&right_anim_, 1000);
+    lv_anim_set_time(&right_anim_, 600);
     lv_anim_set_delay(&right_anim_, 0);
     lv_anim_set_exec_cb(&right_anim_, (lv_anim_exec_xcb_t)lv_obj_set_height);
-    lv_anim_set_path_cb(&right_anim_, lv_anim_path_linear);
+    lv_anim_set_path_cb(&right_anim_, lv_anim_path_ease_in_out);
     lv_anim_set_repeat_count(&right_anim_, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_playback_time(&right_anim_, 1000);
+    lv_anim_set_playback_time(&right_anim_, 600);
     lv_anim_set_playback_delay(&right_anim_, 0);
     lv_anim_start(&right_anim_);
 }
@@ -434,24 +448,24 @@ void EyeDisplay::StartHappyAnimation() {
     lv_anim_init(&left_anim_);
     lv_anim_set_var(&left_anim_, left_eye_);
     lv_anim_set_values(&left_anim_, 40, 80);
-    lv_anim_set_time(&left_anim_, 1000);
+    lv_anim_set_time(&left_anim_, 700);
     lv_anim_set_delay(&left_anim_, 0);
     lv_anim_set_exec_cb(&left_anim_, (lv_anim_exec_xcb_t)lv_obj_set_height);
-    lv_anim_set_path_cb(&left_anim_, lv_anim_path_linear);
+    lv_anim_set_path_cb(&left_anim_, lv_anim_path_ease_in_out);
     lv_anim_set_repeat_count(&left_anim_, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_playback_time(&left_anim_, 1000);
+    lv_anim_set_playback_time(&left_anim_, 700);
     lv_anim_set_playback_delay(&left_anim_, 0);
     lv_anim_start(&left_anim_);
 
     lv_anim_init(&right_anim_);
     lv_anim_set_var(&right_anim_, right_eye_);
     lv_anim_set_values(&right_anim_, 40, 80);
-    lv_anim_set_time(&right_anim_, 1000);
+    lv_anim_set_time(&right_anim_, 700);
     lv_anim_set_delay(&right_anim_, 0);
     lv_anim_set_exec_cb(&right_anim_, (lv_anim_exec_xcb_t)lv_obj_set_height);
-    lv_anim_set_path_cb(&right_anim_, lv_anim_path_linear);
+    lv_anim_set_path_cb(&right_anim_, lv_anim_path_ease_in_out);
     lv_anim_set_repeat_count(&right_anim_, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_playback_time(&right_anim_, 1000);
+    lv_anim_set_playback_time(&right_anim_, 700);
     lv_anim_set_playback_delay(&right_anim_, 0);
     lv_anim_start(&right_anim_);
 
@@ -459,19 +473,19 @@ void EyeDisplay::StartHappyAnimation() {
     mouth_ = lv_img_create(lv_scr_act());
     lv_img_set_src(mouth_, &down_image);
     lv_obj_set_pos(mouth_, (width_ - 32) / 2, height_ - 52 - DISPLAY_VERTICAL_OFFSET);  // 居中，距离底部52像素
-    lv_obj_set_style_img_recolor(mouth_, lv_color_hex(0xFCCCE6), 0);  // 设置青色
+    lv_obj_set_style_img_recolor(mouth_, lv_color_hex(EYE_COLOR), 0);  // 设置青色
     lv_obj_set_style_img_recolor_opa(mouth_, LV_OPA_COVER, 0);  // 设置不透明度
 
     // 创建嘴巴动画
     lv_anim_init(&mouth_anim_);
     lv_anim_set_var(&mouth_anim_, mouth_);
     lv_anim_set_values(&mouth_anim_, height_ - 52 - DISPLAY_VERTICAL_OFFSET, height_ - 62 - DISPLAY_VERTICAL_OFFSET);  // 在-52到-62像素之间移动
-    lv_anim_set_time(&mouth_anim_, 1500);
+    lv_anim_set_time(&mouth_anim_, 1000);
     lv_anim_set_delay(&mouth_anim_, 0);
     lv_anim_set_exec_cb(&mouth_anim_, (lv_anim_exec_xcb_t)lv_obj_set_y);
-    lv_anim_set_path_cb(&mouth_anim_, lv_anim_path_ease_in_out);
+    lv_anim_set_path_cb(&mouth_anim_, lv_anim_path_bounce);
     lv_anim_set_repeat_count(&mouth_anim_, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_playback_time(&mouth_anim_, 1500);
+    lv_anim_set_playback_time(&mouth_anim_, 1000);
     lv_anim_set_playback_delay(&mouth_anim_, 0);
     lv_anim_start(&mouth_anim_);
 }
@@ -492,7 +506,7 @@ void EyeDisplay::StartSadAnimation() {
     mouth_ = lv_img_create(lv_scr_act());
     lv_img_set_src(mouth_, &down_image);
     lv_obj_set_pos(mouth_, (width_ - 32) / 2, height_ - 52 - DISPLAY_VERTICAL_OFFSET);  // 居中，距离底部52像素
-    lv_obj_set_style_img_recolor(mouth_, lv_color_hex(0xFCCCE6), 0);  // 设置青色
+    lv_obj_set_style_img_recolor(mouth_, lv_color_hex(EYE_COLOR), 0);  // 设置青色
     lv_obj_set_style_img_recolor_opa(mouth_, LV_OPA_COVER, 0);  // 设置不透明度
     
     // 旋转嘴巴180度，使其变成向上的箭头
@@ -505,12 +519,12 @@ void EyeDisplay::StartSadAnimation() {
     lv_anim_init(&mouth_anim_);
     lv_anim_set_var(&mouth_anim_, mouth_);
     lv_anim_set_values(&mouth_anim_, height_ - 32 - DISPLAY_VERTICAL_OFFSET, height_ - 42 - DISPLAY_VERTICAL_OFFSET); 
-    lv_anim_set_time(&mouth_anim_, 1500);
+    lv_anim_set_time(&mouth_anim_, 1200);
     lv_anim_set_delay(&mouth_anim_, 0);
     lv_anim_set_exec_cb(&mouth_anim_, (lv_anim_exec_xcb_t)lv_obj_set_y);
     lv_anim_set_path_cb(&mouth_anim_, lv_anim_path_ease_in_out);
     lv_anim_set_repeat_count(&mouth_anim_, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_playback_time(&mouth_anim_, 1500);
+    lv_anim_set_playback_time(&mouth_anim_, 1200);
     lv_anim_set_playback_delay(&mouth_anim_, 0);
     lv_anim_start(&mouth_anim_);
 
@@ -518,7 +532,7 @@ void EyeDisplay::StartSadAnimation() {
     right_tear_ = lv_obj_create(lv_scr_act());
     lv_obj_set_size(right_tear_, 12, 20); // 椭圆形状
     lv_obj_set_style_radius(right_tear_, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(right_tear_, lv_color_hex(0xFCCCE6), 0); // 青色
+    lv_obj_set_style_bg_color(right_tear_, lv_color_hex(EYE_COLOR), 0); // 青色
     lv_obj_set_style_border_width(right_tear_, 0, 0);
     lv_obj_set_style_border_side(right_tear_, LV_BORDER_SIDE_NONE, 0);
     lv_obj_set_style_pad_all(right_tear_, 0, 0);
@@ -548,14 +562,14 @@ void EyeDisplay::StartVertigoAnimation() {
     // 创建左眼爱心图片
     lv_obj_t* left_heart = lv_img_create(lv_screen_active());
     lv_img_set_src(left_heart, &spiral_img_64);
-    lv_obj_set_style_img_recolor(left_heart, lv_color_hex(0xFCCCE6), 0);  // 设置为白色
+    lv_obj_set_style_img_recolor(left_heart, lv_color_hex(EYE_COLOR), 0);  // 设置为白色
     lv_obj_set_style_img_recolor_opa(left_heart, LV_OPA_COVER, 0);  // 完全不透明
     lv_obj_align(left_heart, LV_ALIGN_LEFT_MID, 0, -DISPLAY_VERTICAL_OFFSET);  // 左眼位置，距离左边缘40像素
     
     // 创建右眼爱心图片
     lv_obj_t* right_heart = lv_img_create(lv_screen_active());
     lv_img_set_src(right_heart, &spiral_img_64);
-    lv_obj_set_style_img_recolor(right_heart, lv_color_hex(0xFCCCE6), 0);  // 设置为白色
+    lv_obj_set_style_img_recolor(right_heart, lv_color_hex(EYE_COLOR), 0);  // 设置为白色
     lv_obj_set_style_img_recolor_opa(right_heart, LV_OPA_COVER, 0);  // 完全不透明
     lv_obj_align(right_heart, LV_ALIGN_RIGHT_MID, -0, -DISPLAY_VERTICAL_OFFSET);  // 右眼位置，距离右边缘40像素
     
@@ -571,10 +585,10 @@ void EyeDisplay::StartVertigoAnimation() {
     lv_anim_init(&left_anim_);
     lv_anim_set_var(&left_anim_, left_heart);
     lv_anim_set_values(&left_anim_, 0, -3600);  // 从0度旋转到3600度（10圈）
-    lv_anim_set_time(&left_anim_, 1500);  // 从3000ms减少到1500ms，转得更快
+    lv_anim_set_time(&left_anim_, 1000);  // 更快的旋转速度
     lv_anim_set_delay(&left_anim_, 0);
     lv_anim_set_exec_cb(&left_anim_, (lv_anim_exec_xcb_t)lv_img_set_angle);
-    lv_anim_set_path_cb(&left_anim_, lv_anim_path_linear);
+    lv_anim_set_path_cb(&left_anim_, lv_anim_path_ease_in_out);
     lv_anim_set_repeat_count(&left_anim_, LV_ANIM_REPEAT_INFINITE);
     lv_anim_start(&left_anim_);
     
@@ -582,10 +596,10 @@ void EyeDisplay::StartVertigoAnimation() {
     lv_anim_init(&right_anim_);
     lv_anim_set_var(&right_anim_, right_heart);
     lv_anim_set_values(&right_anim_, 0, 3600);  // 从0度旋转到-3600度（逆时针10圈）
-    lv_anim_set_time(&right_anim_, 1500);  // 从3000ms减少到1500ms，转得更快
+    lv_anim_set_time(&right_anim_, 1000);  // 更快的旋转速度
     lv_anim_set_delay(&right_anim_, 0);
     lv_anim_set_exec_cb(&right_anim_, (lv_anim_exec_xcb_t)lv_img_set_angle);
-    lv_anim_set_path_cb(&right_anim_, lv_anim_path_linear);
+    lv_anim_set_path_cb(&right_anim_, lv_anim_path_ease_in_out);
     lv_anim_set_repeat_count(&right_anim_, LV_ANIM_REPEAT_INFINITE);
     lv_anim_start(&right_anim_);
 }
@@ -598,15 +612,15 @@ void EyeDisplay::StartLovingAnimation() {
     
     // 创建左眼爱心图片
     lv_obj_t* left_heart = lv_img_create(lv_screen_active());
-    lv_img_set_src(left_heart, &hart_img_64);
-    lv_obj_set_style_img_recolor(left_heart, lv_color_hex(0xFCCCE6), 0);  // 设置为白色
+    lv_img_set_src(left_heart, &hart_img);
+    lv_obj_set_style_img_recolor(left_heart, lv_color_hex(EYE_COLOR), 0);  // 设置为白色
     lv_obj_set_style_img_recolor_opa(left_heart, LV_OPA_COVER, 0);  // 完全不透明
     lv_obj_align(left_heart, LV_ALIGN_LEFT_MID, 0, -DISPLAY_VERTICAL_OFFSET);  // 左眼位置，距离左边缘40像素
     
     // 创建右眼爱心图片
     lv_obj_t* right_heart = lv_img_create(lv_screen_active());
-    lv_img_set_src(right_heart, &hart_img_64);
-    lv_obj_set_style_img_recolor(right_heart, lv_color_hex(0xFCCCE6), 0);  // 设置为白色
+    lv_img_set_src(right_heart, &hart_img);
+    lv_obj_set_style_img_recolor(right_heart, lv_color_hex(EYE_COLOR), 0);  // 设置为白色
     lv_obj_set_style_img_recolor_opa(right_heart, LV_OPA_COVER, 0);  // 完全不透明
     lv_obj_align(right_heart, LV_ALIGN_RIGHT_MID, -0, -DISPLAY_VERTICAL_OFFSET);  // 右眼位置，距离右边缘40像素
     
@@ -617,23 +631,23 @@ void EyeDisplay::StartLovingAnimation() {
     // 左眼爱心放大缩小动画
     lv_anim_init(&left_anim_);
     lv_anim_set_var(&left_anim_, left_heart);
-    lv_anim_set_values(&left_anim_, 64, 128);  // 从100%放大到200%
-    lv_anim_set_time(&left_anim_, 750);         // 放大时间
-    lv_anim_set_playback_time(&left_anim_, 750);// 缩小时间
+    lv_anim_set_values(&left_anim_, 74, 128);  // 从100%放大到200%
+    lv_anim_set_time(&left_anim_, 500);         // 放大时间
+    lv_anim_set_playback_time(&left_anim_, 500);// 缩小时间
     lv_anim_set_repeat_count(&left_anim_, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_exec_cb(&left_anim_, (lv_anim_exec_xcb_t)lv_img_set_zoom);
-    lv_anim_set_path_cb(&left_anim_, lv_anim_path_linear);
+    lv_anim_set_path_cb(&left_anim_, lv_anim_path_overshoot);
     lv_anim_start(&left_anim_);
 
     // 右眼爱心放大缩小动画
     lv_anim_init(&right_anim_);
     lv_anim_set_var(&right_anim_, right_heart);
-    lv_anim_set_values(&right_anim_, 64, 128);  // 从100%放大到200%
-    lv_anim_set_time(&right_anim_, 750);
-    lv_anim_set_playback_time(&right_anim_, 750);
+    lv_anim_set_values(&right_anim_, 74, 128);  // 从100%放大到200%
+    lv_anim_set_time(&right_anim_, 500);
+    lv_anim_set_playback_time(&right_anim_, 500);
     lv_anim_set_repeat_count(&right_anim_, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_exec_cb(&right_anim_, (lv_anim_exec_xcb_t)lv_img_set_zoom);
-    lv_anim_set_path_cb(&right_anim_, lv_anim_path_linear);
+    lv_anim_set_path_cb(&right_anim_, lv_anim_path_overshoot);
     lv_anim_start(&right_anim_);
 }
 
@@ -651,21 +665,21 @@ void EyeDisplay::StartSleepingAnimation() {
     // 创建三个 z 标签
     zzz1_ = lv_label_create(lv_screen_active());
     lv_obj_set_style_text_font(zzz1_, fonts_.text_font, 0);  // 使用文本字体
-    lv_obj_set_style_text_color(zzz1_, lv_color_hex(0xFCCCE6), 0);  // 黄色
+    lv_obj_set_style_text_color(zzz1_, lv_color_hex(EYE_COLOR), 0);  // 黄色
     lv_label_set_text(zzz1_, "z");
     lv_obj_align(zzz1_, LV_ALIGN_TOP_MID, -40, 50 - DISPLAY_VERTICAL_OFFSET);  // 调整垂直位置到 50
     lv_obj_set_style_text_letter_space(zzz1_, 2, 0);  // 增加字间距
 
     zzz2_ = lv_label_create(lv_screen_active());
     lv_obj_set_style_text_font(zzz2_, fonts_.text_font, 0);  // 使用文本字体
-    lv_obj_set_style_text_color(zzz2_, lv_color_hex(0xFCCCE6), 0);  // 黄色
+    lv_obj_set_style_text_color(zzz2_, lv_color_hex(EYE_COLOR), 0);  // 黄色
     lv_label_set_text(zzz2_, "z");
     lv_obj_align(zzz2_, LV_ALIGN_TOP_MID, 0, 40 - DISPLAY_VERTICAL_OFFSET);  // 调整垂直位置到 40
     lv_obj_set_style_text_letter_space(zzz2_, 2, 0);  // 增加字间距
 
     zzz3_ = lv_label_create(lv_screen_active());
     lv_obj_set_style_text_font(zzz3_, fonts_.text_font, 0);  // 使用文本字体
-    lv_obj_set_style_text_color(zzz3_, lv_color_hex(0xFCCCE6), 0);  // 黄色
+    lv_obj_set_style_text_color(zzz3_, lv_color_hex(EYE_COLOR), 0);  // 黄色
     lv_label_set_text(zzz3_, "z");
     lv_obj_align(zzz3_, LV_ALIGN_TOP_MID, 40, 30 - DISPLAY_VERTICAL_OFFSET);  // 调整垂直位置到 30
     lv_obj_set_style_text_letter_space(zzz3_, 2, 0);  // 增加字间距
@@ -679,26 +693,53 @@ void EyeDisplay::StartShockedAnimation() {
     lv_anim_init(&left_anim_);
     lv_anim_set_var(&left_anim_, left_eye_);
     lv_anim_set_values(&left_anim_, 40, 80);
-    lv_anim_set_time(&left_anim_, 1000);
+    lv_anim_set_time(&left_anim_, 800);
     lv_anim_set_delay(&left_anim_, 0);
     lv_anim_set_exec_cb(&left_anim_, (lv_anim_exec_xcb_t)lv_obj_set_height);
-    lv_anim_set_path_cb(&left_anim_, lv_anim_path_linear);
+    lv_anim_set_path_cb(&left_anim_, lv_anim_path_overshoot);
     lv_anim_set_repeat_count(&left_anim_, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_playback_time(&left_anim_, 1000);
+    lv_anim_set_playback_time(&left_anim_, 800);
     lv_anim_set_playback_delay(&left_anim_, 0);
     lv_anim_start(&left_anim_);
 
     lv_anim_init(&right_anim_);
     lv_anim_set_var(&right_anim_, right_eye_);
     lv_anim_set_values(&right_anim_, 40, 80);
-    lv_anim_set_time(&right_anim_, 1000);
+    lv_anim_set_time(&right_anim_, 800);
     lv_anim_set_delay(&right_anim_, 0);
     lv_anim_set_exec_cb(&right_anim_, (lv_anim_exec_xcb_t)lv_obj_set_height);
-    lv_anim_set_path_cb(&right_anim_, lv_anim_path_linear);
+    lv_anim_set_path_cb(&right_anim_, lv_anim_path_overshoot);
     lv_anim_set_repeat_count(&right_anim_, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_playback_time(&right_anim_, 1000);
+    lv_anim_set_playback_time(&right_anim_, 800);
     lv_anim_set_playback_delay(&right_anim_, 0);
     lv_anim_start(&right_anim_);
+    
+    // 创建圆形嘴巴
+    mouth_ = lv_obj_create(lv_scr_act());
+    lv_obj_set_size(mouth_, 30, 30);  // 圆形嘴巴
+    lv_obj_set_style_radius(mouth_, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(mouth_, lv_color_hex(EYE_COLOR), 0);
+    lv_obj_set_style_border_width(mouth_, 0, 0);
+    lv_obj_set_style_pad_all(mouth_, 0, 0);
+    lv_obj_set_style_shadow_width(mouth_, 0, 0);
+    lv_obj_set_style_outline_width(mouth_, 0, 0);
+    lv_obj_set_pos(mouth_, (width_ - 30) / 2, height_ - 70 - DISPLAY_VERTICAL_OFFSET);  // 居中显示
+    
+    // 为嘴巴添加大小动画，模拟震惊的效果
+    static lv_anim_t mouth_size_anim;
+    lv_anim_init(&mouth_size_anim);
+    lv_anim_set_var(&mouth_size_anim, mouth_);
+    lv_anim_set_values(&mouth_size_anim, 20, 35);  // 从小到大变化
+    lv_anim_set_time(&mouth_size_anim, 800);
+    lv_anim_set_exec_cb(&mouth_size_anim, [](void* obj, int32_t value) {
+        lv_obj_set_size((lv_obj_t*)obj, value, value);
+        // 重新居中
+        lv_obj_set_x((lv_obj_t*)obj, (240 - value) / 2);
+    });
+    lv_anim_set_path_cb(&mouth_size_anim, lv_anim_path_ease_in_out);
+    lv_anim_set_repeat_count(&mouth_size_anim, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_playback_time(&mouth_size_anim, 800);
+    lv_anim_start(&mouth_size_anim);
 }
 
 void EyeDisplay::StartSillyAnimation() {
@@ -729,6 +770,71 @@ void EyeDisplay::StartSillyAnimation() {
     lv_anim_set_playback_time(&right_anim_, 1000);
     lv_anim_set_playback_delay(&right_anim_, 0);
     lv_anim_start(&right_anim_);
+}
+
+void EyeDisplay::StartAngryAnimation() {
+    // 确保眼睛可见
+    lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
+    
+    // 设置眼睛为倾斜的形状（内高外低）
+    // 左眼：右高左低
+    lv_obj_set_size(left_eye_, 50, 60);
+    lv_obj_set_style_radius(left_eye_, 15, 0);
+    lv_obj_set_style_transform_angle(left_eye_, -150, 0);  // -15度倾斜
+    
+    // 右眼：左高右低  
+    lv_obj_set_size(right_eye_, 50, 60);
+    lv_obj_set_style_radius(right_eye_, 15, 0);
+    lv_obj_set_style_transform_angle(right_eye_, 150, 0);  // 15度倾斜
+    
+    // 眼睛微微跳动的动画
+    lv_anim_init(&left_anim_);
+    lv_anim_set_var(&left_anim_, left_eye_);
+    lv_anim_set_values(&left_anim_, 55, 65);
+    lv_anim_set_time(&left_anim_, 500);
+    lv_anim_set_exec_cb(&left_anim_, (lv_anim_exec_xcb_t)lv_obj_set_height);
+    lv_anim_set_path_cb(&left_anim_, lv_anim_path_ease_in_out);
+    lv_anim_set_repeat_count(&left_anim_, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_playback_time(&left_anim_, 500);
+    lv_anim_start(&left_anim_);
+    
+    lv_anim_init(&right_anim_);
+    lv_anim_set_var(&right_anim_, right_eye_);
+    lv_anim_set_values(&right_anim_, 55, 65);
+    lv_anim_set_time(&right_anim_, 500);
+    lv_anim_set_exec_cb(&right_anim_, (lv_anim_exec_xcb_t)lv_obj_set_height);
+    lv_anim_set_path_cb(&right_anim_, lv_anim_path_ease_in_out);
+    lv_anim_set_repeat_count(&right_anim_, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_playback_time(&right_anim_, 500);
+    lv_anim_start(&right_anim_);
+    
+    // 创建生气的嘴巴（紧闭的横线）
+    mouth_ = lv_obj_create(lv_scr_act());
+    lv_obj_set_size(mouth_, 40, 4);  // 横线形状
+    lv_obj_set_style_radius(mouth_, 2, 0);
+    lv_obj_set_style_bg_color(mouth_, lv_color_hex(EYE_COLOR), 0);
+    lv_obj_set_style_border_width(mouth_, 0, 0);
+    lv_obj_set_style_pad_all(mouth_, 0, 0);
+    lv_obj_set_style_shadow_width(mouth_, 0, 0);
+    lv_obj_set_style_outline_width(mouth_, 0, 0);
+    lv_obj_set_pos(mouth_, (width_ - 40) / 2, height_ - 60 - DISPLAY_VERTICAL_OFFSET);
+    
+    // 嘴巴微微抖动的动画
+    static lv_anim_t mouth_width_anim;
+    lv_anim_init(&mouth_width_anim);
+    lv_anim_set_var(&mouth_width_anim, mouth_);
+    lv_anim_set_values(&mouth_width_anim, 35, 45);  // 宽度变化
+    lv_anim_set_time(&mouth_width_anim, 400);
+    lv_anim_set_exec_cb(&mouth_width_anim, [](void* obj, int32_t value) {
+        lv_obj_set_width((lv_obj_t*)obj, value);
+        // 重新居中
+        lv_obj_set_x((lv_obj_t*)obj, (240 - value) / 2);
+    });
+    lv_anim_set_path_cb(&mouth_width_anim, lv_anim_path_ease_in_out);
+    lv_anim_set_repeat_count(&mouth_width_anim, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_playback_time(&mouth_width_anim, 400);
+    lv_anim_start(&mouth_width_anim);
 }
 
 void EyeDisplay::StartThinkingAnimation() {
@@ -764,36 +870,36 @@ void EyeDisplay::StartThinkingAnimation() {
     // 创建嘴巴图片对象
     mouth_ = lv_img_create(lv_scr_act());
     lv_img_set_src(mouth_, &down_image);
-    lv_obj_set_pos(mouth_, (width_ - 32) / 2, height_ - 80 - DISPLAY_VERTICAL_OFFSET);
-    lv_obj_set_style_img_recolor(mouth_, lv_color_hex(0xFCCCE6), 0);
+    lv_obj_set_pos(mouth_, (width_ - 32) / 2, height_ - 90 - DISPLAY_VERTICAL_OFFSET);
+    lv_obj_set_style_img_recolor(mouth_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_img_recolor_opa(mouth_, LV_OPA_COVER, 0);
 
 
     // 创建左手图片
     left_hand_ = lv_img_create(lv_scr_act());
     lv_img_set_src(left_hand_, &hand_img);
-    lv_obj_set_style_img_recolor(left_hand_, lv_color_hex(0xFCCCE6), 0);
+    lv_obj_set_style_img_recolor(left_hand_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_img_recolor_opa(left_hand_, LV_OPA_COVER, 0);
-    lv_obj_set_pos(left_hand_, 20, height_ - 70 - DISPLAY_VERTICAL_OFFSET);
+    lv_obj_set_pos(left_hand_, 20, height_ - 50 - DISPLAY_VERTICAL_OFFSET);
 
     // 创建右手图片
     right_hand_ = lv_img_create(lv_scr_act());
     lv_img_set_src(right_hand_, &hand_right_img);
-    lv_obj_set_style_img_recolor(right_hand_, lv_color_hex(0xFCCCE6), 0);
+    lv_obj_set_style_img_recolor(right_hand_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_img_recolor_opa(right_hand_, LV_OPA_COVER, 0);
     // 设置右手位置
-    lv_obj_set_pos(right_hand_, width_ - 74, height_ - 70 - DISPLAY_VERTICAL_OFFSET);
+    lv_obj_set_pos(right_hand_, width_ - 74, height_ - 50 - DISPLAY_VERTICAL_OFFSET);
     // 左手左右移动动画
     static lv_anim_t left_hand_anim;
     lv_anim_init(&left_hand_anim);
     lv_anim_set_var(&left_hand_anim, left_hand_);
-    lv_anim_set_values(&left_hand_anim, 20, 60);
-    lv_anim_set_time(&left_hand_anim, 1500);
+    lv_anim_set_values(&left_hand_anim, 40, 60);
+    lv_anim_set_time(&left_hand_anim, 1000);
     lv_anim_set_delay(&left_hand_anim, 0);
     lv_anim_set_exec_cb(&left_hand_anim, (lv_anim_exec_xcb_t)lv_obj_set_x);
     lv_anim_set_path_cb(&left_hand_anim, lv_anim_path_ease_in_out);
     lv_anim_set_repeat_count(&left_hand_anim, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_playback_time(&left_hand_anim, 1500);
+    lv_anim_set_playback_time(&left_hand_anim, 1000);
     lv_anim_set_playback_delay(&left_hand_anim, 0);
     lv_anim_start(&left_hand_anim);
 
@@ -801,13 +907,13 @@ void EyeDisplay::StartThinkingAnimation() {
     static lv_anim_t right_hand_anim;
     lv_anim_init(&right_hand_anim);
     lv_anim_set_var(&right_hand_anim, right_hand_);
-    lv_anim_set_values(&right_hand_anim, width_ - 54, width_ - 100);
-    lv_anim_set_time(&right_hand_anim, 1500);
+    lv_anim_set_values(&right_hand_anim, width_ - 74, width_ - 100);
+    lv_anim_set_time(&right_hand_anim, 1000);
     lv_anim_set_delay(&right_hand_anim, 0);
     lv_anim_set_exec_cb(&right_hand_anim, (lv_anim_exec_xcb_t)lv_obj_set_x);
     lv_anim_set_path_cb(&right_hand_anim, lv_anim_path_ease_in_out);
     lv_anim_set_repeat_count(&right_hand_anim, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_playback_time(&right_hand_anim, 1500);
+    lv_anim_set_playback_time(&right_hand_anim, 1000);
     lv_anim_set_playback_delay(&right_hand_anim, 0);
     lv_anim_start(&right_hand_anim);
 }
@@ -827,13 +933,13 @@ void EyeDisplay::SetupUI() {
     lv_obj_set_flex_flow(container, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(container, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER);
     // 设置容器的顶部内边距来实现向上偏移
-    lv_obj_set_style_pad_top(container, -DISPLAY_VERTICAL_OFFSET, 0);
+    lv_obj_set_style_pad_top(container, -DISPLAY_VERTICAL_OFFSET - 10, 0);
 
     // Create left eye
     left_eye_ = lv_obj_create(container);
     lv_obj_set_size(left_eye_, 40, 80);
     lv_obj_set_style_radius(left_eye_, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(left_eye_, lv_color_hex(0xFCCCE6), 0);  // BGR: 黄色
+    lv_obj_set_style_bg_color(left_eye_, lv_color_hex(EYE_COLOR), 0);  // BGR: 黄色
     lv_obj_set_style_border_width(left_eye_, 0, 0);
     lv_obj_set_style_border_side(left_eye_, LV_BORDER_SIDE_NONE, 0);
     lv_obj_set_style_pad_all(left_eye_, 0, 0);
@@ -844,7 +950,7 @@ void EyeDisplay::SetupUI() {
     right_eye_ = lv_obj_create(container);
     lv_obj_set_size(right_eye_, 40, 80);
     lv_obj_set_style_radius(right_eye_, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(right_eye_, lv_color_hex(0xFCCCE6), 0);  // BGR: 黄色
+    lv_obj_set_style_bg_color(right_eye_, lv_color_hex(EYE_COLOR), 0);  // BGR: 黄色
     lv_obj_set_style_border_width(right_eye_, 0, 0);
     lv_obj_set_style_border_side(right_eye_, LV_BORDER_SIDE_NONE, 0);
     lv_obj_set_style_pad_all(right_eye_, 0, 0);
@@ -911,7 +1017,7 @@ void EyeDisplay::EnterWifiConfig() {
         if (qrcode_img_) {
             lv_obj_t* img = lv_img_create(screen);
             lv_img_set_src(img, qrcode_img_);
-            lv_obj_set_style_img_recolor(img, lv_color_hex(0xFCCCE6), 0);
+            lv_obj_set_style_img_recolor(img, lv_color_hex(EYE_COLOR), 0);
             lv_obj_center(img);
         }
     }
@@ -945,14 +1051,14 @@ void EyeDisplay::EnterOTAMode() {
     
     // 设置前景弧宽度和颜色
     lv_obj_set_style_arc_width(ota_progress_bar_, 15, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_color(ota_progress_bar_, lv_color_hex(0xFCCCE6), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(ota_progress_bar_, lv_color_hex(EYE_COLOR), LV_PART_INDICATOR);
     
     // 创建百分比标签
     ota_number_label_ = lv_label_create(screen);
     lv_obj_align(ota_number_label_, LV_ALIGN_CENTER, 0, 0);  // 居中显示
     lv_label_set_text(ota_number_label_, "0%");  // 设置文本
     lv_obj_set_style_text_font(ota_number_label_, fonts_.text_font, LV_STATE_DEFAULT);  // 设置字体
-    lv_obj_set_style_text_color(ota_number_label_, lv_color_hex(0xFCCCE6), 0);  // 设置文字颜色
+    lv_obj_set_style_text_color(ota_number_label_, lv_color_hex(EYE_COLOR), 0);  // 设置文字颜色
     
     // 重置进度
     ota_progress_ = 0;

@@ -5,6 +5,9 @@
 #include <cstdlib>
 #include <chrono>
 #include <cmath>
+#include <cstring>
+#include "wifi_station.h"
+#include "settings.h"
 
 #define TAG "DataPointManager"
 
@@ -15,7 +18,7 @@ DataPointManager& DataPointManager::GetInstance() {
 
 // 标准实现：获取机智云协议配置
 const char* DataPointManager::GetGizwitsProtocolJson() const {
-    return R"json(
+    static const char* protocol_json = R"json(
 {
   "name": "标准设备",
   "packetVersion": "0x00000004",
@@ -188,6 +191,20 @@ const char* DataPointManager::GetGizwitsProtocolJson() const {
           "type": "status_writable",
           "id": 8,
           "desc": "屏幕亮度"
+        },
+        {
+            "data_type": "binary",
+            "desc": "",
+            "display_name": "ssid",
+            "id": 9,
+            "name": "ssid",
+            "position": {
+                "bit_offset": 0,
+                "byte_offset": 0,
+                "len": 100,
+                "unit": "byte"
+            },
+            "type": "status_readonly"
         }
       ],
       "name": "entity0",
@@ -196,6 +213,7 @@ const char* DataPointManager::GetGizwitsProtocolJson() const {
   ]
 }
 )json";
+    return protocol_json;
 }
 
 // 标准实现：获取数据点数量
@@ -287,6 +305,12 @@ bool DataPointManager::GetDataPointValue(const std::string& name, int& value) co
 
 // 标准实现：设置数据点值
 bool DataPointManager::SetDataPointValue(const std::string& name, int value) {
+    // 写入缓存与存储
+    cache_[name] = value;
+    // 使用 NVS 进行持久化
+    Settings settings("datapoint", true);
+    settings.SetInt(name, value);
+
     if (name == "chat_mode") {
         if (set_chat_mode_callback_) {
             set_chat_mode_callback_(value);
@@ -308,20 +332,22 @@ bool DataPointManager::SetDataPointValue(const std::string& name, int value) {
 
 // 标准实现：生成上报数据
 void DataPointManager::GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) {
-
+ 
     // 固定头部
     buffer[0] = 0x00;
     buffer[1] = 0x00;
     buffer[2] = 0x00;
     buffer[3] = 0x03;
     
-    // 命令标识
-    buffer[4] = 0x0b;
+    // mqtt 可变长度
+    buffer[4] = 0x73;
+    // flag
     buffer[5] = 0x00;
+    // 命令标识
     buffer[6] = 0x00;
     buffer[7] = 0x93;
     
-    // 数据长度
+    // SN
     buffer[8] = 0x00;
     buffer[9] = 0x00;
     buffer[10] = 0x00;
@@ -329,7 +355,8 @@ void DataPointManager::GenerateReportData(uint8_t* buffer, size_t buffer_size, s
     
     // 数据类型
     buffer[12] = 0x14;
-    buffer[13] = 0x01;
+    // flag
+    buffer[13] = 0x03;
     buffer[14] = 0xff;
 
     // 状态字节
@@ -377,7 +404,26 @@ void DataPointManager::GenerateReportData(uint8_t* buffer, size_t buffer_size, s
         buffer[19] = 0;
     }
 
-    data_size = 20;
+    // 获取 ssid
+    std::string ssid = WifiStation::GetInstance().GetSsid();
+    if (ssid.length() > 100) {
+        ssid = ssid.substr(0, 100);
+    }
+    
+    // 总是复制SSID数据，长度不够100字节的部分用0填充
+    if (ssid.length() > 0) {
+        memcpy(buffer + 20, ssid.c_str(), ssid.length());
+    }
+    
+    // 用0填充剩余空间到100字节
+    if (ssid.length() < 100) {
+        memset(buffer + 20 + ssid.length(), 0, 100 - ssid.length());
+    }
+
+    data_size = 20 + 100;  // 固定为120字节
+    
+    ESP_LOGD(TAG, "SSID length: %zu, padded to 100 bytes, total data size: %zu", 
+             ssid.length(), data_size);
 }
 
 // 标准实现：处理数据点值
@@ -406,4 +452,50 @@ void DataPointManager::SetCallbacks(
     get_rssi_callback_ = get_rssi_callback;
     get_brightness_callback_ = get_brightness_callback;
     set_brightness_callback_ = set_brightness_callback;
+}
+
+void DataPointManager::InitFromStorage() {
+    // 加载已知可写数据点
+    Settings settings("datapoint", false);
+
+    // chat_mode, volume_set, brightness 为可写数据点
+    int v;
+    v = settings.GetInt("chat_mode", -1);
+    if (v != -1) {
+        cache_["chat_mode"] = v;
+        if (set_chat_mode_callback_) {
+            set_chat_mode_callback_(v);
+        }
+    }
+
+    v = settings.GetInt("volume_set", -1);
+    if (v != -1) {
+        cache_["volume_set"] = v;
+        if (set_volume_callback_) {
+            set_volume_callback_(v);
+        }
+    }
+
+    v = settings.GetInt("brightness", -1);
+    if (v != -1) {
+        cache_["brightness"] = v;
+        if (set_brightness_callback_) {
+            set_brightness_callback_(v);
+        }
+    }
+}
+
+bool DataPointManager::GetCachedDataPoint(const std::string& name, int& value) const {
+    auto it = cache_.find(name);
+    if (it == cache_.end()) {
+        return false;
+    }
+    value = it->second;
+    return true;
+}
+
+void DataPointManager::SetCachedDataPoint(const std::string& name, int value) {
+    cache_[name] = value;
+    Settings settings("datapoint", true);
+    settings.SetInt(name, value);
 }

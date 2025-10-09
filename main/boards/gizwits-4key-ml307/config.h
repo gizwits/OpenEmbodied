@@ -1,0 +1,42 @@
+#ifndef _BOARD_CONFIG_H_
+#define _BOARD_CONFIG_H_
+
+// AtomMatrix+EchoBase Board configuration
+
+#include <driver/gpio.h>
+#include <driver/adc.h>
+
+#define AUDIO_INPUT_SAMPLE_RATE  24000
+#define AUDIO_OUTPUT_SAMPLE_RATE 24000
+
+#define AUDIO_I2S_GPIO_MCLK GPIO_NUM_16
+#define AUDIO_I2S_GPIO_WS GPIO_NUM_45
+#define AUDIO_I2S_GPIO_BCLK GPIO_NUM_9
+#define AUDIO_I2S_GPIO_DIN  GPIO_NUM_10
+#define AUDIO_I2S_GPIO_DOUT GPIO_NUM_8
+
+#define AUDIO_CODEC_I2C_SDA_PIN  GPIO_NUM_18
+#define AUDIO_CODEC_I2C_SCL_PIN  GPIO_NUM_17
+#define AUDIO_CODEC_ES8311_ADDR  ES8311_CODEC_DEFAULT_ADDR
+#define AUDIO_CODEC_GPIO_PA GPIO_NUM_7
+#define POWER_HOLD_GPIO GPIO_NUM_15
+
+#define ML307_RX_PIN GPIO_NUM_43
+#define ML307_TX_PIN GPIO_NUM_44
+#define ML307_POWER_PIN GPIO_NUM_2 
+#define ML307_POWER_OUTPUT_INVERT false 
+
+#define BUILTIN_SINGLE_LED_GPIO        GPIO_NUM_6
+#define BOOT_BUTTON_GPIO        GPIO_NUM_12
+#define REC_BUTTON_GPIO        GPIO_NUM_13
+
+#define CHARGING_PIN     GPIO_NUM_11   // CHRG pin
+#define STANDBY_PIN      GPIO_NUM_3    // STDBY pin
+
+// Battery ADC configuration
+#define BAT_ADC_CHANNEL  ADC_CHANNEL_0  // Battery voltage ADC channel
+#define BAT_ADC_ATTEN    ADC_ATTEN_DB_11 // ADC attenuation
+#define BAT_ADC_UNIT     ADC_UNIT_1
+#define POWER_CHARGE_LED_PIN GPIO_NUM_NC
+
+#endif // _BOARD_CONFIG_H_

@@ -1,12 +1,9 @@
 #include "wifi_board.h"
-#include "audio_codecs/vb6824_audio_codec.h"
+#include "audio/codecs/vb6824_audio_codec.h"
 #include "application.h"
 #include "button.h"
 #include "config.h"
-#include "led/circular_strip.h"
 #include "settings.h"
-#include "led/gpio_led.h"
-#include "led/single_led.h"
 #include "iot/thing_manager.h"
 #include <esp_sleep.h>
 #include "power_save_timer.h"
@@ -24,8 +21,6 @@
 #include "servo.h"
 #include <vector>
 #include <string>
-#include "driver/ledc.h"
-#include "led_signal.h"
 #include "power_manager.h"
 
 #define TAG "CustomBoard"
@@ -118,14 +113,6 @@ private:
         });
     }
 
-    void InitializeLedSignal() {
-        LedSignal::GetInstance().MonitorAndUpdateLedState_timer();
-    }
-
-    void SetLedBrightness(uint8_t brightness) {
-        LedSignal::GetInstance().SetBrightness(brightness);
-    }
-
     // 检查命令是否在列表中
     bool IsCommandInList(const std::string& command, const std::vector<std::string>& command_list) {
         return std::find(command_list.begin(), command_list.end(), command) != command_list.end();
@@ -199,7 +186,6 @@ public:
         if (s_factory_test_mode == 0) {
             // 不在产测模式才启动，不然有问题
             InitializeButtons();
-            InitializeLedSignal();
         }
 
         ESP_LOGI(TAG, "Initializing Power Manager...");
@@ -257,19 +243,6 @@ public:
     void SetPowerSaveTimer(bool enable) {
         power_save_timer_->SetEnabled(enable);
     }
-
-    uint8_t GetBrightness() {
-        return LedSignal::GetInstance().GetBrightness();
-    }
-    
-    void SetBrightness(uint8_t brightness) {
-        LedSignal::GetInstance().SetBrightness(brightness);
-    }
-
-    uint8_t GetDefaultBrightness() {
-        return LedSignal::GetInstance().GetDefaultBrightness();
-    }
-
     // 数据点相关方法实现
     const char* GetGizwitsProtocolJson() const override {
         return DataPointManager::GetInstance().GetGizwitsProtocolJson();

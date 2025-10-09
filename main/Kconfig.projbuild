@@ -15,6 +15,8 @@ choice
 
     config LANGUAGE_ZH_CN
         bool "Chinese"
+    config LANGUAGE_ZH_CN_LVLIN
+        bool "Chinese LVLIN"
     config LANGUAGE_ZH_TW
         bool "Chinese Traditional"
     config LANGUAGE_EN_US
@@ -28,6 +30,30 @@ config COZE_WEBSOCKET_URL
     default "ws://ws.coze.cn/v1/chat"
     help
         Communication with the Coze server through websocket after wake up.
+        
+config TMP_PRODUCT_TEST_WIFI
+    string "Product Test WiFi"
+    default ""
+    help
+        Product test WiFi for Gizwits.
+
+config TMP_PRODUCT_TEST_WIFI_PASSWORD
+    string "Product Test WiFi Password"
+    default ""
+    help
+        Product test WiFi password for Gizwits.
+
+config PRODUCT_TEST_WIFI
+    string "Product Test WiFi"
+    default ""
+    help
+        Product test WiFi for Gizwits.
+
+config PRODUCT_TEST_WIFI_PASSWORD
+    string "Product Test WiFi Password"
+    default ""
+    help
+        Product test WiFi password for Gizwits.
         
 config PRODUCT_KEY
     string "Product Key"
@@ -63,28 +89,30 @@ choice BOARD_TYPE
         bool "面包板（WiFi） ESP32 DevKit"
     config BOARD_TYPE_BREAD_COMPACT_ESP32_LCD
         bool "面包板（WiFi+ LCD） ESP32 DevKit"
-    config BOARD_TYPE_ESP32_CGC
-        bool "ESP32 CGC"
-    config BOARD_TYPE_ESP_BOX_3
-        bool "ESP BOX 3"
-    config BOARD_TYPE_ESP_BOX
-        bool "ESP BOX"
-    config BOARD_TYPE_ESP_BOX_LITE
-        bool "ESP BOX Lite"
     config BOARD_TYPE_GIZWITS_GOKIT5
         bool "机智云ESP32-S3 Gokit5"
+    config BOARD_TYPE_GIZWITS_LOTTIE
+        bool "机智云ESP32-S3 Lottie"
     config BOARD_TYPE_GIZWITS_4KEY
         bool "机智云ESP32-S3 4键"
+    config BOARD_TYPE_GIZWITS_4KEY_ML307
+        bool "机智云ESP32-S3 4键ML307"
     config BOARD_TYPE_GIZWITS_C2_6824
         bool "机智云ESP32-C2 6824"
+    config BOARD_TYPE_GIZWITS_C2_6824_CWH
+        bool "机智云ESP32-C2 6824 cwh"
+    config BOARD_TYPE_GIZWITS_C2_6824_LIGHT_ROBOT
+        bool "机智云ESP32-C2 6824 光机器人"
+    config BOARD_TYPE_GIZWITS_C2_6824_XINGBAO
+        bool "机智云ESP32-C2 6824 星宝"
+    config BOARD_TYPE_GIZWITS_C2_6824_ML307
+        bool "机智云ESP32-C2 6824 ML307"
     config BOARD_TYPE_GIZWITS_C2_6824_LVLIN
         bool "机智云ESP32-C2 6824 绿林"
     config BOARD_TYPE_GIZWITS_C2_6824_TOY
         bool "机智云ESP32-C2 6824 玩具"
-    config BOARD_TYPE_LICHUANG_DEV
-        bool "立创·实战派ESP32-S3开发板"
-    config BOARD_TYPE_LICHUANG_C3_DEV
-        bool "立创·实战派ESP32-C3开发板"
+    config BOARD_TYPE_GIZWITS_C2_6824_MOTOR
+        bool "机智云ESP32-C2 6824 电机"
     config BOARD_TYPE_DOIT_AI_01_KIT
         bool "Doit ai 01 kit"
     config BOARD_TYPE_DOIT_AI_01_KIT_NFC
@@ -95,100 +123,12 @@ choice BOARD_TYPE
         bool "Doit 小智眼 6824"
     config BOARD_TYPE_GIZWITS_S3_VB6824_LCD
         bool "机智云ESP32-S3 6824 LCD"
-    config BOARD_TYPE_MAGICLICK_2P4
-        bool "神奇按钮 Magiclick_2.4"
-    config BOARD_TYPE_MAGICLICK_2P5
-        bool "神奇按钮 Magiclick_2.5"
-    config BOARD_TYPE_MAGICLICK_C3
-        bool "神奇按钮 Magiclick_C3"
-    config BOARD_TYPE_MAGICLICK_C3_V2
-        bool "神奇按钮 Magiclick_C3_v2"
-    config BOARD_TYPE_M5STACK_CORE_S3
-        bool "M5Stack CoreS3"
-    config BOARD_TYPE_M5STACK_CORE_TAB5
-        bool "M5Stack Tab5"
-    config BOARD_TYPE_ATOMS3_ECHO_BASE
-        bool "AtomS3 + Echo Base"
-    config BOARD_TYPE_ATOMS3R_ECHO_BASE
-        bool "AtomS3R + Echo Base"
-    config BOARD_TYPE_ATOMS3R_CAM_M12_ECHO_BASE
-        bool "AtomS3R CAM/M12 + Echo Base"
-    config BOARD_TYPE_ATOMMATRIX_ECHO_BASE
-        bool "AtomMatrix + Echo Base"
-    config BOARD_TYPE_XMINI_C3
-        bool "虾哥 Mini C3"
-    config BOARD_TYPE_ESP32S3_KORVO2_V3
-        bool "ESP32S3_KORVO2_V3开发板"
-    config BOARD_TYPE_ESP_SPARKBOT
-        bool "ESP-SparkBot开发板"
-    config BOARD_TYPE_ESP_SPOT_S3
-        bool "ESP-Spot-S3"
-    config BOARD_TYPE_ESP32S3_Touch_AMOLED_1_8
-        bool "Waveshare ESP32-S3-Touch-AMOLED-1.8"
+    config BOARD_TYPE_GIZWITS_S3_VB6824_ST7735S
+        bool "机智云ESP32-S3 6824 ST7735S"
     config BOARD_TYPE_ESP32S3_XUNGUAN_AMOLED_1_28
         bool "讯管"
     config BOARD_TYPE_ESP32S3_XUNGUAN_AMOLED_1_28_OLD
         bool "讯管old"
-    config BOARD_TYPE_ESP32S3_Touch_AMOLED_1_75
-        bool "Waveshare ESP32-S3-Touch-AMOLED-1.75"
-    config BOARD_TYPE_ESP32S3_Touch_LCD_1_85C
-        bool "Waveshare ESP32-S3-Touch-LCD-1.85C"
-    config BOARD_TYPE_ESP32S3_Touch_LCD_1_85
-        bool "Waveshare ESP32-S3-Touch-LCD-1.85"
-    config BOARD_TYPE_ESP32S3_Touch_LCD_1_46
-        bool "Waveshare ESP32-S3-Touch-LCD-1.46"
-    config BOARD_TYPE_ESP32S3_Touch_LCD_3_5
-        bool "Waveshare ESP32-S3-Touch-LCD-3.5"
-    config BOARD_TYPE_ESP32P4_NANO
-        bool "Waveshare ESP32-P4-NANO"
-    config BOARD_TYPE_TUDOUZI
-        bool "土豆子"
-    config BOARD_TYPE_LILYGO_T_CIRCLE_S3
-        bool "LILYGO T-Circle-S3"
-    config BOARD_TYPE_LILYGO_T_CAMERAPLUS_S3
-        bool "LILYGO T-CameraPlus-S3"
-    config BOARD_TYPE_LILYGO_T_DISPLAY_S3_PRO_MVSRLORA
-        bool "LILYGO T-Display-S3-Pro-MVSRLora"
-    config BOARD_TYPE_LILYGO_T_DISPLAY_S3_PRO_MVSRLORA_NO_BATTERY
-        bool "LILYGO T-Display-S3-Pro-MVSRLora_No_Battery"
-    config BOARD_TYPE_MOVECALL_MOJI_ESP32S3
-         bool "Movecall Moji 小智AI衍生版"
-    config BOARD_TYPE_MOVECALL_CUICAN_ESP32S3
-         bool "Movecall CuiCan 璀璨·AI吊坠"
-    config BOARD_TYPE_DU_CHATX
-        bool "嘟嘟开发板CHATX(wifi)"
-    config BOARD_TYPE_ESP32S3_Taiji_Pi
-        bool "太极小派esp32s3"
-    config BOARD_TYPE_XINGZHI_Cube_0_85TFT_WIFI
-        bool "无名科技星智0.85(WIFI)"
-    config BOARD_TYPE_XINGZHI_Cube_0_85TFT_ML307
-        bool "无名科技星智0.85(ML307)"
-    config BOARD_TYPE_XINGZHI_Cube_0_96OLED_WIFI
-        bool "无名科技星智0.96(WIFI)"
-    config BOARD_TYPE_XINGZHI_Cube_0_96OLED_ML307
-        bool "无名科技星智0.96(ML307)"
-    config BOARD_TYPE_XINGZHI_Cube_1_54TFT_WIFI
-        bool "无名科技星智1.54(WIFI)"
-    config BOARD_TYPE_XINGZHI_Cube_1_54TFT_ML307
-        bool "无名科技星智1.54(ML307)"
-    config BOARD_TYPE_SENSECAP_WATCHER
-        bool "SenseCAP Watcher"
-    config BOARD_TYPE_DOIT_S3_AIBOX
-        bool "四博智联AI陪伴盒子"
-    config BOARD_TYPE_MIXGO_NOVA
-        bool "元控·青春"
-    config BOARD_TYPE_GENJUTECH_S3_1_54TFT
-        bool "亘具科技1.54(s3)"
-    config BOARD_TYPE_ESP_S3_LCD_EV_Board
-        bool "乐鑫ESP S3 LCD EV Board开发板"
-    config BOARD_TYPE_ZHENGCHEN_1_54TFT_WIFI
-        bool "征辰科技1.54(WIFI)"
-    config BOARD_TYPE_MINSI_K08_DUAL
-        bool "敏思科技K08(DUAL)"
-    config BOARD_TYPE_ZHENGCHEN_1_54TFT_ML307
-        bool "征辰科技1.54(ML307)"
-    config BOARD_TYPE_ESP32_S3_1_54_MUMA
-        bool "Spotpear ESP32-S3-1.54-MUMA"
 endchoice
 
 choice ESP_S3_LCD_EV_Board_Version_TYPE
@@ -276,14 +216,8 @@ choice DISPLAY_ESP32S3_KORVO2_V3
 endchoice
 
 
-config USE_EYE_STYLE_ES8311
-    bool "ES8311"
-    default n
-    help
-        ES8311
-
 config USE_EYE_STYLE_VB6824
-    bool "VB6824"
+    bool "Use VB6824"
     default n
     help
         VB6824
@@ -318,19 +252,34 @@ config USE_WECHAT_MESSAGE_STYLE
     help
         使用微信聊天界面风格
 
-config USE_WAKE_WORD_DETECT
-    bool "Enable Wake Word Detection"
-    default y
-    depends on IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4 && SPIRAM
-    help
-        需要 ESP32 S3 与 AFE 支持
 
-config USE_AUDIO_PROCESSOR
-    bool "Enable Audio Noise Reduction"
-    default y
-    depends on IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4 && SPIRAM
+config USE_ESP_WAKE_WORD
+    bool "Enable Wake Word Detection (without AFE)"
+    default n
+    depends on IDF_TARGET_ESP32C3 || IDF_TARGET_ESP32C5 || IDF_TARGET_ESP32C6 || (IDF_TARGET_ESP32 && SPIRAM)
     help
-        需要 ESP32 S3 与 AFE 支持
+        支持 ESP32 C3、ESP32 C5 与 ESP32 C6，增加ESP32支持（需要开启PSRAM）
+
+config USE_AFE_WAKE_WORD
+    bool "Enable Wake Word Detection (AFE)"
+    default y
+    depends on (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4) && SPIRAM
+    help
+        需要 ESP32 S3 与 PSRAM 支持
+
+config USE_CUSTOM_WAKE_WORD
+    bool "Enable Custom Wake Word Detection"
+    default n
+    depends on (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4) && SPIRAM && (!USE_AFE_WAKE_WORD)
+    help
+        需要 ESP32 S3 与 PSRAM 支持
+        
+config CUSTOM_WAKE_WORD
+    string "Custom Wake Word"
+    default "xiao tu dou"
+    depends on USE_CUSTOM_WAKE_WORD
+    help
+        自定义唤醒词，中文用拼音表示，每个字之间用空格隔开
 
 config USE_DEVICE_AEC
     bool "Enable Device-Side AEC"
@@ -338,6 +287,13 @@ config USE_DEVICE_AEC
     help
         因为性能不够，不建议和微信聊天界面风格同时开启
 
+config USE_AUDIO_PROCESSOR
+    bool "Enable Audio Noise Reduction"
+    default y
+    depends on (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4) && SPIRAM
+    help
+        需要 ESP32 S3 与 PSRAM 支持
+        
 config USE_SERVER_AEC
     bool "Enable Server-Side AEC"
     default n
@@ -345,14 +301,27 @@ config USE_SERVER_AEC
     help
         启用服务器端 AEC，需要服务器支持
 
-config USE_AUDIO_CODEC_ENCODE_OPUS
-    bool "use audio codec encode opus"
-    default y
 
-config USE_AUDIO_CODEC_DECODE_OPUS
-    bool "use audio codec decode opus"
+config USE_AUDIO_DEBUGGER
+    bool "Enable Audio Debugger"
     default n
-        
+    help
+        启用音频调试功能，通过UDP发送音频数据
+
+
+config AUDIO_DEBUG_UDP_SERVER
+    string "Audio Debug UDP Server Address"
+    default "192.168.2.100:8000"
+    depends on USE_AUDIO_DEBUGGER
+    help
+        UDP服务器地址，格式: IP:PORT，用于接收音频调试数据
+
+config RECEIVE_CUSTOM_MESSAGE
+    bool "Enable Custom Message Reception"
+    default n
+    help
+        启用接收自定义消息功能，允许设备接收来自服务器的自定义消息（最好通过 MQTT 协议）
+
 
 choice IOT_PROTOCOL
     prompt "IoT Protocol"

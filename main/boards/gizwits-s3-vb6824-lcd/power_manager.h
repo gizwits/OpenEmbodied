@@ -5,6 +5,7 @@
 #include <esp_adc/adc_oneshot.h>
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <functional>
 
 class PowerManager {
 private:
@@ -12,7 +13,7 @@ private:
     static constexpr struct {
         uint16_t adc;
         uint8_t level;
-    } BATTERY_LEVELS[] = {{1500, 0}, {2000, 100}};
+    } BATTERY_LEVELS[] = {{1750, 0}, {2010, 100}};
     static constexpr size_t BATTERY_LEVELS_COUNT = 2;
     static constexpr size_t ADC_VALUES_COUNT = 10;
 
@@ -35,6 +36,9 @@ private:
 
     adc_oneshot_unit_handle_t adc_handle_;
 
+    // 充电状态改变回调函数
+    std::function<void(bool)> charging_status_callback_ = nullptr;
+
     void CheckBatteryStatus() {
         uint64_t current_time = esp_timer_get_time(); // 获取当前时间（微秒）
 
@@ -53,9 +57,15 @@ private:
 
             // 如果状态有变化
             if (new_is_charging != is_charging_) {
+                bool old_charging_status = is_charging_;
                 is_charging_ = new_is_charging;
                 change_count_++;  // 增加变化次数
                 last_change_time_ = current_time;  // 更新最后变化时间
+                
+                // 调用充电状态改变回调
+                if (charging_status_callback_) {
+                    charging_status_callback_(is_charging_);
+                }
             }
         }
 
@@ -102,19 +112,18 @@ public:
         : charging_pin_(charging_pin), bat_led_pin_(bat_led_pin), adc_unit_(adc_unit), adc_channel_(adc_channel) {
 
         // 配置充电引脚
+        gpio_config_t io_conf = {};
+        io_conf.intr_type = GPIO_INTR_DISABLE;
+        io_conf.mode = GPIO_MODE_INPUT;
+        io_conf.pin_bit_mask = (1ULL << charging_pin_);
+        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+        gpio_config(&io_conf);
 
-        // gpio_config_t io_conf = {};
-        // io_conf.intr_type = GPIO_INTR_DISABLE;
-        // io_conf.mode = GPIO_MODE_INPUT;
-        // io_conf.pin_bit_mask = (1ULL << charging_pin_);
-        // io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-        // io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
-        // gpio_config(&io_conf);
-
-        // // 配置状态引脚
-        // io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-        // io_conf.pin_bit_mask = (1ULL << bat_led_pin_);
-        // gpio_config(&io_conf);
+        // 配置状态引脚
+        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+        io_conf.pin_bit_mask = (1ULL << bat_led_pin_);
+        gpio_config(&io_conf);
 
         // 定时器配置
         esp_timer_create_args_t timer_args = {
@@ -167,6 +176,11 @@ public:
     // 立即检测一次电量
     void CheckBatteryStatusImmediately() {
         CheckBatteryStatus();
+    }
+
+    // 设置充电状态改变回调函数
+    void SetChargingStatusCallback(std::function<void(bool)> callback) {
+        charging_status_callback_ = callback;
     }
 };
 #endif  // __POWER_MANAGER_H__

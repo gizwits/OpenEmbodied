@@ -6,55 +6,35 @@
 #include <freertos/task.h>
 #include <esp_timer.h>
 #include "player/player.h"
-#include "factory_test/factory_test.h"
+#include "server/giz_mqtt.h"
 #include <string>
 #include <mutex>
-#include <list>
+#include <deque>
+#include "ntp.h"
+#include "auth.h"
+#include "watchdog.h"
 #include <vector>
-#include <condition_variable>
 #include <memory>
-
-#include <opus_encoder.h>
-#include <opus_decoder.h>
-#include <opus_resampler.h>
+#include "factory_test/test.h"
+#include "factory_test/factory_test.h"
 
 #include "protocol.h"
-#include "server/giz_mqtt.h"
 #include "ota.h"
-#include "background_task.h"
-#include "ntp.h"
-#include "protocols/websocket_protocol.h"
-#include "factory_test/test.h"
-#include "sdkconfig.h"
+#include "audio_service.h"
+#include "device_state_event.h"
 
-#if CONFIG_USE_AUDIO_PROCESSOR
-#include "audio_processor.h"
-#endif
+#define MAIN_EVENT_SCHEDULE (1 << 0)
+#define MAIN_EVENT_SEND_AUDIO (1 << 1)
+#define MAIN_EVENT_WAKE_WORD_DETECTED (1 << 2)
+#define MAIN_EVENT_VAD_CHANGE (1 << 3)
+#define MAIN_EVENT_ERROR (1 << 4)
+#define MAIN_EVENT_CHECK_NEW_VERSION_DONE (1 << 5)
 
-#if CONFIG_USE_WAKE_WORD_DETECT
-#include "wake_word_detect.h"
-#endif
-
-#define SCHEDULE_EVENT (1 << 0)
-#define AUDIO_INPUT_READY_EVENT (1 << 1)
-#define AUDIO_OUTPUT_READY_EVENT (1 << 2)
-#define CHECK_NEW_VERSION_DONE_EVENT (1 << 3)
-
-
-enum DeviceState {
-    kDeviceStateUnknown,
-    kDeviceStateStarting,
-    kDeviceStateWifiConfiguring,
-    kDeviceStateIdle,
-    kDeviceStateConnecting,
-    kDeviceStateListening,
-    kDeviceStateSpeaking,
-    kDeviceStateUpgrading,
-    kDeviceStateActivating,
-    kDeviceStateFatalError
+enum AecMode {
+    kAecOff,
+    kAecOnDeviceSide,
+    kAecOnServerSide,
 };
-
-#define OPUS_FRAME_DURATION_MS 60
 
 class Application {
 public:
@@ -62,110 +42,84 @@ public:
         static Application instance;
         return instance;
     }
-    char trace_id_[33];  // 32 chars + null terminator
-
     Player player_;
     UdpBroadcaster udp_broadcaster_;
-
+    char trace_id_[33];  // 32 chars + null terminator
     // 删除拷贝构造函数和赋值运算符
     Application(const Application&) = delete;
     Application& operator=(const Application&) = delete;
-    void QuitTalking();
+
     void Start();
+    void MainEventLoop();
+    void GenerateTraceId();
     DeviceState GetDeviceState() const { return device_state_; }
-    bool IsVoiceDetected() const { return voice_detected_; }
-    void Schedule(std::function<void()> callback);
+    bool IsVoiceDetected() const { return audio_service_.IsVoiceDetected(); }
+    void Schedule(std::function<void()> callback, const std::string& task_name = "unknown");
     void SetDeviceState(DeviceState state);
     void Alert(const char* status, const char* message, const char* emotion = "", const std::string_view& sound = "");
     void DismissAlert();
-    void ChangeBot(const char* id, const char* voice_id);
     void AbortSpeaking(AbortReason reason);
-    void PlayMusic(const char* url);
-    void CheckBatteryLevel();
-    void CancelPlayMusic();
-    void ResetDecoder();
     void ToggleChatState();
     void StartListening();
-    void SetChatMode(int mode);
-    int GetChatMode() const { return chat_mode_; }
     void StopListening();
-    void UpdateIotStates();
-
-#ifdef CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS
-    void ReadAudio(std::vector<uint8_t>& opus, int sample_rate, int samples);
-#else
-    void ReadAudio(std::vector<int16_t>& data, int sample_rate, int samples);
-#endif
-
-#ifdef CONFIG_USE_AUDIO_CODEC_DECODE_OPUS
-void WriteAudio(std::vector<uint8_t>& opus);
-#else
-    void WriteAudio(std::vector<int16_t>& data, int sample_rate);
-#endif
-
     void Reboot();
-    void SendMessage(const std::string& message);
-    void WakeWordInvoke(const std::string& wake_word);
+    void ResetDecoder();
     void PlaySound(const std::string_view& sound);
+    void WakeWordInvoke(const std::string& wake_word);
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
+    void QuitTalking();
+    void SetChatMode(int mode);
+    int GetChatMode() const { return chat_mode_; }
+    void CancelPlayMusic();
     void SendTextToAI(const std::string& text);
+    bool IsTmpFactoryTestMode() const { return tmp_ft_mode_; }
+    void SetIsTmpFactoryTestMode(bool is_tmp_ft_mode) { tmp_ft_mode_ = is_tmp_ft_mode; }
     
     // 工厂测试相关方法
     int StartRecordTest(int duration_seconds);
     int StartPlayTest(int duration_seconds);
     void StopRecordTest();
+    // 工厂测试录制：供 AudioService 追加录制数据（Opus 原始片段）
+    void AppendRecordedAudioData(const uint8_t* data, size_t size);
 
+
+    // 关闭 wifi 的休眠
+    void EnterSleepMode();
+    void ExitSleepMode();
+    void HandleNetError();
 
     const char* GetTraceId() const { return trace_id_; }
-    void GenerateTraceId();
+    void PlayMusic(const char* url);
+    AudioService& GetAudioService() { return audio_service_; }
+    bool IsNormalReset() const { return is_normal_reset_; }  // 获取重启状态
+
     bool IsWebsocketWorking() const { return protocol_ ? protocol_->IsAudioChannelOpened() : false; }
     bool HasWebsocketError() const { return protocol_ ? protocol_->HasErrorOccurred() : false; }
 
 private:
     Application();
     ~Application();
-
-#if CONFIG_USE_WAKE_WORD_DETECT
-    WakeWordDetect wake_word_detect_;
-#endif
-#if CONFIG_USE_AUDIO_PROCESSOR
-    std::unique_ptr<AudioProcessor> audio_processor_;
-#endif
-    Ota ota_;
     std::mutex mutex_;
-    std::list<std::function<void()>> main_tasks_;
-    std::unique_ptr<WebsocketProtocol> protocol_;
-
-    int chat_mode_ = 1;
-    bool realtime_chat_is_start_ = false;
-    
-
+    std::deque<std::pair<std::string, std::function<void()>>> main_tasks_;
+    std::unique_ptr<Protocol> protocol_;
     EventGroupHandle_t event_group_ = nullptr;
     esp_timer_handle_t clock_timer_handle_ = nullptr;
-    esp_timer_handle_t report_timer_handle_ = nullptr;
     volatile DeviceState device_state_ = kDeviceStateUnknown;
     ListeningMode listening_mode_ = kListeningModeAutoStop;
+    std::string last_error_message_;
+    AudioService audio_service_;
+    esp_timer_handle_t report_timer_handle_ = nullptr;
+    int chat_mode_ = 1;
+    bool has_emotion_ = false;
+    bool tmp_ft_mode_ = false;
+    std::chrono::steady_clock::time_point last_battery_check_time_;
+
+    bool has_server_time_ = false;
+    bool is_normal_reset_ = false;  // 重启状态标志：true=正常重启，false=异常重启
     bool aborted_ = false;
-    bool voice_detected_ = false;
-    bool busy_decoding_audio_ = false;
     int clock_ticks_ = 0;
     TaskHandle_t check_new_version_task_handle_ = nullptr;
-
-    // Audio encode / decode
-    TaskHandle_t audio_loop_task_handle_ = nullptr;
-    BackgroundTask* background_task_ = nullptr;
-    std::chrono::steady_clock::time_point last_output_time_;
-    std::list<AudioStreamPacket> audio_decode_queue_;
-    std::condition_variable audio_decode_cv_;
-
-    // 新增：用于维护音频包的timestamp队列
-    std::list<uint32_t> timestamp_queue_;
-    std::mutex timestamp_mutex_;
-    std::atomic<uint32_t> last_output_timestamp_ = 0;
-
-    // 新增：用于跟踪上次检查电量的时间
-    std::chrono::steady_clock::time_point last_battery_check_time_;
 
     // 工厂测试录制相关变量
     bool record_test_active_ = false;
@@ -173,6 +127,7 @@ private:
     std::chrono::steady_clock::time_point record_test_start_time_;
     std::vector<uint8_t> recorded_audio_data_;
     std::mutex record_test_mutex_;
+    esp_timer_handle_t record_timer_handle_ = nullptr;
     
     // 工厂测试播放相关变量
     bool play_test_active_ = false;
@@ -180,25 +135,22 @@ private:
     std::chrono::steady_clock::time_point play_test_start_time_;
     size_t play_test_data_index_ = 0;
 
-
-    std::unique_ptr<OpusEncoderWrapper> opus_encoder_;
-    std::unique_ptr<OpusDecoderWrapper> opus_decoder_;
-
     OpusResampler input_resampler_;
     OpusResampler reference_resampler_;
     OpusResampler output_resampler_;
 
-    void MainEventLoop();
-    void OnAudioInput();
-    void OnAudioOutput();
 
-    void SetDecodeSampleRate(int sample_rate, int frame_duration);
-    void CheckNewVersion();
-    void ShowActivationCode();
+    void OnWakeWordDetected();
+    void CheckNewVersion(Ota& ota);
+    void ShowActivationCode(const std::string& code, const std::string& message);
     void OnClockTimer();
-    void SetListeningMode(ListeningMode mode);
-    void AudioLoop();
+    void initGizwitsServer();
+    bool CheckBatteryLevel();
     void StartReportTimer();
+    bool ProductTestCheck();
+
+    void SetListeningMode(ListeningMode mode);
+
 };
 
 #endif // _APPLICATION_H_

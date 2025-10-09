@@ -14,5 +14,4 @@ main/assets/lang_config.h
 scripts/auth.py
 scripts/.env
 target/
-sdkconfig_peter
 scripts/auth/auth.py

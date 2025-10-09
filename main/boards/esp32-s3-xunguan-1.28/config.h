@@ -30,7 +30,6 @@
 #define DISPLAY_OFFSET_Y  0
 
 #define DISPLAY_BACKLIGHT_PIN GPIO_NUM_48
-#define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
 
 #define DISPLAY_SPI_SCLK_PIN    GPIO_NUM_6
 #define DISPLAY_SPI_MOSI_PIN    GPIO_NUM_15
@@ -38,6 +37,9 @@
 #define DISPLAY_SPI_DC_PIN      GPIO_NUM_4
 // #define DISPLAY_SPI_RESET_PIN   GPIO_NUM_NC
 #define DISPLAY_SPI_RESET_PIN   GPIO_NUM_47
+
+#define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
+
 
 #define DISPLAY_SPI_SCLK_HZ     (20 * 1000 * 1000)
 
@@ -58,6 +60,7 @@
 #define BAT_ADC_ATTEN    ADC_ATTEN_DB_11 // ADC attenuation
 #define BAT_ADC_UNIT     ADC_UNIT_2
 #define POWER_CHARGE_LED_PIN GPIO_NUM_NC
+
 
 // 自动生成的螺旋图像数据
 static const uint8_t qrcode_map[] =  {

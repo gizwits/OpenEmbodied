@@ -117,6 +117,8 @@ void CozeMCPParser::handle_mcp(std::string_view data) {
     cJSON_AddStringToObject(params_data, "tool_call_id", tool_call_id->valuestring);
     cJSON_AddStringToObject(params_data, "event_id", event_id);
     
+    std::string mcp_data_str = "handle_mcp " + std::string(cJSON_Print(mcp_data));
+    MqttClient::getInstance().sendTraceLog("info", mcp_data_str.c_str());
     if (strcmp(name->valuestring, "volume") == 0) {
         cJSON *volume = cJSON_GetObjectItem(args_json, "volume");
         if (volume && cJSON_IsNumber(volume)) {

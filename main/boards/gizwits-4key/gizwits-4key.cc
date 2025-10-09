@@ -1,5 +1,5 @@
 #include "wifi_board.h"
-#include "audio_codecs/es8311_audio_codec.h"
+#include "audio/codecs/es8311_audio_codec.h"
 #include "application.h"
 #include "button.h"
 #include "config.h"
@@ -13,6 +13,7 @@
 #include <esp_timer.h>
 #include "power_manager.h"
 #include "assets/lang_config.h"
+#include "data_point_manager.h"
 
 
 #define TAG "GizwitsDev"
@@ -42,6 +43,34 @@ private:
     int64_t dual_long_press_time_ = 0;
     bool is_sleep_ = false;
 
+
+    void InitializeDataPointManager() {
+        
+        // 设置 DataPointManager 的回调函数
+        DataPointManager::GetInstance().SetCallbacks(
+            [this]() -> bool { return IsCharging(); },
+            []() -> int { return Application::GetInstance().GetChatMode(); },
+            [](int value) { Application::GetInstance().SetChatMode(value); },
+            [this]() -> int { 
+                int level = 0;
+                bool charging = false, discharging = false;
+                GetBatteryLevel(level, charging, discharging);
+                return level;
+            },
+            [this]() -> int { return GetAudioCodec()->output_volume(); },
+            [this](int value) { GetAudioCodec()->SetOutputVolume(value); },
+            []() -> int { 
+                wifi_ap_record_t ap_info;
+                if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+                    return 100 - (uint8_t)abs(ap_info.rssi);
+                }
+                return 0;
+            },
+            [this]() -> int { return GetBrightness(); },
+            [this](int value) { SetBrightness(value); }
+        );
+    }
+
     void InitializeI2c() {
         // Initialize I2C peripheral
         i2c_master_bus_config_t i2c_bus_cfg = {
@@ -61,12 +90,10 @@ private:
     }
     void InitializeButtons() {
         static int first_level = gpio_get_level(BOOT_BUTTON_GPIO);
-        boot_button_.OnPressDown([this]() {
-            // 点灯
-            gpio_set_level(BUILTIN_SINGLE_LED_GPIO, 0);
-        });
+        boot_button_.OnClick([this]() {
+            WakeUp();
+        }); 
         boot_button_.OnPressRepeat([this](uint16_t count) {
-
             ESP_LOGI(TAG, "boot_button_.OnPressRepeat");
             if(count >= 5){
                 ResetWifiConfiguration();
@@ -88,15 +115,19 @@ private:
                 first_level = 1;
                 ESP_LOGI(TAG, "首次上电5秒内，忽略长按操作");
             } else {
-              
-                ESP_LOGI(TAG, "执行关机操作");
-                Application::GetInstance().QuitTalking();
-                vTaskDelay(pdMS_TO_TICKS(200));
-                auto codec = GetAudioCodec();
-                gpio_set_level(BUILTIN_SINGLE_LED_GPIO, 1);
-                codec->EnableOutput(true);
-                Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
-                need_power_off_ = true;
+                // 提前播放音频
+                // 非休眠模式才播报
+                if (!is_sleep_) {
+                    ESP_LOGI(TAG, "执行关机操作");
+                    Application::GetInstance().QuitTalking();
+                    vTaskDelay(pdMS_TO_TICKS(200));
+                    auto codec = GetAudioCodec();
+                    gpio_set_level(BUILTIN_SINGLE_LED_GPIO, 1);
+                    codec->EnableOutput(true);
+                    Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
+                    need_power_off_ = true;
+                }
+                
             }
         });
         boot_button_.OnPressUp([this]() {
@@ -127,6 +158,7 @@ private:
 
         if (chat_mode == 0) {
             rec_button_.OnPressDown([this]() {
+                WakeUp();
                 ESP_LOGI(TAG, "rec_button_.OnPressDown");
                 Application::GetInstance().StartListening();
             });
@@ -137,13 +169,13 @@ private:
         } else {
             rec_button_.OnPressDown([this]() {
                 ESP_LOGI(TAG, "rec_button_.OnPressDown");
+                WakeUp();
                 Application::GetInstance().ToggleChatState();
             });
         }
         
         volume_up_button_.OnClick([this]() {
-            // 点灯
-            gpio_set_level(BUILTIN_SINGLE_LED_GPIO, 0);
+            WakeUp();
             ESP_LOGI(TAG, "volume_up_button_.OnClick");
             auto codec = GetAudioCodec();
             auto volume = codec->output_volume() + 10;
@@ -155,8 +187,7 @@ private:
         });
 
         volume_down_button_.OnClick([this]() {
-            // 点灯
-            gpio_set_level(BUILTIN_SINGLE_LED_GPIO, 0);
+            WakeUp();
             ESP_LOGI(TAG, "volume_down_button_.OnClick");
             auto codec = GetAudioCodec();
             auto volume = codec->output_volume() - 10;
@@ -181,6 +212,11 @@ private:
             new PowerManager(GPIO_NUM_NC, GPIO_NUM_NC, BAT_ADC_UNIT, BAT_ADC_CHANNEL);
     }
 
+    void WakeUp() {
+        is_sleep_ = false;
+        gpio_set_level(BUILTIN_SINGLE_LED_GPIO, 0);
+    }
+
 
 public:
     GizwitsDevBoard() : boot_button_(BOOT_BUTTON_GPIO),
@@ -198,6 +234,8 @@ public:
         InitializeIot();
         InitializePowerManager();
         
+        InitializeDataPointManager();
+
         if (power_manager_) {
             power_manager_->CheckBatteryStatusImmediately();
             ESP_LOGI(TAG, "启动时立即检测电量: %d", power_manager_->GetBatteryLevel());
@@ -244,7 +282,7 @@ public:
     bool isCharging() {
         int chrg = gpio_get_level(CHARGING_PIN);
         int standby = gpio_get_level(STANDBY_PIN);
-        ESP_LOGI(TAG, "chrg: %d, standby: %d", chrg, standby);
+        // ESP_LOGI(TAG, "chrg: %d, standby: %d", chrg, standby);
         return chrg == 0 || standby == 0;
     }
     
@@ -290,8 +328,33 @@ public:
         charging = isCharging();
         discharging = !charging;
         level = power_manager_->GetBatteryLevel();
-        ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
         return true;
+    }
+
+
+    // 数据点相关方法实现
+    const char* GetGizwitsProtocolJson() const override {
+        return DataPointManager::GetInstance().GetGizwitsProtocolJson();
+    }
+
+    size_t GetDataPointCount() const override {
+        return DataPointManager::GetInstance().GetDataPointCount();
+    }
+
+    bool GetDataPointValue(const std::string& name, int& value) const override {
+        return DataPointManager::GetInstance().GetDataPointValue(name, value);
+    }
+
+    bool SetDataPointValue(const std::string& name, int value) override {
+        return DataPointManager::GetInstance().SetDataPointValue(name, value);
+    }
+
+    void GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) override {
+        DataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
+    }
+
+    void ProcessDataPointValue(const std::string& name, int value) override {
+        DataPointManager::GetInstance().ProcessDataPointValue(name, value);
     }
 
     virtual Led* GetLed() override {

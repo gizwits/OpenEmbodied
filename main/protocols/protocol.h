@@ -8,6 +8,8 @@
 #include <vector>
 
 struct AudioStreamPacket {
+    int sample_rate = 0;
+    int frame_duration = 0;
     uint32_t timestamp = 0;
     std::vector<uint8_t> payload;
 };
@@ -68,15 +70,16 @@ public:
     void OnIncomingAudio(std::function<void(AudioStreamPacket&& packet)> callback);
     void OnIncomingJson(std::function<void(const cJSON* root)> callback);
     void OnAudioChannelOpened(std::function<void()> callback);
-    void OnAudioChannelClosed(std::function<void()> callback);
+    void OnAudioChannelClosed(std::function<void(bool is_clean)> callback);
     void OnNetworkError(std::function<void(const std::string& message)> callback);
 
     virtual bool Start() = 0;
     virtual bool OpenAudioChannel() = 0;
     virtual void CloseAudioChannel() = 0;
     virtual bool IsAudioChannelOpened() const = 0;
+    virtual bool IsAudioCanEnterSleepMode() const = 0;
     virtual bool IsAudioChannelBusy() const;
-    virtual void SendAudio(const AudioStreamPacket& packet) = 0;
+    virtual bool SendAudio(const AudioStreamPacket& packet) = 0;
     virtual void SendWakeWordDetected(const std::string& wake_word);
     virtual void SendTextToAI(const std::string& text);
     virtual void SendStartListening(ListeningMode mode);
@@ -94,7 +97,7 @@ protected:
     std::function<void(const cJSON* root)> on_incoming_json_;
     std::function<void(AudioStreamPacket&& packet)> on_incoming_audio_;
     std::function<void()> on_audio_channel_opened_;
-    std::function<void()> on_audio_channel_closed_;
+    std::function<void(bool is_clean)> on_audio_channel_closed_;
     std::function<void(const std::string& message)> on_network_error_;
 
     RoomParams room_params_;
@@ -105,6 +108,10 @@ protected:
     bool busy_sending_audio_ = false;
     std::string session_id_;
     std::chrono::time_point<std::chrono::steady_clock> last_incoming_time_;
+
+    // 打断AI说话时间戳，用于忽略1秒内服务器推送的音频
+    std::chrono::steady_clock::time_point abort_speaking_timestamp_;
+    bool abort_speaking_recorded_ = false;
 
     virtual bool SendText(const std::string& text) = 0;
     virtual void SetError(const std::string& message);

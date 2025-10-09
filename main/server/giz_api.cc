@@ -1,4 +1,5 @@
 #include "giz_api.h"
+#include "system_info.h"
 #include <esp_wifi.h>
 #include <esp_log.h>
 #include <esp_random.h>
@@ -59,20 +60,69 @@ void GServer::hexToStr(uint8_t *dest, uint8_t *src, int32_t srcLen, int8_t flag)
 }
 
 uint8_t* GServer::gatNetMACGet() {
-    uint8_t mac_hex[MAC_LEN] = {0};
-    static uint8_t device_mac[MAC_LEN + 1] = {0};
-    int ret;
-
-    // 获取设备MAC地址
-    ret = esp_wifi_get_mac(WIFI_IF_STA, mac_hex);
-    if (ret != 0) {
-        ESP_LOGE(TAG, "get mac failed");
+    uint8_t mac_hex[NETIF_MAX_HWADDR_LEN] = {0};  // 使用正确的MAC地址长度：6字节
+    static uint8_t device_mac[NETIF_MAX_HWADDR_LEN * 2 + 1] = {0};  // 6字节 -> 12字节hex字符串
+    
+    // ===== 新方式：使用SystemInfo获取MAC地址 =====
+    std::string mac_str = SystemInfo::GetMacAddress();
+    if (mac_str.empty()) {
+        ESP_LOGE(TAG, "SystemInfo::GetMacAddress() failed");
         return nullptr;
     }
-
+    
+    // 将MAC地址字符串转换为字节数组
+    // 格式: "xx:xx:xx:xx:xx:xx" -> 转换为6字节
+    for (int i = 0; i < NETIF_MAX_HWADDR_LEN; i++) {
+        size_t pos = i * 3; // 每个字节占3个字符位置 (xx:)
+        if (pos + 1 < mac_str.length()) {
+            std::string byte_str = mac_str.substr(pos, 2);
+            try {
+                mac_hex[i] = std::stoi(byte_str, nullptr, 16);
+            } catch (const std::exception& e) {
+                ESP_LOGE(TAG, "Failed to parse MAC byte %d: %s", i, byte_str.c_str());
+                return nullptr;
+            }
+        }
+    }
+    
+    // ESP_LOGI(TAG, "MAC bytes: %02x:%02x:%02x:%02x:%02x:%02x", 
+    //           mac_hex[0], mac_hex[1], mac_hex[2], 
+    //           mac_hex[3], mac_hex[4], mac_hex[5]);
+    
     // 转换为hex字符串
     hexToStr(device_mac, mac_hex, NETIF_MAX_HWADDR_LEN, 0);
-    device_mac[MAC_LEN] = 0;
+    device_mac[NETIF_MAX_HWADDR_LEN * 2] = 0;  // 12字节hex字符串的结束符
+    
+    // ESP_LOGI(TAG, "Hex string: %s", device_mac);
+    
+    // ===== 老方式：使用esp_wifi_get_mac获取MAC地址 =====
+    // uint8_t old_mac_hex[NETIF_MAX_HWADDR_LEN] = {0};
+    // uint8_t old_device_mac[NETIF_MAX_HWADDR_LEN * 2 + 1] = {0};
+    
+    // ESP_LOGI(TAG, "=== 老方式 (esp_wifi_get_mac) ===");
+    // int ret = esp_wifi_get_mac(WIFI_IF_STA, old_mac_hex);
+    // if (ret == 0) {
+    //     ESP_LOGI(TAG, "MAC bytes: %02x:%02x:%02x:%02x:%02x:%02x", 
+    //               old_mac_hex[0], old_mac_hex[1], old_mac_hex[2], 
+    //               old_mac_hex[3], old_mac_hex[4], old_mac_hex[5]);
+        
+    //     // 转换为hex字符串
+    //     hexToStr(old_device_mac, old_mac_hex, NETIF_MAX_HWADDR_LEN, 0);
+    //     old_device_mac[NETIF_MAX_HWADDR_LEN * 2] = 0;
+        
+    //     ESP_LOGI(TAG, "Hex string: %s", old_device_mac);
+        
+    //     // 比较两种方式的结果
+    //     ESP_LOGI(TAG, "=== 对比结果 ===");
+    //     ESP_LOGI(TAG, "字节数组是否相同: %s", 
+    //               (memcmp(mac_hex, old_mac_hex, NETIF_MAX_HWADDR_LEN) == 0) ? "是" : "否");
+    //     ESP_LOGI(TAG, "Hex字符串是否相同: %s", 
+    //               (memcmp(device_mac, old_device_mac, NETIF_MAX_HWADDR_LEN * 2) == 0) ? "是" : "否");
+    // } else {
+    //     ESP_LOGW(TAG, "esp_wifi_get_mac failed: %d", ret);
+    // }
+    
+    // ESP_LOGI(TAG, "=== 使用新方式的结果 ===");
     return device_mac;
 }
 
@@ -294,7 +344,8 @@ int32_t GServer::getProvision(std::function<void(mqtt_config_t*)> callback) {
 
     // 使用Board的HTTP客户端
     auto& board = Board::GetInstance();
-    auto http = board.CreateHttp();
+    auto network = board.GetNetwork();
+    auto http = network->CreateHttp(5);
     
     // 设置请求头
     http->SetHeader("X-Sign-Method", "sha256");
@@ -305,7 +356,7 @@ int32_t GServer::getProvision(std::function<void(mqtt_config_t*)> callback) {
     // 发送GET请求
     if (!http->Open("GET", url)) {
         ESP_LOGE(TAG, "Failed to open HTTP connection");
-        delete http;
+        
         return -1;
     }
 
@@ -313,7 +364,7 @@ int32_t GServer::getProvision(std::function<void(mqtt_config_t*)> callback) {
 
     std::string response = http->ReadAll();
     ESP_LOGI(TAG, "response: %s", response.c_str());
-    delete http;
+    
 
     return getProvision_prase_cb(response.c_str(), response.length());
 }
@@ -333,7 +384,8 @@ int32_t GServer::getLimitProvision(std::function<void(mqtt_config_t*)> callback)
 
     // 使用Board的HTTP客户端
     auto& board = Board::GetInstance();
-    auto http = board.CreateHttp();
+    auto network = board.GetNetwork();
+    auto http = network->CreateHttp(5);
     
     // 设置请求头
     http->SetHeader("X-Sign-Method", "sha256");
@@ -344,7 +396,7 @@ int32_t GServer::getLimitProvision(std::function<void(mqtt_config_t*)> callback)
     // 发送GET请求
     if (!http->Open("GET", url)) {
         ESP_LOGE(TAG, "Failed to open HTTP connection");
-        delete http;
+        
         return -1;
     }
 
@@ -352,7 +404,7 @@ int32_t GServer::getLimitProvision(std::function<void(mqtt_config_t*)> callback)
 
     std::string response = http->ReadAll();
     ESP_LOGI(TAG, "response: %s", response.c_str());
-    delete http;
+    
 
     return getProvision_prase_cb(response.c_str(), response.length());
 }
@@ -386,7 +438,8 @@ int32_t GServer::activationLimitDevice(std::function<void(mqtt_config_t*)> callb
 
     // 使用Board的HTTP客户端
     auto& board = Board::GetInstance();
-    auto http = board.CreateHttp();
+    auto network = board.GetNetwork();
+    auto http = network->CreateHttp(5);
     
     // 设置请求头
     http->SetHeader("X-Sign-Method", "sha256");
@@ -403,7 +456,7 @@ int32_t GServer::activationLimitDevice(std::function<void(mqtt_config_t*)> callb
     // 发送POST请求
     if (!http->Open("POST", url)) {
         ESP_LOGE(TAG, "Failed to open HTTP connection");
-        delete http;
+        
         return -1;
     }
 
@@ -411,7 +464,7 @@ int32_t GServer::activationLimitDevice(std::function<void(mqtt_config_t*)> callb
 
     std::string response = http->ReadAll();
     http->Close();
-    delete http;
+    
     ESP_LOGI(TAG, "response: %s", response.c_str());
 
     return getProvision_prase_cb(response.c_str(), response.length());
@@ -443,7 +496,8 @@ int32_t GServer::activationDevice(std::function<void(mqtt_config_t*)> callback) 
 
     // 使用Board的HTTP客户端
     auto& board = Board::GetInstance();
-    auto http = board.CreateHttp();
+    auto network = board.GetNetwork();
+    auto http = network->CreateHttp(5);
     
     // 设置请求头
     http->SetHeader("X-Sign-Method", "sha256");
@@ -460,7 +514,7 @@ int32_t GServer::activationDevice(std::function<void(mqtt_config_t*)> callback) 
     // 发送POST请求
     if (!http->Open("POST", url)) {
         ESP_LOGE(TAG, "Failed to open HTTP connection");
-        delete http;
+        
         return -1;
     }
 
@@ -468,7 +522,7 @@ int32_t GServer::activationDevice(std::function<void(mqtt_config_t*)> callback) 
 
     std::string response = http->ReadAll();
     http->Close();
-    delete http;
+    
     ESP_LOGI(TAG, "response: %s", response.c_str());
 
     return getProvision_prase_cb(response.c_str(), response.length());
@@ -531,7 +585,8 @@ int32_t GServer::getFirmwareUpdate(const char* hw_version, const char* sw_versio
 
     // 使用Board的HTTP客户端
     auto& board = Board::GetInstance();
-    auto http = board.CreateHttp();
+    auto network = board.GetNetwork();
+    auto http = network->CreateHttp(4);
     
     // 设置请求头
     http->SetHeader("X-Sign-Method", "sha256");
@@ -549,7 +604,7 @@ int32_t GServer::getFirmwareUpdate(const char* hw_version, const char* sw_versio
     // 发送PUT请求
     if (!http->Open("PUT", url)) {
         ESP_LOGE(TAG, "Failed to open HTTP connection");
-        delete http;
+        
         return -1;
     }
 
@@ -557,8 +612,9 @@ int32_t GServer::getFirmwareUpdate(const char* hw_version, const char* sw_versio
 
     std::string response = http->ReadAll();
     http->Close();
-    delete http;
+    
 
+    ESP_LOGI(TAG, "Firmware Update Response: %s", response.c_str());
     // 解析响应
     char* params = strdup(response.c_str());
     char* saveptr = nullptr;
@@ -619,7 +675,8 @@ int32_t GServer::getWebsocketConfig(std::function<void(RoomParams*)> callback) {
 
     // 使用Board的HTTP客户端
     auto& board = Board::GetInstance();
-    auto http = board.CreateHttp();
+    auto network = board.GetNetwork();
+    auto http = network->CreateHttp(5);
     
     // 创建token
     static uint8_t szNonce[PASSCODE_LEN + 1];
@@ -637,14 +694,14 @@ int32_t GServer::getWebsocketConfig(std::function<void(RoomParams*)> callback) {
     // 发送GET请求
     if (!http->Open("GET", url)) {
         ESP_LOGE(TAG, "Failed to open HTTP connection");
-        delete http;
+        
         return -1;
     }
 
     auto status_code = http->GetStatusCode();
 
     std::string response = http->ReadAll();
-    delete http;
+    
 
     // 解析JSON响应
     ESP_LOGI(TAG, "Websocket config response: %s", response.c_str());

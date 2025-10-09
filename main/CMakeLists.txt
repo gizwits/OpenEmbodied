@@ -1,11 +1,12 @@
-set(SOURCES 
-            "audio_codecs/audio_codec.cc"
-            "audio_codecs/no_audio_codec.cc"
-            "audio_codecs/box_audio_codec.cc"
-            "audio_codecs/es8311_audio_codec.cc"
-            "audio_codecs/es8374_audio_codec.cc"
-            "audio_codecs/es8388_audio_codec.cc"
-            "audio_codecs/vb6824_audio_codec.cc"
+set(SOURCES "audio/audio_codec.cc"
+            "audio/audio_service.cc"
+            "audio/codecs/no_audio_codec.cc"
+            "audio/codecs/box_audio_codec.cc"
+            "audio/codecs/es8311_audio_codec.cc"
+            "audio/codecs/es8374_audio_codec.cc"
+            "audio/codecs/es8388_audio_codec.cc"
+            "audio/codecs/dummy_audio_codec.cc"
+            "audio/processors/audio_debugger.cc"
             "led/single_led.cc"
             "led/circular_strip.cc"
             "led/gpio_led.cc"
@@ -14,6 +15,11 @@ set(SOURCES
             "display/oled_display.cc"
             "display/eye_toy_single_display.cc"
             "display/eye_toy_display.cc"
+            "display/eye_display.cc"
+            "display/eye_display_horizontal.cc"
+            "display/eye_display_horizontal_emojis.cc"
+            "display/lottie_display.cc"
+            "display/lv_mem_psram.c"
             "protocols/protocol.cc"
             "watchdog.cc"
             "protocols/websocket_protocol.cc"
@@ -31,15 +37,15 @@ set(SOURCES
             "application.cc"
             "ota.cc"
             "settings.cc"
-            "background_task.cc"
             "ntp.cc"
+            "device_state_event.cc"
             "main.cc"
             "factory_test/factory_test.cc"
             "factory_test/test.cc"
             "factory_test/test_uart.cc"
             )
 
-set(INCLUDE_DIRS "." "display" "audio_codecs" "protocols" "audio_processing" )
+set(INCLUDE_DIRS "." "display" "audio" "protocols")
 
 # 添加 IOT 相关文件
 file(GLOB IOT_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/iot/things/*.cc)
@@ -69,52 +75,28 @@ elseif(CONFIG_BOARD_TYPE_DOIT_ESP32S3_EYE_6824)
     set(BOARD_TYPE "doit-esp32s3-eye-6824")
 elseif(CONFIG_BOARD_TYPE_GIZWITS_S3_VB6824_LCD)
     set(BOARD_TYPE "gizwits-s3-vb6824-lcd")
-elseif(CONFIG_BOARD_TYPE_ESP_BOX_3)
-    set(BOARD_TYPE "esp-box-3")
-elseif(CONFIG_BOARD_TYPE_ESP_BOX)
-    set(BOARD_TYPE "esp-box")
-elseif(CONFIG_BOARD_TYPE_ESP_BOX_LITE)
-    set(BOARD_TYPE "esp-box-lite")
+elseif(CONFIG_BOARD_TYPE_GIZWITS_S3_VB6824_ST7735S)
+    set(BOARD_TYPE "gizwits-s3-vb6824-st7735s")
 elseif(CONFIG_BOARD_TYPE_GIZWITS_GOKIT5)
     set(BOARD_TYPE "gizwits-gokit5")
+elseif(CONFIG_BOARD_TYPE_GIZWITS_LOTTIE)
+    set(BOARD_TYPE "gizwits-lottie")
 elseif(CONFIG_BOARD_TYPE_GIZWITS_4KEY)
     set(BOARD_TYPE "gizwits-4key")
-elseif(CONFIG_BOARD_TYPE_LICHUANG_DEV)
-    set(BOARD_TYPE "lichuang-dev")
-elseif(CONFIG_BOARD_TYPE_LICHUANG_C3_DEV)
-    set(BOARD_TYPE "lichuang-c3-dev")
-elseif(CONFIG_BOARD_TYPE_MAGICLICK_2P4)
-    set(BOARD_TYPE "magiclick-2p4")
-elseif(CONFIG_BOARD_TYPE_MAGICLICK_2P5)
-    set(BOARD_TYPE "magiclick-2p5")
-elseif(CONFIG_BOARD_TYPE_MAGICLICK_C3)
-    set(BOARD_TYPE "magiclick-c3")
-elseif(CONFIG_BOARD_TYPE_MAGICLICK_C3_V2)
-    set(BOARD_TYPE "magiclick-c3-v2")
-elseif(CONFIG_BOARD_TYPE_M5STACK_CORE_S3)
-    set(BOARD_TYPE "m5stack-core-s3")
-elseif(CONFIG_BOARD_TYPE_M5STACK_CORE_TAB5)
-    set(BOARD_TYPE "m5stack-tab5")
-elseif(CONFIG_BOARD_TYPE_ATOMS3_ECHO_BASE)
-    set(BOARD_TYPE "atoms3-echo-base")
-elseif(CONFIG_BOARD_TYPE_ATOMS3R_ECHO_BASE)
-    set(BOARD_TYPE "atoms3r-echo-base")
-elseif(CONFIG_BOARD_TYPE_ATOMS3R_CAM_M12_ECHO_BASE)
-    set(BOARD_TYPE "atoms3r-cam-m12-echo-base")
-elseif(CONFIG_BOARD_TYPE_ATOMMATRIX_ECHO_BASE)
-    set(BOARD_TYPE "atommatrix-echo-base")
-elseif(CONFIG_BOARD_TYPE_XMINI_C3)
-    set(BOARD_TYPE "xmini-c3")
-elseif(CONFIG_BOARD_TYPE_ESP32S3_KORVO2_V3)
-    set(BOARD_TYPE "esp32s3-korvo2-v3")
-elseif(CONFIG_BOARD_TYPE_ESP_SPARKBOT)
-    set(BOARD_TYPE "esp-sparkbot")
-elseif(CONFIG_BOARD_TYPE_ESP_SPOT_S3)
-    set(BOARD_TYPE "esp-spot-s3")
-elseif(CONFIG_BOARD_TYPE_ESP32S3_Touch_AMOLED_1_8)
-    set(BOARD_TYPE "esp32-s3-touch-amoled-1.8")
+elseif(CONFIG_BOARD_TYPE_GIZWITS_4KEY_ML307)
+    set(BOARD_TYPE "gizwits-4key-ml307")
 elseif(CONFIG_BOARD_TYPE_GIZWITS_C2_6824)
     set(BOARD_TYPE "gizwits-c2-6824")
+elseif(CONFIG_BOARD_TYPE_GIZWITS_C2_6824_XINGBAO)
+    set(BOARD_TYPE "gizwits-c2-6824-xingbao")
+elseif(CONFIG_BOARD_TYPE_GIZWITS_C2_6824_CWH)
+    set(BOARD_TYPE "gizwits-c2-6824-cwh")
+elseif(CONFIG_BOARD_TYPE_GIZWITS_C2_6824_LIGHT_ROBOT)
+    set(BOARD_TYPE "gizwits-c2-6824-light-robot")
+elseif(CONFIG_BOARD_TYPE_GIZWITS_C2_6824_ML307)
+    set(BOARD_TYPE "gizwits-c2-6824-ml307")
+elseif(CONFIG_BOARD_TYPE_GIZWITS_C2_6824_MOTOR)
+    set(BOARD_TYPE "gizwits-c2-6824-motor")
 elseif(CONFIG_BOARD_TYPE_GIZWITS_C2_6824_LVLIN)
     set(BOARD_TYPE "gizwits-c2-6824-lvlin")
 elseif(CONFIG_BOARD_TYPE_GIZWITS_C2_6824_TOY)
@@ -123,70 +105,6 @@ elseif(CONFIG_BOARD_TYPE_ESP32S3_XUNGUAN_AMOLED_1_28)
     set(BOARD_TYPE "esp32-s3-xunguan-1.28")
 elseif(CONFIG_BOARD_TYPE_ESP32S3_XUNGUAN_AMOLED_1_28_OLD)
     set(BOARD_TYPE "esp32-s3-xunguan-1.28-old")
-elseif(CONFIG_BOARD_TYPE_ESP32S3_Touch_AMOLED_1_75)
-    set(BOARD_TYPE "waveshare-s3-touch-amoled-1.75")
-elseif(CONFIG_BOARD_TYPE_ESP32S3_Touch_LCD_1_85C)
-    set(BOARD_TYPE "esp32-s3-touch-lcd-1.85c")
-elseif(CONFIG_BOARD_TYPE_ESP32S3_Touch_LCD_1_85)
-    set(BOARD_TYPE "esp32-s3-touch-lcd-1.85")
-elseif(CONFIG_BOARD_TYPE_ESP32S3_Touch_LCD_1_46)
-    set(BOARD_TYPE "esp32-s3-touch-lcd-1.46")
-elseif(CONFIG_BOARD_TYPE_ESP32S3_Touch_LCD_3_5)
-    set(BOARD_TYPE "esp32-s3-touch-lcd-3.5")
-elseif(CONFIG_BOARD_TYPE_ESP32P4_NANO)
-    set(BOARD_TYPE "waveshare-p4-nano")
-elseif(CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI_LCD)
-    set(BOARD_TYPE "bread-compact-wifi-lcd")
-elseif(CONFIG_BOARD_TYPE_TUDOUZI)
-    set(BOARD_TYPE "tudouzi")
-elseif(CONFIG_BOARD_TYPE_LILYGO_T_CIRCLE_S3)
-    set(BOARD_TYPE "lilygo-t-circle-s3")
-elseif(CONFIG_BOARD_TYPE_LILYGO_T_CAMERAPLUS_S3)
-    set(BOARD_TYPE "lilygo-t-cameraplus-s3")
-elseif(CONFIG_BOARD_TYPE_LILYGO_T_DISPLAY_S3_PRO_MVSRLORA)
-    set(BOARD_TYPE "lilygo-t-display-s3-pro-mvsrlora")
-elseif(CONFIG_BOARD_TYPE_LILYGO_T_DISPLAY_S3_PRO_MVSRLORA_NO_BATTERY)
-    set(BOARD_TYPE "lilygo-t-display-s3-pro-mvsrlora")
-elseif(CONFIG_BOARD_TYPE_MOVECALL_MOJI_ESP32S3)
-    set(BOARD_TYPE "movecall-moji-esp32s3")
-    elseif(CONFIG_BOARD_TYPE_MOVECALL_CUICAN_ESP32S3)
-    set(BOARD_TYPE "movecall-cuican-esp32s3")
-elseif(CONFIG_BOARD_TYPE_DU_CHATX)
-    set(BOARD_TYPE "du-chatx")
-elseif(CONFIG_BOARD_TYPE_ESP32S3_Taiji_Pi)
-    set(BOARD_TYPE "taiji-pi-s3")
-elseif(CONFIG_BOARD_TYPE_XINGZHI_Cube_0_85TFT_WIFI)
-    set(BOARD_TYPE "xingzhi-cube-0.85tft-wifi")
-elseif(CONFIG_BOARD_TYPE_XINGZHI_Cube_0_85TFT_ML307)
-    set(BOARD_TYPE "xingzhi-cube-0.85tft-ml307")
-elseif(CONFIG_BOARD_TYPE_XINGZHI_Cube_0_96OLED_WIFI)
-    set(BOARD_TYPE "xingzhi-cube-0.96oled-wifi")
-elseif(CONFIG_BOARD_TYPE_XINGZHI_Cube_0_96OLED_ML307)
-    set(BOARD_TYPE "xingzhi-cube-0.96oled-ml307")
-elseif(CONFIG_BOARD_TYPE_XINGZHI_Cube_1_54TFT_WIFI)
-    set(BOARD_TYPE "xingzhi-cube-1.54tft-wifi")
-elseif(CONFIG_BOARD_TYPE_XINGZHI_Cube_1_54TFT_ML307)
-    set(BOARD_TYPE "xingzhi-cube-1.54tft-ml307")
-elseif(CONFIG_BOARD_TYPE_SENSECAP_WATCHER)
-    set(BOARD_TYPE "sensecap-watcher")
-elseif(CONFIG_BOARD_TYPE_DOIT_S3_AIBOX)
-    set(BOARD_TYPE "doit-s3-aibox")
-elseif(CONFIG_BOARD_TYPE_MIXGO_NOVA)
-    set(BOARD_TYPE "mixgo-nova")
-elseif(CONFIG_BOARD_TYPE_GENJUTECH_S3_1_54TFT)
-    set(BOARD_TYPE "genjutech-s3-1.54tft")
-elseif(CONFIG_BOARD_TYPE_ESP32_CGC)
-    set(BOARD_TYPE "esp32-cgc")
-elseif(CONFIG_BOARD_TYPE_ESP_S3_LCD_EV_Board)
-    set(BOARD_TYPE "esp-s3-lcd-ev-board")
-elseif(CONFIG_BOARD_TYPE_ZHENGCHEN_1_54TFT_WIFI)
-    set(BOARD_TYPE "zhengchen-1.54tft-wifi")
-elseif(CONFIG_BOARD_TYPE_MINSI_K08_DUAL)
-    set(BOARD_TYPE "minsi-k08-dual")
-elseif(CONFIG_BOARD_TYPE_ZHENGCHEN_1_54TFT_ML307)
-    set(BOARD_TYPE "zhengchen-1.54tft-ml307")
-elseif(CONFIG_BOARD_TYPE_ESP32_S3_1_54_MUMA)
-    set(BOARD_TYPE "sp-esp32-s3-1.54-muma")
 endif()
 
 # Include board specific directory
@@ -199,17 +117,23 @@ file(GLOB BOARD_SOURCES
 list(APPEND SOURCES ${BOARD_SOURCES})
 
 if(CONFIG_USE_AUDIO_PROCESSOR)
-    list(APPEND SOURCES "audio_processing/afe_audio_processor.cc")
+    list(APPEND SOURCES "audio/processors/afe_audio_processor.cc")
 else()
-    list(APPEND SOURCES "audio_processing/dummy_audio_processor.cc")
+    list(APPEND SOURCES "audio/processors/no_audio_processor.cc")
 endif()
-if(CONFIG_USE_WAKE_WORD_DETECT)
-    list(APPEND SOURCES "audio_processing/wake_word_detect.cc")
+if(CONFIG_USE_AFE_WAKE_WORD)
+    list(APPEND SOURCES "audio/wake_words/afe_wake_word.cc")
+elseif(CONFIG_USE_ESP_WAKE_WORD)
+    list(APPEND SOURCES "audio/wake_words/esp_wake_word.cc")
+elseif(CONFIG_USE_CUSTOM_WAKE_WORD)
+    list(APPEND SOURCES "audio/wake_words/custom_wake_word.cc")
 endif()
 
 # 根据Kconfig选择语言目录
 if(CONFIG_LANGUAGE_ZH_CN)
     set(LANG_DIR "zh-CN")
+elseif(CONFIG_LANGUAGE_ZH_CN_LVLIN)
+    set(LANG_DIR "zh-CN-LVLIN")
 elseif(CONFIG_LANGUAGE_ZH_TW)
     set(LANG_DIR "zh-TW")
 elseif(CONFIG_LANGUAGE_EN_US)
@@ -226,19 +150,26 @@ file(GLOB COMMON_SOUNDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/common/*.p3)
 
 # 如果目标芯片是 ESP32，则排除特定文件
 if(CONFIG_IDF_TARGET_ESP32)
-    list(REMOVE_ITEM SOURCES "audio_codecs/box_audio_codec.cc"
-                             "audio_codecs/es8388_audio_codec.cc"
+    list(REMOVE_ITEM SOURCES "audio/codecs/box_audio_codec.cc"
+                             "audio/codecs/es8388_audio_codec.cc"
+                             "audio/codecs/es8389_audio_codec.cc"
                              "led/gpio_led.cc"
                              )
 endif()
 
-if(CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS OR CONFIG_USE_AUDIO_CODEC_DECODE_OPUS)
-    list(APPEND SOURCES "audio_codecs/vb6824_audio_codec.cc")
-    list(REMOVE_ITEM SOURCES "audio_codecs/box_audio_codec.cc"
-                            "audio_codecs/no_audio_codec.cc"
-                            "audio_codecs/es8311_audio_codec.cc"
-                            "audio_codecs/es8374_audio_codec.cc"
-                            "audio_codecs/es8388_audio_codec.cc")
+if(CONFIG_IDF_TARGET_ESP32C2)
+    list(REMOVE_ITEM SOURCES "display/lv_mem_psram.c")
+endif()
+           
+if(CONFIG_USE_EYE_STYLE_VB6824 OR CONFIG_USE_AUDIO_CODEC_DECODE_OPUS)
+    list(APPEND SOURCES "audio/codecs/vb6824_audio_codec.cc")
+    list(REMOVE_ITEM SOURCES "audio/codecs/box_audio_codec.cc"
+                            "audio/codecs/no_audio_codec.cc"
+                            "audio/codecs/es8311_audio_codec.cc"
+                            "audio/codecs/es8374_audio_codec.cc"
+                            "audio/codecs/es8389_audio_codec.cc"
+                            "display/lottie_display.cc"
+                            "audio/codecs/es8388_audio_codec.cc")
 endif()
 
 idf_component_register(SRCS ${SOURCES}
@@ -272,3 +203,11 @@ add_custom_command(
 add_custom_target(lang_header ALL
     DEPENDS ${LANG_HEADER}
 )
+
+# Add Lottie SPIFFS image if board uses lottie
+if(CONFIG_LV_USE_LOTTIE)
+    # 自动生成 Lottie SPIFFS 镜像
+    # 从 main/assets/lottie 目录创建 SPIFFS 镜像
+    spiffs_create_partition_image(lottie ${CMAKE_CURRENT_SOURCE_DIR}/assets/lottie FLASH_IN_PROJECT)
+endif()
+

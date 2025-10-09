@@ -18,11 +18,6 @@ Board::Board() {
         uuid_ = GenerateUuid();
         settings.SetString("uuid", uuid_);
     }
-    
-    // 从设置中读取设备模式，默认唤醒
-    device_mode_ = DeviceMode::WAKE_WORD_MODE;
-    
-    ESP_LOGI(TAG, "UUID=%s SKU=%s Mode=%s", uuid_.c_str(), BOARD_NAME, GetDeviceModeString().c_str());
 }
 
 std::string Board::GenerateUuid() {
@@ -47,7 +42,6 @@ std::string Board::GenerateUuid() {
     
     return std::string(uuid_str);
 }
-
 
 bool Board::IsWifiConfigMode() {
     return wifi_config_mode_;
@@ -170,9 +164,6 @@ std::string Board::GetJson() {
     json += "},";
 
     json += "\"board\":" + GetBoardJson();
-
-    // 添加设备模式信息
-    json += ",\"device_mode\":\"" + GetDeviceModeString() + "\"";
 
     // Close the JSON object
     json += "}";

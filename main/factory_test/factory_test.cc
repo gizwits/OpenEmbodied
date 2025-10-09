@@ -14,7 +14,7 @@
 #include <cstdio>
 #include "assets/lang_config.h"
 #include "application.h"
-#include "audio_codecs/audio_codec.h"
+#include "audio/audio_codec.h"
 #include "board.h"
 #include <string>
 #include <wifi_station.h>
@@ -218,15 +218,16 @@ void factory_test_init(void) {
         wifi_station.OnConnected([](const std::string& ssid) {
             ESP_LOGI(TAG, "Connected to WiFi: %s", ssid.c_str());
         });
-        wifi_station.Start();
 
         // 插入 ssid
         wifi_station.AddAuth(FACTORY_TEST_SSID, FACTORY_TEST_PASSWORD);
 
-        ESP_LOGI(TAG, "产测模式临时连接产测路由器");
-        if (!wifi_station.WaitForConnected(30 * 1000)) {
-            // wifi_station.Stop();
-        }
+        wifi_station.Start();
+        
+        // ESP_LOGI(TAG, "产测模式临时连接产测路由器");
+        // if (!wifi_station.WaitForConnected(30 * 1000)) {
+        //     // wifi_station.Stop();
+        // }
     }
 }
 
@@ -347,6 +348,11 @@ void save_factory_test_mode_task(void *arg) {
     if (mode == 0) {
         // 退出产测
         if (ret == ESP_OK) {
+#ifdef CONFIG_TMP_PRODUCT_TEST_WIFI
+            // 进入临时产测模式
+            Settings settings("wifi", true);
+            settings.SetInt("tmp_ft_mode", 1);
+#endif
             factory_test_send("+EXIT_TEST OK", strlen("+EXIT_TEST OK"));
         } else {
             factory_test_send("+EXIT_TEST ERROR", strlen("+EXIT_TEST ERROR"));
@@ -374,13 +380,17 @@ static void handle_at_command(char *cmd) {
     if (strcmp(cmd, "AT+ENTER_TEST") == 0) {
         // 处理进入产测命令
         ESP_LOGI(TAG, "Received enter factory test command");
-        xTaskCreate(save_factory_test_mode_task, "save_factory_test_mode", 1024*8,
+        auto& wifi_station = WifiStation::GetInstance();
+        wifi_station.ClearAuth();
+        xTaskCreate(save_factory_test_mode_task, "save_factory_test_mode", 1024*4,
                     reinterpret_cast<void*>(static_cast<intptr_t>(FACTORY_TEST_MODE_IN_FACTORY)), 5, nullptr);
     }
     else if (strcmp(cmd, "AT+EXIT_TEST") == 0) {
         // 处理退出产测命令
         ESP_LOGI(TAG, "Received exit factory test command");
-        xTaskCreate(save_factory_test_mode_task, "save_factory_test_mode", 1024*8,
+        auto& wifi_station = WifiStation::GetInstance();
+        wifi_station.ClearAuth();
+        xTaskCreate(save_factory_test_mode_task, "save_factory_test_mode", 1024*4,
                     reinterpret_cast<void*>(static_cast<intptr_t>(FACTORY_TEST_MODE_NONE)), 5, nullptr);
     }
     else if (strcmp(cmd, "AT+VER") == 0) {
@@ -447,7 +457,7 @@ static void handle_at_command(char *cmd) {
                 factory_test_send("+PLAY ERROR", strlen("+PLAY ERROR"));
             }
             vTaskDelete(NULL);
-        }, "audio_play", 1024 * 8, nullptr, 8, nullptr);
+        }, "audio_play", 1024 * 4, nullptr, 8, nullptr);
     }else if (strncmp(cmd, "AT+RSSI?", strlen("AT+RSSI?")) == 0) {
         ESP_LOGI(TAG, "Received get RSSI command");
         int32_t rssi = 0;

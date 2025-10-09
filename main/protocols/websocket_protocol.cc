@@ -13,10 +13,30 @@
 #include "assets/lang_config.h"
 #include "protocols/mcp.h"
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+
 #define TAG "WS"
 
-#define MAX_AUDIO_PACKET_SIZE 512
+#define MAX_AUDIO_PACKET_SIZE 256
+
+// WebSocket audio send path constants
+// If packet/frame size changes, adjust these accordingly
+#if CONFIG_IDF_TARGET_ESP32S3
+#define WS_AUDIO_BASE64_LEN 256           // Observed base64 length for current audio packet
+#define WS_BASE64_BUFFER_BYTES 256        // Base64 buffer capacity (includes null terminator headroom)
+#define WS_MESSAGE_BUFFER_RESERVE 320    // Typical JSON envelope reserve to avoid realloc churn
+#else
+#define WS_AUDIO_BASE64_LEN 56           // Observed base64 length for current audio packet
+#define WS_BASE64_BUFFER_BYTES 64        // Base64 buffer capacity (includes null terminator headroom)
+#define WS_MESSAGE_BUFFER_RESERVE 320    // Typical JSON envelope reserve to avoid realloc churn
+#endif
+
+#if CONFIG_IDF_TARGET_ESP32S3
 #define MAX_CACHED_PACKETS 10
+#else
+#define MAX_CACHED_PACKETS 4
+#endif
 
 struct Emotion {
     const char* icon;
@@ -34,14 +54,14 @@ static const std::vector<Emotion> emotions = {
     {"😳", "embarrassed"},
     {"😯", "surprised"},
     {"😱", "shocked"},
-    {"🤔", "thinking"},
+    // {"🤔", "thinking"}, //动画有冲突
     {"😉", "winking"},
     {"😎", "cool"},
     {"😌", "relaxed"},
     {"🤤", "delicious"},
     {"😘", "kissy"},
     {"😏", "confident"},
-    {"😴", "sleepy"},
+    // {"😴", "sleepy"}, //动画有冲突
     {"😜", "silly"},
     {"🙄", "confused"},
     {"🤡", "vertigo"}
@@ -66,14 +86,13 @@ WebsocketProtocol::~WebsocketProtocol() {
         if (close_task_handle_ != nullptr) {
             ESP_LOGW(TAG, "Close task did not complete in time, force cleanup");
             // 强制清理 websocket
-            if (websocket_ != nullptr) {
-                delete websocket_;
-                websocket_ = nullptr;
+            if (websocket_) {
+                websocket_.reset();
             }
         }
-    } else if (websocket_ != nullptr) {
+    } else if (websocket_) {
         // 如果没有关闭任务，直接清理 websocket
-        delete websocket_;
+        websocket_.reset();
     }
     
     vEventGroupDelete(event_group_handle_);
@@ -83,24 +102,41 @@ bool WebsocketProtocol::Start() {
     return true;
 }
 
-void WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
-    if (websocket_ == nullptr || !websocket_->IsConnected() || packet.payload.empty() || busy_sending_audio_) {
-        return;
+bool WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
+    if (!websocket_ || !websocket_->IsConnected() || packet.payload.empty() || busy_sending_audio_) {
+        return false;
     }
-    const std::vector<uint8_t>& data = packet.payload;
-    // Calculate required base64 buffer size
-    size_t out_len = 4 * ((data.size() + 2) / 3);
     
-    // Resize base64 buffer if needed
-    if (out_len + 1 > base64_buffer_size_) {
-        base64_buffer_.reset(new char[out_len + 1]);
-        base64_buffer_size_ = out_len + 1;
-        if (!base64_buffer_) {
-            ESP_LOGE(TAG, "Failed to allocate base64 buffer");
-            return;
+    // 在chat_mode==1时，检查是否需要忽略音频上传
+    int chat_mode = Application::GetInstance().GetChatMode();
+    if (chat_mode == 1 && speech_stopped_recorded_) {
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - speech_stopped_timestamp_).count();
+        
+        // 如果距离用户说话结束不到1秒，忽略音频上传
+        if (elapsed < 1000) {
+            ESP_LOGW(TAG, "Ignoring audio upload, elapsed: %lld ms since speech stopped", elapsed);
+            // 返回 false 表示没有发送，调用方需要清理 packet
+            return false;
+        } else {
+            // 超过1秒后，清除记录
+            speech_stopped_recorded_ = false;
+            ESP_LOGD(TAG, "Audio ignore period ended, elapsed: %lld ms", elapsed);
         }
     }
-
+    // 提取前面一半的数据
+    std::vector<uint8_t> data = packet.payload;
+    // 需要注意：如果改了包长度，这里的宏需要同步调整
+    constexpr size_t kExpectedBase64Len = WS_AUDIO_BASE64_LEN;
+    constexpr size_t kMaxBase64Bytes = WS_BASE64_BUFFER_BYTES;
+    if (base64_buffer_size_ == 0) {
+        base64_buffer_.reset(new char[kMaxBase64Bytes]);
+        base64_buffer_size_ = kMaxBase64Bytes;
+        if (!base64_buffer_) {
+            ESP_LOGE(TAG, "Failed to allocate base64 buffer");
+            return false;
+        }
+    }
     size_t encoded_len;
     mbedtls_base64_encode((unsigned char *)base64_buffer_.get(), base64_buffer_size_, &encoded_len,
                          (const unsigned char*)data.data(), data.size());
@@ -111,9 +147,11 @@ void WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
     uint32_t random_value = esp_random();
     snprintf(event_id, sizeof(event_id), "%lu", random_value);
 
-    // Reuse message buffer
+    // Reuse message buffer with small fixed reserve
     message_buffer_.clear();
-    message_buffer_.reserve(256 + out_len);  // Pre-allocate space
+    if (message_buffer_.capacity() < WS_MESSAGE_BUFFER_RESERVE) {
+        message_buffer_.reserve(WS_MESSAGE_BUFFER_RESERVE);
+    }
     message_buffer_ = "{";
     message_buffer_ += "\"id\":\"" + std::string(event_id) + "\",";
     message_buffer_ += "\"event_type\":\"input_audio_buffer.append\",";
@@ -122,13 +160,14 @@ void WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
     message_buffer_ += "}";
     message_buffer_ += "}";
 
-    // Send message
-    websocket_->Send(message_buffer_);
+    // 复制并发送
+    websocket_->Send(message_buffer_.data(), message_buffer_.size(), false);
+    return true;
 }
 
 
 bool WebsocketProtocol::SendText(const std::string& text) {
-    if (websocket_ == nullptr) {
+    if (!websocket_) {
         return false;
     }
     websocket_->Send(text);
@@ -136,7 +175,7 @@ bool WebsocketProtocol::SendText(const std::string& text) {
 }
 
 void WebsocketProtocol::SendStopListening() {
-    if (websocket_ == nullptr) {
+    if (!websocket_) {
         return;
     }
 
@@ -160,9 +199,13 @@ void WebsocketProtocol::SendStopListening() {
 }
 
 bool WebsocketProtocol::IsAudioChannelOpened() const {
-    // if (Application::GetInstance().GetChatMode() == 0) {
-    //     return websocket_ != nullptr && websocket_->IsConnected() && !error_occurred_;
-    // }
+    // 实际上IsAudioChannelOpened 不应该考虑超时
+    return websocket_ != nullptr && websocket_->IsConnected() && !error_occurred_;
+}
+
+
+bool WebsocketProtocol::IsAudioCanEnterSleepMode() const {
+    // 休眠才需要判断 timeout
     return websocket_ != nullptr && websocket_->IsConnected() && !error_occurred_ && !IsTimeout();
 }
 
@@ -171,12 +214,14 @@ bool WebsocketProtocol::HasErrorOccurred() const {
 }
 
 void WebsocketProtocol::CloseAudioChannel() {
-    if (websocket_ == nullptr) {
+    if (!websocket_) {
+        ESP_LOGW(TAG, "websocket_ is null");
         return;
     }
 
     // 如果已经有关闭任务在运行，直接返回
     if (close_task_handle_ != nullptr) {
+        ESP_LOGW(TAG, "close_task_handle_ is not null");
         return;
     }
 
@@ -212,14 +257,13 @@ void WebsocketProtocol::CloseAudioChannelTask(void* param) {
     vTaskDelay(pdMS_TO_TICKS(300));
     
     // 3. 发送关闭帧给服务器
-    if (self->websocket_ != nullptr) {
+    if (self->websocket_) {
         self->websocket_->Close();
     }
     
     // 5. 清理资源
-    if (self->websocket_ != nullptr) {
-        delete self->websocket_;
-        self->websocket_ = nullptr;
+    if (self->websocket_) {
+        self->websocket_.reset();
     }
     
     ESP_LOGI(TAG, "Audio channel closed successfully");
@@ -232,8 +276,8 @@ void WebsocketProtocol::CloseAudioChannelTask(void* param) {
 }
 
 bool WebsocketProtocol::OpenAudioChannel() {
-    if (websocket_ != nullptr) {
-        delete websocket_;
+    if (websocket_) {
+        websocket_.reset();
     }
     if (room_params_.bot_id.empty() || room_params_.access_token.empty() || room_params_.voice_id.empty()) {
         ESP_LOGE(TAG, "Bot ID or access token or voice id is empty");
@@ -242,6 +286,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     // 用来标记是否触发 progress
     // 如果触发了，收到第一包音频再进入说话模式
     static bool is_first_packet_ = false;
+    static bool is_start_progress_ = false;
     static bool is_detect_emotion_ = false;
     error_occurred_ = false;
     busy_sending_audio_ = false;  // 重置音频发送标志
@@ -249,7 +294,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
     std::string token = "Bearer " + std::string(room_params_.access_token);
 
     message_cache_ = "";
-    websocket_ = Board::GetInstance().CreateWebSocket();
+    auto network = Board::GetInstance().GetNetwork();
+    websocket_ = network->CreateWebSocket(1);
     websocket_->SetHeader("Authorization", token.c_str());
 
     websocket_->OnData([this](const char* data, size_t len, bool binary) {
@@ -280,6 +326,21 @@ bool WebsocketProtocol::OpenAudioChannel() {
         //     return;
         // }
         if(event_type == "conversation.audio.delta") {
+            // 检查是否在打断AI说话后的1秒内，如果是则忽略音频
+            if (abort_speaking_recorded_) {
+                auto now = std::chrono::steady_clock::now();
+                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - abort_speaking_timestamp_).count();
+                
+                if (elapsed < 1000) {
+                    ESP_LOGD(TAG, "Ignoring server audio, elapsed: %lld ms since abort speaking", elapsed);
+                    return;
+                } else {
+                    // 超过1秒后，清除记录
+                    abort_speaking_recorded_ = false;
+                    ESP_LOGD(TAG, "Audio ignore period ended, elapsed: %lld ms", elapsed);
+                }
+            }
+            
 
             constexpr std::string_view content_key = "\"content\":\"";
             size_t content_start = str_data.find(content_key);
@@ -349,13 +410,15 @@ bool WebsocketProtocol::OpenAudioChannel() {
                             
                             // 创建当前音频包
                             AudioStreamPacket packet;
+                            packet.sample_rate = 16000;
+                            packet.frame_duration = OPUS_FRAME_DURATION_MS;
                             packet.payload.assign(audio_data_buffer_.begin(), audio_data_buffer_.begin() + actual_len);
                             
                             if (cached_packet_count_ < MAX_CACHED_PACKETS) {
                                 // 还在缓存阶段，添加到缓存
                                 packet_cache_.push_back(std::move(packet));
                                 cached_packet_count_++;
-                                ESP_LOGI(TAG, "Caching packet %d/%d", cached_packet_count_, MAX_CACHED_PACKETS);
+                                // ESP_LOGI(TAG, "Caching packet %d/%d", cached_packet_count_, MAX_CACHED_PACKETS);
                             } else {
                                 // 缓存已满，开始推送
                                 if (!packet_cache_.empty()) {
@@ -369,6 +432,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
                                 // 推送当前包
                                 on_incoming_audio_(std::move(packet));
                             }
+                            // on_incoming_audio_(std::move(packet));
                         }
                     }
                 }
@@ -411,26 +475,26 @@ bool WebsocketProtocol::OpenAudioChannel() {
 
                 is_detect_emotion_ = false;
                 is_first_packet_ = true;
+                is_start_progress_ = true;
                 cached_packet_count_ = 0;
                 packet_cache_.clear();
 
-                message_cache_.clear();
-                message_buffer_.clear();
-                message_buffer_ = "{";
-                message_buffer_ += "\"type\":\"tts\",";
-                message_buffer_ += "\"state\":\"pre_start\"";
-                message_buffer_ += "}";
-                
-                auto message_json = cJSON_Parse(message_buffer_.c_str());
-                if (message_json) {
-                    on_incoming_json_(message_json);
-                    cJSON_Delete(message_json);
-                }
-                
+                // 立即暂停上传
+                speech_stopped_recorded_ = true;
+                speech_stopped_timestamp_ = std::chrono::steady_clock::now();
+                SwitchToSpeaking();
             } else if (event_type == "conversation.chat.completed" || event_type == "conversation.audio.completed") {
                 is_first_packet_ = false;
                 cached_packet_count_ = 0;
-                packet_cache_.clear();
+
+                if (event_type == "conversation.audio.completed") {
+                    packet_cache_.clear();
+                }
+
+                // 重置打断记录状态，因为这是新对话的开始
+                abort_speaking_recorded_ = false;
+                // 重置语音停止记录状态，因为对话已完成
+                speech_stopped_recorded_ = false;
 
                 std::string messageData = "conversation.chat.completed or conversation.audio.completed";
                 MqttClient::getInstance().sendTraceLog("info", messageData.c_str());
@@ -442,10 +506,17 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 message_buffer_ += "}";
                 
                 auto message_json = cJSON_Parse(message_buffer_.c_str());
-                if (message_json) {
+                if (message_json && is_start_progress_ == true) {
                     on_incoming_json_(message_json);
                     cJSON_Delete(message_json);
+                    // 结束流程
+                    is_start_progress_ = false;
                 }
+
+                // 清理消息缓存，防止内存泄漏
+                message_cache_.clear();
+                message_buffer_.clear();
+
             } else if (event_type == "input_audio_buffer.speech_started") {
 
                 MqttClient::getInstance().sendTraceLog("info", "input_audio_buffer.speech_started");
@@ -501,7 +572,11 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 CozeMCPParser::getInstance().handle_mcp(str_data);
             } else if (event_type == "error") {
                 ESP_LOGE(TAG, "Error: %s", str_data.data());
-                MqttClient::getInstance().sendTraceLog("error", str_data.data());
+                SetError(str_data.data());
+                if (str_data.find("\"code\":4200") != std::string::npos || str_data.find("\"code\":4101") != std::string::npos || str_data.find("\"code\":4100") != std::string::npos) {
+                    // token 过期
+                    MqttClient::getInstance().GetRoomInfo(true);
+                }
             }
             
             cJSON_Delete(root);
@@ -509,10 +584,21 @@ bool WebsocketProtocol::OpenAudioChannel() {
         last_incoming_time_ = std::chrono::steady_clock::now();
     });
 
-    websocket_->OnDisconnected([this]() {
-        ESP_LOGI(TAG, "Websocket disconnected");
+    websocket_->OnDisconnected([this](bool is_clean) {
+        auto chat_mode = Application::GetInstance().GetChatMode();
+        // chat_mode == 0 表示按键说话，这种情况下不重连
+        if (is_clean || chat_mode == 0) {
+            ESP_LOGI(TAG, "Websocket disconnected cleanly");
+            reconnect_attempts_ = 0;   // 正常断开，重置重连计数
+            should_reconnect_ = false; // 正常断开不需要重连
+        } else {
+            ESP_LOGI(TAG, "Websocket disconnected unexpectedly");
+            // 异常断开，尝试重连
+            should_reconnect_ = true;
+            HandleReconnect();
+        }
         if (on_audio_channel_closed_ != nullptr) {
-            on_audio_channel_closed_();
+            on_audio_channel_closed_(is_clean);
         }
     });
 
@@ -523,8 +609,24 @@ bool WebsocketProtocol::OpenAudioChannel() {
         return false;
     }
 
+    // 测试正常断开 - 连接成功后5秒自动断开
+    // xTaskCreate([](void* param) {
+    //     WebsocketProtocol* self = static_cast<WebsocketProtocol*>(param);
+    //     vTaskDelay(pdMS_TO_TICKS(5000)); // 延时5秒
+        
+    //     if (self->websocket_ && self->websocket_->IsConnected()) {
+    //         ESP_LOGI(TAG, "=== 手动断开测试 ===");
+    //         ESP_LOGI(TAG, "手动断开WebSocket连接");
+    //         self->websocket_->Close();  // 触发 is_clean = true 的回调
+    //     } else {
+    //         ESP_LOGI(TAG, "=== WebSocket连接已断开 ===");
+    //     }
+    //     vTaskDelete(nullptr);
+    // }, "disconnect_test", 2048, this, 5, nullptr);
+
+
     // Wait for server hello
-    EventBits_t bits = xEventGroupWaitBits(event_group_handle_, WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT, pdTRUE, pdFALSE, pdMS_TO_TICKS(10000));
+    EventBits_t bits = xEventGroupWaitBits(event_group_handle_, WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT, pdTRUE, pdFALSE, pdMS_TO_TICKS(5000));
     if (!(bits & WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT)) {
         ESP_LOGE(TAG, "Failed to receive server hello");
         SetError(Lang::Strings::SERVER_TIMEOUT);
@@ -552,26 +654,25 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 }
             }
             
-                            // 提取 parameters
-                cJSON* chat_config = cJSON_GetObjectItem(config_json, "chat_config");
-                if (chat_config && cJSON_IsObject(chat_config)) {
-                    cJSON* parameters_item = cJSON_GetObjectItem(chat_config, "parameters");
-                    if (parameters_item && cJSON_IsObject(parameters_item)) {
-                        char* parameters_str = cJSON_PrintUnformatted(parameters_item);
-                        if (parameters_str) {
-                            parameters = std::string(parameters_str);
-                            free(parameters_str);
-                        }
+            // 提取 parameters
+            cJSON* chat_config = cJSON_GetObjectItem(config_json, "chat_config");
+            if (chat_config && cJSON_IsObject(chat_config)) {
+                cJSON* parameters_item = cJSON_GetObjectItem(chat_config, "parameters");
+                if (parameters_item && cJSON_IsObject(parameters_item)) {
+                    char* parameters_str = cJSON_PrintUnformatted(parameters_item);
+                    if (parameters_str) {
+                        parameters = std::string(parameters_str);
+                        free(parameters_str);
                     }
-                    
-                    // 提取 custom_variables
-                    cJSON* custom_variables_item = cJSON_GetObjectItem(chat_config, "custom_variables");
-                    if (custom_variables_item && cJSON_IsObject(custom_variables_item)) {
-                        char* custom_variables_str = cJSON_PrintUnformatted(custom_variables_item);
-                        if (custom_variables_str) {
-                            custom_variables = std::string(custom_variables_str);
-                            free(custom_variables_str);
-                        }
+                }
+                
+                // 提取 custom_variables
+                cJSON* custom_variables_item = cJSON_GetObjectItem(chat_config, "custom_variables");
+                if (custom_variables_item && cJSON_IsObject(custom_variables_item)) {
+                    char* custom_variables_str = cJSON_PrintUnformatted(custom_variables_item);
+                    if (custom_variables_str) {
+                        custom_variables = std::string(custom_variables_str);
+                        free(custom_variables_str);
                     }
             }
             cJSON_Delete(config_json);
@@ -582,8 +683,9 @@ bool WebsocketProtocol::OpenAudioChannel() {
     char event_id[32];
     uint32_t random_value = esp_random();
     snprintf(event_id, sizeof(event_id), "%lu", random_value);
-    Settings settings("wifi", true);
-    int speed = Board::GetInstance().GetVoiceSpeed();
+
+    NetworkType network_type = Board::GetInstance().GetNetworkType();
+
     int chat_mode = Application::GetInstance().GetChatMode();
     
     std::string codec = "opus";
@@ -622,7 +724,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
         message += "\"turn_detection\": {";
         message += "\"type\": \"server_vad\",";  // 判停类型，client_vad/server_vad，默认为 client_vad
         message += "\"prefix_padding_ms\": 300,"; // server_vad模式下，VAD 检测到语音之前要包含的音频量，单位为 ms。默认为 600ms
-        message += "\"silence_duration_ms\": 800"; // server_vad模式下，检测语音停止的静音持续时间，单位为 ms。默认为 800ms
+        message += "\"silence_duration_ms\": 500"; // server_vad模式下，检测语音停止的静音持续时间，单位为 ms。默认为 800ms
         message += "},";
     }
     message += "\"chat_config\":{";
@@ -651,15 +753,24 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "\"output_audio\":{";
     message += "\"codec\":\"" + codec + "\",";
     message += "\"opus_config\":{";
+    message += "\"bitrate\":16000,";
     message += "\"sample_rate\":16000,";
     message += "\"use_cbr\":false,";
     message += "\"frame_size_ms\":60,";
     message += "\"limit_config\":{";
-    message += "\"period\":1,";
-#if CONFIG_IDF_TARGET_ESP32C2
-    message += "\"max_frame_num\":17";
+#ifdef CONFIG_IDF_TARGET_ESP32C2
+    
+    if (network_type == NetworkType::ML307) {
+        message += "\"period\":1,";
+        message += "\"max_frame_num\":25";
+    } else {
+        ESP_LOGI(TAG, "network_type: %d", static_cast<int>(network_type));
+        message += "\"period\":1,";
+        message += "\"max_frame_num\":17";
+    }
 #else
-    message += "\"max_frame_num\":20";
+    message += "\"period\":1,";
+    message += "\"max_frame_num\":25";
 #endif
     message += "}";
     message += "},";
@@ -696,4 +807,90 @@ void WebsocketProtocol::ParseServerHello(const cJSON* root) {
     // COZE 的音频信息是由设备发起的，因此这里直接返回
     server_sample_rate_ = 16000;
     xEventGroupSetBits(event_group_handle_, WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT);
+}
+
+void WebsocketProtocol::SwitchToSpeaking() {
+    
+    message_cache_.clear();
+    message_buffer_.clear();
+    message_buffer_ = "{";
+    message_buffer_ += "\"type\":\"tts\",";
+    message_buffer_ += "\"state\":\"pre_start\"";
+    message_buffer_ += "}";
+    
+    auto message_json = cJSON_Parse(message_buffer_.c_str());
+    if (message_json) {
+        on_incoming_json_(message_json);
+        cJSON_Delete(message_json);
+    }
+}
+
+// 重连
+void WebsocketProtocol::HandleReconnect() {
+    // 如果正在重连或不应该重连，则直接返回
+    if (is_reconnecting_ || !should_reconnect_) {
+        return;
+    }
+    
+    // 检查是否已达到最大重连次数
+    if (reconnect_attempts_ >= MAX_RECONNECT_ATTEMPTS) {
+        ESP_LOGE(TAG, "已达到最大重连次数 (%d次)", MAX_RECONNECT_ATTEMPTS);
+        SetError("重连失败，请检查网络连接");
+        
+        if (on_audio_channel_closed_ != nullptr) {
+            on_audio_channel_closed_(false);
+        }
+        
+        // 重置重连状态，允许后续再次触发重连
+        is_reconnecting_ = false;
+        return;
+    }
+    
+    is_reconnecting_ = true;
+    reconnect_attempts_++;
+    
+    ESP_LOGI(TAG, "尝试重连... (%d/%d)", reconnect_attempts_, MAX_RECONNECT_ATTEMPTS);
+    
+    // 创建重连任务
+    xTaskCreate(ReconnectTask, "ws_reconnect_task", 8192, this, 5, nullptr);
+}
+void WebsocketProtocol::ReconnectTask(void* param) {
+    WebsocketProtocol* self = static_cast<WebsocketProtocol*>(param);
+    
+    // 重连间隔时间（指数退避）5s,10s,20s
+    uint32_t delay_ms = self->RECONNECT_INTERVAL_MS * (1 << (self->reconnect_attempts_ - 1));
+    // 限制最大延迟时间
+    if (delay_ms > 30000) {
+        delay_ms = 30000;
+    }
+    
+    vTaskDelay(pdMS_TO_TICKS(delay_ms));
+    
+    bool reconnect_success = self->OpenAudioChannel();
+    if (reconnect_success) {
+        ESP_LOGI(TAG, "重连成功");
+        self->reconnect_attempts_ = 0;
+        self->is_reconnecting_ = false;
+        
+        // 通知上层应用连接已恢复
+        if (self->on_audio_channel_opened_ != nullptr) {
+            self->on_audio_channel_opened_();
+        }
+    } else {
+        ESP_LOGE(TAG, "第%d次重连失败", self->reconnect_attempts_);
+        self->is_reconnecting_ = false;
+        
+        // 如果还有重连机会，通过 HandleReconnect 创建新任务
+        if (self->reconnect_attempts_ < self->MAX_RECONNECT_ATTEMPTS) {
+            self->HandleReconnect();
+        } else {
+            // 已达到最大重试次数
+            ESP_LOGE(TAG, "已达到最大重连次数，连接失败");
+            if (self->on_audio_channel_closed_ != nullptr) {
+                self->on_audio_channel_closed_(false);
+            }
+        }
+    }
+    
+    vTaskDelete(nullptr);
 }

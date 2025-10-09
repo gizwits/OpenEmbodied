@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <functional>
+#include <map>
 
 class DataPointManager {
 public:
@@ -40,6 +41,15 @@ public:
         std::function<void(int)> set_brightness_callback
     );
 
+    // 初始化：从存储加载并应用缓存的数据点
+    void InitFromStorage();
+
+    // 查询缓存数据点（如果不存在则返回false）
+    bool GetCachedDataPoint(const std::string& name, int& value) const;
+
+    // 设置缓存但不触发回调（用于内部恢复时调用回调前的缓存同步）
+    void SetCachedDataPoint(const std::string& name, int value);
+
 protected:
     DataPointManager() = default;
     virtual ~DataPointManager() = default;
@@ -56,4 +66,7 @@ protected:
     std::function<int()> get_rssi_callback_;
     std::function<int()> get_brightness_callback_;
     std::function<void(int)> set_brightness_callback_;
+
+    // 简单的内存缓存
+    std::map<std::string, int> cache_;
 };
