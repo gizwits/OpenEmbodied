@@ -264,7 +264,9 @@ void LedSignal::UpdateLedState() {
         auto now = std::chrono::steady_clock::now();
         auto duration_since_non_working = std::chrono::duration_cast<std::chrono::seconds>(now - last_non_working_time).count();
 
-        if (duration_since_non_working < LEVEL_WORK_TIME_MIN * 60) {
+        auto is_wifi_config_mode = Board::GetInstance().IsWifiConfigMode();
+        // 配网模式下，一直闪烁
+        if ((duration_since_non_working < LEVEL_WORK_TIME_MIN * 60) || is_wifi_config_mode) {
             blue = rgb_value; // 蓝色闪烁代表非工作状态
             need_blink = true;
         } else {
