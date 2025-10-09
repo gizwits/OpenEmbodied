@@ -21,6 +21,8 @@ choice
         bool "English"
     config LANGUAGE_JA_JP
         bool "Japanese"
+    config LANGUAGE_ZH_CN_LVLIN
+        bool "Chinese Traditional LVLIN"
 endchoice
 
 config COZE_WEBSOCKET_URL
