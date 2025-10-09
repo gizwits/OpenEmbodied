@@ -31,9 +31,9 @@
 
 #define TAG "CustomBoard"
 
-#define RESET_WIFI_CONFIGURATION_COUNT 10
+#define RESET_WIFI_CONFIGURATION_COUNT 5
 #define SLEEP_TIME_SEC 60 * 3
-// #define SLEEP_TIME_SEC 30
+// #define SLEEP_TIME_SEC 10
 class CustomBoard : public WifiBoard {
 private:
     Button boot_button_;
@@ -45,10 +45,11 @@ private:
     // PowerManager* power_manager_;
     
     // 唤醒词列表
-    std::vector<std::string> wake_words_ = {"你好小智", "你好小云", "合养精灵", "嗨小火人"};
+    std::vector<std::string> wake_words_ = {"你好小智", "你好小云", "合养精灵", "嗨小火人", "你好冬冬"};
     std::vector<std::string> network_config_words_ = {"开始配网"};
 
     void InitializePowerSaveTimer() {
+        ESP_LOGI(TAG, "Initializing Power Save Timer... SLEEP_TIME_SEC: %d", SLEEP_TIME_SEC);
         power_save_timer_ = new PowerSaveTimer(-1, SLEEP_TIME_SEC, portMAX_DELAY);  // peter mark 休眠时间
         power_save_timer_->OnEnterSleepMode([this]() {
             ESP_LOGI(TAG, "Enabling sleep mode");
