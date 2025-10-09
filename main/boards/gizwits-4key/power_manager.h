@@ -9,10 +9,14 @@
 class PowerManager {
 private:
     // 电池电量区间-分压电阻为2个100k
-    static constexpr struct {
+    // static constexpr struct {
+    //     uint16_t adc;
+    //     uint8_t level;
+    // } BATTERY_LEVELS[] = {{1980, 0}, {2519, 100}};
+        static constexpr struct {
         uint16_t adc;
         uint8_t level;
-    } BATTERY_LEVELS[] = {{1980, 0}, {2519, 100}};
+    } BATTERY_LEVELS[] = {{1785, 0}, {2370, 100}};//实际分压比0.467，实际ADC值1788-2373
     static constexpr size_t BATTERY_LEVELS_COUNT = 2;
     static constexpr size_t ADC_VALUES_COUNT = 10;
 
@@ -65,6 +69,12 @@ private:
         int adc_value;
         ESP_ERROR_CHECK(adc_oneshot_read(adc_handle_, adc_channel_, &adc_value));
 
+        // 添加详细的ADC读数信息
+        ESP_LOGI("PowerManager", "=== ADC测试开始 ===");
+        ESP_LOGI("PowerManager", "原始ADC读数: %d", adc_value);
+        ESP_LOGI("PowerManager", "ADC通道: %d", adc_channel_);
+        ESP_LOGI("PowerManager", "ADC单元: %d", adc_unit_);
+
         adc_values_[adc_values_index_] = adc_value;
         adc_values_index_ = (adc_values_index_ + 1) % ADC_VALUES_COUNT;
         if (adc_values_count_ < ADC_VALUES_COUNT) {
@@ -77,8 +87,38 @@ private:
         }
         average_adc /= adc_values_count_;
 
+        // 显示所有采样值
+        ESP_LOGI("PowerManager", "采样数组状态 - 索引: %d, 计数: %d", adc_values_index_, adc_values_count_);
+        ESP_LOGI("PowerManager", "当前采样值:");
+        for (size_t i = 0; i < adc_values_count_; i++) {
+            ESP_LOGI("PowerManager", "  [%d]: %d", i, adc_values_[i]);
+        }
+        ESP_LOGI("PowerManager", "计算得出的平均值: %ld", average_adc);
+
+        // 显示电量映射参数
+        ESP_LOGI("PowerManager", "电量映射参数:");
+        ESP_LOGI("PowerManager", "  最低ADC值: %d -> 0%%", BATTERY_LEVELS[0].adc);
+        ESP_LOGI("PowerManager", "  最高ADC值: %d -> 100%%", BATTERY_LEVELS[1].adc);
+        ESP_LOGI("PowerManager", "当前ADC值: %d", adc_value);
+        ESP_LOGI("PowerManager", "当前平均值: %ld", average_adc);
+
+        uint8_t old_battery_level = battery_level_;
+
         CalculateBatteryLevel(average_adc);
 
+        // 在CalculateBatteryLevel后显示详细计算过程
+        ESP_LOGI("PowerManager", "=== 电量计算详情 ===");
+        if (average_adc <= BATTERY_LEVELS[0].adc) {
+            ESP_LOGI("PowerManager", "ADC值(%ld) <= 最低ADC值(%d), 设置电池等级为 0%%", average_adc, BATTERY_LEVELS[0].adc);
+        } else if (average_adc >= BATTERY_LEVELS[BATTERY_LEVELS_COUNT - 1].adc) {
+            ESP_LOGI("PowerManager", "ADC值(%ld) >= 最高ADC值(%d), 设置电池等级为 100%%", average_adc, BATTERY_LEVELS[BATTERY_LEVELS_COUNT - 1].adc);
+        } else {
+            float ratio = static_cast<float>(average_adc - BATTERY_LEVELS[0].adc) / 
+                        (BATTERY_LEVELS[1].adc - BATTERY_LEVELS[0].adc);
+            ESP_LOGI("PowerManager", "插值计算: (ADC值 %ld - 最低ADC值 %d) / (最高ADC值 %d - 最低ADC值 %d) = %.3f", 
+                    average_adc, BATTERY_LEVELS[0].adc, BATTERY_LEVELS[1].adc, BATTERY_LEVELS[0].adc, ratio);
+            ESP_LOGI("PowerManager", "电池等级 = %.3f * 100 = %.1f%%", ratio, ratio * 100);
+        }
 
         // ESP_LOGI("PowerManager", "ADC值: %d 平均值: %ld 电量: %u%%", adc_value, average_adc,
         //          battery_level_);
