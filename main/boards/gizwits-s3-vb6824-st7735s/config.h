@@ -18,7 +18,7 @@
 
 // 使用单独串口 UART_NUM_2
 #define FACTORY_TEST_UART_NUM       UART_NUM_2
-#define FACTORY_TEST_UART_TX_PIN    GPIO_NUM_0
+#define FACTORY_TEST_UART_TX_PIN    GPIO_NUM_43
 #define FACTORY_TEST_UART_RX_PIN    GPIO_NUM_44
 
 // ST7735S display configuration (根据实际屏幕尺寸)

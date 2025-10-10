@@ -158,13 +158,14 @@ private:
         adc_cfg.max = 2500;   // 2.01V附近 (2500/4095*3.3V) - 扩大上限
         adc_button_k51_ = new AdcButton(adc_cfg);
         
-        // 设置K50按钮回调 - 打断AI
+        // 设置K50按钮回调 - 循环切换颜色模式
         adc_button_k50_->OnClick([this]() {
-            ESP_LOGI(TAG, " ===== K50按键按下 =====");
+            ESP_LOGI(TAG, " ===== K50按键点击 =====");
             ESP_LOGI(TAG, " 按键类型: K50按键 (ADC检测)");
+            ESP_LOGI(TAG, " 检测范围: 0-200 (0V-0.16V)");
             
-            // 设备关机状态下不响应
             if (!device_powered_on_) {
+                // 设备关机状态,不响应
                 ESP_LOGI(TAG, "设备关机状态,K50按键无效");
                 return;
             }
@@ -176,32 +177,6 @@ private:
                 return;
             }
             last_k50_click_ms_ = now_ms;
-            
-            // 设备开机状态,打断AI思考和播放
-            auto &app = Application::GetInstance();
-            app.ToggleChatState();
-            ESP_LOGI(TAG, "K50打断已触发,ToggleChatState 调用完成,device_state_当前: [%d]", app.GetDeviceState());
-        });
-        
-        // 设置K51按钮点击回调 - 循环切换颜色模式
-        adc_button_k51_->OnClick([this]() {
-            ESP_LOGI(TAG, " ===== K51按键点击 =====");
-            ESP_LOGI(TAG, " 按键类型: K51按键 (ADC检测)");
-            ESP_LOGI(TAG, " 检测范围: 1500-2500 (1.21V-2.01V)");
-            
-            if (!device_powered_on_) {
-                // 设备关机状态,不响应
-                ESP_LOGI(TAG, "设备关机状态,K51按键无效");
-                return;
-            }
-
-            // 防止刚触发K50后短时间内误触发K51（保持简单的时间互斥,不做ADC硬校验）
-            int64_t now_ms2 = esp_timer_get_time() / 1000;
-            if (now_ms2 - last_k50_click_ms_ < 250) {
-                ESP_LOGI(TAG, "K51按下但与K50间隔过短,忽略");
-                return;
-            }
-            last_k51_click_ms_ = now_ms2;
             
             // 设备开机状态,切换颜色模式
             
@@ -279,15 +254,15 @@ private:
             }
         });
         
-        // 设置K51按钮长按回调 - 关闭灯光和电机
-        adc_button_k51_->OnLongPress([this]() {
-            ESP_LOGI(TAG, " ===== K51按键长按 =====");
-            ESP_LOGI(TAG, " 按键类型: K51按键 (ADC检测)");
-            ESP_LOGI(TAG, " 检测范围: 1500-2500 (1.21V-2.01V)");
+        // 设置K50按钮长按回调 - 关闭灯光和电机
+        adc_button_k50_->OnLongPress([this]() {
+            ESP_LOGI(TAG, " ===== K50按键长按 =====");
+            ESP_LOGI(TAG, " 按键类型: K50按键 (ADC检测)");
+            ESP_LOGI(TAG, " 检测范围: 0-200 (0V-0.16V)");
             
             // 设备关机状态下不响应
             if (!device_powered_on_) {
-                ESP_LOGI(TAG, "设备关机状态,K51长按无效");
+                ESP_LOGI(TAG, "设备关机状态,K50长按无效");
                 return;
             }
             
@@ -307,6 +282,32 @@ private:
             
             // 重置颜色状态,下次按键从模式0开始
             k51_color_mode_ = 7; // 设为7,这样第一次按键时(7+1)%8=0
+        });
+        
+        // 设置K51按钮点击回调 - 打断AI
+        adc_button_k51_->OnClick([this]() {
+            ESP_LOGI(TAG, " ===== K51按键按下 =====");
+            ESP_LOGI(TAG, " 按键类型: K51按键 (ADC检测)");
+            ESP_LOGI(TAG, " 检测范围: 1500-2500 (1.21V-2.01V)");
+            
+            // 设备关机状态下不响应
+            if (!device_powered_on_) {
+                ESP_LOGI(TAG, "设备关机状态,K51按键无效");
+                return;
+            }
+
+            // 防止刚触发K50后短时间内误触发K51（保持简单的时间互斥,不做ADC硬校验）
+            int64_t now_ms2 = esp_timer_get_time() / 1000;
+            if (now_ms2 - last_k50_click_ms_ < 250) {
+                ESP_LOGI(TAG, "K51按下但与K50间隔过短,忽略");
+                return;
+            }
+            last_k51_click_ms_ = now_ms2;
+            
+            // 设备开机状态,打断AI思考和播放
+            auto &app = Application::GetInstance();
+            app.ToggleChatState();
+            ESP_LOGI(TAG, "K51打断已触发,ToggleChatState 调用完成,device_state_当前: [%d]", app.GetDeviceState());
         });
         
         ESP_LOGI(TAG, "ADC按钮初始化完成");
@@ -423,7 +424,7 @@ private:
         ESP_LOGI(TAG, " K51按键: GPIO%d (AdcButton库检测, 1500-2500 ADC值)", KEY_GPIO);
         ESP_LOGI(TAG, " ADC通道: 通道%d (按键), 通道3 (电池), 分辨率: 12位", KEY_ADC_CHANNEL);
         ESP_LOGI(TAG, " 检测方式: BOOT按键用Button类, K50/K51按键用AdcButton库");
-        ESP_LOGI(TAG, " 按键功能: 点击切换聊天状态, 长按重置WiFi");
+        ESP_LOGI(TAG, " 按键功能: K50控制RGB灯光和电机, K51打断AI聊天");
         ESP_LOGI(TAG, " 自动检测: AdcButton库自动处理ADC检测和事件触发");
         ESP_LOGI(TAG, " 调试模式: 每秒打印ADC值和电压");
     }
