@@ -17,7 +17,10 @@
               "CONFIG_USE_AUDIO_PROCESSOR=n",
               "CONFIG_USE_AFE_WAKE_WORD=n",
               "CONFIG_PRODUCT_TEST_WIFI=\"FACTORY_TEST#@#@\"",
-              "CONFIG_PRODUCT_TEST_WIFI_PASSWORD=\"12345678\""
+              "CONFIG_PRODUCT_TEST_WIFI_PASSWORD=\"12345678\"",
+              "CONFIG_ESP_CONSOLE_UART_BAUDRATE=74880",
+              "CONFIG_ESP_CONSOLE_UART_CUSTOM=y",
+              "CONFIG_ESP_CONSOLE_UART_CUSTOM_NUM_0=y"
           ]
       }
   ]
