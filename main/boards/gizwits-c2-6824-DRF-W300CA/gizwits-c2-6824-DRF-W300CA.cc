@@ -30,9 +30,6 @@
 
 #define TAG "CustomBoard"
 
-// RGB灯光亮度宏定义
-#define RGB_LED_BRIGHTNESS 1
-
 #define RESET_WIFI_CONFIGURATION_COUNT 3
 #define SLEEP_TIME_SEC 60 * 3
 
@@ -206,49 +203,49 @@ private:
                     ESP_LOGI(TAG, "🌈 模式1: 白色");
                     StopRgbLightEffect(); // 先停止渐变任务
                     rgb_light_on_ = true;
-                    rgb_led_.SetBrightness(RGB_LED_BRIGHTNESS);
+                    rgb_led_.SetBrightness(GetBrightness_());
                     rgb_led_.SetColor(255, 255, 255);
                     break;
                 case 2: // 红色
                     ESP_LOGI(TAG, "🌈 模式2: 红色");
                     StopRgbLightEffect(); // 先停止渐变任务
                     rgb_light_on_ = true;
-                    rgb_led_.SetBrightness(RGB_LED_BRIGHTNESS);
+                    rgb_led_.SetBrightness(GetBrightness_());
                     rgb_led_.SetColor(255, 0, 0);
                     break;
                 case 3: // 绿色
                     ESP_LOGI(TAG, "🌈 模式3: 绿色");
                     StopRgbLightEffect(); // 先停止渐变任务
                     rgb_light_on_ = true;
-                    rgb_led_.SetBrightness(RGB_LED_BRIGHTNESS);
+                    rgb_led_.SetBrightness(GetBrightness_());
                     rgb_led_.SetColor(0, 255, 0);
                     break;
                 case 4: // 蓝色
                     ESP_LOGI(TAG, "🌈 模式4: 蓝色");
                     StopRgbLightEffect(); // 先停止渐变任务
                     rgb_light_on_ = true;
-                    rgb_led_.SetBrightness(RGB_LED_BRIGHTNESS);
+                    rgb_led_.SetBrightness(GetBrightness_());
                     rgb_led_.SetColor(0, 0, 255);
                     break;
                 case 5: // 黄色
                     ESP_LOGI(TAG, "🌈 模式5: 黄色");
                     StopRgbLightEffect(); // 先停止渐变任务
                     rgb_light_on_ = true;
-                    rgb_led_.SetBrightness(RGB_LED_BRIGHTNESS);
+                    rgb_led_.SetBrightness(GetBrightness_());
                     rgb_led_.SetColor(255, 255, 0);
                     break;
                 case 6: // 青色
                     ESP_LOGI(TAG, "🌈 模式6: 青色");
                     StopRgbLightEffect(); // 先停止渐变任务
                     rgb_light_on_ = true;
-                    rgb_led_.SetBrightness(RGB_LED_BRIGHTNESS);
+                    rgb_led_.SetBrightness(GetBrightness_());
                     rgb_led_.SetColor(0, 255, 255);
                     break;
                 case 7: // 紫色
                     ESP_LOGI(TAG, "🌈 模式7: 紫色");
                     StopRgbLightEffect(); // 先停止渐变任务
                     rgb_light_on_ = true;
-                    rgb_led_.SetBrightness(RGB_LED_BRIGHTNESS);
+                    rgb_led_.SetBrightness(GetBrightness_());
                     rgb_led_.SetColor(255, 0, 255);
                     break;
             }
@@ -313,17 +310,24 @@ private:
         ESP_LOGI(TAG, "ADC按钮初始化完成");
         
         // 启动ADC调试任务
-        xTaskCreate([](void* param) {
-            CustomBoard* board = static_cast<CustomBoard*>(param);
-            while (true) {
-                int adc_value;
-                if (adc_oneshot_read(board->adc1_handle_, (adc_channel_t)KEY_ADC_CHANNEL, &adc_value) == ESP_OK) {
-                    float voltage = (adc_value * 3.3f) / 4095.0f;
-                    // ESP_LOGI(TAG, "🔍 ADC调试: 值=%d, 电压=%.3fV", adc_value, voltage);
-                }
-                vTaskDelay(pdMS_TO_TICKS(1000)); // 每秒打印一次
-            }
-        }, "adc_debug", 4096, this, 1, nullptr);
+        // xTaskCreate([](void* param) {
+        //     CustomBoard* board = static_cast<CustomBoard*>(param);
+        //     while (true) {
+        //         int adc_value;
+        //         if (adc_oneshot_read(board->adc1_handle_, (adc_channel_t)KEY_ADC_CHANNEL, &adc_value) == ESP_OK) {
+        //             float voltage = (adc_value * 3.3f) / 4095.0f;
+        //             // ESP_LOGI(TAG, "🔍 ADC调试: 值=%d, 电压=%.3fV", adc_value, voltage);
+        //         }
+        //         vTaskDelay(pdMS_TO_TICKS(1000)); // 每秒打印一次
+        //     }
+        // }, "adc_debug", 4096, this, 1, nullptr);
+    }
+
+    // 获取数据点缓存
+    uint8_t GetBrightness_() {
+        auto brightness = 0;
+        DataPointManager::GetInstance().GetCachedDataPoint("brightness", brightness);
+        return brightness;
     }
 
     void InitializeButtons() {
@@ -472,7 +476,10 @@ private:
                 return 0;
             },
             [this]() -> int { return GetBrightness(); },
-            [this](int value) { SetBrightness(value); }
+            [this](int value) { 
+                SetBrightness(value);
+                SetRgbBrightness(value);
+            }
         );
     }
 
@@ -501,6 +508,7 @@ public:
         gpio_set_level(RGB_LED_G_GPIO, 0);
         gpio_set_level(RGB_LED_B_GPIO, 0);
 
+       
         ESP_LOGI(TAG, "Power rails init done");
 
         ESP_LOGI(TAG, "Initializing Power Save Timer...");
@@ -552,6 +560,13 @@ public:
         ESP_LOGI(TAG, "Initializing Data Point Manager...");
         InitializeDataPointManager();
         ESP_LOGI(TAG, "Data Point Manager initialized.");
+
+
+        auto brightness = GetBrightness_();
+        ESP_LOGI(TAG, "RGB灯光亮度: %d", brightness);
+        if (brightness > 0) {
+            StartRgbLightEffect();
+        }
     }
 
     virtual void WakeUpPowerSaveTimer() {
@@ -615,6 +630,7 @@ public:
     
     void SetRgbBrightness(uint8_t brightness) {
         rgb_led_.SetBrightness(brightness);
+        StartRgbLightEffect();
     }
     
     void StartRgbBreathing(uint8_t r = 255, uint8_t g = 0, uint8_t b = 0) {
@@ -635,7 +651,8 @@ public:
         current_color_index_ = 0;
         
         // 设置RGB LED亮度
-        rgb_led_.SetBrightness(RGB_LED_BRIGHTNESS); // 使用宏定义亮度
+        auto brightness = GetBrightness_();
+        rgb_led_.SetBrightness(brightness); // 使用宏定义亮度
         
         // 创建RGB灯光任务
         xTaskCreate([](void* param) {
@@ -703,7 +720,7 @@ public:
             
             board->rgb_task_handle_ = nullptr;
             vTaskDelete(nullptr);
-        }, "rgb_light_task", 4096, this, 1, &rgb_task_handle_);
+        }, "rgb_light_task", 2048, this, 1, &rgb_task_handle_);
     }
     
     // 停止RGB灯光效果
