@@ -13,6 +13,11 @@
 
 DataPointManager& DataPointManager::GetInstance() {
     static DataPointManager instance;
+    static bool initialized = false;
+    if (!initialized) {
+        instance.InitFromStorage();
+        initialized = true;
+    }
     return instance;
 }
 
