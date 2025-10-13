@@ -536,6 +536,10 @@ void Application::Start() {
                         // 自然对话不要 biu
                         ResetDecoder();
                         PlaySound(Lang::Sounds::P3_BO);
+                    } else if (board.NeedPlayProcessVoiceWithLife()) {
+                        // 不满足上面的条件，但是又开启了自然对话提示音
+                        ResetDecoder();
+                        PlaySound(Lang::Sounds::P3_BO);
                     }
                     auto display = board.GetDisplay();
                     display->SetEmotion("thinking");
@@ -1028,7 +1032,8 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     if (device_state_ == kDeviceStateIdle) {
         Schedule([this, wake_word]() {
             audio_service_.ResetDecoder();
-            audio_service_.PlaySound(Lang::Sounds::P3_SUCCESS);
+            audio_service_.PlaySound(Lang::Sounds::P3_IM_IN);
+
             ToggleChatState();
             if (protocol_) {
                 protocol_->SendWakeWordDetected(wake_word); 
@@ -1048,7 +1053,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
             ESP_LOGI(TAG, "WakeWordInvoke(kDeviceStateSpeaking)");
             protocol_->SendAbortSpeaking(kAbortReasonNone);
             audio_service_.ResetDecoder();
-            audio_service_.PlaySound(Lang::Sounds::P3_SUCCESS);
+            audio_service_.PlaySound(Lang::Sounds::P3_IM_IN);
             
         }, "WakeWordInvoke_AbortSpeaking");
     } else if (device_state_ == kDeviceStateListening) { 
@@ -1056,7 +1061,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
         protocol_->PreAbortSpeaking();
         Schedule([this]() {
             ResetDecoder();
-            PlaySound(Lang::Sounds::P3_SUCCESS);
+            PlaySound(Lang::Sounds::P3_IM_IN);
             SetDeviceState(kDeviceStateListening);
         });
     } else if (device_state_ == kDeviceStateSleeping) {

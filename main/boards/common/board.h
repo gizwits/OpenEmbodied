@@ -90,6 +90,7 @@ public:
     virtual uint8_t GetDefaultBrightness() { return 0; }
     virtual void EnterDeepSleepIfNotCharging() { }
     virtual bool GetNeedPlayPrologue() { return false; }
+    virtual bool NeedPlayProcessVoiceWithLife() { return false; }
     
     // 数据点相关方法
     virtual const char* GetGizwitsProtocolJson() const { return nullptr; }

@@ -32,7 +32,7 @@
 
 #define TAG "CustomBoard"
 
-#define RESET_WIFI_CONFIGURATION_COUNT 10
+#define RESET_WIFI_CONFIGURATION_COUNT 5
 #define SLEEP_TIME_SEC 60 * 3
 // #define SLEEP_TIME_SEC 30
 class CustomBoard : public WifiBoard {
@@ -90,10 +90,20 @@ private:
 
         if (chat_mode == 0) {
             rec_button_->OnPressUp([this]() {
+                // 检查是否已经过了5秒
+                if ((esp_timer_get_time() / 1000 - power_on_time_) < 5000) {
+                    return;
+                }
+                
                 auto &app = Application::GetInstance();
                 app.StopListening();
             });
             rec_button_->OnPressDown([this]() {
+                // 检查是否已经过了5秒
+                if ((esp_timer_get_time() / 1000 - power_on_time_) < 5000) {
+                    return;
+                }
+                
                 auto &app = Application::GetInstance();
                 app.AbortSpeaking(kAbortReasonNone);
                 app.StartListening();
@@ -258,20 +268,18 @@ private:
 
 public:
     CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO){      
+        power_on_time_ = esp_timer_get_time() / 1000;  // 记录上电时间（毫秒）
+
         InitializePowerManager();
         Settings settings("wifi", true);
         auto s_factory_test_mode = settings.GetInt("ft_mode", 0);
-
-        if (s_factory_test_mode == 0) {
-            // 不在产测模式才启动，不然有问题
-            InitializeButtons();
-        }
 
         // 如果是从深度睡眠被碰撞 GPIO 唤醒，则先等待稳定摇晃，否则重新睡眠
         // WaitForCollisionShakeOrSleepIfWokenByCollision();
 
         if (s_factory_test_mode == 0) {
             InitializeLedSignal();
+            InitializeButtons();
         }
 
         
@@ -331,6 +339,11 @@ public:
 
     int GetDefaultChatMode() override {
         return 1;
+    }
+
+    virtual bool NeedPlayProcessVoiceWithLife() override {
+        // 自然对话也要播放提示音
+        return true;
     }
 
     void EnterDeepSleepIfNotCharging() {
