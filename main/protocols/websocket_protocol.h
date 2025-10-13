@@ -9,6 +9,16 @@
 #include <optional>
 #include <chrono>
 
+// WebSocket audio send path constants
+// If packet/frame size changes, adjust these accordingly
+#if CONFIG_IDF_TARGET_ESP32S3
+#define WS_BASE64_BUFFER_BYTES 256        // Base64 buffer capacity (includes null terminator headroom)
+#define WS_MESSAGE_BUFFER_RESERVE 320    // Typical JSON envelope reserve to avoid realloc churn
+#else
+#define WS_BASE64_BUFFER_BYTES 64        // Base64 buffer capacity (includes null terminator headroom)
+#define WS_MESSAGE_BUFFER_RESERVE 320    // Typical JSON envelope reserve to avoid realloc churn
+#endif
+
 #define WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT (1 << 0)
 
 class WebsocketProtocol : public Protocol {
@@ -42,7 +52,9 @@ private:
     std::vector<uint8_t> audio_data_buffer_;  // Reuse buffer for Ogg data
     std::unique_ptr<char[]> base64_buffer_;  // Reuse buffer for base64 encoding
     size_t base64_buffer_size_ = 0;  // Current size of base64 buffer
-    std::string message_buffer_;  // Reuse buffer for message construction
+    
+    // 固定长度的消息缓冲区，避免频繁内存分配
+    char message_buffer_[WS_MESSAGE_BUFFER_RESERVE];  // 固定长度缓冲区
     
     // 用户说话结束时间戳，用于chat_mode==1时忽略1秒内的音频上传
     std::chrono::steady_clock::time_point speech_stopped_timestamp_;
@@ -53,6 +65,7 @@ private:
     std::string GetHelloMessage();
     static void CloseAudioChannelTask(void* param);
     void SwitchToSpeaking();
+    
 
     static void ReconnectTask(void* param);
 
