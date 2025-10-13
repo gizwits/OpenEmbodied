@@ -22,7 +22,7 @@
 #include <esp_lcd_panel_vendor.h>
 #include <driver/spi_common.h>
 #include "servo.h"
-#include <driver/ledc.h>
+// LEDC at 3 Hz is hard to achieve due to divider limits; use esp_timer to toggle GPIOs
 
 #define TAG "CustomBoard"
 
@@ -48,61 +48,61 @@ private:
     int64_t prev_last_click_time_ = 0;
     int64_t next_last_click_time_ = 0;
 
-    // LEDC PWM for VOLUME_UP/DOWN pins
+    // Software PWM via esp_timer toggling at 3 Hz (square wave)
     bool pwm_initialized_ = false;
-    static constexpr ledc_timer_t PWM_TIMER = LEDC_TIMER_1;
-    static constexpr ledc_mode_t PWM_MODE = LEDC_LOW_SPEED_MODE;
-    static constexpr ledc_channel_t PWM_CH_UP = LEDC_CHANNEL_1;
-    static constexpr ledc_channel_t PWM_CH_DOWN = LEDC_CHANNEL_2;
-    static constexpr uint32_t PWM_FREQ_HZ = 3; // 3 Hz as requested
+    esp_timer_handle_t pwm_timer_ = nullptr;
+    volatile bool pwm_level_ = false;
+
+    static void PwmTimerCb(void* arg) {
+        auto* self = static_cast<CustomBoard*>(arg);
+        self->pwm_level_ = !self->pwm_level_;
+        gpio_set_level(VOLUME_UP_BUTTON_GPIO, self->pwm_level_ ? 1 : 0);
+        gpio_set_level(VOLUME_DOWN_BUTTON_GPIO, self->pwm_level_ ? 1 : 0);
+    }
 
     void InitializePwm() {
         if (pwm_initialized_) return;
+        // Configure the two GPIOs as outputs
+        gpio_config_t io_conf = {};
+        io_conf.pin_bit_mask = (1ULL << VOLUME_UP_BUTTON_GPIO) | (1ULL << VOLUME_DOWN_BUTTON_GPIO);
+        io_conf.mode = GPIO_MODE_OUTPUT;
+        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        io_conf.intr_type = GPIO_INTR_DISABLE;
+        ESP_ERROR_CHECK(gpio_config(&io_conf));
+        gpio_set_level(VOLUME_UP_BUTTON_GPIO, 0);
+        gpio_set_level(VOLUME_DOWN_BUTTON_GPIO, 0);
 
-        // Configure LEDC timer for 3 Hz square wave
-        ledc_timer_config_t timer_config = {};
-        timer_config.speed_mode = PWM_MODE;
-        timer_config.duty_resolution = LEDC_TIMER_10_BIT; // 10-bit resolution
-        timer_config.timer_num = PWM_TIMER;
-        timer_config.freq_hz = PWM_FREQ_HZ;
-        timer_config.clk_cfg = LEDC_AUTO_CLK;
-        ESP_ERROR_CHECK(ledc_timer_config(&timer_config));
-
-        // Prepare common channel template
-        auto configure_channel = [&](gpio_num_t gpio, ledc_channel_t channel) {
-            ledc_channel_config_t ch = {};
-            ch.gpio_num = gpio;
-            ch.speed_mode = PWM_MODE;
-            ch.channel = channel;
-            ch.intr_type = LEDC_INTR_DISABLE;
-            ch.timer_sel = PWM_TIMER;
-            ch.duty = 0; // start stopped
-            ch.hpoint = 0;
-            ESP_ERROR_CHECK(ledc_channel_config(&ch));
-        };
-
-        configure_channel(VOLUME_UP_BUTTON_GPIO, PWM_CH_UP);
-        configure_channel(VOLUME_DOWN_BUTTON_GPIO, PWM_CH_DOWN);
+        if (pwm_timer_ == nullptr) {
+            esp_timer_create_args_t args = {
+                .callback = &CustomBoard::PwmTimerCb,
+                .arg = this,
+                .name = "pwm_3hz_timer"
+            };
+            ESP_ERROR_CHECK(esp_timer_create(&args, &pwm_timer_));
+        }
 
         pwm_initialized_ = true;
     }
 
     void StartPwm() {
         InitializePwm();
-        // 50% duty square wave
-        uint32_t max_duty = (1U << LEDC_TIMER_10_BIT) - 1U; // 1023
-        uint32_t duty = max_duty / 2;
-        ESP_ERROR_CHECK(ledc_set_duty(PWM_MODE, PWM_CH_UP, duty));
-        ESP_ERROR_CHECK(ledc_update_duty(PWM_MODE, PWM_CH_UP));
-        ESP_ERROR_CHECK(ledc_set_duty(PWM_MODE, PWM_CH_DOWN, duty));
-        ESP_ERROR_CHECK(ledc_update_duty(PWM_MODE, PWM_CH_DOWN));
+        pwm_level_ = false;
+        gpio_set_level(VOLUME_UP_BUTTON_GPIO, 0);
+        gpio_set_level(VOLUME_DOWN_BUTTON_GPIO, 0);
+        // 3 Hz square wave toggles every half-period: 1 / (2 * 3) = 0.166666... s
+        const int64_t half_period_us = 166666; // ~0.166666s
+        ESP_ERROR_CHECK(esp_timer_start_periodic(pwm_timer_, half_period_us));
     }
 
     void StopPwm() {
         if (!pwm_initialized_) return;
-        // Stop PWM and drive low
-        ledc_stop(PWM_MODE, PWM_CH_UP, 0);
-        ledc_stop(PWM_MODE, PWM_CH_DOWN, 0);
+        if (pwm_timer_) {
+            esp_timer_stop(pwm_timer_);
+        }
+        pwm_level_ = false;
+        gpio_set_level(VOLUME_UP_BUTTON_GPIO, 0);
+        gpio_set_level(VOLUME_DOWN_BUTTON_GPIO, 0);
     }
 
     static void IdleTimerCb(void* arg) {
@@ -375,6 +375,10 @@ public:
         }
         // Ensure PWM outputs are stopped on destruction
         StopPwm();
+        if (pwm_timer_) {
+            esp_timer_delete(pwm_timer_);
+            pwm_timer_ = nullptr;
+        }
     }
 
     void InitializeGpio(gpio_num_t gpio_num_, bool output = false) {
