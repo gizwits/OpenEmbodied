@@ -70,6 +70,7 @@ static const std::vector<Emotion> emotions = {
 
 WebsocketProtocol::WebsocketProtocol() {
     event_group_handle_ = xEventGroupCreate();
+    need_play_prologue_ = Board::GetInstance().GetNeedPlayPrologue();
 }
 
 WebsocketProtocol::~WebsocketProtocol() {
@@ -326,6 +327,13 @@ bool WebsocketProtocol::OpenAudioChannel() {
         //     return;
         // }
         if(event_type == "conversation.audio.delta") {
+            
+            // 开场白没有明确的事件，只能用这种方式来检测是否要切换到说话模式
+            if (need_check_play_prologue_ == true && need_play_prologue_ == true) {
+                Application::GetInstance().SetDeviceState(kDeviceStateSpeaking);
+                need_check_play_prologue_= false;
+            }
+            
             // 检查是否在打断AI说话后的1秒内，如果是则忽略音频
             if (abort_speaking_recorded_) {
                 auto now = std::chrono::steady_clock::now();
@@ -486,6 +494,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 ESP_LOGI(TAG, "conversation.chat.in_progress");
                 MqttClient::getInstance().sendTraceLog("info", "conversation.chat.in_progress");
 
+                need_check_play_prologue_ = false;
+
                 is_detect_emotion_ = false;
                 is_first_packet_ = true;
                 is_start_progress_ = true;
@@ -638,6 +648,12 @@ bool WebsocketProtocol::OpenAudioChannel() {
     // }, "disconnect_test", 2048, this, 5, nullptr);
 
 
+    // 连接成功 启动开场白检测
+    if (need_play_prologue_ == true) {
+        need_check_play_prologue_ = true;
+    }
+
+    
     // Wait for server hello
     EventBits_t bits = xEventGroupWaitBits(event_group_handle_, WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT, pdTRUE, pdFALSE, pdMS_TO_TICKS(5000));
     if (!(bits & WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT)) {
@@ -707,7 +723,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "\"id\":\"" + std::string(event_id) + "\",";
     message += "\"event_type\":\"chat.update\",";
     message += "\"data\":{";
-    if (room_params_.need_play_prologue) {
+    if (need_play_prologue_) {
         message += "\"need_play_prologue\":true,";
     }
     message += "\"event_subscriptions\": [";

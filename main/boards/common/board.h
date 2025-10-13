@@ -89,6 +89,7 @@ public:
     virtual void SetBrightness(uint8_t brightness) { }
     virtual uint8_t GetDefaultBrightness() { return 0; }
     virtual void EnterDeepSleepIfNotCharging() { }
+    virtual bool GetNeedPlayPrologue() { return false; }
     
     // 数据点相关方法
     virtual const char* GetGizwitsProtocolJson() const { return nullptr; }

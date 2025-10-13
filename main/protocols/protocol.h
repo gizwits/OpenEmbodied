@@ -33,7 +33,6 @@ struct RoomParams {
     std::string api_domain;
     std::string user_id;
     std::string config;  // 新增：保存 coze_websocket.config 的 JSON 字符串
-    bool need_play_prologue = false;
 };
 
 struct BinaryProtocol3 {
