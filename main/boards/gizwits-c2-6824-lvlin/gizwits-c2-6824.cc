@@ -17,7 +17,7 @@
 #include "assets/lang_config.h"
 #include "vb6824.h"
 #include <esp_wifi.h>
-#include "data_point_manager.h"
+#include "lvlin_data_point_manager.h"
 
 #include <esp_lcd_panel_vendor.h>
 #include <driver/spi_common.h>
@@ -241,8 +241,8 @@ private:
     // }
 
     void InitializeDataPointManager() {
-        // 设置 DataPointManager 的回调函数
-        DataPointManager::GetInstance().SetCallbacks(
+        // 设置 LvlinDataPointManager 的回调函数
+        LvlinDataPointManager::GetInstance().SetCallbacks(
             [this]() -> bool { return IsCharging(); },
             []() -> int { return Application::GetInstance().GetChatMode(); },
             [](int value) { Application::GetInstance().SetChatMode(value); },
@@ -372,27 +372,27 @@ public:
 
     // 数据点相关方法实现
     const char* GetGizwitsProtocolJson() const override {
-        return DataPointManager::GetInstance().GetGizwitsProtocolJson();
+        return LvlinDataPointManager::GetInstance().GetGizwitsProtocolJson();
     }
 
     size_t GetDataPointCount() const override {
-        return DataPointManager::GetInstance().GetDataPointCount();
+        return LvlinDataPointManager::GetInstance().GetDataPointCount();
     }
 
     bool GetDataPointValue(const std::string& name, int& value) const override {
-        return DataPointManager::GetInstance().GetDataPointValue(name, value);
+        return LvlinDataPointManager::GetInstance().GetDataPointValue(name, value);
     }
 
     bool SetDataPointValue(const std::string& name, int value) override {
-        return DataPointManager::GetInstance().SetDataPointValue(name, value);
+        return LvlinDataPointManager::GetInstance().SetDataPointValue(name, value);
     }
 
     void GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) override {
-        DataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
+        LvlinDataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
     }
 
     void ProcessDataPointValue(const std::string& name, int value) override {
-        DataPointManager::GetInstance().ProcessDataPointValue(name, value);
+        LvlinDataPointManager::GetInstance().ProcessDataPointValue(name, value);
     }
 
 };
