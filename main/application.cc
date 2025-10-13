@@ -1052,12 +1052,13 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
             
         }, "WakeWordInvoke_AbortSpeaking");
     } else if (device_state_ == kDeviceStateListening) { 
-        // 忽略唤醒词
-        // Schedule([this]() {
-        //     ResetDecoder();
-        //     PlaySound(Lang::Sounds::P3_SUCCESS);
-        //     protocol_->SendAbortSpeaking(kAbortReasonNone);
-        // });
+        ESP_LOGI(TAG, "WakeWordInvoke(kDeviceStateListening): PreAbortSpeaking");
+        protocol_->PreAbortSpeaking();
+        Schedule([this]() {
+            ResetDecoder();
+            PlaySound(Lang::Sounds::P3_SUCCESS);
+            SetDeviceState(kDeviceStateListening);
+        });
     } else if (device_state_ == kDeviceStateSleeping) {
         Schedule([this]() {
             ExitSleepMode();

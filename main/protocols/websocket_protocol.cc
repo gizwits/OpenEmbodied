@@ -448,6 +448,14 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 ParseServerHello(root);
 
             } else if (event_type == "conversation.chat.created") {
+                                // 聆听模式下打断，通过标记为，打断掉这个唤醒词的输出
+                ESP_LOGI(TAG, "conversation.chat.created: need abort speaking: %d", need_abort_speaking_);
+                if (need_abort_speaking_ == true) {
+                    SendAbortSpeaking(kAbortReasonNone);
+                    ESP_LOGW(TAG, "conversation.chat.created: need abort speaking");
+                    return;
+                }
+                
                 auto id = cJSON_GetObjectItem(root, "id");
                 ESP_LOGI(TAG, "conversation.chat.created: %s", id->valuestring);
                 std::string message = "conversation.chat.created: " + std::string(id->valuestring);
@@ -470,6 +478,11 @@ bool WebsocketProtocol::OpenAudioChannel() {
                     cJSON_Delete(message_json);
                 }
             } else if (event_type == "conversation.chat.in_progress") {
+                if (need_abort_speaking_ == true) {
+                    ESP_LOGW(TAG, "conversation.chat.in_progress: need abort speaking");
+                    return;
+                }
+
                 ESP_LOGI(TAG, "conversation.chat.in_progress");
                 MqttClient::getInstance().sendTraceLog("info", "conversation.chat.in_progress");
 
