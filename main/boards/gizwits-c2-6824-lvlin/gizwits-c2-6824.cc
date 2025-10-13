@@ -119,6 +119,13 @@ private:
             });
         }
 
+        boot_button_.OnLongPress([this]() {
+            run_sleep_mode(true);
+        });
+        rec_button_->OnLongPress([this]() {
+            run_sleep_mode(true);
+        });
+
         // collision_button.OnPressDown([this]() {
         //     ESP_LOGI(TAG, "collision_button.OnClick");
         //     // 连续触发 1.5s，间隔<=300ms 视为有效
