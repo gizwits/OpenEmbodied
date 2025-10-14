@@ -279,6 +279,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
     auto network = Board::GetInstance().GetNetwork();
     websocket_ = network->CreateWebSocket(1);
     websocket_->SetHeader("Authorization", token.c_str());
+    std::string device_id = Auth::getInstance().getDeviceId();
+    websocket_->SetHeader("X-Coze-DeviceId", device_id.c_str());
 
     websocket_->OnData([this](const char* data, size_t len, bool binary) {
         if (!data || len == 0) {
