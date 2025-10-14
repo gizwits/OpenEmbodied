@@ -205,9 +205,10 @@ bool LedSignal::CheckIfWorking() {
     // 按wifi状态判断，如果ws连不上报非工作状态
     bool error_occurred = Application::GetInstance().HasWebsocketError();
     bool wifi_connected = WifiStation::GetInstance().IsConnected();
+    bool protocol_opened = Application::GetInstance().IsWebsocketWorking();
     // ESP_LOGI(TAG, "error_occurred: %d, WiFi connected: %s ret %d", 
     //     error_occurred, wifi_connected ? "true" : "false", error_occurred && wifi_connected);
-    return !error_occurred && wifi_connected;
+    return !error_occurred && wifi_connected && protocol_opened;
 }
 
 bool LedSignal::CheckIfCharging() {
@@ -253,31 +254,31 @@ void LedSignal::UpdateLedState() {
     bool is_charging = CheckIfCharging();
     bool is_battery_low = CheckIfBatteryLow();
 
+    // ESP_LOGI(TAG, "is_working: %d, is_charging: %d, is_battery_low: %d", is_working, is_charging, is_battery_low);
     uint8_t red = 0, green = 0, blue = 0;
     uint8_t rgb_value = brightness_; // 增加亮度权重变量，命名为rgb_value
     bool need_blink = false;
 
-    if (is_working) {
+    // 配网模式，或者 wifi 没有连接的情况下 闪烁
+    auto is_wifi_config_mode = Board::GetInstance().IsWifiConfigMode();
+    WifiStation::GetInstance().IsConnected();
+    bool wifi_connected = WifiStation::GetInstance().IsConnected();
+    // 配网模式下，一直闪烁
+    if ((!wifi_connected) || is_wifi_config_mode) {
+        blue = rgb_value; // 蓝色闪烁代表非工作状态
+        need_blink = true;
+    } else if (is_working) {
         blue = rgb_value; // 蓝色代表处于工作状态
         last_non_working_time = std::chrono::steady_clock::now();
     } else {
-        auto now = std::chrono::steady_clock::now();
-        auto duration_since_non_working = std::chrono::duration_cast<std::chrono::seconds>(now - last_non_working_time).count();
-
-        auto is_wifi_config_mode = Board::GetInstance().IsWifiConfigMode();
-        // 配网模式下，一直闪烁
-        if ((duration_since_non_working < LEVEL_WORK_TIME_MIN * 60) || is_wifi_config_mode) {
-            blue = rgb_value; // 蓝色闪烁代表非工作状态
-            need_blink = true;
+       
+        if (is_battery_low) {
+            red = rgb_value; // 红色代表电量低
+            need_blink = true; // 低电量需要闪烁
+        } else if (is_charging) {
+            red = rgb_value; // 红色代表充电中
         } else {
-            if (is_battery_low) {
-                red = rgb_value; // 红色代表电量低
-                need_blink = true; // 低电量需要闪烁
-            } else if (is_charging) {
-                red = rgb_value; // 红色代表充电中
-            } else {
-                red = green = blue = 0; // 关闭所有LED
-            }
+            red = green = blue = 0; // 关闭所有LED
         }
     }
 

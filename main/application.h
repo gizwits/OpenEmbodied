@@ -116,6 +116,7 @@ private:
     std::chrono::steady_clock::time_point last_battery_check_time_;
 
     bool has_server_time_ = false;
+    bool is_silent_startup_ = false;
     bool is_normal_reset_ = false;  // 重启状态标志：true=正常重启，false=异常重启
     bool aborted_ = false;
     int clock_ticks_ = 0;

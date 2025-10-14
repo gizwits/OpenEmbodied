@@ -276,6 +276,10 @@ public:
         }
     };
 
+    virtual bool NeedSilentStartup() override {
+        return true;
+    }
+
     virtual bool GetBatteryLevel(int &level, bool& charging, bool& discharging) override {
         level = PowerManager::GetInstance().GetBatteryLevel();
         charging = PowerManager::GetInstance().IsCharging();

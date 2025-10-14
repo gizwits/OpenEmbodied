@@ -364,10 +364,11 @@ void Application::Start() {
                         reset_reason == ESP_RST_JTAG ||
                         reset_reason == ESP_RST_DEEPSLEEP
                     );
-    
-    if (is_normal_reset_) {
-        ESP_LOGI(TAG, "Normal reset detected");
-    } else {
+
+
+    is_silent_startup_ = !is_normal_reset_;
+
+    if (!is_normal_reset_) {
         ESP_LOGW(TAG, "Abnormal reset detected - reason: %d", reset_reason);
     }
     
@@ -411,7 +412,22 @@ void Application::Start() {
     esp_timer_start_periodic(clock_timer_handle_, 1000000);
     tmp_ft_mode_ = settings.GetInt("tmp_ft_mode", 0);
 
-    if (is_normal_reset_ && tmp_ft_mode_ == 0) {
+
+    int level = 0;
+    bool charging = false;
+    bool discharging = false;
+    if (
+        Board::GetInstance().NeedSilentStartup() && 
+        Board::GetInstance().GetBatteryLevel(level, charging, discharging)
+    ) {
+        ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
+        if (charging) {
+            // 静默启动
+            is_silent_startup_ = is_silent_startup_ || charging;
+        }
+    }
+
+    if (!is_silent_startup_ && tmp_ft_mode_ == 0) {
         // 播放上电提示音
         audio_service_.PlaySound(Lang::Sounds::P3_SUCCESS);
     }
@@ -435,7 +451,7 @@ void Application::Start() {
     }
 
     audio_service_.ResetDecoder();
-    if (is_normal_reset_) {
+    if (!is_silent_startup_) {
         audio_service_.PlaySound(Lang::Sounds::P3_CONNECT_SUCCESS);
     }
     vTaskDelay(pdMS_TO_TICKS(500));
