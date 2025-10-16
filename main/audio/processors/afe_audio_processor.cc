@@ -20,11 +20,16 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms) {
     int ref_num = codec_->input_reference() ? 1 : 0;
 
     std::string input_format;
-    for (int i = 0; i < codec_->input_channels() - ref_num; i++) {
-        input_format.push_back('M');
-    }
-    for (int i = 0; i < ref_num; i++) {
-        input_format.push_back('R');
+    if (codec_->supports_software_aec_reference()) {
+        // Force MR for software reference (single mic + reference)
+        input_format = "MR";
+    } else {
+        for (int i = 0; i < codec_->input_channels() - ref_num; i++) {
+            input_format.push_back('M');
+        }
+        for (int i = 0; i < ref_num; i++) {
+            input_format.push_back('R');
+        }
     }
 
     srmodel_list_t *models = esp_srmodel_init("model");

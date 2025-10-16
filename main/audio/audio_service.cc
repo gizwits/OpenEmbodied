@@ -93,8 +93,8 @@ void AudioService::Initialize(AudioCodec* codec) {
     };
     esp_timer_create(&audio_power_timer_args, &audio_power_timer_);
 
-    // Enable software AEC only for Es8311
-    enable_software_aec_ = (dynamic_cast<Es8311AudioCodec*>(codec_) != nullptr);
+    // Enable software AEC only for Es8311 (avoid RTTI)
+    enable_software_aec_ = codec_->supports_software_aec_reference();
     if (enable_software_aec_) {
         if (codec->output_sample_rate() != 16000) {
             playback_ref_resampler_.Configure(codec->output_sample_rate(), 16000);

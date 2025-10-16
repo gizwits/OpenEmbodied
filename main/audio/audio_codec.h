@@ -29,6 +29,8 @@ public:
     virtual void Start();
     // Optional: set microphone input gain (dB). Default no-op.
     virtual void SetInputGainDb(float gain_db);
+    // Capability: whether this codec supports software AEC reference path
+    virtual bool supports_software_aec_reference() const { return false; }
     
 
     inline bool duplex() const { return duplex_; }
@@ -54,7 +56,7 @@ protected:
     int output_sample_rate_ = 0;
     int input_channels_ = 1;
     int output_channels_ = 1;
-    int output_volume_ = 70;
+    int output_volume_ = 50;
 
     virtual int Read(int16_t* dest, int samples) = 0;
     virtual int Write(const int16_t* data, int samples) = 0;
