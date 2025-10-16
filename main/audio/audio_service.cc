@@ -92,6 +92,15 @@ void AudioService::Initialize(AudioCodec* codec) {
         .skip_unhandled_events = true,
     };
     esp_timer_create(&audio_power_timer_args, &audio_power_timer_);
+
+    // Enable software AEC only for Es8311
+    enable_software_aec_ = (dynamic_cast<Es8311AudioCodec*>(codec_) != nullptr);
+    if (enable_software_aec_) {
+        if (codec->output_sample_rate() != 16000) {
+            playback_ref_resampler_.Configure(codec->output_sample_rate(), 16000);
+        }
+        reference_ring_.clear();
+    }
 }
 
 void AudioService::Start() {
@@ -278,7 +287,22 @@ void AudioService::AudioInputTask() {
             int samples = audio_processor_->GetFeedSize();
             if (samples > 0) {
                 if (ReadAudioData(data, 16000, samples)) {
-                    audio_processor_->Feed(std::move(data));
+                    if (enable_software_aec_ && codec_->input_channels() == 1 && codec_->input_reference()) {
+                        std::vector<int16_t> reference;
+                        PopReferenceSamples(data.size(), reference);
+                        if (reference.size() < data.size()) {
+                            reference.resize(data.size(), 0);
+                        }
+                        std::vector<int16_t> interleaved;
+                        interleaved.resize(data.size() * 2);
+                        for (size_t i = 0, j = 0; i < data.size(); ++i, j += 2) {
+                            interleaved[j] = data[i];
+                            interleaved[j + 1] = reference[i];
+                        }
+                        audio_processor_->Feed(std::move(interleaved));
+                    } else {
+                        audio_processor_->Feed(std::move(data));
+                    }
                     continue;
                 }
             }
@@ -310,6 +334,19 @@ void AudioService::AudioOutputTask() {
             codec_->EnableOutput(true);
         }
         codec_->OutputData(task->pcm);
+
+        // Capture playback as AEC reference for Es8311
+        if (enable_software_aec_) {
+            const int16_t* src = task->pcm.data();
+            size_t src_samples = task->pcm.size();
+            if (codec_->output_sample_rate() != 16000) {
+                std::vector<int16_t> resampled(playback_ref_resampler_.GetOutputSamples(src_samples));
+                playback_ref_resampler_.Process(src, src_samples, resampled.data());
+                PushReferenceSamples(resampled.data(), resampled.size());
+            } else {
+                PushReferenceSamples(src, src_samples);
+            }
+        }
 
         /* Update the last output time */
         last_output_time_ = std::chrono::steady_clock::now();
@@ -755,5 +792,31 @@ void AudioService::CheckAndUpdateAudioPowerState() {
     }
     if (!codec_->input_enabled() && !codec_->output_enabled()) {
         esp_timer_stop(audio_power_timer_);
+    }
+}
+
+void AudioService::PushReferenceSamples(const int16_t* data, size_t samples) {
+    if (!samples) return;
+    // Limit ring buffer size
+    size_t free_cap = (reference_ring_max_samples_ > reference_ring_.size()) ? (reference_ring_max_samples_ - reference_ring_.size()) : 0;
+    size_t to_push = samples;
+    if (to_push > free_cap) {
+        // Drop oldest to make room
+        size_t need_drop = to_push - free_cap;
+        if (need_drop >= reference_ring_.size()) {
+            reference_ring_.clear();
+        } else {
+            reference_ring_.erase(reference_ring_.begin(), reference_ring_.begin() + need_drop);
+        }
+    }
+    reference_ring_.insert(reference_ring_.end(), data, data + samples);
+}
+
+void AudioService::PopReferenceSamples(size_t samples, std::vector<int16_t>& out) {
+    out.clear();
+    size_t take = std::min(samples, reference_ring_.size());
+    if (take) {
+        out.insert(out.end(), reference_ring_.begin(), reference_ring_.begin() + take);
+        reference_ring_.erase(reference_ring_.begin(), reference_ring_.begin() + take);
     }
 }

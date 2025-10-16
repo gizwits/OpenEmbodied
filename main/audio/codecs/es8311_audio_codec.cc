@@ -8,7 +8,7 @@ Es8311AudioCodec::Es8311AudioCodec(void* i2c_master_handle, i2c_port_t i2c_port,
     gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din,
     gpio_num_t pa_pin, uint8_t es8311_addr, bool use_mclk, bool pa_inverted) {
     duplex_ = true; // 是否双工
-    input_reference_ = false; // 是否使用参考输入，实现回声消除
+    input_reference_ = true; // 是否使用参考输入，实现回声消除（软件参考，仅在 Es8311 下启用）
     input_channels_ = 1; // 输入通道数
     input_sample_rate_ = input_sample_rate;
     output_sample_rate_ = output_sample_rate;

@@ -10,8 +10,7 @@
                 "CONFIG_PARTITION_TABLE_CUSTOM=y",
                 "CONFIG_LANGUAGE_EN_US=y",
                 "CONFIG_USE_AFE_WAKE_WORD=n",
-                "CONFIG_OTA_URL=\"http://rf-openembodied.iotsdk.com:8002/xiaozhi/ota/\"",
-                "CONFIG_USE_SERVER_AEC=y"
+                "CONFIG_OTA_URL=\"http://rf-openembodied.iotsdk.com:8002/xiaozhi/ota/\""
             ]
         }
     ]
