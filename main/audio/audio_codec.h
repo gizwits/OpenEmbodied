@@ -27,6 +27,9 @@ public:
     virtual void OutputData(std::vector<int16_t>& data);
     virtual bool InputData(std::vector<int16_t>& data);
     virtual void Start();
+    // Optional: set microphone input gain (dB). Default no-op.
+    virtual void SetInputGainDb(float gain_db);
+    
 
     inline bool duplex() const { return duplex_; }
     inline bool input_reference() const { return input_reference_; }
@@ -37,6 +40,7 @@ public:
     inline int output_volume() const { return output_volume_; }
     inline bool input_enabled() const { return input_enabled_; }
     inline bool output_enabled() const { return output_enabled_; }
+    
 
 protected:
     i2s_chan_handle_t tx_handle_ = nullptr;

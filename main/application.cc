@@ -14,8 +14,30 @@
 #include <cJSON.h>
 #include <driver/gpio.h>
 #include <arpa/inet.h>
+#include <esp_spiffs.h>
+#include <fstream>
 
 #define TAG "Application"
+// Play an OGG file from SPIFFS in a separate task to avoid blocking UI/network callbacks
+static void play_spiffs_audio_task(void* param) {
+    char* audio_token = (char*)param;  // malloc'ed string from caller
+    std::string filepath = "/spiffs/";
+    if (audio_token != nullptr) {
+        std::string token(audio_token);
+        free(audio_token);
+        // If token doesn't have extension, append .ogg
+        if (token.find('.') == std::string::npos) {
+            token += ".ogg";
+        }
+        filepath += token;
+    } else {
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    Application::GetInstance().GetAudioService().PlayOggFile(filepath);
+    vTaskDelete(nullptr);
+}
 
 
 static const char* const STATE_STRINGS[] = {
@@ -45,6 +67,9 @@ Application::Application() {
 #else
     aec_mode_ = kAecOff;
 #endif
+
+    // Initialize SPIFFS for P3 audio files
+    InitializeSpiffs();
 
     esp_timer_create_args_t clock_timer_args = {
         .callback = [](void* arg) {
@@ -235,7 +260,7 @@ void Application::ToggleChatState() {
         SetDeviceState(kDeviceStateAudioTesting);
         return;
     } else if (device_state_ == kDeviceStateAudioTesting) {
-        audio_service_.EnableAudioTesting(false);
+        // audio_service_.EnableAudioTesting(false);
         SetDeviceState(kDeviceStateWifiConfiguring);
         return;
     }
@@ -261,10 +286,14 @@ void Application::ToggleChatState() {
             AbortSpeaking(kAbortReasonNone);
         });
     } else if (device_state_ == kDeviceStateListening) {
-        Schedule([this]() {
-            protocol_->CloseAudioChannel();
-        });
+        // Schedule([this]() {
+        //     protocol_->CloseAudioChannel();
+        // });
     }
+}
+
+void Application::SendCustomMessage(const std::string& message) {
+    protocol_->SendCustomMessage(message);
 }
 
 void Application::StartListening() {
@@ -303,7 +332,7 @@ void Application::StartListening() {
 
 void Application::StopListening() {
     if (device_state_ == kDeviceStateAudioTesting) {
-        audio_service_.EnableAudioTesting(false);
+        // audio_service_.EnableAudioTesting(false);
         SetDeviceState(kDeviceStateWifiConfiguring);
         return;
     }
@@ -358,7 +387,6 @@ void Application::Start() {
     PlaySound(Lang::Sounds::OGG_SUCCESS);
     board.StartNetwork();
 
-    PlaySound(Lang::Sounds::OGG_CONNECT_SUCCESS);
 
     // Update the status bar immediately to show the network state
     display->UpdateStatusBar(true);
@@ -397,6 +425,8 @@ void Application::Start() {
             ESP_LOGW(TAG, "Server sample rate %d does not match device output sample rate %d, resampling may cause distortion",
                 protocol_->server_sample_rate(), codec->output_sample_rate());
         }
+
+        PlaySound(Lang::Sounds::OGG_CONNECT_SUCCESS);
     });
     protocol_->OnAudioChannelClosed([this, &board]() {
         board.SetPowerSaveMode(true);
@@ -434,6 +464,48 @@ void Application::Start() {
                     ESP_LOGI(TAG, "<< %s", text->valuestring);
                     Schedule([this, display, message = std::string(text->valuestring)]() {
                         display->SetChatMessage("assistant", message.c_str());
+
+                        // Extract content within parentheses like (audioXXX) or （audioXXX） and play file
+                        bool audio_content_extracted = false;
+                        const char* msg_cstr = message.c_str();
+                        const char* audio_start = strstr(msg_cstr, "(audio");
+                        if (!audio_start) {
+                            audio_start = strstr(msg_cstr, "（audio");
+                        }
+                        if (audio_start) {
+                            const char* audio_end = strchr(audio_start + 1, ')');
+                            if (!audio_end) {
+                                const char* wide_close = strstr(audio_start + 1, "）");
+                                if (wide_close) audio_end = wide_close; // points to start of UTF-8 sequence
+                            }
+                            if (audio_end) {
+                                // Copy token between parentheses (excluding the leading '(' or '（')
+                                size_t len = (size_t)(audio_end - audio_start - 1);
+                                if (len > 0 && len < 64) {
+                                    // allocate buffer and copy substring starting after '(' or '（'
+                                    char* buf = (char*)malloc(len + 1);
+                                    if (buf) {
+                                        strncpy(buf, audio_start + 1, len);
+                                        buf[len] = '\0';
+                                        // trim leading/trailing spaces
+                                        char* start_ptr = buf;
+                                        while (*start_ptr == ' ' || *start_ptr == '\t') ++start_ptr;
+                                        char* end_ptr = buf + strlen(buf);
+                                        while (end_ptr > start_ptr && (end_ptr[-1] == ' ' || end_ptr[-1] == '\t')) --end_ptr;
+                                        *end_ptr = '\0';
+
+                                        // duplicate trimmed string to pass ownership to task
+                                        char* stable = strdup(start_ptr);
+                                        free(buf);
+                                        if (stable) {
+                                            xTaskCreate(play_spiffs_audio_task, "play_spiffs_audio_task", 2048 * 4, stable, 5, NULL);
+                                            audio_content_extracted = true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        (void)audio_content_extracted;
                     });
                 }
             }
@@ -507,6 +579,12 @@ void Application::Start() {
         display->SetChatMessage("system", "");
         // Play the success sound to indicate the device is ready
         // audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
+        Schedule([this]() {
+            // audio_service_.EnableAudioTesting(true);
+            // SetDeviceState(kDeviceStateAudioTesting);
+            // 立即连接
+            ToggleChatState();
+        }); 
     }
 
     // Print heap stats
@@ -666,6 +744,7 @@ void Application::SetDeviceState(DeviceState state) {
         case kDeviceStateListening:
             display->SetStatus(Lang::Strings::LISTENING);
             display->SetEmotion("neutral");
+            // audio_service_.SetInputGainDb(AUDIO_CODEC_DEFAULT_MIC_GAIN);
 
             // Make sure the audio processor is running
             if (!audio_service_.IsAudioProcessorRunning()) {
@@ -676,6 +755,8 @@ void Application::SetDeviceState(DeviceState state) {
             }
             break;
         case kDeviceStateSpeaking:
+            // audio_service_.SetInputGainDb(5.0f);
+
             display->SetStatus(Lang::Strings::SPEAKING);
 
             if (listening_mode_ != kListeningModeRealtime) {
@@ -775,4 +856,33 @@ void Application::SetAecMode(AecMode mode) {
 
 void Application::PlaySound(const std::string_view& sound) {
     audio_service_.PlaySound(sound);
+}
+
+void Application::InitializeSpiffs() {
+    esp_vfs_spiffs_conf_t conf = {
+        .base_path = "/spiffs",
+        .partition_label = "jiaochuang_tone",
+        .max_files = 5,
+        .format_if_mount_failed = false
+    };
+    
+    esp_err_t ret = esp_vfs_spiffs_register(&conf);
+    if (ret != ESP_OK) {
+        if (ret == ESP_FAIL) {
+            ESP_LOGE(TAG, "Failed to mount or format filesystem");
+        } else if (ret == ESP_ERR_NOT_FOUND) {
+            ESP_LOGE(TAG, "Failed to find SPIFFS partition");
+        } else {
+            ESP_LOGE(TAG, "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
+        }
+        return;
+    }
+    
+    size_t total = 0, used = 0;
+    ret = esp_spiffs_info("jiaochuang_tone", &total, &used);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to get SPIFFS partition information (%s)", esp_err_to_name(ret));
+    } else {
+        ESP_LOGI(TAG, "SPIFFS partition mounted: total: %d, used: %d", total, used);
+    }
 }

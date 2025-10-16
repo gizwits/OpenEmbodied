@@ -12,6 +12,7 @@
 #include <esp_timer.h>
 #include "power_manager.h"
 #include "assets/lang_config.h"
+#include "wx433.h"
 
 
 #define TAG "GizwitsDev"
@@ -150,11 +151,31 @@ public:
         InitializeI2c();
         InitializeIot();
         InitializePowerManager();
+
+        // Initialize 433MHz module and listen to events
+        wx433_init();
+        wx433_register_event_listener([](const wx433_event_t *event, void *user_data){
+            ESP_LOGI(TAG, "wx433_register_event_listener: %d", event->type);
+            if (!event) return;
+            switch (event->type) {
+                case WX433_EVENT_LEG_TOUCH:
+                    Application::GetInstance().SendCustomMessage("用户正在摸你大腿");
+                    break;
+                case WX433_EVENT_CHEST_TOUCH:
+                    Application::GetInstance().SendCustomMessage("用户在摸你的奶头");
+                    break;
+                case WX433_EVENT_NONE:
+                    Application::GetInstance().SendCustomMessage("用户在摸你");
+                    break;
+                default:
+                    break;
+            }
+        }, this);
         
-        // if (power_manager_) {
-        //     power_manager_->CheckBatteryStatusImmediately();
-        //     ESP_LOGI(TAG, "启动时立即检测电量: %d", power_manager_->GetBatteryLevel());
-        // }
+        if (power_manager_) {
+            power_manager_->CheckBatteryStatusImmediately();
+            ESP_LOGI(TAG, "启动时立即检测电量: %d", power_manager_->GetBatteryLevel());
+        }
     }
 
 

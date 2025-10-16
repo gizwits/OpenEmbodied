@@ -52,6 +52,7 @@ public:
     void ToggleChatState();
     void StartListening();
     void StopListening();
+    void SendCustomMessage(const std::string& message);
     void Reboot();
     void WakeWordInvoke(const std::string& wake_word);
     bool CanEnterSleepMode();
@@ -86,6 +87,7 @@ private:
     void ShowActivationCode(const std::string& code, const std::string& message);
     void OnClockTimer();
     void SetListeningMode(ListeningMode mode);
+    void InitializeSpiffs();
 };
 
 #endif // _APPLICATION_H_

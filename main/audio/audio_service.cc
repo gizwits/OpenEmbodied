@@ -1,6 +1,7 @@
 #include "audio_service.h"
 #include <esp_log.h>
 #include <cstring>
+#include <math.h>
 
 #if CONFIG_USE_AUDIO_PROCESSOR
 #include "processors/afe_audio_processor.h"
@@ -35,6 +36,7 @@ void AudioService::Initialize(AudioCodec* codec) {
     codec_->Start();
 
     /* Setup the audio codec */
+    ESP_LOGI(TAG, "Initialize: input_sr=%d output_sr=%d in_ch=%d duplex=%d input_ref=%d", codec->input_sample_rate(), codec->output_sample_rate(), codec->input_channels(), codec->duplex(), codec->input_reference());
     opus_decoder_ = std::make_unique<OpusDecoderWrapper>(codec->output_sample_rate(), 1, OPUS_FRAME_DURATION_MS);
     opus_encoder_ = std::make_unique<OpusEncoderWrapper>(16000, 1, OPUS_FRAME_DURATION_MS);
     opus_encoder_->SetComplexity(0);
@@ -233,8 +235,22 @@ void AudioService::AudioInputTask() {
             if (ReadAudioData(data, 16000, samples)) {
                 // If input channels is 2, we need to fetch the left channel data
                 if (codec_->input_channels() == 2) {
-                    auto mono_data = std::vector<int16_t>(data.size() / 2);
-                    for (size_t i = 0, j = 0; i < mono_data.size(); ++i, j += 2) {
+                    // Compute simple RMS for L/R to detect which has mic signal
+                    long long sumL = 0, sumR = 0;
+                    for (size_t j = 0; j + 1 < data.size(); j += 2) {
+                        int l = data[j];
+                        int r = data[j + 1];
+                        sumL += (long long)l * l;
+                        sumR += (long long)r * r;
+                    }
+                    int samples_per_ch = data.size() / 2;
+                    int rmsL = samples_per_ch ? (int)sqrtf((float)sumL / samples_per_ch) : 0;
+                    int rmsR = samples_per_ch ? (int)sqrtf((float)sumR / samples_per_ch) : 0;
+                    ESP_LOGI(TAG, "Mic RMS L=%d R=%d (testing)", rmsL, rmsR);
+
+                    auto mono_data = std::vector<int16_t>(samples_per_ch);
+                    bool use_right = rmsR > (rmsL * 2); // heuristic
+                    for (size_t i = 0, j = use_right ? 1 : 0; i < mono_data.size(); ++i, j += 2) {
                         mono_data[i] = data[j];
                     }
                     data = std::move(mono_data);
@@ -684,6 +700,32 @@ void AudioService::PlaySound(const std::string_view& ogg) {
 
         offset = body_off + body_size;
     }
+}
+
+void AudioService::PlayOggFile(const std::string& filepath) {
+    FILE* f = fopen(filepath.c_str(), "rb");
+    if (!f) {
+        ESP_LOGE(TAG, "Failed to open OGG file: %s", filepath.c_str());
+        return;
+    }
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    if (sz <= 0) {
+        ESP_LOGE(TAG, "OGG file is empty: %s", filepath.c_str());
+        fclose(f);
+        return;
+    }
+    fseek(f, 0, SEEK_SET);
+    std::string data;
+    data.resize(static_cast<size_t>(sz));
+    size_t rd = fread(&data[0], 1, static_cast<size_t>(sz), f);
+    fclose(f);
+    if (rd != static_cast<size_t>(sz)) {
+        ESP_LOGE(TAG, "Failed to read OGG file: %s", filepath.c_str());
+        return;
+    }
+    ESP_LOGI(TAG, "Playing OGG file: %s (size: %ld bytes)", filepath.c_str(), sz);
+    PlaySound(data);
 }
 
 bool AudioService::IsIdle() {

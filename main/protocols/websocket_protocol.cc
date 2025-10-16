@@ -153,8 +153,18 @@ bool WebsocketProtocol::OpenAudioChannel() {
         } else {
             // Parse JSON data
             auto root = cJSON_Parse(data);
+            if (!root) {
+                ESP_LOGE(TAG, "JSON parse failed: %.*s", (int)len, data);
+                return;
+            }
             auto type = cJSON_GetObjectItem(root, "type");
-            ESP_LOGI(TAG, "Received message type: %s", cJSON_PrintUnformatted(root));
+            {
+                char* compact = cJSON_PrintUnformatted(root);
+                if (compact) {
+                    ESP_LOGI(TAG, "Received message type: %s", compact);
+                    cJSON_free(compact);
+                }
+            }
             if (cJSON_IsString(type)) {
                 if (strcmp(type->valuestring, "hello") == 0) {
                     ParseServerHello(root);
@@ -177,7 +187,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
                     }
                 }
             } else {
-                ESP_LOGE(TAG, "Missing message type, data: %s", data);
+                ESP_LOGE(TAG, "Missing message type, data: %.*s", (int)len, data);
             }
             cJSON_Delete(root);
         }

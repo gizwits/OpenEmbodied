@@ -104,8 +104,10 @@ public:
     bool PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> packet, bool wait = false);
     std::unique_ptr<AudioStreamPacket> PopPacketFromSendQueue();
     void PlaySound(const std::string_view& sound);
+    void PlayOggFile(const std::string& filepath);
     bool ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples);
     void ResetDecoder();
+    void SetInputGainDb(float gain_db) { if (codec_) codec_->SetInputGainDb(gain_db); }
 
 private:
     AudioCodec* codec_ = nullptr;

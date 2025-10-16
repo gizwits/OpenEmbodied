@@ -16,6 +16,8 @@ Es8311AudioCodec::Es8311AudioCodec(void* i2c_master_handle, i2c_port_t i2c_port,
     pa_inverted_ = pa_inverted;
 
     assert(input_sample_rate_ == output_sample_rate_);
+    ESP_LOGI(TAG, "Construct: duplex=%d input_ref=%d in_ch=%d in_sr=%d out_sr=%d",
+             duplex_, input_reference_, input_channels_, input_sample_rate_, output_sample_rate_);
     CreateDuplexChannels(mclk, bclk, ws, dout, din);
 
     // Do initialize of related interface: data_if, ctrl_if and gpio_if
@@ -170,6 +172,13 @@ void Es8311AudioCodec::EnableOutput(bool enable) {
     }
     AudioCodec::EnableOutput(enable);
     UpdateDeviceState();
+}
+
+void Es8311AudioCodec::SetInputGainDb(float gain_db) {
+    if (dev_) {
+        ESP_LOGI(TAG, "Setting input gain to %f dB", gain_db);
+        ESP_ERROR_CHECK(esp_codec_dev_set_in_gain(dev_, gain_db));
+    }
 }
 
 int Es8311AudioCodec::Read(int16_t* dest, int samples) {

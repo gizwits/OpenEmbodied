@@ -399,3 +399,5 @@ spiffs_create_partition_assets(
     IMPORT_INC_PATH ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}
 )
 endif()
+
+spiffs_create_partition_image(jiaochuang_tone ../spiffs FLASH_IN_PROJECT)
