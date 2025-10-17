@@ -2,7 +2,6 @@
 #define __POWER_MANAGER_H__
 
 #include <driver/gpio.h>
-#include "config.h"
 #include <esp_adc/adc_oneshot.h>
 #include <esp_log.h>
 #include <esp_timer.h>
@@ -10,6 +9,7 @@
 #include <esp_sleep.h>
 #include <driver/rtc_io.h>
 #include "driver/gpio.h"
+#include "config.h"
 
 // Battery ADC configuration
 #define BAT_ADC_CHANNEL  ADC_CHANNEL_3  // Battery voltage ADC channel
@@ -41,6 +41,7 @@ private:
     uint64_t last_change_time_ = 0;  // 最后一次状态变化的时间戳（微秒）
 
     adc_oneshot_unit_handle_t adc_handle_;
+
 
     // 电压-电量对照表
     static constexpr struct VoltageSocPair {
@@ -113,7 +114,6 @@ private:
 
     
     void ReadBatteryAdcData() {
-        static uint8_t times = 0;
         ESP_ERROR_CHECK(adc_oneshot_read(adc_handle_, adc_channel_, &adc_value));
 
         adc_values_[adc_values_index_] = adc_value;
@@ -133,10 +133,11 @@ private:
         //          adc_values_[5], adc_values_[6], adc_values_[7], adc_values_[8], adc_values_[9]);
 
         CalculateBatteryLevel(average_adc*2);
-        if(times++ % 50 == 0){
-            ESP_LOGI("PowerManager", "adc: %d adc_avg: %ld, VBAT: %ld, battery_level_: %u%%", 
-                adc_value, average_adc, average_adc*2, battery_level_);
-        }
+
+        // if(times++ % 50 == 0){
+        //     ESP_LOGI("PowerManager", "adc: %d adc_avg: %ld, VBAT: %ld, battery_level_: %u%%", 
+        //         adc_value, average_adc, average_adc*2, battery_level_);
+        // }
     }
 
     void CalculateBatteryLevel(uint32_t average_adc) {
@@ -182,18 +183,9 @@ public:
     }
 
     void InitializeAdc() {
-        adc_oneshot_unit_init_cfg_t init_config = {
-            .unit_id = adc_unit_,
-            .ulp_mode = ADC_ULP_MODE_DISABLE,
-        };
-        ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config, &adc_handle_));
-
-        adc_oneshot_chan_cfg_t chan_config = {
-            .atten = ADC_ATTEN_DB_12,
-            .bitwidth = ADC_BITWIDTH_12,
-        };
-
-        ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle_, adc_channel_, &chan_config));
+        // ADC 单元由 CustomBoard 创建，这里只配置通道
+        // 注意：需要确保 CustomBoard 已经创建了 ADC 单元
+        ESP_LOGI("PowerManager", "ADC 单元由 CustomBoard 管理，跳过创建");
     }
 
     ~PowerManager() {
@@ -220,23 +212,26 @@ public:
         return instance;
     }
 
+    // 设置ADC句柄（由CustomBoard调用）
+    static void SetAdcHandle(adc_oneshot_unit_handle_t handle) {
+        GetInstance().adc_handle_ = handle;
+    }
+
     void EnterDeepSleepIfNotCharging() {
         // 不在充电就真休眠
-        if (is_charging_) {
-            // 充电中，只断开 socket
-            Application::GetInstance().QuitTalking();
-            return;
+        if (is_charging_ == 0) {
+            vb6824_shutdown();
+            vTaskDelay(pdMS_TO_TICKS(200));
+            // 配置唤醒源 只有电源域是VDD3P3_RTC的才能唤醒深睡
+            uint64_t wakeup_pins = (BIT(GPIO_NUM_1));
+            esp_deep_sleep_enable_gpio_wakeup(wakeup_pins, ESP_GPIO_WAKEUP_GPIO_LOW);
+            ESP_LOGI("PowerMgr", "ready to esp_deep_sleep_start");
+            vTaskDelay(pdMS_TO_TICKS(10));
+            
+            esp_deep_sleep_start();
         }
-        vb6824_shutdown();
-        vTaskDelay(pdMS_TO_TICKS(200));
-        // 配置唤醒源 只有电源域是VDD3P3_RTC的才能唤醒深睡
-        uint64_t wakeup_pins = (BIT(GPIO_NUM_1) | BIT(COLLISION_BUTTON_GPIO));
-        esp_deep_sleep_enable_gpio_wakeup(wakeup_pins, ESP_GPIO_WAKEUP_GPIO_LOW);
-        ESP_LOGI("PowerMgr", "ready to esp_deep_sleep_start");
-        vTaskDelay(pdMS_TO_TICKS(10));
-        
-        esp_deep_sleep_start();
-}
+    }
+
 
     
 };

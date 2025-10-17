@@ -120,11 +120,6 @@ private:
     void InitializeST7735SDisplay() {
         // 上电先关闭背光，确保开机时屏幕是黑的
         gpio_set_direction(DISPLAY_BACKLIGHT_PIN, GPIO_MODE_OUTPUT);
-#if DISPLAY_BACKLIGHT_OUTPUT_INVERT
-        gpio_set_level(DISPLAY_BACKLIGHT_PIN, 1);
-#else
-        gpio_set_level(DISPLAY_BACKLIGHT_PIN, 0);
-#endif
 
         esp_lcd_panel_io_spi_config_t io_config = {
             .cs_gpio_num = DISPLAY_SPI_CS_PIN,
@@ -231,7 +226,7 @@ private:
     }
 
     int MaxBacklightBrightness() {
-        return 100;
+        return 60;
     }
 
     void InitializeChargingGpio() {

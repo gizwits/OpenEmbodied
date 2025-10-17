@@ -6,6 +6,7 @@
 #include <functional>
 #include <chrono>
 #include <vector>
+#include <esp_timer.h>
 
 struct AudioStreamPacket {
     int sample_rate = 0;
@@ -32,7 +33,6 @@ struct RoomParams {
     std::string api_domain;
     std::string user_id;
     std::string config;  // 新增：保存 coze_websocket.config 的 JSON 字符串
-    bool need_play_prologue = false;
 };
 
 struct BinaryProtocol3 {
@@ -55,7 +55,14 @@ enum ListeningMode {
 
 class Protocol {
 public:
-    virtual ~Protocol() = default;
+    virtual ~Protocol() {
+        // 清理定时器资源
+        if (busy_timer_ != nullptr) {
+            esp_timer_stop(busy_timer_);
+            esp_timer_delete(busy_timer_);
+            busy_timer_ = nullptr;
+        }
+    }
 
     inline int server_sample_rate() const {
         return server_sample_rate_;
@@ -84,6 +91,7 @@ public:
     virtual void SendTextToAI(const std::string& text);
     virtual void SendStartListening(ListeningMode mode);
     virtual void SendStopListening();
+    virtual void PreAbortSpeaking();
     virtual void SendMessage(const std::string& message);
     virtual void SendAbortSpeaking(AbortReason reason);
     virtual void SendIotDescriptors(const std::string& descriptors);
@@ -106,9 +114,11 @@ protected:
     int server_frame_duration_ = 60;
     bool error_occurred_ = false;
     bool busy_sending_audio_ = false;
+    bool need_abort_speaking_ = false;
+
     std::string session_id_;
     std::chrono::time_point<std::chrono::steady_clock> last_incoming_time_;
-
+    esp_timer_handle_t busy_timer_ = nullptr;
     // 打断AI说话时间戳，用于忽略1秒内服务器推送的音频
     std::chrono::steady_clock::time_point abort_speaking_timestamp_;
     bool abort_speaking_recorded_ = false;
