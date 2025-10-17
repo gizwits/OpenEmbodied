@@ -681,6 +681,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     snprintf(event_id, sizeof(event_id), "%lu", random_value);
 
     NetworkType network_type = Board::GetInstance().GetNetworkType();
+    int speed = Board::GetInstance().GetVoiceSpeed();
 
     int chat_mode = Application::GetInstance().GetChatMode();
     
@@ -770,7 +771,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
 #endif
     message += "}";
     message += "},";
-    message += "\"speech_rate\":0,";
+    message += "\"speech_rate\":" + std::to_string(speed) + ",";
     message += "\"voice_id\":\"" + std::string(room_params_.voice_id) + "\"";
     message += "}";
     message += "}";

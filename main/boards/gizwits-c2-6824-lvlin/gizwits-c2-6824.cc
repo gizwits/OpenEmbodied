@@ -277,7 +277,7 @@ public:
     };
 
     virtual bool NeedSilentStartup() override {
-        return true;
+        return false;
     }
 
     virtual bool GetBatteryLevel(int &level, bool& charging, bool& discharging) override {
@@ -328,7 +328,7 @@ public:
     int GetSpeed_() {
         // 从设置中获取语速，默认值为0（对应正常语速）
         Settings settings("wifi", true);
-        return settings.GetInt("speed", 0);
+        return settings.GetInt("speed", 50);
     }
     int GetVoiceSpeed() {
         int speed = GetSpeed_();
@@ -341,7 +341,7 @@ public:
         settings.SetInt("speed", clamped_speed);
         ESP_LOGI(TAG, "Speed set to: %d", clamped_speed);
 
-        MqttClient::getInstance().GetRoomInfo();
+        MqttClient::getInstance().GetRoomInfo(false);
     }
 
     // 数据点相关方法实现
