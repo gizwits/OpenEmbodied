@@ -1087,6 +1087,34 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     }
 }
 
+
+void Application::ChangeBot(const char* id, const char* voice_id) {
+    
+    if (protocol_) {
+        
+        Schedule([this, id = std::string(id), voice_id = std::string(voice_id)]() {
+            QuitTalking();
+            CancelPlayMusic();
+            auto params = protocol_->GetRoomParams();
+            params.bot_id = id;
+            params.voice_id = voice_id;
+            protocol_->UpdateRoomParams(params);
+    
+            if (protocol_->IsAudioChannelOpened()) {
+                Schedule([this]() {
+                    vTaskDelay(pdMS_TO_TICKS(500));
+                    ToggleChatState();
+                });
+            } else {
+                Schedule([this]() {
+                    ToggleChatState();
+                });
+            }
+        });
+    }
+    
+}
+
 bool Application::CanEnterSleepMode() {
     // if (device_state_ != kDeviceStateIdle) {
     //     return false;

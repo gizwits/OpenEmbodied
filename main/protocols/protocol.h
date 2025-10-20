@@ -73,13 +73,11 @@ public:
     inline const std::string& session_id() const {
         return session_id_;
     }
-
     void OnIncomingAudio(std::function<void(AudioStreamPacket&& packet)> callback);
     void OnIncomingJson(std::function<void(const cJSON* root)> callback);
     void OnAudioChannelOpened(std::function<void()> callback);
     void OnAudioChannelClosed(std::function<void(bool is_clean)> callback);
     void OnNetworkError(std::function<void(const std::string& message)> callback);
-
     virtual bool Start() = 0;
     virtual bool OpenAudioChannel() = 0;
     virtual void CloseAudioChannel() = 0;

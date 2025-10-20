@@ -4,7 +4,7 @@
         {
             "name": "doit-ai-01-kit",
             "sdkconfig_append": [
-                "CONFIG_BOARD_TYPE_DOIT_AI_01_KIT=y",
+                "CONFIG_BOARD_TYPE_DOIT_AI_01_KIT_NFC=y",
                 "CONFIG_MQTT_USE_CUSTOM_CONFIG=y",
                 "CONFIG_ESPTOOLPY_FLASHSIZE_4MB=n",
                 "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=partitions_4M.csv",

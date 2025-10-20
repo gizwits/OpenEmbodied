@@ -80,7 +80,7 @@ public:
     virtual std::string GetDeviceStatusJson() = 0;
     virtual int MaxVolume() { return 100; }
     virtual int MaxBacklightBrightness() { return 100; }
-    virtual int GetVoiceSpeed() { return 50; }
+    virtual int GetVoiceSpeed() { return 0; }
     virtual bool IsCharging() { return false; }
     virtual void PowerOff() {};
     virtual void ResetPowerSaveTimer() {};  // 新增：重置电源保存定时器
