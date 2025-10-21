@@ -20,17 +20,7 @@
 
 #define MAX_AUDIO_PACKET_SIZE 256
 
-// WebSocket audio send path constants
-// If packet/frame size changes, adjust these accordingly
-#if CONFIG_IDF_TARGET_ESP32S3
-#define WS_AUDIO_BASE64_LEN 256           // Observed base64 length for current audio packet
-#define WS_BASE64_BUFFER_BYTES 256        // Base64 buffer capacity (includes null terminator headroom)
-#define WS_MESSAGE_BUFFER_RESERVE 320    // Typical JSON envelope reserve to avoid realloc churn
-#else
-#define WS_AUDIO_BASE64_LEN 56           // Observed base64 length for current audio packet
-#define WS_BASE64_BUFFER_BYTES 64        // Base64 buffer capacity (includes null terminator headroom)
-#define WS_MESSAGE_BUFFER_RESERVE 320    // Typical JSON envelope reserve to avoid realloc churn
-#endif
+
 
 #if CONFIG_IDF_TARGET_ESP32S3
 #define MAX_CACHED_PACKETS 10
@@ -70,6 +60,7 @@ static const std::vector<Emotion> emotions = {
 
 WebsocketProtocol::WebsocketProtocol() {
     event_group_handle_ = xEventGroupCreate();
+    need_play_prologue_ = Board::GetInstance().GetNeedPlayPrologue();
 }
 
 WebsocketProtocol::~WebsocketProtocol() {
@@ -127,7 +118,6 @@ bool WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
     // 提取前面一半的数据
     std::vector<uint8_t> data = packet.payload;
     // 需要注意：如果改了包长度，这里的宏需要同步调整
-    constexpr size_t kExpectedBase64Len = WS_AUDIO_BASE64_LEN;
     constexpr size_t kMaxBase64Bytes = WS_BASE64_BUFFER_BYTES;
     if (base64_buffer_size_ == 0) {
         base64_buffer_.reset(new char[kMaxBase64Bytes]);
@@ -147,21 +137,13 @@ bool WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
     uint32_t random_value = esp_random();
     snprintf(event_id, sizeof(event_id), "%lu", random_value);
 
-    // Reuse message buffer with small fixed reserve
-    message_buffer_.clear();
-    if (message_buffer_.capacity() < WS_MESSAGE_BUFFER_RESERVE) {
-        message_buffer_.reserve(WS_MESSAGE_BUFFER_RESERVE);
-    }
-    message_buffer_ = "{";
-    message_buffer_ += "\"id\":\"" + std::string(event_id) + "\",";
-    message_buffer_ += "\"event_type\":\"input_audio_buffer.append\",";
-    message_buffer_ += "\"data\":{";
-    message_buffer_ += "\"delta\":\"" + std::string(base64_buffer_.get()) + "\"";
-    message_buffer_ += "}";
-    message_buffer_ += "}";
+    // 使用固定长度缓冲区构建消息
+    int len = snprintf(message_buffer_, sizeof(message_buffer_),
+        "{\"id\":\"%s\",\"event_type\":\"input_audio_buffer.append\",\"data\":{\"delta\":\"%s\"}}",
+        event_id, base64_buffer_.get());
 
-    // 复制并发送
-    websocket_->Send(message_buffer_.data(), message_buffer_.size(), false);
+    // 发送消息
+    websocket_->Send(message_buffer_, len, false);
     return true;
 }
 
@@ -297,6 +279,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
     auto network = Board::GetInstance().GetNetwork();
     websocket_ = network->CreateWebSocket(1);
     websocket_->SetHeader("Authorization", token.c_str());
+    std::string device_id = Auth::getInstance().getDeviceId();
+    websocket_->SetHeader("X-Coze-DeviceId", device_id.c_str());
 
     websocket_->OnData([this](const char* data, size_t len, bool binary) {
         if (!data || len == 0) {
@@ -326,6 +310,13 @@ bool WebsocketProtocol::OpenAudioChannel() {
         //     return;
         // }
         if(event_type == "conversation.audio.delta") {
+            
+            // 开场白没有明确的事件，只能用这种方式来检测是否要切换到说话模式
+            if (need_check_play_prologue_ == true && need_play_prologue_ == true) {
+                Application::GetInstance().SetDeviceState(kDeviceStateSpeaking);
+                need_check_play_prologue_= false;
+            }
+            
             // 检查是否在打断AI说话后的1秒内，如果是则忽略音频
             if (abort_speaking_recorded_) {
                 auto now = std::chrono::steady_clock::now();
@@ -391,13 +382,10 @@ bool WebsocketProtocol::OpenAudioChannel() {
                         if (on_incoming_audio_ != nullptr) {
                             // 队列长度限制逻辑在下游
                             if (is_first_packet_ == true) {
-                                message_buffer_.clear();
-                                message_buffer_ = "{";
-                                message_buffer_ += "\"type\":\"tts\",";
-                                message_buffer_ += "\"state\":\"start\"";
-                                message_buffer_ += "}";
+                                snprintf(message_buffer_, sizeof(message_buffer_), 
+                                    "{\"type\":\"tts\",\"state\":\"start\"}");
                                    
-                                auto message_json = cJSON_Parse(message_buffer_.c_str());
+                                auto message_json = cJSON_Parse(message_buffer_);
                                 if (message_json) {
                                     on_incoming_json_(message_json);
                                     cJSON_Delete(message_json);
@@ -448,6 +436,14 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 ParseServerHello(root);
 
             } else if (event_type == "conversation.chat.created") {
+                                // 聆听模式下打断，通过标记为，打断掉这个唤醒词的输出
+                ESP_LOGI(TAG, "conversation.chat.created: need abort speaking: %d", need_abort_speaking_);
+                if (need_abort_speaking_ == true) {
+                    SendAbortSpeaking(kAbortReasonNone);
+                    ESP_LOGW(TAG, "conversation.chat.created: need abort speaking");
+                    return;
+                }
+                
                 auto id = cJSON_GetObjectItem(root, "id");
                 ESP_LOGI(TAG, "conversation.chat.created: %s", id->valuestring);
                 std::string message = "conversation.chat.created: " + std::string(id->valuestring);
@@ -458,20 +454,24 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 auto content_json = cJSON_GetObjectItem(data_json, "content");
                 
                 // Reuse message buffer
-                message_buffer_.clear();
-                message_buffer_ = "{";
-                message_buffer_ += "\"type\":\"stt\",";
-                message_buffer_ += "\"text\":\"" + std::string(content_json->valuestring) + "\"";
-                message_buffer_ += "}";
+                snprintf(message_buffer_, sizeof(message_buffer_), 
+                    "{\"type\":\"stt\",\"text\":\"%s\"}", content_json->valuestring);
                 
-                auto message_json = cJSON_Parse(message_buffer_.c_str());
+                auto message_json = cJSON_Parse(message_buffer_);
                 if (message_json) {
                     on_incoming_json_(message_json);
                     cJSON_Delete(message_json);
                 }
             } else if (event_type == "conversation.chat.in_progress") {
+                if (need_abort_speaking_ == true) {
+                    ESP_LOGW(TAG, "conversation.chat.in_progress: need abort speaking");
+                    return;
+                }
+
                 ESP_LOGI(TAG, "conversation.chat.in_progress");
                 MqttClient::getInstance().sendTraceLog("info", "conversation.chat.in_progress");
+
+                need_check_play_prologue_ = false;
 
                 is_detect_emotion_ = false;
                 is_first_packet_ = true;
@@ -499,13 +499,10 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 std::string messageData = "conversation.chat.completed or conversation.audio.completed";
                 MqttClient::getInstance().sendTraceLog("info", messageData.c_str());
 
-                message_buffer_.clear();
-                message_buffer_ = "{";
-                message_buffer_ += "\"type\":\"tts\",";
-                message_buffer_ += "\"state\":\"stop\"";
-                message_buffer_ += "}";
+                snprintf(message_buffer_, sizeof(message_buffer_), 
+                    "{\"type\":\"tts\",\"state\":\"stop\"}");
                 
-                auto message_json = cJSON_Parse(message_buffer_.c_str());
+                auto message_json = cJSON_Parse(message_buffer_);
                 if (message_json && is_start_progress_ == true) {
                     on_incoming_json_(message_json);
                     cJSON_Delete(message_json);
@@ -515,7 +512,6 @@ bool WebsocketProtocol::OpenAudioChannel() {
 
                 // 清理消息缓存，防止内存泄漏
                 message_cache_.clear();
-                message_buffer_.clear();
 
             } else if (event_type == "input_audio_buffer.speech_started") {
 
@@ -536,14 +532,10 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 auto content_json = cJSON_GetObjectItem(data_json, "content");
 
                 message_cache_ += std::string(content_json->valuestring);
-                message_buffer_.clear();
-                message_buffer_ = "{";
-                message_buffer_ += "\"type\":\"tts\",";
-                message_buffer_ += "\"state\":\"sentence_start\",";
-                message_buffer_ += "\"text\":\"" + message_cache_ + "\"";
-                message_buffer_ += "}";
+                snprintf(message_buffer_, sizeof(message_buffer_), 
+                    "{\"type\":\"tts\",\"state\":\"sentence_start\",\"text\":\"%s\"}", message_cache_.c_str());
                 
-                auto message_json = cJSON_Parse(message_buffer_.c_str());
+                auto message_json = cJSON_Parse(message_buffer_);
                 if (message_json) {
                     on_incoming_json_(message_json);
                     cJSON_Delete(message_json);
@@ -553,13 +545,10 @@ bool WebsocketProtocol::OpenAudioChannel() {
                     for (const auto& emotion : emotions) {
                         if (message_cache_.find(emotion.icon) != std::string::npos) {
                             is_detect_emotion_ = true;
-                            message_buffer_.clear();
-                            message_buffer_ = "{";
-                            message_buffer_ += "\"type\":\"llm\",";
-                            message_buffer_ += "\"emotion\":\"" + std::string(emotion.text) + "\"";
-                            message_buffer_ += "}";
+                            snprintf(message_buffer_, sizeof(message_buffer_), 
+                                "{\"type\":\"llm\",\"emotion\":\"%s\"}", emotion.text);
                             
-                            auto message_json = cJSON_Parse(message_buffer_.c_str());
+                            auto message_json = cJSON_Parse(message_buffer_);
                             if (message_json) {
                                 on_incoming_json_(message_json);
                                 cJSON_Delete(message_json);
@@ -625,6 +614,12 @@ bool WebsocketProtocol::OpenAudioChannel() {
     // }, "disconnect_test", 2048, this, 5, nullptr);
 
 
+    // 连接成功 启动开场白检测
+    if (need_play_prologue_ == true) {
+        need_check_play_prologue_ = true;
+    }
+
+    
     // Wait for server hello
     EventBits_t bits = xEventGroupWaitBits(event_group_handle_, WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT, pdTRUE, pdFALSE, pdMS_TO_TICKS(5000));
     if (!(bits & WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT)) {
@@ -694,7 +689,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "\"id\":\"" + std::string(event_id) + "\",";
     message += "\"event_type\":\"chat.update\",";
     message += "\"data\":{";
-    if (room_params_.need_play_prologue) {
+    if (need_play_prologue_) {
         message += "\"need_play_prologue\":true,";
     }
     message += "\"event_subscriptions\": [";
@@ -813,13 +808,10 @@ void WebsocketProtocol::ParseServerHello(const cJSON* root) {
 void WebsocketProtocol::SwitchToSpeaking() {
     
     message_cache_.clear();
-    message_buffer_.clear();
-    message_buffer_ = "{";
-    message_buffer_ += "\"type\":\"tts\",";
-    message_buffer_ += "\"state\":\"pre_start\"";
-    message_buffer_ += "}";
+    snprintf(message_buffer_, sizeof(message_buffer_), 
+        "{\"type\":\"tts\",\"state\":\"pre_start\"}");
     
-    auto message_json = cJSON_Parse(message_buffer_.c_str());
+    auto message_json = cJSON_Parse(message_buffer_);
     if (message_json) {
         on_incoming_json_(message_json);
         cJSON_Delete(message_json);

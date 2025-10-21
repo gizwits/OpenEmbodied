@@ -1,0 +1,447 @@
+#include "wifi_board.h"
+#include "audio/codecs/vb6824_audio_codec.h"
+#include "application.h"
+#include "button.h"
+#include "config.h"
+#include "iot/thing_manager.h"
+#include <esp_sleep.h>
+#include "power_save_timer.h" // retained for other boards; this board uses a lighter timer
+#include <driver/rtc_io.h>
+#include "driver/gpio.h"
+#include <wifi_station.h>
+#include <esp_log.h>
+#include "assets/lang_config.h"
+#include "power_manager.h"
+#include "vb6824.h"
+#include <esp_wifi.h>
+#include "data_point_manager.h"
+#include "settings.h"
+#include <esp_timer.h>
+#include "device_state_event.h"
+
+#include <esp_lcd_panel_vendor.h>
+#include <driver/spi_common.h>
+#include "servo.h"
+// LEDC at 3 Hz is hard to achieve due to divider limits; use esp_timer to toggle GPIOs
+
+#define TAG "CustomBoard"
+
+class CustomBoard : public WifiBoard {
+private:
+    Button boot_button_;
+    VbAduioCodec audio_codec;
+    // Button prev_button_;
+    Button next_button_;
+    // Minimal idle power-save (no heap, no std::function)
+    esp_timer_handle_t idle_timer_ = nullptr;
+    volatile int idle_ticks_ = 0;
+    static constexpr int SLEEP_SECONDS = 60 * 20;
+    static constexpr int SHUTDOWN_SECONDS = -1; // not used
+
+
+    // 上电计数器相关
+    Settings power_counter_settings_;
+    esp_timer_handle_t power_counter_timer_;
+    static constexpr int POWER_COUNT_THRESHOLD = 5;  // 触发阈值
+    static constexpr int POWER_COUNT_RESET_DELAY_MS = 4000;  // 2秒后重置
+
+    int64_t prev_last_click_time_ = 0;
+    int64_t next_last_click_time_ = 0;
+
+    // Software PWM via esp_timer toggling at 3 Hz (square wave)
+    bool pwm_initialized_ = false;
+    esp_timer_handle_t pwm_timer_ = nullptr;
+    volatile bool pwm_level_ = false;
+
+    static void PwmTimerCb(void* arg) {
+        auto* self = static_cast<CustomBoard*>(arg);
+        self->pwm_level_ = !self->pwm_level_;
+        gpio_set_level(VOLUME_UP_BUTTON_GPIO, self->pwm_level_ ? 1 : 0);
+        gpio_set_level(VOLUME_DOWN_BUTTON_GPIO, self->pwm_level_ ? 1 : 0);
+    }
+
+    void InitializePwm() {
+        if (pwm_initialized_) return;
+        // Configure the two GPIOs as outputs
+        gpio_config_t io_conf = {};
+        io_conf.pin_bit_mask = (1ULL << VOLUME_UP_BUTTON_GPIO) | (1ULL << VOLUME_DOWN_BUTTON_GPIO);
+        io_conf.mode = GPIO_MODE_OUTPUT;
+        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        io_conf.intr_type = GPIO_INTR_DISABLE;
+        ESP_ERROR_CHECK(gpio_config(&io_conf));
+        gpio_set_level(VOLUME_UP_BUTTON_GPIO, 0);
+        gpio_set_level(VOLUME_DOWN_BUTTON_GPIO, 0);
+
+        if (pwm_timer_ == nullptr) {
+            esp_timer_create_args_t args = {
+                .callback = &CustomBoard::PwmTimerCb,
+                .arg = this,
+                .name = "pwm_3hz_timer"
+            };
+            ESP_ERROR_CHECK(esp_timer_create(&args, &pwm_timer_));
+        }
+
+        pwm_initialized_ = true;
+    }
+
+    void StartPwm() {
+        InitializePwm();
+        pwm_level_ = false;
+        gpio_set_level(VOLUME_UP_BUTTON_GPIO, 0);
+        gpio_set_level(VOLUME_DOWN_BUTTON_GPIO, 0);
+        // 3 Hz square wave toggles every half-period: 1 / (2 * 3) = 0.166666... s
+        const int64_t half_period_us = 166666; // ~0.166666s
+        ESP_ERROR_CHECK(esp_timer_start_periodic(pwm_timer_, half_period_us));
+    }
+
+    void StopPwm() {
+        if (!pwm_initialized_) return;
+        if (pwm_timer_) {
+            esp_timer_stop(pwm_timer_);
+        }
+        pwm_level_ = false;
+        gpio_set_level(VOLUME_UP_BUTTON_GPIO, 0);
+        gpio_set_level(VOLUME_DOWN_BUTTON_GPIO, 0);
+    }
+
+    static void IdleTimerCb(void* arg) {
+        auto* self = static_cast<CustomBoard*>(arg);
+        auto& app = Application::GetInstance();
+        if (!app.CanEnterSleepMode()) {
+            self->idle_ticks_ = 0;
+            return;
+        }
+        int t = ++self->idle_ticks_;
+        if (SLEEP_SECONDS != -1 && t >= SLEEP_SECONDS) {
+            ESP_LOGI(TAG, "Idle timeout reached (%d s), entering sleep", t);
+            self->run_sleep_mode(true);
+        }
+        if (SHUTDOWN_SECONDS != -1 && t >= SHUTDOWN_SECONDS) {
+            // optional shutdown action
+        }
+    }
+
+    void InitializePowerSaveTimer() {
+        if (idle_timer_ == nullptr) {
+            esp_timer_create_args_t args = {
+                .callback = &CustomBoard::IdleTimerCb,
+                .arg = this,
+                .name = "idle_timer"
+            };
+            ESP_ERROR_CHECK(esp_timer_create(&args, &idle_timer_));
+        }
+        idle_ticks_ = 0;
+        ESP_ERROR_CHECK(esp_timer_start_periodic(idle_timer_, 1000000));
+    }
+
+    void run_sleep_mode(bool need_delay = true){
+        auto& application = Application::GetInstance();
+        if (need_delay) {
+            application.QuitTalking();
+            GetAudioCodec()->EnableOutput(true);
+            application.Alert("", "", "", Lang::Sounds::P3_SLEEP);
+            vTaskDelay(pdMS_TO_TICKS(1500));
+            ESP_LOGI(TAG, "Sleep mode");
+        }
+        vb6824_shutdown();
+        vTaskDelay(pdMS_TO_TICKS(200));
+        // 杰挺不需要唤醒源
+        // esp_deep_sleep_enable_gpio_wakeup(1ULL << BOOT_BUTTON_GPIO, ESP_GPIO_WAKEUP_GPIO_LOW);
+        
+        esp_deep_sleep_start();
+    }
+
+
+    // 定时器回调函数
+    static void PowerCounterTimerCallback(void* arg) {
+        CustomBoard* board = static_cast<CustomBoard*>(arg);
+        board->ResetPowerCounter();
+    }
+
+    // 重置上电计数器
+    void ResetPowerCounter() {
+        power_counter_settings_.SetInt("power_count", 0);
+        ESP_LOGI(TAG, "Power counter reset to 0");
+    }
+
+    void InitializeDeviceStateEvent() {
+        
+        // CustomBoard 构造函数内合适位置
+        DeviceStateEventManager::GetInstance().RegisterStateChangeCallback(
+            [this](DeviceState prev, DeviceState curr) {
+                ESP_LOGI(TAG, "Device state changed: %d -> %d", prev, curr);
+
+                // 示例：根据状态做动作
+                switch (curr) {
+                    case DeviceState::kDeviceStateListening:
+                        // Pause PWM when listening
+                        StopPwm();
+                        break;
+                    case DeviceState::kDeviceStateSpeaking:
+                        // Start 3 Hz PWM when speaking
+                        StartPwm();
+                        break;
+                    default:
+                        break;
+                }
+            }
+        );
+    }
+
+    // 检查并处理上电计数
+    void CheckPowerCount() {
+        int current_count = power_counter_settings_.GetInt("power_count", 0);
+        current_count++;
+        power_counter_settings_.SetInt("power_count", current_count);
+        
+        ESP_LOGI(TAG, "Power count: %d", current_count);
+        
+        if (current_count >= POWER_COUNT_THRESHOLD) {
+            ESP_LOGI(TAG, "Power count threshold reached! Triggering event...");
+            // 在这里添加你的事件处理逻辑
+            // 例如：触发某种特殊模式、发送通知等
+            
+            // 重置计数器
+            ResetPowerCounter();
+            auto& wifi_station = WifiStation::GetInstance();
+            wifi_station.ClearAuth();
+            ResetWifiConfiguration();
+        }
+        
+        // 启动定时器，2秒后重置计数器
+        esp_timer_start_once(power_counter_timer_, POWER_COUNT_RESET_DELAY_MS * 1000);
+    }
+
+    void InitializeButtons() {
+
+        boot_button_.OnPressRepeat([this](uint16_t count) {
+            if(count >= 3){
+                ResetWifiConfiguration();
+            } else {
+                Application::GetInstance().ToggleChatState();
+            }
+        });
+
+        // prev_button_.OnClick([this]() {
+        //     int64_t now = esp_timer_get_time();
+        //     if (Application::GetInstance().GetDeviceState() == DeviceState::kDeviceStateIdle) {
+        //         Application::GetInstance().CancelPlayMusic();
+        //         Application::GetInstance().ToggleChatState();
+        //         vTaskDelay(pdMS_TO_TICKS(2000));
+        //         Application::GetInstance().SendTextToAI("给我播放一首歌");
+        //     } else {
+        //         if (now - prev_last_click_time_ > 10* 1000000) { // 5秒
+        //             prev_last_click_time_ = now;
+        //             Application::GetInstance().SendTextToAI("给我播放一首歌");
+        //         }
+        //     }
+            
+        // });
+
+        next_button_.OnClick([this]() {
+            int64_t now = esp_timer_get_time();
+            if (Application::GetInstance().GetDeviceState() == DeviceState::kDeviceStateIdle) {
+                Application::GetInstance().CancelPlayMusic();
+                Application::GetInstance().ToggleChatState();
+                vTaskDelay(pdMS_TO_TICKS(2000));
+                Application::GetInstance().SendTextToAI("给我播放一首歌");
+            } else {
+                if (now - prev_last_click_time_ > 10* 1000000) { // 5秒
+                    prev_last_click_time_ = now;
+                    Application::GetInstance().SendTextToAI("给我播放一首歌");
+                }
+            }
+        });
+    }
+    // 物联网初始化，添加对 AI 可见设备
+    void InitializeIot() {
+        auto& thing_manager = iot::ThingManager::GetInstance();
+        thing_manager.AddThing(iot::CreateThing("Speaker"));
+    }
+
+    void InitializeDataPointManager() {
+        // 设置 DataPointManager 的回调函数
+        DataPointManager::GetInstance().SetCallbacks(
+            [this]() -> bool { return false; }, // IsCharging - toy 版本可能没有充电功能
+            []() -> int { return Application::GetInstance().GetChatMode(); },
+            [](int value) { Application::GetInstance().SetChatMode(value); },
+            [this]() -> int { 
+                int level = 0;
+                bool charging = false, discharging = false;
+                GetBatteryLevel(level, charging, discharging);
+                return level;
+            },
+            [this]() -> int { return GetAudioCodec()->output_volume(); },
+            [this](int value) { GetAudioCodec()->SetOutputVolume(value); },
+            []() -> int { 
+                wifi_ap_record_t ap_info;
+                if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+                    return 100 - (uint8_t)abs(ap_info.rssi);
+                }
+                return 0;
+            },
+            [this]() -> int { return 100; }, // 固定亮度 100%
+            [this](int value) { 
+                /* toy 版本可能没有亮度调节 */
+                // 只处理 0 和 100
+                if (value == 0) {
+                    gpio_set_level(EXTRA_LIGHT_GPIO, 0);
+                } 
+                if (value == 100) {
+                    gpio_set_level(EXTRA_LIGHT_GPIO, 1);
+                }
+            }
+        );
+    }
+
+
+    void InitializePowerManager() {
+        PowerManager::GetInstance();
+    }
+
+
+public:
+    CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO),next_button_(NEXT_BUTTON_GPIO),
+    power_counter_settings_("power_counter", true) {      
+
+        InitializeDeviceStateEvent();
+        // 初始化上电计数器定时器
+        esp_timer_create_args_t timer_args = {
+            .callback = &CustomBoard::PowerCounterTimerCallback,
+            .arg = this,
+            .name = "power_counter_timer"
+        };
+        ESP_ERROR_CHECK(esp_timer_create(&timer_args, &power_counter_timer_));
+
+        Settings settings("wifi", true);
+        auto s_factory_test_mode = settings.GetInt("ft_mode", 0);
+
+        if (s_factory_test_mode == 0) {
+            // 不在产测模式才启动，不然有问题
+            InitializeButtons();
+            InitializeIot();
+            InitializeDataPointManager();
+            InitializePowerSaveTimer();
+            // 检查上电计数
+            CheckPowerCount();
+        }
+
+        InitializePowerManager();
+
+        InitializeGpio(POWER_GPIO, true);
+
+        // 根据缓存亮度决定是否点亮灯
+        int cached_brightness = -1;
+        bool extra_light_on = true;  // 未设置过时默认打开
+        {
+            Settings dp_settings("datapoint", false);
+            cached_brightness = dp_settings.GetInt("brightness", -1);
+            if (cached_brightness != -1) {
+                extra_light_on = cached_brightness > 0;
+            }
+        }
+        InitializeGpio(EXTRA_LIGHT_GPIO, extra_light_on);
+        
+
+        gpio_config_t io_conf = {};
+        io_conf.pin_bit_mask = (1ULL << LED_GPIO);
+        io_conf.mode = GPIO_MODE_OUTPUT;
+        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        io_conf.intr_type = GPIO_INTR_DISABLE;
+        gpio_config(&io_conf);
+        gpio_set_level(LED_GPIO, 0);
+
+        audio_codec.OnWakeUp([this](const std::string& command) {
+            ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());
+            if (command == "你好小智" || command.find("小云") != std::string::npos){
+                ESP_LOGE(TAG, "vb6824 recv cmd: %d", Application::GetInstance().GetDeviceState());
+                Application::GetInstance().WakeWordInvoke("你好小智");
+            } else if (command == "开始配网") {
+                ResetWifiConfiguration();
+            }
+        });
+    }
+
+    ~CustomBoard() {
+        if (power_counter_timer_) {
+            esp_timer_delete(power_counter_timer_);
+        }
+        if (idle_timer_) {
+            esp_timer_stop(idle_timer_);
+            esp_timer_delete(idle_timer_);
+            idle_timer_ = nullptr;
+        }
+        // Ensure PWM outputs are stopped on destruction
+        StopPwm();
+        if (pwm_timer_) {
+            esp_timer_delete(pwm_timer_);
+            pwm_timer_ = nullptr;
+        }
+    }
+
+    void InitializeGpio(gpio_num_t gpio_num_, bool output = false) {
+        gpio_config_t config = {
+            .pin_bit_mask = (1ULL << gpio_num_),
+            .mode = GPIO_MODE_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_ENABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        ESP_ERROR_CHECK(gpio_config(&config));
+        if (output) {
+            gpio_set_level(gpio_num_, 1);
+        } else {
+            gpio_set_level(gpio_num_, 0);
+        }
+    }
+
+    // virtual Led* GetLed() override {
+    //     static GpioLed led(LED_GPIO);
+    //     return &led;
+    // }
+
+    virtual AudioCodec* GetAudioCodec() override {
+        return &audio_codec;
+    }
+
+
+    virtual bool GetBatteryLevel(int &level, bool& charging, bool& discharging) override {
+        level = PowerManager::GetInstance().GetBatteryLevel();
+        charging = PowerManager::GetInstance().IsCharging();
+        discharging = !charging;
+        return true;
+    }
+
+    virtual bool IsCharging() override {
+        return PowerManager::GetInstance().IsCharging();
+    }
+
+    // 数据点相关方法实现
+    const char* GetGizwitsProtocolJson() const override {
+        return DataPointManager::GetInstance().GetGizwitsProtocolJson();
+    }
+
+    size_t GetDataPointCount() const override {
+        return DataPointManager::GetInstance().GetDataPointCount();
+    }
+
+    bool GetDataPointValue(const std::string& name, int& value) const override {
+        return DataPointManager::GetInstance().GetDataPointValue(name, value);
+    }
+
+    bool SetDataPointValue(const std::string& name, int value) override {
+        return DataPointManager::GetInstance().SetDataPointValue(name, value);
+    }
+
+    void GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) override {
+        DataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
+    }
+
+    void ProcessDataPointValue(const std::string& name, int value) override {
+        DataPointManager::GetInstance().ProcessDataPointValue(name, value);
+    }
+};
+
+DECLARE_BOARD(CustomBoard);

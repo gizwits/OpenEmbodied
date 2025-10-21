@@ -47,27 +47,24 @@ private:
         uint16_t adcValue; // ADC value
         uint8_t soc;       // State of Charge (percentage of battery capacity)
     } dischargeCurve[] = {
-        {4140, 100}, // 100%
-        {4104, 95},  // 下降36mV
-        {4068, 90},  // 下降36mV
-        {4032, 85},  // 下降36mV
-        {3996, 80},  // 下降36mV
-        {3960, 75},  // 下降36mV
-        {3924, 70},  // 下降36mV
-        {3888, 65},  // 下降36mV
-        {3852, 60},  // 下降36mV
-        {3829, 55},  // 下降23mV（过渡段开始）
-        {3808, 50},  // 下降21mV
-        {3787, 45},  // 下降21mV
-        {3766, 40},  // 下降21mV
-        {3745, 35},  // 下降21mV
-        {3724, 30},  // 下降21mV
-        {3703, 25},  // 下降21mV
-        {3672, 20},  // 下降31mV
-        {3570, 15},  // 下降102mV
-        {3420, 10},  // 下降150mV（低电量段开始）
-        {3220, 5},   // 下降200mV
-        {3000, 0}    // 下降220mV
+        {4200, 100}, // 满电压附近
+        {4160, 95},
+        {4120, 90},
+        {4080, 85},
+        {4040, 80},
+        {4000, 75},
+        {3960, 70},
+        {3920, 60},
+        {3880, 50},
+        {3850, 40},
+        {3820, 35},
+        {3790, 30},
+        {3760, 25},
+        {3720, 20},
+        {3680, 15},
+        {3600, 10},
+        {3500, 5},
+        {3400, 0},
     };
 
     // 查表函数
@@ -133,6 +130,7 @@ private:
         //          adc_values_[5], adc_values_[6], adc_values_[7], adc_values_[8], adc_values_[9]);
 
         CalculateBatteryLevel(average_adc*2);
+
         if(times++ % 50 == 0){
             ESP_LOGI("PowerManager", "adc: %d adc_avg: %ld, VBAT: %ld, battery_level_: %u%%", 
                 adc_value, average_adc, average_adc*2, battery_level_);
@@ -219,24 +217,6 @@ public:
         static PowerManager instance; // 使用默认构造函数初始化对象
         return instance;
     }
-
-    void EnterDeepSleepIfNotCharging() {
-        // 不在充电就真休眠
-        if (is_charging_) {
-            // 充电中，只断开 socket
-            Application::GetInstance().QuitTalking();
-            return;
-        }
-        vb6824_shutdown();
-        vTaskDelay(pdMS_TO_TICKS(200));
-        // 配置唤醒源 只有电源域是VDD3P3_RTC的才能唤醒深睡
-        uint64_t wakeup_pins = (BIT(GPIO_NUM_1) | BIT(COLLISION_BUTTON_GPIO));
-        esp_deep_sleep_enable_gpio_wakeup(wakeup_pins, ESP_GPIO_WAKEUP_GPIO_LOW);
-        ESP_LOGI("PowerMgr", "ready to esp_deep_sleep_start");
-        vTaskDelay(pdMS_TO_TICKS(10));
-        
-        esp_deep_sleep_start();
-}
 
     
 };

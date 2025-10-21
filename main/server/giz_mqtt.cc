@@ -288,9 +288,6 @@ bool MqttClient::initialize() {
     xTaskCreate(sendTask, "mqtt_send", MQTT_TASK_STACK_SIZE_RESEND, this, 1, nullptr);
 #endif
 
-    // 打印内存使用情况
-    printMemoryUsage();
-    
     return true;
 }
 
@@ -1218,17 +1215,6 @@ void MqttClient::ReportTimer() {
     }
 }
 
-// const int MqttClient::attr_size_ = (8 + 8 - 1) / 8;
-
-void MqttClient::printMemoryUsage() {
-    size_t total_memory = getEstimatedMemoryUsage();
-    ESP_LOGI(TAG, "MQTT Memory Usage:");
-    ESP_LOGI(TAG, "  Task stacks: %zu bytes", MQTT_TASK_STACK_SIZE_RCV + MQTT_TASK_STACK_SIZE_RESEND);
-    ESP_LOGI(TAG, "  Message queue: %zu bytes", MQTT_QUEUE_SIZE * sizeof(mqtt_msg_t));
-    ESP_LOGI(TAG, "  Static data: %zu bytes", sizeof(g_attrs));
-    ESP_LOGI(TAG, "  Total estimated: %zu bytes", total_memory);
-    ESP_LOGI(TAG, "  Note: Increased stack size to prevent JSON parsing stack overflow");
-}
 
 size_t MqttClient::getEstimatedMemoryUsage() {
     size_t memory = 0;
