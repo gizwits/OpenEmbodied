@@ -15,7 +15,8 @@
 // LED 配置
 #define BUILTIN_LED_GPIO        GPIO_NUM_6
 
-// 电源控制已简化，删除不必要的PWR配置
+// 电源控制配置
+#define POWER_HOLD_GPIO        GPIO_NUM_0     // 电源保持引脚
 
 // RGB LED 配置（V 通道恒接 VCC，无需控制）
 #define RGB_LED_R_GPIO          GPIO_NUM_5   // 红色（R）
