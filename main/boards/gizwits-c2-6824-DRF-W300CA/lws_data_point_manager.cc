@@ -62,6 +62,25 @@ const char* LWSDataPointManager::GetGizwitsProtocolJson() const {
                     "desc": ""
                 },
                 {
+                    "display_name": "充电状态",
+                    "name": "charge_status",
+                    "data_type": "enum",
+                    "enum": [
+                        "none",
+                        "charging",
+                        "charge_done"
+                    ],
+                    "position": {
+                        "byte_offset": 6,
+                        "unit": "bit",
+                        "len": 2,
+                        "bit_offset": 0
+                    },
+                    "type": "status_readonly",
+                    "id": 9,
+                    "desc": ""
+                },
+                {
                     "display_name": "提示音",
                     "name": "alert_tone_language",
                     "data_type": "enum",
@@ -98,6 +117,26 @@ const char* LWSDataPointManager::GetGizwitsProtocolJson() const {
                     "id": 3,
                     "desc": ""
                 },
+                     {
+                    "display_name": "电量",
+                    "name": "battery_percentage",
+                    "data_type": "uint8",
+                    "position": {
+                        "byte_offset": 7,
+                        "unit": "byte",
+                        "len": 1,
+                        "bit_offset": 0
+                    },
+                    "uint_spec": {
+                        "addition": 0,
+                        "max": 100,
+                        "ratio": 1,
+                        "min": 0
+                    },
+                    "type": "status_readonly",
+                    "id": 10,
+                    "desc": ""
+                },
                 {
                     "display_name": "音量",
                     "name": "volume_set",
@@ -116,6 +155,26 @@ const char* LWSDataPointManager::GetGizwitsProtocolJson() const {
                     },
                     "type": "status_writable",
                     "id": 4,
+                    "desc": ""
+                },
+                    {
+                    "display_name": "rssi",
+                    "name": "rssi",
+                    "data_type": "uint8",
+                    "position": {
+                        "byte_offset": 8,
+                        "unit": "byte",
+                        "len": 1,
+                        "bit_offset": 0
+                    },
+                    "uint_spec": {
+                        "addition": -100,
+                        "max": 100,
+                        "ratio": 1,
+                        "min": 0
+                    },
+                    "type": "status_readonly",
+                    "id": 11,
                     "desc": ""
                 },
                 {
@@ -199,65 +258,6 @@ const char* LWSDataPointManager::GetGizwitsProtocolJson() const {
                     "desc": ""
                 },
                 {
-                    "display_name": "充电状态",
-                    "name": "charge_status",
-                    "data_type": "enum",
-                    "enum": [
-                        "none",
-                        "charging",
-                        "charge_done"
-                    ],
-                    "position": {
-                        "byte_offset": 6,
-                        "unit": "bit",
-                        "len": 2,
-                        "bit_offset": 0
-                    },
-                    "type": "status_readonly",
-                    "id": 9,
-                    "desc": ""
-                },
-                {
-                    "display_name": "电量",
-                    "name": "battery_percentage",
-                    "data_type": "uint8",
-                    "position": {
-                        "byte_offset": 7,
-                        "unit": "byte",
-                        "len": 1,
-                        "bit_offset": 0
-                    },
-                    "uint_spec": {
-                        "addition": 0,
-                        "max": 100,
-                        "ratio": 1,
-                        "min": 0
-                    },
-                    "type": "status_readonly",
-                    "id": 10,
-                    "desc": ""
-                },
-                {
-                    "display_name": "rssi",
-                    "name": "rssi",
-                    "data_type": "uint8",
-                    "position": {
-                        "byte_offset": 8,
-                        "unit": "byte",
-                        "len": 1,
-                        "bit_offset": 0
-                    },
-                    "uint_spec": {
-                        "addition": -100,
-                        "max": 100,
-                        "ratio": 1,
-                        "min": 0
-                    },
-                    "type": "status_readonly",
-                    "id": 11,
-                    "desc": ""
-                },
-                {
                     "display_name": "ssid",
                     "name": "ssid",
                     "data_type": "binary",
@@ -283,7 +283,7 @@ const char* LWSDataPointManager::GetGizwitsProtocolJson() const {
 
 // 标准实现：获取数据点数量
 size_t LWSDataPointManager::GetDataPointCount() const {
-    return 12; // 12个数据点
+    return 13; // 12个数据点
 }
 
 // 标准实现：获取数据点值
@@ -477,51 +477,54 @@ void LWSDataPointManager::GenerateReportData(uint8_t* buffer, size_t buffer_size
     
     buffer[15] = status;
 
-    // 音量
-    if (get_volume_callback_) {
-        buffer[16] = get_volume_callback_();
+
+    // 电量
+    if (get_battery_level_callback_) {
+        buffer[16] = get_battery_level_callback_();
     } else {
         buffer[16] = 0;
     }
 
-    // 亮度
-    if (get_brightness_callback_) {
-        buffer[17] = get_brightness_callback_();
+    // 音量
+    if (get_volume_callback_) {
+        buffer[17] = get_volume_callback_();
     } else {
         buffer[17] = 0;
     }
 
-    // 新增数据点：语速 (byte_offset 5)
-    if (get_speed_callback_) {
-        buffer[18] = get_speed_callback_();
+
+    // RSSI
+    if (get_rssi_callback_) {
+        buffer[18] = get_rssi_callback_();
     } else {
         buffer[18] = 0;
     }
 
-    // 新增数据点：灯光速度 (byte_offset 6)
-    if (get_light_speed_callback_) {
-        buffer[19] = get_light_speed_callback_();
+
+    // 亮度
+    if (get_brightness_callback_) {
+        buffer[19] = get_brightness_callback_();
     } else {
         buffer[19] = 0;
     }
 
-    // 新增数据点：灯光模式 (byte_offset 7)
-    if (get_light_mode_callback_) {
-        buffer[20] = get_light_mode_callback_();
+    // 新增数据点：语速 (byte_offset 5)
+    if (get_speed_callback_) {
+        buffer[20] = get_speed_callback_();
     } else {
         buffer[20] = 0;
     }
 
-    // 电量
-    if (get_battery_level_callback_) {
-        buffer[21] = get_battery_level_callback_();
+    // 新增数据点：灯光速度 (byte_offset 6)
+    if (get_light_speed_callback_) {
+        buffer[21] = get_light_speed_callback_();
     } else {
         buffer[21] = 0;
     }
 
-    // RSSI
-    if (get_rssi_callback_) {
-        buffer[22] = get_rssi_callback_();
+    // 新增数据点：灯光模式 (byte_offset 7)
+    if (get_light_mode_callback_) {
+        buffer[22] = get_light_mode_callback_();
     } else {
         buffer[22] = 0;
     }
@@ -544,8 +547,23 @@ void LWSDataPointManager::GenerateReportData(uint8_t* buffer, size_t buffer_size
 
     data_size = 20 + 100 + 3;  // 固定为123字节
     
-    ESP_LOGD(TAG, "SSID length: %zu, padded to 100 bytes, total data size: %zu", 
-             ssid.length(), data_size);
+    // ESP_LOGI(TAG, "SSID length: %zu, padded to 100 bytes, total data size: %zu", 
+    //          ssid.length(), data_size);
+    
+    // 打印buffer的16进制内容
+    // ESP_LOGI(TAG, "Buffer hex dump (%zu bytes):", data_size);
+    // for (size_t i = 0; i < data_size; i += 16) {
+    //     char hex_str[64] = {0};
+    //     char ascii_str[17] = {0};
+        
+    //     for (size_t j = 0; j < 16 && (i + j) < data_size; j++) {
+    //         uint8_t byte = buffer[i + j];
+    //         sprintf(hex_str + j * 3, "%02X ", byte);
+    //         ascii_str[j] = (byte >= 32 && byte <= 126) ? byte : '.';
+    //     }
+    //     ascii_str[16] = '\0';
+    //     ESP_LOGI(TAG, "%04X: %-48s |%s|", (unsigned int)i, hex_str, ascii_str);
+    // }
 }
 
 // 标准实现：处理数据点值

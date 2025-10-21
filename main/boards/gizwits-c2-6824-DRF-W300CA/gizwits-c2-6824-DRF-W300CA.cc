@@ -724,7 +724,7 @@ public:
     // 启动电压是否过低(true表示不允许启动)
     bool IsLowVoltageStartup() const { return low_voltage_startup_; }
     // 是否低电量(基于PowerManager阈值)
-    bool IsLowBattery() const override { return PowerManager::GetInstance().IsLowBattery(); }
+    // bool IsLowBattery() const override { return PowerManager::GetInstance().IsLowBattery(); }
     // Set short_press_time to a small non-zero value to enable multiple-click detection reliably
     CustomBoard() : boot_button_(BOOT_BUTTON_GPIO, false, 2000, 80), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO), 
                     adc_button_k50_(nullptr), adc_button_k51_(nullptr) {      
