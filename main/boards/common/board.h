@@ -94,6 +94,7 @@ public:
     virtual bool NeedPlayProcessVoiceWithLife() { return false; }
     // 充电状态是否静默启动
     virtual bool NeedSilentStartup() { return false; }
+    virtual bool NeedBlockLowBattery() { return false; }
     
     // 数据点相关方法
     virtual const char* GetGizwitsProtocolJson() const { return nullptr; }

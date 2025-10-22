@@ -416,9 +416,10 @@ void Application::Start() {
     int level = 0;
     bool charging = false;
     bool discharging = false;
+    bool hasBattery = Board::GetInstance().GetBatteryLevel();
     if (
         Board::GetInstance().NeedSilentStartup() && 
-        Board::GetInstance().GetBatteryLevel(level, charging, discharging)
+        hasBattery
     ) {
         ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
         if (charging) {
@@ -443,11 +444,11 @@ void Application::Start() {
     // ESP_LOGI(TAG, "json: %s", json.c_str());
 
     bool battery_ok = CheckBatteryLevel();
-    if (!battery_ok) {
+    if (!battery_ok && Board::GetInstance().NeedBlockLowBattery()) {
         // 播放提示
         vTaskDelay(pdMS_TO_TICKS(3000));
-        // Board::GetInstance().PowerOff();
-        // return;
+        Board::GetInstance().PowerOff();
+        return;
     }
 
     audio_service_.ResetDecoder();
