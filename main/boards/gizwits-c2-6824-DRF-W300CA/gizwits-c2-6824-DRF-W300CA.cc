@@ -745,6 +745,11 @@ private:
     }
 
 public:
+
+    // 低电量是否阻止启动
+    bool NeedBlockLowBattery() override {
+        return true;
+    }
     // 启动电压是否过低(true表示不允许启动)
     bool IsLowVoltageStartup() const { return low_voltage_startup_; }
     // 是否低电量(基于PowerManager阈值)
