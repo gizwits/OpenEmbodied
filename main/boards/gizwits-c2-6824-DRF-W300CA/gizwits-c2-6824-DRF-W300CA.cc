@@ -31,8 +31,6 @@
 
 #define TAG "CustomBoard"
 
-// 电机速度
-#define MOTOR_DEFAULT_SPEED 100
 
 #define RESET_WIFI_CONFIGURATION_COUNT 3
 #define SLEEP_TIME_SEC 60 * 100
@@ -43,14 +41,12 @@ private:
     Button boot_button_;  // BOOT按键(GPIO8)
     PowerSaveTimer* power_save_timer_;
     VbAduioCodec audio_codec;
-    bool sleep_flag_ = false;
-    // PowerManager* power_manager_;
     
     // RGB LED 和电机控制实例
     RgbLed rgb_led_;
     MotorControl motor_control_;
     bool motor_on_ = false;
-    uint8_t current_led_mode_ = 0;  // 当前LED模式 0-5
+    uint8_t current_led_mode_ = 0;  // 当前LED模式 0-7
     
     // ADC按钮(使用ESP-IDF库)
     AdcButton* adc_button_k50_;
@@ -68,89 +64,73 @@ private:
     
     // RGB灯光状态管理
     bool rgb_light_on_ = false;
-    uint8_t current_color_index_ = 0;
     TaskHandle_t rgb_task_handle_ = nullptr;
-    static const uint8_t RGB_COLORS[8][3];
-    static constexpr uint8_t RGB_COLOR_COUNT = 8;
     
     // K51按键颜色循环状态
     uint8_t k51_color_mode_ = 7; // 0=全彩渐变, 1=白, 2=红, 3=绿, 4=蓝, 5=黄, 6=青, 7=紫
-    void SaveLedMode_(uint8_t mode) {
-        Settings settings("lighting", true);
-        settings.SetInt("led_mode", (int32_t)mode);
-    }
-
-    uint8_t LoadLedMode_(uint8_t default_mode) {
-        Settings settings("lighting", false);
-        int32_t m = settings.GetInt("led_mode", (int32_t)default_mode);
-        m = (m < 0) ? 0 : ((m > 7) ? 7 : m);
-        return (uint8_t)m;
-    }
 
     void ApplyLedMode_(uint8_t mode) {
+        // 限制模式范围
+        if (mode > 7) mode = 7;
+        
         // 停止之前的灯光效果
         if (rgb_light_on_) {
             StopRgbLightEffect();
         }
+        
+        // 更新当前模式
+        current_led_mode_ = mode;
+        
         // 根据模式应用效果
         switch (mode) {
             case 0:
                 ESP_LOGI(TAG, "模式0: 全彩渐变");
-                current_led_mode_ = 0;
                 StartRgbLightEffect();
                 break;
             case 1:
                 ESP_LOGI(TAG, "模式1: 白色");
-                current_led_mode_ = 1;
                 rgb_light_on_ = true;
                 rgb_led_.SetBrightness(MapAppliedBrightness_(GetBrightness_()));
                 rgb_led_.SetColor(255, 255, 255);
                 break;
             case 2:
                 ESP_LOGI(TAG, "模式2: 红色");
-                current_led_mode_ = 2;
                 rgb_light_on_ = true;
                 rgb_led_.SetBrightness(MapAppliedBrightness_(GetBrightness_()));
                 rgb_led_.SetColor(255, 0, 0);
                 break;
             case 3:
                 ESP_LOGI(TAG, "模式3: 绿色");
-                current_led_mode_ = 3;
                 rgb_light_on_ = true;
                 rgb_led_.SetBrightness(MapAppliedBrightness_(GetBrightness_()));
                 rgb_led_.SetColor(0, 255, 0);
                 break;
             case 4:
                 ESP_LOGI(TAG, "模式4: 蓝色");
-                current_led_mode_ = 4;
                 rgb_light_on_ = true;
                 rgb_led_.SetBrightness(MapAppliedBrightness_(GetBrightness_()));
                 rgb_led_.SetColor(0, 0, 255);
                 break;
             case 5:
                 ESP_LOGI(TAG, "模式5: 黄色");
-                current_led_mode_ = 5;
                 rgb_light_on_ = true;
                 rgb_led_.SetBrightness(MapAppliedBrightness_(GetBrightness_()));
                 rgb_led_.SetColor(255, 255, 0);
                 break;
             case 6:
                 ESP_LOGI(TAG, "模式6: 青色");
-                current_led_mode_ = 6;
                 rgb_light_on_ = true;
                 rgb_led_.SetBrightness(MapAppliedBrightness_(GetBrightness_()));
                 rgb_led_.SetColor(0, 255, 255);
                 break;
             case 7:
                 ESP_LOGI(TAG, "模式7: 紫色");
-                current_led_mode_ = 7;
                 rgb_light_on_ = true;
                 rgb_led_.SetBrightness(MapAppliedBrightness_(GetBrightness_()));
                 rgb_led_.SetColor(255, 0, 255);
                 break;
         }
         k51_color_mode_ = current_led_mode_; // 让下次按键从当前模式的下一个开始
-        SaveLedMode_(current_led_mode_);
         // 更新负载补偿
         UpdateBatteryLoadComp();
     }
@@ -289,36 +269,58 @@ private:
             }
             last_k50_click_ms_ = now_ms;
             
-            // 设备开机状态,切换颜色模式
+            // 根据数据点判断当前状态
+            uint8_t dp_brightness = GetBrightness_();
+            uint8_t dp_light_speed = GetLightSpeed_();
             
-            // 停止之前的灯光效果
-            if (rgb_light_on_) {
-                StopRgbLightEffect();
-            }
-            
-            // 只有电机没有启动时才启动
-            if (!motor_on_) {
-                motor_control_.SetSpeed(GetLightSpeed_());
-                motor_control_.Start();
-                motor_on_ = true;
-                ESP_LOGI(TAG, "电机已启动，速度: %d", GetLightSpeed_());
-
-                // 若数据点亮度为0，则按键开启时设为40；否则使用现有数据点亮度
-                uint8_t dp_brightness = GetBrightness_();
-                if (dp_brightness == 0) {
-                    LWSDataPointManager::GetInstance().SetDataPointValue("brightness", 80);
-                    ESP_LOGI(TAG, "数据点亮度为0，已设置为40");
+            if (dp_brightness == 0) {
+                // 亮度为0，开启灯光、电机和模式
+                uint8_t current_mode = GetLightMode_();
+                ESP_LOGI(TAG, "亮度为0，开启灯光、电机和模式: %d", current_mode);
+                k51_color_mode_ = current_mode;
+                
+                // 检查电机速度数据点，如果为0则设置为100
+                if (dp_light_speed == 0) {
+                    LWSDataPointManager::GetInstance().SetCachedDataPoint("light_speed", 100);
+                    ESP_LOGI(TAG, "数据点电机速度为0，已设置为100");
+                    dp_light_speed = 100;
                 }
+                
+                // 启动电机
+                motor_control_.SetSpeed(dp_light_speed);
+                motor_control_.Start();
+                ESP_LOGI(TAG, "电机已启动，速度: %d", dp_light_speed);
+
+                // 设置亮度为80
+                LWSDataPointManager::GetInstance().SetCachedDataPoint("brightness", 80);
+                ESP_LOGI(TAG, "数据点亮度设置为80");
+                
+                // 应用灯光模式
+                ApplyLedMode_(current_mode);
+                // 同步数据点（不触发回调）
+                LWSDataPointManager::GetInstance().SetCachedDataPoint("light_mode", current_mode);
+            } else {
+                // 亮度不为0，切换到下一个模式
+                uint8_t current_mode = GetLightMode_();
+                uint8_t next_mode = (current_mode + 1) % 8;
+                ESP_LOGI(TAG, "亮度不为0，从模式%d切换到模式%d", current_mode, next_mode);
+                
+                // 检查电机速度数据点，如果为0则设置为100
+                if (dp_light_speed == 0) {
+                    LWSDataPointManager::GetInstance().SetCachedDataPoint("light_speed", 100);
+                    ESP_LOGI(TAG, "数据点电机速度为0，已设置为100");
+                    dp_light_speed = 100;
+                }
+                
+                // 启动电机（使用现有速度）
+                motor_control_.SetSpeed(dp_light_speed);
+                motor_control_.Start();
+                ESP_LOGI(TAG, "电机已启动，速度: %d", dp_light_speed);
+                
+                ApplyLedMode_(next_mode);
+                // 同步数据点（不触发回调）
+                LWSDataPointManager::GetInstance().SetCachedDataPoint("light_mode", next_mode);
             }
-            
-            // 先切换到下一个颜色模式
-            k51_color_mode_ = (k51_color_mode_ + 1) % 8;
-
-            // 统一由 ApplyLedMode_ 处理具体效果，避免重复代码
-            ApplyLedMode_(k51_color_mode_);
-
-			// 更新负载补偿状态
-			UpdateBatteryLoadComp();
         });
         
         // 设置K50按钮长按回调 - 关闭灯光和电机
@@ -333,23 +335,24 @@ private:
                 return;
             }
             
-            // 设备开机状态,关闭灯光和电机
-            if (rgb_light_on_) {
-                // 如果灯光已开启,则关闭
-                ESP_LOGI(TAG, "关闭RGB灯光效果");
-                StopRgbLightEffect();
-            }
+            // 设备开机状态,强制关闭灯光和电机
+            ESP_LOGI(TAG, "强制关闭RGB灯光效果");
             
-            // 关闭电机
-            if (motor_on_) {
-                motor_control_.Stop();
-                motor_on_ = false;
-                ESP_LOGI(TAG, "🔧 电机已关闭");
-            }
+            // 强制关闭电机
+            motor_control_.Stop();
+            motor_on_ = false;
+            ESP_LOGI(TAG, "🔧 电机已关闭");
             
-            // 同步状态到云端：关灯时将数据点亮度置为0，避免重启恢复点亮
-            LWSDataPointManager::GetInstance().SetDataPointValue("brightness", 0);
-            ESP_LOGI(TAG, "💡 已同步数据点亮度为0");
+            // 关闭时将数据点设置为0（使用SetCachedDataPoint避免触发回调）
+            LWSDataPointManager::GetInstance().SetCachedDataPoint("brightness", 0);
+            LWSDataPointManager::GetInstance().SetCachedDataPoint("light_speed", 0);
+            LWSDataPointManager::GetInstance().SetCachedDataPoint("light_mode", 0);
+            ESP_LOGI(TAG, "💡 已关闭灯光，数据点亮度设置为0");
+            ESP_LOGI(TAG, "🔧 已关闭电机，数据点速度设置为0");
+            ESP_LOGI(TAG, "🎨 已关闭灯光模式，数据点模式设置为0");
+            
+            // 最后关闭RGB灯光效果
+            StopRgbLightEffect();
             
             // 重置颜色状态,下次按键从模式0开始
             k51_color_mode_ = 7; // 设为7,这样第一次按键时(7+1)%8=0
@@ -498,21 +501,6 @@ private:
             }
         });
 
-        // BOOT按键短按连按三次 - 进入配网模式(仅在开机状态下有效)
-        boot_button_.OnMultipleClick([this]() {
-            ESP_LOGI(TAG, " ===== BOOT按键3次点击 - 进入配网模式 =====");
-            ESP_LOGI(TAG, " 按键类型: BOOT按键 (GPIO8)");
-            
-            // 设备关机状态下不响应
-            if (!device_powered_on_) {
-                ESP_LOGI(TAG, "设备关机状态,配网功能无效");
-                return;
-            }
-            
-            ESP_LOGI(TAG, " 短按连按三次 - 进入配网模式");
-            ResetWifiConfiguration();
-        }, 3);
-        
         // 初始化ADC按钮
         InitializeAdcButtons();
         
@@ -643,31 +631,44 @@ private:
                 return 0;
             },
             [this]() -> int { 
-                int brightness = GetBrightness();
+                int brightness = GetBrightness_();
                 ESP_LOGI(TAG, "读取亮度数据点: brightness = %d", brightness);
                 return brightness;
             },
             [this](int value) { 
                 ESP_LOGI(TAG, "收到亮度数据点设置: brightness = %d", value);
-                SetBrightness(value);
                 SetRgbBrightness(value);
-                // 绑定：亮度>0 表示灯开，则启动电机；亮度=0 表示灯关，则停止电机
-                // if (value > 0) {
-                //     if (!motor_on_) {
-                //         motor_control_.SetSpeed(GetLightSpeed_());
-                //         motor_control_.Start();
-                //         motor_on_ = true;
-                //         ESP_LOGI(TAG, "灯开启，启动电机，速度: %d", GetLightSpeed_());
-                //     }
-                // } else {
-                //     if (motor_on_) {
-                //         motor_control_.Stop();
-                //         motor_on_ = false;
-                //         ESP_LOGI(TAG, "灯光关闭，停止电机");
-                //     }
-                // }
-				// 更新负载补偿状态
-				// UpdateBatteryLoadComp();
+                
+                // 根据亮度值控制电机
+                if (value > 0) {
+                    // 亮度>0，开启电机
+                    if (!motor_on_) {
+                        uint8_t dp_light_speed = GetLightSpeed_();
+                        if (dp_light_speed == 0) {
+                            LWSDataPointManager::GetInstance().SetDataPointValue("light_speed", 80);
+                            dp_light_speed = 80;
+                        }
+                        motor_control_.SetSpeed(dp_light_speed);
+                        motor_control_.Start();
+                        motor_on_ = true;
+                        ESP_LOGI(TAG, "云端控制：灯开启，启动电机，速度: %d", dp_light_speed);
+                    }
+                } else {
+                    // 亮度=0，关闭电机
+                    if (motor_on_) {
+                        motor_control_.Stop();
+                        motor_on_ = false;
+                        ESP_LOGI(TAG, "云端控制：灯关闭，停止电机");
+                    }
+                    
+                    // 亮度为0时，同时将电机速度和模式也设置为0
+                    LWSDataPointManager::GetInstance().SetCachedDataPoint("light_speed", 0);
+                    LWSDataPointManager::GetInstance().SetCachedDataPoint("light_mode", 0);
+                    ESP_LOGI(TAG, "云端控制：灯关闭时，电机速度和模式也设置为0");
+                }
+                
+                // 更新负载补偿状态
+                UpdateBatteryLoadComp();
             },
             // 语速回调函数
             [this]() -> int { return GetSpeed_(); },
@@ -683,7 +684,8 @@ private:
             },
             [this](int value) { 
                 ESP_LOGI(TAG, "收到电机速度数据点设置: light_speed = %d", value);
-                // 通过 light_speed 直接控制电机：>0 启动并设速，=0 停止
+                
+                // 限制速度范围
                 if (value < 0) value = 0;
                 if (value > 100) value = 100;
 
@@ -692,16 +694,23 @@ private:
                     if (!motor_on_) {
                         motor_control_.Start();
                         motor_on_ = true;
-                        ESP_LOGI(TAG, "light_speed触发：电机启动，速度: %d", value);
+                        ESP_LOGI(TAG, "云端控制：电机启动，速度: %d", value);
+                        
+                        // 如果灯光是关闭的，自动打开灯光以便看到电机效果
+                        uint8_t current_brightness = GetBrightness_();
+                        if (current_brightness == 0) {
+                            LWSDataPointManager::GetInstance().SetDataPointValue("brightness", 80);
+                            ESP_LOGI(TAG, "云端控制：电机启动时自动打开灯光，亮度设置为80");
+                        }
                     } else {
-                        ESP_LOGI(TAG, "light_speed触发：电机速度更新为: %d", value);
+                        ESP_LOGI(TAG, "云端控制：电机速度更新为: %d", value);
                     }
                 } else {
                     SetMotorSpeed(0);
                     if (motor_on_) {
                         motor_control_.Stop();
                         motor_on_ = false;
-                        ESP_LOGI(TAG, "light_speed为0：电机停止");
+                        ESP_LOGI(TAG, "云端控制：电机停止");
                     }
                 }
                 // 同步负载信息
@@ -715,7 +724,22 @@ private:
             },
             [this](int value) { 
                 ESP_LOGI(TAG, "收到灯光模式数据点设置: light_mode = %d", value);
-                // TODO: 实现灯光模式控制逻辑
+                
+                // 如果亮度为0，自动打开灯光和电机以便看到模式效果
+                uint8_t current_brightness = GetBrightness_();
+                if (current_brightness == 0) {
+                    LWSDataPointManager::GetInstance().SetDataPointValue("brightness", 80);
+                    ESP_LOGI(TAG, "云端控制：设置灯光模式时自动打开灯光，亮度设置为80");
+                }
+                
+                // 如果电机速度为0，自动设置电机速度以便看到效果
+                uint8_t current_speed = GetLightSpeed_();
+                if (current_speed == 0) {
+                    LWSDataPointManager::GetInstance().SetDataPointValue("light_speed", 100);
+                    ESP_LOGI(TAG, "云端控制：设置灯光模式时自动设置电机速度，速度设置为80");
+                }
+                
+                ApplyLedMode_(value);
             }
         );
     }
@@ -806,19 +830,31 @@ public:
         InitializeLWSDataPointManager();
         ESP_LOGI(TAG, "Data Point Manager initialized.");
 
-
         auto brightness = GetBrightness_();
+        auto light_mode = GetLightMode_();
         ESP_LOGI(TAG, "RGB灯光亮度: 数据点=%d, 应用=%d", brightness, MapAppliedBrightness_(brightness));
+        ESP_LOGI(TAG, "RGB灯光模式: 数据点=%d", light_mode);
+        
+        // 设置按键从当前模式的下一个开始
+        k51_color_mode_ = light_mode;
+        
         if (brightness > 0) {
-            // 加载上次的灯光模式并应用，确保按键从该模式的下一个开始
-            uint8_t last_mode = LoadLedMode_(0);
-            ApplyLedMode_(last_mode);
-            // 绑定：如果开机时亮度>0(存储的灯是开的)，则启动电机
+            // 应用数据点中的灯光模式
+            ApplyLedMode_(light_mode);
+            // 绑定：如果开关开启且亮度>0，则启动电机
             if (!motor_on_) {
-                motor_control_.SetSpeed(GetLightSpeed_());
+                // 检查电机速度数据点，如果为0则设置为80
+                uint8_t dp_light_speed = GetLightSpeed_();
+                if (dp_light_speed == 0) {
+                    LWSDataPointManager::GetInstance().SetDataPointValue("light_speed", 80);
+                    ESP_LOGI(TAG, "开机恢复：数据点电机速度为0，已设置为80");
+                    dp_light_speed = 80;
+                }
+                
+                motor_control_.SetSpeed(dp_light_speed);
                 motor_control_.Start();
                 motor_on_ = true;
-                ESP_LOGI(TAG, "开机恢复状态：灯开，启动电机，速度: %d", GetLightSpeed_());
+                ESP_LOGI(TAG, "开机恢复状态：灯开，启动电机，速度: %d", dp_light_speed);
             }
         }
 
@@ -889,7 +925,11 @@ public:
         uint8_t applied = MapAppliedBrightness_(brightness);
         ESP_LOGI(TAG, "SetRgbBrightness: 数据点=%d, 应用=%d", (int)brightness, (int)applied);
         rgb_led_.SetBrightness(applied);
-        StartRgbLightEffect();
+        if (brightness > 0) {
+            StartRgbLightEffect();
+        } else {
+            StopRgbLightEffect();
+        }
     }
     
     void SetMotorSpeed(uint8_t speed) {
@@ -898,9 +938,14 @@ public:
         ESP_LOGI(TAG, "SetMotorSpeed: 数据点=%d", (int)speed);
         motor_control_.SetSpeed(speed);
         // 如果电机正在运行，重新启动以应用新速度
-        if (motor_on_) {
+        if (motor_on_ && speed > 0) {
             motor_control_.Start();
             ESP_LOGI(TAG, "电机速度已实时更新为: %d", speed);
+        } else if (speed == 0) {
+            // 如果速度为0，停止电机
+            motor_control_.Stop();
+            motor_on_ = false;
+            ESP_LOGI(TAG, "电机速度设置为0，已停止电机");
         }
     }
 
@@ -937,13 +982,6 @@ public:
 		return (uint8_t)(powf(clamped, 1.0f/2.2f) * 255.0f + 0.5f);
 	}
     
-    void StartRgbBreathing(uint8_t r = 255, uint8_t g = 0, uint8_t b = 0) {
-        rgb_led_.StartBreathing(r, g, b);
-    }
-    
-    void StopRgbBreathing() {
-        rgb_led_.StopBreathing();
-    }
     
     // 启动RGB灯光效果
     void StartRgbLightEffect() {
@@ -953,7 +991,6 @@ public:
         
         rgb_light_on_ = true;
         UpdateBatteryLoadComp();
-        current_color_index_ = 0;
         
         // 设置RGB LED亮度（按映射规则应用）
         auto brightness = GetBrightness_();
@@ -1049,8 +1086,6 @@ public:
         ESP_LOGI(TAG, "停止RGB灯光效果");
     }
     
-    
-    
     // 析构函数
     ~CustomBoard() {
         // 停止RGB灯光效果
@@ -1102,17 +1137,6 @@ public:
 
 };
 
-// RGB颜色数组定义 (彩虹色,白,红,绿,蓝,黄,青,紫)
-const uint8_t CustomBoard::RGB_COLORS[8][3] = {
-    {255, 128, 0},    // 彩虹色 (橙色)
-    {255, 255, 255},  // 白色
-    {255, 0, 0},      // 红色
-    {0, 255, 0},      // 绿色
-    {0, 0, 255},      // 蓝色
-    {255, 255, 0},    // 黄色
-    {0, 255, 255},    // 青色
-    {255, 0, 255}     // 紫色
-};
 
 void* create_board() { 
     ESP_LOGE("CustomBoard", "create_board() called - creating CustomBoard instance");

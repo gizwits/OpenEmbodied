@@ -190,66 +190,70 @@ private:
         
         // 动态负载补偿：根据实际负载状态计算补偿值
         // 目标：与无负载参考相比，显示电量波动≤10%
-        uint32_t compensation_mv = 0;
+        // uint32_t compensation_mv = 0;
         
-        if (motor_running_ || led_enabled_) {
-            // 基于实际负载电流计算补偿值
-            float motor_current_ma = (motor_speed_ / 100.0f) * MAX_MOTOR_CURRENT_MA;
-            float led_current_ma = (led_brightness_ / 100.0f) * MAX_LED_CURRENT_MA;
-            float actual_current_ma = motor_current_ma + led_current_ma + SYSTEM_BASE_CURRENT_MA;
-            
-            float total_resistance_mohm = BATTERY_INTERNAL_RESISTANCE_MOHM + LINE_RESISTANCE_MOHM;
-            float voltage_drop_mv = (actual_current_ma * total_resistance_mohm) / 1000.0f;
-            
-            // 基础补偿（微调-10mV）
-            compensation_mv = (uint32_t)voltage_drop_mv + 90; // 基础额外补偿90mV
-            
-            // 模式1（白色）功率较大，增加额外补偿
-            if (led_mode_ == 1) {
-                compensation_mv += 90; // 白色模式额外90mV（微调-10mV）
-            }
-            
-            // 高亮度时增加额外补偿
-            if (led_brightness_ > 80) {
-                compensation_mv += 40; // 高亮度额外40mV（微调-10mV）
-            }
-            
-            
-            // 有负载时：ADC读数偏低（负载压降），需要加上补偿值来恢复真实电压
-            voltage += compensation_mv;
-            is_compensating = true;
-            last_compensation_mv_ = compensation_mv;
-            
-            ESP_LOGD("PowerManager", "🔋 负载补偿: 启用, 补偿值: +%" PRIu32 "mV (电机:%.1fmA, LED:%.1fmA, 模式:%d, 总电流:%.1fmA, 压降:%.1fmV)",
-                     compensation_mv, motor_current_ma, led_current_ma, led_mode_, actual_current_ma, voltage_drop_mv);
+        // if (motor_running_ || led_enabled_) {
+        //     // 基于实际负载电流计算补偿值
+        //     float motor_current_ma = (motor_speed_ / 100.0f) * MAX_MOTOR_CURRENT_MA;
+        //     float led_current_ma = (led_brightness_ / 100.0f) * MAX_LED_CURRENT_MA;
+        //     float actual_current_ma = motor_current_ma + led_current_ma + SYSTEM_BASE_CURRENT_MA;
+        //     
+        //     float total_resistance_mohm = BATTERY_INTERNAL_RESISTANCE_MOHM + LINE_RESISTANCE_MOHM;
+        //     float voltage_drop_mv = (actual_current_ma * total_resistance_mohm) / 1000.0f;
+        //     
+        //     // 基础补偿（微调-10mV）
+        //     compensation_mv = (uint32_t)voltage_drop_mv + 90; // 基础额外补偿90mV
+        //     
+        //     // 模式1（白色）功率较大，增加额外补偿
+        //     if (led_mode_ == 1) {
+        //         compensation_mv += 90; // 白色模式额外90mV（微调-10mV）
+        //     }
+        //     
+        //     // 高亮度时增加额外补偿
+        //     if (led_brightness_ > 80) {
+        //         compensation_mv += 40; // 高亮度额外40mV（微调-10mV）
+        //     }
+        //     
+        //     
+        //     // 有负载时：ADC读数偏低（负载压降），需要加上补偿值来恢复真实电压
+        //     voltage += compensation_mv;
+        //     is_compensating = true;
+        //     last_compensation_mv_ = compensation_mv;
+        //     
+        //     ESP_LOGD("PowerManager", "🔋 负载补偿: 启用, 补偿值: +%" PRIu32 "mV (电机:%.1fmA, LED:%.1fmA, 模式:%d, 总电流:%.1fmA, 压降:%.1fmV)",
+        //              compensation_mv, motor_current_ma, led_current_ma, led_mode_, actual_current_ma, voltage_drop_mv);
 
-            // 将负载下的SOC限制在无负载基线±10%以内（若基线有效）
-            if (baseline_valid_) {
-                uint8_t current_soc = estimate_soc_from_voltage((uint16_t)voltage);
-                int16_t diff = (int16_t)current_soc - (int16_t)baseline_soc_;
-                if (diff > 3) {
-                    uint8_t target_soc = (uint8_t)std::min(100, (int)baseline_soc_ + 3);
-                    uint16_t target_v = voltage_for_soc(target_soc);
-                    int32_t delta_v = (int32_t)target_v - (int32_t)voltage;
-                    voltage = (uint32_t)((int32_t)voltage + delta_v);
-                    ESP_LOGD("PowerManager", "🔋 SOC上限钳位: %d%%→%d%%, 电压调整 +%" PRId32 " mV", current_soc, target_soc, delta_v);
-                } else if (diff < -7) { // 下限稍宽，避免误触发
-                    int target_soc_int = (int)baseline_soc_ - 7;
-                    if (target_soc_int < 0) target_soc_int = 0;
-                    uint8_t target_soc = (uint8_t)target_soc_int;
-                    uint16_t target_v = voltage_for_soc(target_soc);
-                    int32_t delta_v = (int32_t)target_v - (int32_t)voltage;
-                    voltage = (uint32_t)((int32_t)voltage + delta_v);
-                    ESP_LOGD("PowerManager", "🔋 SOC下限钳位: %d%%→%d%%, 电压调整 +%" PRId32 " mV", current_soc, target_soc, delta_v);
-                }
-            }
-        } else {
-            // 无负载时：电压读数正常，不需要补偿
-            compensation_mv = 0;
-            is_compensating = false;
-            last_compensation_mv_ = 0;
-            ESP_LOGD("PowerManager", "🔋 负载补偿: 禁用, 补偿值: 0mV");
-        }
+        //     // 将负载下的SOC限制在无负载基线±10%以内（若基线有效）
+        //     if (baseline_valid_) {
+        //         uint8_t current_soc = estimate_soc_from_voltage((uint16_t)voltage);
+        //         int16_t diff = (int16_t)current_soc - (int16_t)baseline_soc_;
+        //         if (diff > 3) {
+        //             uint8_t target_soc = (uint8_t)std::min(100, (int)baseline_soc_ + 3);
+        //             uint16_t target_v = voltage_for_soc(target_soc);
+        //             int32_t delta_v = (int32_t)target_v - (int32_t)voltage;
+        //             voltage = (uint32_t)((int32_t)voltage + delta_v);
+        //             ESP_LOGD("PowerManager", "🔋 SOC上限钳位: %d%%→%d%%, 电压调整 +%" PRId32 " mV", current_soc, target_soc, delta_v);
+        //         } else if (diff < -7) { // 下限稍宽，避免误触发
+        //             int target_soc_int = (int)baseline_soc_ - 7;
+        //             if (target_soc_int < 0) target_soc_int = 0;
+        //             uint8_t target_soc = (uint8_t)target_soc_int;
+        //             uint16_t target_v = voltage_for_soc(target_soc);
+        //             int32_t delta_v = (int32_t)target_v - (int32_t)voltage;
+        //             voltage = (uint32_t)((int32_t)voltage + delta_v);
+        //             ESP_LOGD("PowerManager", "🔋 SOC下限钳位: %d%%→%d%%, 电压调整 +%" PRId32 " mV", current_soc, target_soc, delta_v);
+        //         }
+        //     }
+        // } else {
+        //     // 无负载时：电压读数正常，不需要补偿
+        //     compensation_mv = 0;
+        //     is_compensating = false;
+        //     last_compensation_mv_ = 0;
+        //     ESP_LOGD("PowerManager", "🔋 负载补偿: 禁用, 补偿值: 0mV");
+        // }
+        
+        // 禁用负载补偿 - 直接使用原始电压读数
+        is_compensating = false;
+        last_compensation_mv_ = 0;
         
         return voltage;
     }
@@ -524,11 +528,11 @@ public:
             print_counter = 0;
             uint32_t voltage = GetBatteryVoltage();
             float actual_voltage = voltage / 1000.0f;
-            auto comp_info = GetLoadCompensationInfo();
+            // auto comp_info = GetLoadCompensationInfo(); // 负载补偿已禁用
             
             ESP_LOGI("PowerManager", "🔋 ===== 电池状态详情 =====");
-            ESP_LOGI("PowerManager", "🔋 实时状态: 电压=%" PRIu32 "mV, 补偿=%s%" PRIu32 "mV, 电机=%s, LED=%s, 模式=%d",
-                     voltage, comp_info.is_compensating ? "+" : "无", last_compensation_mv_,
+            ESP_LOGI("PowerManager", "🔋 实时状态: 电压=%" PRIu32 "mV, 补偿=禁用, 电机=%s, LED=%s, 模式=%d",
+                     voltage,
                      motor_running_ ? "开" : "关", led_enabled_ ? "开" : "关", led_mode_);
             ESP_LOGI("PowerManager", "🔋 ADC原始值: %d, 平均值: %" PRIu32 "", adc_value, average_adc);
             ESP_LOGI("PowerManager", "🔋 检测电压: %" PRIu32 "mV (%.2fV)", voltage, actual_voltage);
