@@ -167,7 +167,7 @@ private:
 #ifndef CONFIG_USE_EYE_STYLE_VB6824
     std::deque<std::unique_ptr<AudioTask>> audio_encode_queue_;
 #endif
-    // std::deque<std::unique_ptr<AudioTask>> audio_playback_queue_;
+    std::deque<std::unique_ptr<AudioTask>> audio_playback_queue_;
     // For server AEC
     std::deque<uint32_t> timestamp_queue_;
 

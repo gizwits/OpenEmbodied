@@ -1471,6 +1471,7 @@ void EyeDisplayHorizontalEmo::StartSadEmojiAnimation() {
     // int EYEBROW_SPACING = 35;
     const int TEAR_SIZE = 4;       // 眼泪大小缩小一半：8/2=4
     const int VERTICAL_OFFSET = 20; // 垂直偏移量，缩短10：10+10=20
+    (void)VERTICAL_OFFSET; // 暂时未使用，避免编译警告
     
     // 创建面部容器
     lv_obj_t* face = lv_obj_create(screen);

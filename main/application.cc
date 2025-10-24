@@ -123,7 +123,7 @@ void Application::CheckNewVersion(Ota& ota) {
                 display->SetChatMessage("system", buffer);
                 display->SetOTAProgress(progress);
 
-#if CONFIG_USE_GIZWITS_MQTT
+#if CONFIG_USE_GIZWITS_MQTT && CONFIG_PROTOCOL_TYPE_COZE
                 auto& mqtt_client = MqttClient::getInstance();
                 if (progress == 100) {
                     mqtt_client.sendOtaProgressReport(100, "done");
@@ -1020,7 +1020,7 @@ void Application::Reboot() {
 }
 
 void Application::WakeWordInvoke(const std::string& wake_word) {
-#if CONFIG_USE_GIZWITS_MQTT
+#if CONFIG_USE_GIZWITS_MQTT && CONFIG_PROTOCOL_TYPE_COZE
     auto& mqtt_client = MqttClient::getInstance();
     mqtt_client.sendTraceLog("info", "唤醒词触发");
 #endif
@@ -1158,7 +1158,7 @@ void Application::initGizwitsServer() {
 
 
     Settings settings("wifi", true);
-#if CONFIG_USE_GIZWITS_MQTT
+#if CONFIG_USE_GIZWITS_MQTT && CONFIG_PROTOCOL_TYPE_COZE
     auto& mqtt_client = MqttClient::getInstance();
     mqtt_client.OnRoomParamsUpdated([this](const RoomParams& params, bool is_mutual) {
         // 判断 protocol_ 是否启动
@@ -1279,7 +1279,7 @@ void Application::StartReportTimer() {
     if (report_timer_handle_ != nullptr) {
         return;
     }
-#if CONFIG_USE_GIZWITS_MQTT
+#if CONFIG_USE_GIZWITS_MQTT && CONFIG_PROTOCOL_TYPE_COZE
     // 先上报一次
     auto& mqtt_client = MqttClient::getInstance();
     mqtt_client.ReportTimer();

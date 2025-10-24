@@ -1171,6 +1171,9 @@ bool MqttClient::uploadP0Data(const void* data, size_t data_len) {
 
 
 void MqttClient::ReportTimer() {
+    if (!mqtt_){
+        return;
+    }
     // 检查 board 是否支持数据点
     if (Board::GetInstance().GetGizwitsProtocolJson() == nullptr) {
         // 如果 board 不支持数据点，直接返回，不上报
