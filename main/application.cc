@@ -416,11 +416,7 @@ void Application::Start() {
     int level = 0;
     bool charging = false;
     bool discharging = false;
-    bool hasBattery = Board::GetInstance().GetBatteryLevel();
-    if (
-        Board::GetInstance().NeedSilentStartup() && 
-        hasBattery
-    ) {
+    if (Board::GetInstance().GetBatteryLevel(level, charging, discharging)) {
         ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
         if (charging) {
             // 静默启动
