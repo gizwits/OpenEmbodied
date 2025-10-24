@@ -762,8 +762,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
         message += "\"max_frame_num\":25";
     } else {
         ESP_LOGI(TAG, "network_type: %d", static_cast<int>(network_type));
-        message += "\"period\":1,";
-        message += "\"max_frame_num\":17";
+        message += "\"period\":3,";
+        message += "\"max_frame_num\":50";
     }
 #else
     message += "\"period\":1,";
