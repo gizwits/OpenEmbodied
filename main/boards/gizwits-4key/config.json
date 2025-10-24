@@ -6,7 +6,8 @@
             "sdkconfig_append": [
                 "CONFIG_CODEC_ES8311_SUPPORT=y",
                 "CONFIG_USE_AUDIO_PROCESSOR=y",
-                "CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS=n"
+                "CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS=n",
+                "CONFIG_USE_DEVICE_AEC=y"
             ]
         }
     ]

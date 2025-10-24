@@ -508,6 +508,9 @@ int MqttClient::getPublishedId() {
 
 void MqttClient::sendTraceLog(const char* level, const char* message) {
 
+    if (!mqtt_) {
+        return;
+    }
     // C2 先不上报
 #ifndef CONFIG_IDF_TARGET_ESP32C2
     // ESP_LOGI(TAG, "sendTraceLog: %s", message);

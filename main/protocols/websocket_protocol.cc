@@ -20,14 +20,6 @@
 
 #define MAX_AUDIO_PACKET_SIZE 256
 
-
-
-#if CONFIG_IDF_TARGET_ESP32S3
-#define MAX_CACHED_PACKETS 10
-#else
-#define MAX_CACHED_PACKETS 4
-#endif
-
 struct Emotion {
     const char* icon;
     const char* text;
@@ -267,9 +259,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     }
     // 用来标记是否触发 progress
     // 如果触发了，收到第一包音频再进入说话模式
-    static bool is_first_packet_ = false;
-    static bool is_start_progress_ = false;
-    static bool is_detect_emotion_ = false;
+    // 这些变量现在是类成员变量，在头文件中定义
     error_occurred_ = false;
     busy_sending_audio_ = false;  // 重置音频发送标志
     std::string url = std::string("ws://") + room_params_.api_domain + std::string("/v1/chat") + std::string("?bot_id=") + std::string(room_params_.bot_id);

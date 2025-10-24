@@ -247,3 +247,17 @@ bool Ota::IsNewVersionAvailable(const std::string& currentVersion, const std::st
     
     return newer.size() > current.size();
 }
+
+// Default implementations for virtual functions
+const std::string& Ota::GetCheckVersionUrl() const {
+    return check_version_url_;
+}
+
+
+std::string Ota::GetActivationPayload() {
+    return "{}";
+}
+
+esp_err_t Ota::Activate() {
+    return ESP_OK;
+}

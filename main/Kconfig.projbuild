@@ -7,6 +7,19 @@ config OTA_URL
         The application will access this URL to check for new firmwares and server address.
 
 
+
+
+choice
+    prompt "protocol type"
+    default PROTOCOL_TYPE_COZE
+    help
+        Select device display language
+
+    config PROTOCOL_TYPE_COZE
+        bool "Coze"
+    config PROTOCOL_TYPE_XIAOZHI
+        bool "Xiaozhi"
+endchoice
 choice
     prompt "Default Language"
     default LANGUAGE_ZH_CN

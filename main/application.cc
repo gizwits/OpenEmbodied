@@ -491,10 +491,8 @@ void Application::Start() {
         last_error_message_ = message;
     });
     protocol_->OnIncomingAudio([this](AudioStreamPacket&& packet) {
-        if (device_state_ == kDeviceStateSpeaking) {
-            auto packet_ptr = std::make_unique<AudioStreamPacket>(std::move(packet));
-            audio_service_.PushPacketToDecodeQueue(std::move(packet_ptr));
-        }
+        auto packet_ptr = std::make_unique<AudioStreamPacket>(std::move(packet));
+        audio_service_.PushPacketToDecodeQueue(std::move(packet_ptr));
     });
     protocol_->OnAudioChannelOpened([this, codec, &board]() {
         board.SetPowerSaveMode(false);
@@ -1152,6 +1150,13 @@ void Application::PlaySound(const std::string_view& sound) {
 }
 
 void Application::initGizwitsServer() {
+
+    // 小智不需要初始化
+#if CONFIG_PROTOCOL_TYPE_XIAOZHI
+    return;
+#endif
+
+
     Settings settings("wifi", true);
 #if CONFIG_USE_GIZWITS_MQTT
     auto& mqtt_client = MqttClient::getInstance();

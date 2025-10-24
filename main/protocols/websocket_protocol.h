@@ -59,6 +59,11 @@ private:
     // 用户说话结束时间戳，用于chat_mode==1时忽略1秒内的音频上传
     std::chrono::steady_clock::time_point speech_stopped_timestamp_;
     bool speech_stopped_recorded_ = false;
+    
+    // 共享的状态变量，用于两个平台实现
+    bool is_first_packet_ = false;
+    bool is_start_progress_ = false;
+    bool is_detect_emotion_ = false;
 
     void ParseServerHello(const cJSON* root);
     bool SendText(const std::string& text) override;

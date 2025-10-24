@@ -142,55 +142,6 @@ void Protocol::SendStopListening() {
     // SendText(message);
 }
 
-void Protocol::SendIotDescriptors(const std::string& descriptors) {
-    // cJSON* root = cJSON_Parse(descriptors.c_str());
-    // if (root == nullptr) {
-    //     ESP_LOGE(TAG, "Failed to parse IoT descriptors: %s", descriptors.c_str());
-    //     return;
-    // }
-
-    // if (!cJSON_IsArray(root)) {
-    //     ESP_LOGE(TAG, "IoT descriptors should be an array");
-    //     cJSON_Delete(root);
-    //     return;
-    // }
-
-    // int arraySize = cJSON_GetArraySize(root);
-    // for (int i = 0; i < arraySize; ++i) {
-    //     cJSON* descriptor = cJSON_GetArrayItem(root, i);
-    //     if (descriptor == nullptr) {
-    //         ESP_LOGE(TAG, "Failed to get IoT descriptor at index %d", i);
-    //         continue;
-    //     }
-
-    //     cJSON* messageRoot = cJSON_CreateObject();
-    //     cJSON_AddStringToObject(messageRoot, "session_id", session_id_.c_str());
-    //     cJSON_AddStringToObject(messageRoot, "type", "iot");
-    //     cJSON_AddBoolToObject(messageRoot, "update", true);
-
-    //     cJSON* descriptorArray = cJSON_CreateArray();
-    //     cJSON_AddItemToArray(descriptorArray, cJSON_Duplicate(descriptor, 1));
-    //     cJSON_AddItemToObject(messageRoot, "descriptors", descriptorArray);
-
-    //     char* message = cJSON_PrintUnformatted(messageRoot);
-    //     if (message == nullptr) {
-    //         ESP_LOGE(TAG, "Failed to print JSON message for IoT descriptor at index %d", i);
-    //         cJSON_Delete(messageRoot);
-    //         continue;
-    //     }
-
-    //     SendText(std::string(message));
-    //     cJSON_free(message);
-    //     cJSON_Delete(messageRoot);
-    // }
-
-    // cJSON_Delete(root);
-}
-
-void Protocol::SendIotStates(const std::string& states) {
-    // std::string message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"iot\",\"update\":true,\"states\":" + states + "}";
-    // SendText(message);
-}
 
 // void Protocol::SendMcpMessage(const std::string& payload) {
 //     std::string message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"mcp\",\"payload\":" + payload + "}";
@@ -228,6 +179,18 @@ void Protocol::UpdateRoomParams(const RoomParams& params) {
     room_params_ = params;
 }
 
-void Protocol::SendTextToAI(const std::string& text) {
-    // 
+void Protocol::SendTextToAI(const std::string& message) {
+    const char *init_message = "{"
+        "\"event_type\":\"conversation.message.create\","
+        "\"data\":{"
+            "\"role\":\"user\","
+            "\"content_type\":\"text\","
+            "\"content\":\"%s\""
+        "}"
+    "}";
+
+    char *init_message_str = (char *)malloc(strlen(init_message) + message.length() + 1);
+    snprintf(init_message_str, strlen(init_message) + message.length() + 1, init_message, message.c_str());
+    SendText(init_message_str);
+    free(init_message_str);
 }

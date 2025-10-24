@@ -21,6 +21,7 @@
 #include "processors/audio_debugger.h"
 #include "wake_word.h"
 #include "protocol.h"
+#include "audio/codecs/es8311_audio_codec.h"
 
 
 /*
@@ -146,9 +147,7 @@ private:
     OpusResampler input_resampler_;
     OpusResampler reference_resampler_;
     OpusResampler output_resampler_;
-#endif
-
-
+    OpusResampler playback_ref_resampler_;
     DebugStatistics debug_statistics_;
 
     EventGroupHandle_t event_group_;
@@ -170,6 +169,11 @@ private:
     // For server AEC
     std::deque<uint32_t> timestamp_queue_;
 
+    // Software AEC reference buffer (only for Es8311)
+    std::deque<int16_t> reference_ring_;
+    bool enable_software_aec_ = false;
+    size_t reference_ring_max_samples_ = 16000 * 2; // ~2 seconds @16k mono
+
     bool wake_word_initialized_ = false;
     bool audio_processor_initialized_ = false;
     bool voice_detected_ = false;
@@ -187,7 +191,9 @@ private:
     void PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t>&& pcm);
     void SetDecodeSampleRate(int sample_rate, int frame_duration);
     void CheckAndUpdateAudioPowerState();
-    
+
+    void PushReferenceSamples(const int16_t* data, size_t samples);
+    void PopReferenceSamples(size_t samples, std::vector<int16_t>& out);
 };
 
 #endif

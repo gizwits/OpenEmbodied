@@ -8,6 +8,14 @@
 #include <vector>
 #include <esp_timer.h>
 
+
+#if CONFIG_IDF_TARGET_ESP32S3
+#define MAX_CACHED_PACKETS 0
+#else
+#define MAX_CACHED_PACKETS 4
+#endif
+
+
 struct AudioStreamPacket {
     int sample_rate = 0;
     int frame_duration = 0;
@@ -92,8 +100,6 @@ public:
     virtual void PreAbortSpeaking();
     virtual void SendMessage(const std::string& message);
     virtual void SendAbortSpeaking(AbortReason reason);
-    virtual void SendIotDescriptors(const std::string& descriptors);
-    virtual void SendIotStates(const std::string& states);
     virtual void UpdateRoomParams(const RoomParams& params);
     virtual const RoomParams& GetRoomParams() const { return room_params_; }
     virtual bool HasErrorOccurred() const { return error_occurred_; }
@@ -107,6 +113,7 @@ protected:
     std::function<void(const std::string& message)> on_network_error_;
 
     RoomParams room_params_;
+    int version_ = 1;
 
     int server_sample_rate_ = 24000;
     int server_frame_duration_ = 60;

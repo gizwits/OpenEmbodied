@@ -119,13 +119,15 @@ private:
                 // 非休眠模式才播报
                 if (!is_sleep_) {
                     ESP_LOGI(TAG, "执行关机操作");
-                    Application::GetInstance().QuitTalking();
-                    vTaskDelay(pdMS_TO_TICKS(200));
-                    auto codec = GetAudioCodec();
-                    gpio_set_level(BUILTIN_SINGLE_LED_GPIO, 1);
-                    codec->EnableOutput(true);
-                    Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
-                    need_power_off_ = true;
+                    Application::GetInstance().Schedule([this]() {
+                        Application::GetInstance().QuitTalking();
+                        vTaskDelay(pdMS_TO_TICKS(200));
+                        auto codec = GetAudioCodec();
+                        gpio_set_level(BUILTIN_SINGLE_LED_GPIO, 1);
+                        codec->EnableOutput(true);
+                        Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
+                        need_power_off_ = true;
+                    });
                 }
                 
             }
@@ -176,10 +178,11 @@ private:
         
         volume_up_button_.OnClick([this]() {
             WakeUp();
-            ESP_LOGI(TAG, "volume_up_button_.OnClick");
-            auto codec = GetAudioCodec();
-            auto volume = codec->output_volume() + 10;
-            codec->SetOutputVolume(volume);
+            Application::GetInstance().Schedule([this]() {
+                auto codec = GetAudioCodec();
+                auto volume = codec->output_volume() + 10;
+                codec->SetOutputVolume(volume);
+            });
         });
         volume_up_button_.OnLongPress([this]() {
             ESP_LOGI(TAG, "volume_up_button_.OnLongPress");
@@ -188,10 +191,11 @@ private:
 
         volume_down_button_.OnClick([this]() {
             WakeUp();
-            ESP_LOGI(TAG, "volume_down_button_.OnClick");
-            auto codec = GetAudioCodec();
-            auto volume = codec->output_volume() - 10;
-            codec->SetOutputVolume(volume);
+            Application::GetInstance().Schedule([this]() {
+                auto codec = GetAudioCodec();
+                auto volume = codec->output_volume() - 10;
+                codec->SetOutputVolume(volume);
+            });
         });
         volume_down_button_.OnLongPress([this]() {
             ESP_LOGI(TAG, "volume_down_button_.OnLongPress");
