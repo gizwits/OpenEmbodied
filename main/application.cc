@@ -416,7 +416,7 @@ void Application::Start() {
     int level = 0;
     bool charging = false;
     bool discharging = false;
-    bool hasBattery = Board::GetInstance().GetBatteryLevel();
+    bool hasBattery = Board::GetInstance().GetBatteryLevel(level, charging, discharging);
     if (
         Board::GetInstance().NeedSilentStartup() && 
         hasBattery
