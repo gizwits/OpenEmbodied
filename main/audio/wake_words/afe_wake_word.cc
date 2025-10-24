@@ -64,11 +64,16 @@ bool AfeWakeWord::Initialize(AudioCodec* codec) {
     }
 
     std::string input_format;
-    for (int i = 0; i < codec_->input_channels() - ref_num; i++) {
-        input_format.push_back('M');
-    }
-    for (int i = 0; i < ref_num; i++) {
-        input_format.push_back('R');
+    if (codec_->supports_software_aec_reference()) {
+        // Force MR for software reference (single mic + reference)
+        input_format = "MR";
+    } else {
+        for (int i = 0; i < codec_->input_channels() - ref_num; i++) {
+            input_format.push_back('M');
+        }
+        for (int i = 0; i < ref_num; i++) {
+            input_format.push_back('R');
+        }
     }
     afe_config_t* afe_config = afe_config_init(input_format.c_str(), models_, AFE_TYPE_SR, AFE_MODE_HIGH_PERF);
     afe_config->aec_init = codec_->input_reference();

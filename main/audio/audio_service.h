@@ -148,6 +148,8 @@ private:
     OpusResampler reference_resampler_;
     OpusResampler output_resampler_;
     OpusResampler playback_ref_resampler_;
+#endif
+
     DebugStatistics debug_statistics_;
 
     EventGroupHandle_t event_group_;

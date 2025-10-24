@@ -31,8 +31,6 @@ public:
 #endif
     virtual bool InputData(std::vector<int16_t>& data);
     virtual void Start();
-    // Optional: set microphone input gain (dB). Default no-op.
-    virtual void SetInputGainDb(float gain_db);
     // Capability: whether this codec supports software AEC reference path
     virtual bool supports_software_aec_reference() const { return false; }
     

@@ -35,9 +35,6 @@ public:
     virtual void EnableInput(bool enable) override;
     virtual void EnableOutput(bool enable) override;
 
-    // Set microphone input gain in dB. Requires device opened (EnableInput/Output true).
-    virtual void SetInputGainDb(float gain_db) override;
-
     virtual bool supports_software_aec_reference() const override { return true; }
 };
 

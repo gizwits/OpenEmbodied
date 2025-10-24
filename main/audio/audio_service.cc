@@ -323,7 +323,23 @@ void AudioService::AudioInputTask() {
             if (samples > 0) {
                 if (ReadAudioData(data, 16000, samples)) {
                     ESP_LOGD(TAG, "Audio processor feed: opus.size()=%u", (unsigned int)data.size());
-                    audio_processor_->Feed(std::move(data));
+                    if (enable_software_aec_ && codec_->input_channels() == 1 && codec_->input_reference()) {
+                        std::vector<int16_t> reference;
+                        PopReferenceSamples(data.size(), reference);
+                        if (reference.size() < data.size()) {
+                            reference.resize(data.size(), 0);
+                        }
+                        std::vector<int16_t> interleaved;
+                        interleaved.resize(data.size() * 2);
+                        for (size_t i = 0, j = 0; i < data.size(); ++i, j += 2) {
+                            interleaved[j] = data[i];
+                            interleaved[j + 1] = reference[i];
+                        }
+                        audio_processor_->Feed(std::move(interleaved));
+                    } else {
+                        audio_processor_->Feed(std::move(data));
+                    }
+
                     continue;
                 } else {
                     ESP_LOGE(TAG, "Failed to read audio data");
@@ -472,19 +488,21 @@ void AudioService::OpusCodecTask() {
                         esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
                     }
 
-                  // Capture playback as AEC reference for Es8311
-                    if (enable_software_aec_) {
-                        const int16_t* src = decode_pcm_buffer_.data();
-                        size_t src_samples = decode_pcm_buffer_.size();
-                        if (codec_->output_sample_rate() != 16000) {
-                            std::vector<int16_t> resampled(playback_ref_resampler_.GetOutputSamples(src_samples));
-                            playback_ref_resampler_.Process(src, src_samples, resampled.data());
-                            PushReferenceSamples(resampled.data(), resampled.size());
-                        } else {
-                            PushReferenceSamples(src, src_samples);
-                        }
+                }
+
+                codec_->OutputData(decode_pcm_buffer_);
+
+                // Capture playback as AEC reference for Es8311
+                if (enable_software_aec_) {
+                    const int16_t* src = decode_pcm_buffer_.data();
+                    size_t src_samples = decode_pcm_buffer_.size();
+                    if (codec_->output_sample_rate() != 16000) {
+                        std::vector<int16_t> resampled(playback_ref_resampler_.GetOutputSamples(src_samples));
+                        playback_ref_resampler_.Process(src, src_samples, resampled.data());
+                        PushReferenceSamples(resampled.data(), resampled.size());
+                    } else {
+                        PushReferenceSamples(src, src_samples);
                     }
-                    codec_->OutputData(decode_pcm_buffer_);
                 }
 #else
                 // VB6824模式：直接输出解码后的数据
