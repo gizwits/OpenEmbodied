@@ -680,6 +680,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     snprintf(event_id, sizeof(event_id), "%lu", random_value);
 
     NetworkType network_type = Board::GetInstance().GetNetworkType();
+    int speed = Board::GetInstance().GetVoiceSpeed();
 
     int chat_mode = Application::GetInstance().GetChatMode();
     
@@ -760,8 +761,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
         message += "\"max_frame_num\":25";
     } else {
         ESP_LOGI(TAG, "network_type: %d", static_cast<int>(network_type));
-        message += "\"period\":1,";
-        message += "\"max_frame_num\":17";
+        message += "\"period\":3,";
+        message += "\"max_frame_num\":50";
     }
 #else
     message += "\"period\":1,";

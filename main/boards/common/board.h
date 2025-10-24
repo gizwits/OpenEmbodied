@@ -79,6 +79,7 @@ public:
     virtual std::string GetDeviceStatusJson() = 0;
     virtual int MaxVolume() { return 100; }
     virtual int MaxBacklightBrightness() { return 100; }
+    virtual int GetVoiceSpeed() { return 0; }
     virtual bool IsCharging() { return false; }
     virtual void PowerOff() {};
     virtual void ResetPowerSaveTimer() {};  // 新增：重置电源保存定时器
@@ -92,6 +93,7 @@ public:
     virtual bool NeedPlayProcessVoiceWithLife() { return false; }
     // 充电状态是否静默启动
     virtual bool NeedSilentStartup() { return false; }
+    virtual bool NeedBlockLowBattery() { return false; }
     
     // 数据点相关方法
     virtual const char* GetGizwitsProtocolJson() const { return nullptr; }

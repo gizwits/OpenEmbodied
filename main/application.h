@@ -52,6 +52,7 @@ public:
     void Start();
     void MainEventLoop();
     void GenerateTraceId();
+    void ChangeBot(const char* id, const char* voice_id);
     DeviceState GetDeviceState() const { return device_state_; }
     bool IsVoiceDetected() const { return audio_service_.IsVoiceDetected(); }
     void Schedule(std::function<void()> callback, const std::string& task_name = "unknown");

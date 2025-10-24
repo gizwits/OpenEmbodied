@@ -70,11 +70,11 @@ private:
                     }
                     ESP_LOGI(TAG, "提取到的ID: %s", id);
 
-                    if (strcmp(id, "88044BCD") == 0) {
+                    if (strcmp(id, "88044BCD") == 0 || strcmp(id, "EBFCED61") == 0) {
                         // 小杰
                         Application::GetInstance().ChangeBot("7509442794864951330", "7468512265134882867");
                     }
-                    if (strcmp(id, "3BC25962") == 0) {
+                    if (strcmp(id, "3BC25962") == 0 || strcmp(id, "FBBAE962") == 0) {
                         // 机智云
                         Application::GetInstance().ChangeBot("7486372905413787700", "7468518846874533939");
                     }
@@ -211,6 +211,9 @@ public:
     virtual Servo* GetServo() override {
         return &servo_;
     }
+
+    virtual bool GetNeedPlayPrologue() override { return true; }
+
 
     virtual AudioCodec* GetAudioCodec() override {
         return &audio_codec;

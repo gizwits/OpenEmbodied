@@ -416,9 +416,10 @@ void Application::Start() {
     int level = 0;
     bool charging = false;
     bool discharging = false;
+    bool hasBattery = Board::GetInstance().GetBatteryLevel(level, charging, discharging);
     if (
         Board::GetInstance().NeedSilentStartup() && 
-        Board::GetInstance().GetBatteryLevel(level, charging, discharging)
+        hasBattery
     ) {
         ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
         if (charging) {
@@ -443,11 +444,11 @@ void Application::Start() {
     // ESP_LOGI(TAG, "json: %s", json.c_str());
 
     bool battery_ok = CheckBatteryLevel();
-    if (!battery_ok) {
+    if (!battery_ok && Board::GetInstance().NeedBlockLowBattery()) {
         // 播放提示
         vTaskDelay(pdMS_TO_TICKS(3000));
-        // Board::GetInstance().PowerOff();
-        // return;
+        Board::GetInstance().PowerOff();
+        return;
     }
 
     audio_service_.ResetDecoder();
@@ -1085,6 +1086,34 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
             ExitSleepMode();
         }, "WakeWordInvoke_ExitSleepMode");
     }
+}
+
+
+void Application::ChangeBot(const char* id, const char* voice_id) {
+    
+    if (protocol_) {
+        
+        Schedule([this, id = std::string(id), voice_id = std::string(voice_id)]() {
+            QuitTalking();
+            CancelPlayMusic();
+            auto params = protocol_->GetRoomParams();
+            params.bot_id = id;
+            params.voice_id = voice_id;
+            protocol_->UpdateRoomParams(params);
+    
+            if (protocol_->IsAudioChannelOpened()) {
+                Schedule([this]() {
+                    vTaskDelay(pdMS_TO_TICKS(500));
+                    ToggleChatState();
+                });
+            } else {
+                Schedule([this]() {
+                    ToggleChatState();
+                });
+            }
+        });
+    }
+    
 }
 
 bool Application::CanEnterSleepMode() {
