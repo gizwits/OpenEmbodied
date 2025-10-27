@@ -130,6 +130,7 @@ void AudioService::Initialize(AudioCodec* codec) {
     };
     esp_timer_create(&audio_power_timer_args, &audio_power_timer_);
 
+#ifndef CONFIG_USE_EYE_STYLE_VB6824
     // Enable software AEC only for Es8311 (avoid RTTI)
     enable_software_aec_ = codec_->supports_software_aec_reference();
     if (enable_software_aec_) {
@@ -138,6 +139,7 @@ void AudioService::Initialize(AudioCodec* codec) {
         }
         reference_ring_.clear();
     }
+#endif
 }
 
 void AudioService::Start() {
@@ -170,7 +172,7 @@ void AudioService::Start() {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->AudioInputTask();
         vTaskDelete(NULL);
-    }, "audio_input", input_task_size, this, 8, &audio_input_task_handle_);  // 提高优先级从 8 到 6
+    }, "audio_input", input_task_size, this, 8, &audio_input_task_handle_);
 
     /* Start the audio output task */
     xTaskCreate([](void* arg) {
@@ -189,7 +191,7 @@ void AudioService::Start() {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->OpusCodecTask();
         vTaskDelete(NULL);
-    }, "opus_codec", task_size, this, 2, &opus_codec_task_handle_);  // 提高优先级从 2 到 5
+    }, "opus_codec", task_size, this, 2, &opus_codec_task_handle_);
 }
 
 void AudioService::Stop() {
@@ -322,24 +324,7 @@ void AudioService::AudioInputTask() {
             int samples = audio_processor_->GetFeedSize();
             if (samples > 0) {
                 if (ReadAudioData(data, 16000, samples)) {
-                    ESP_LOGD(TAG, "Audio processor feed: opus.size()=%u", (unsigned int)data.size());
-                    if (enable_software_aec_ && codec_->input_channels() == 1 && codec_->input_reference()) {
-                        std::vector<int16_t> reference;
-                        PopReferenceSamples(data.size(), reference);
-                        if (reference.size() < data.size()) {
-                            reference.resize(data.size(), 0);
-                        }
-                        std::vector<int16_t> interleaved;
-                        interleaved.resize(data.size() * 2);
-                        for (size_t i = 0, j = 0; i < data.size(); ++i, j += 2) {
-                            interleaved[j] = data[i];
-                            interleaved[j + 1] = reference[i];
-                        }
-                        audio_processor_->Feed(std::move(interleaved));
-                    } else {
-                        audio_processor_->Feed(std::move(data));
-                    }
-
+                    audio_processor_->Feed(std::move(data));
                     continue;
                 } else {
                     ESP_LOGE(TAG, "Failed to read audio data");
@@ -462,6 +447,7 @@ void AudioService::AudioOutputTask() {
         }
         codec_->OutputData(task->pcm);
 
+#ifndef CONFIG_USE_EYE_STYLE_VB6824
         // Capture playback as AEC reference for Es8311
         if (enable_software_aec_) {
             const int16_t* src = task->pcm.data();
@@ -474,7 +460,7 @@ void AudioService::AudioOutputTask() {
                 PushReferenceSamples(src, src_samples);
             }
         }
-
+#endif
         /* Update the last output time */
         last_output_time_ = std::chrono::steady_clock::now();
         debug_statistics_.playback_count++;
@@ -540,13 +526,16 @@ void AudioService::OpusCodecTask() {
 
             SetDecodeSampleRate(packet->sample_rate, packet->frame_duration);
             if (opus_decoder_->Decode(std::move(packet->payload), task->pcm)) {
-                // 重采样（如果需要）
-                if (opus_decoder_->sample_rate() != codec_->output_sample_rate()) {
-                    int target_size = output_resampler_.GetOutputSamples(task->pcm.size());
-                    std::vector<int16_t> resampled(target_size);
-                    output_resampler_.Process(task->pcm.data(), task->pcm.size(), resampled.data());
-                    task->pcm = std::move(resampled);
-                }
+
+#ifndef CONFIG_USE_EYE_STYLE_VB6824
+            // 重采样（如果需要）
+            if (opus_decoder_->sample_rate() != codec_->output_sample_rate()) {
+                int target_size = output_resampler_.GetOutputSamples(task->pcm.size());
+                std::vector<int16_t> resampled(target_size);
+                output_resampler_.Process(task->pcm.data(), task->pcm.size(), resampled.data());
+                task->pcm = std::move(resampled);
+            }
+#endif
 
 #if CONFIG_USE_SERVER_AEC
                 /* Record the timestamp for server AEC before moving task */
