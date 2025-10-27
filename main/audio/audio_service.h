@@ -171,10 +171,12 @@ private:
     // For server AEC
     std::deque<uint32_t> timestamp_queue_;
 
+#ifndef CONFIG_USE_EYE_STYLE_VB6824
     // Software AEC reference buffer (only for Es8311)
     std::deque<int16_t> reference_ring_;
     bool enable_software_aec_ = false;
     size_t reference_ring_max_samples_ = 16000 * 2; // ~2 seconds @16k mono
+#endif
 
     bool wake_word_initialized_ = false;
     bool audio_processor_initialized_ = false;
@@ -194,8 +196,10 @@ private:
     void SetDecodeSampleRate(int sample_rate, int frame_duration);
     void CheckAndUpdateAudioPowerState();
 
+#ifndef CONFIG_USE_EYE_STYLE_VB6824
     void PushReferenceSamples(const int16_t* data, size_t samples);
     void PopReferenceSamples(size_t samples, std::vector<int16_t>& out);
+#endif
 };
 
 #endif

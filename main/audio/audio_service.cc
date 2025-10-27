@@ -181,7 +181,6 @@ void AudioService::Start() {
         vTaskDelete(NULL);
     }, "audio_output", 2048 + 768, this, 3, &audio_output_task_handle_);
 #endif
-
     /* Start the opus codec task */
     int task_size = 2048 * 13;
 #ifdef CONFIG_USE_EYE_STYLE_VB6824
@@ -977,6 +976,7 @@ void AudioService::CheckAndUpdateAudioPowerState() {
     }
 }
 
+#ifndef CONFIG_USE_EYE_STYLE_VB6824
 void AudioService::PushReferenceSamples(const int16_t* data, size_t samples) {
     if (!samples) return;
     // Limit ring buffer size
@@ -1002,3 +1002,4 @@ void AudioService::PopReferenceSamples(size_t samples, std::vector<int16_t>& out
         reference_ring_.erase(reference_ring_.begin(), reference_ring_.begin() + take);
     }
 }
+#endif
