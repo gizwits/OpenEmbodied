@@ -70,13 +70,13 @@ private:
         }
         sleep_flag_ = true;
         auto& application = Application::GetInstance();
+        application.QuitTalking();
+
         if (need_delay) {
             application.Alert("", "", "", Lang::Sounds::P3_SLEEP);
             vTaskDelay(pdMS_TO_TICKS(3000));
             ESP_LOGI(TAG, "Sleep mode");
         }
-        application.QuitTalking();
-
         // 检查不在充电就真休眠
         PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
     }
@@ -114,7 +114,13 @@ private:
             });
         } else {
             rec_button_->OnPressDown([this]() {
+
+                if (Application::GetInstance().IsTmpFactoryTestMode()) {
+                    Application::GetInstance().PlaySound(Lang::Sounds::P3_SUCCESS);
+                    return;
+                }
                 WakeUpPowerSaveTimer();
+                
                 auto &app = Application::GetInstance();
                 app.ToggleChatState();
             });
