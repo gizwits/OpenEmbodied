@@ -33,7 +33,7 @@
 
 
 #define RESET_WIFI_CONFIGURATION_COUNT 3
-#define SLEEP_TIME_SEC 60 * 100
+#define SLEEP_TIME_SEC 60 * 3
 
 // #define SLEEP_TIME_SEC 30
 class CustomBoard : public WifiBoard {
@@ -139,7 +139,6 @@ private:
     bool need_power_off_ = false;
     bool device_powered_on_ = true;  // 设备是否开机
     int64_t power_on_time_ = 0;  // 记录上电时间
-    bool low_voltage_startup_ = false;  // 低电压启动标志
     
     // BOOT按键三击计数逻辑
     uint8_t boot_button_click_count_ = 0;
@@ -222,6 +221,9 @@ private:
         gpio_set_level(POWER_HOLD_GPIO, 0);
         ESP_LOGI(TAG, "🔋 电源保持引脚已拉低，设备关机 (GPIO%d)", POWER_HOLD_GPIO);
         
+        // 延时3秒
+        vTaskDelay(pdMS_TO_TICKS(3000));
+
         // 进入深度睡眠
         run_sleep_mode(false);
     }
@@ -562,52 +564,6 @@ private:
         }
     }
 
-    // 启动时电压检测 - 使用PowerManager的最终滤波电压，并采用与关机相同的“连续判定”策略
-    void CheckStartupVoltage() {
-        // 等待PowerManager开始采样并填充滑动窗口
-        vTaskDelay(pdMS_TO_TICKS(600)); // 约6个周期(100ms)，使10点窗口部分收敛
-
-        const uint32_t LOW_VOLTAGE_THRESHOLD_MV = 3400; // 与关机阈值一致
-        const int consecutive_needed = 10;               // 与关机判定一致
-        const int max_checks = 20;                       // 最多检查约2秒
-        int consecutive = 0;
-        uint32_t last_mv = 0;
-        for (int i = 0; i < max_checks; ++i) {
-            last_mv = PowerManager::GetInstance().GetCurrentBatteryVoltage();
-            if (last_mv <= LOW_VOLTAGE_THRESHOLD_MV) {
-                consecutive++;
-                if (consecutive >= consecutive_needed) break;
-            } else {
-                consecutive = 0;
-            }
-            vTaskDelay(pdMS_TO_TICKS(100));
-        }
-
-        ESP_LOGI(TAG, "🔋 启动电压检测(连续判定): 最近电压=%" PRIu32 "mV, 阈值=%dmV, 连续低于次数=%d/%d", 
-                 last_mv, (int)LOW_VOLTAGE_THRESHOLD_MV, consecutive, consecutive_needed);
-
-        if (consecutive >= consecutive_needed) {
-            low_voltage_startup_ = true;
-            ESP_LOGW(TAG, "🔋 低电压启动(连续): 电压≤%dmV (连续%d次)，设备无法启动", 
-                     (int)LOW_VOLTAGE_THRESHOLD_MV, consecutive_needed);
-            
-            // 立即关机，等待充电
-            ESP_LOGW(TAG, "🔋 低电压保护：设备将立即关机，请充电后重新启动");
-            vTaskDelay(pdMS_TO_TICKS(500));
-            
-            // 拉低电源保持引脚，关闭设备
-            gpio_set_level(POWER_HOLD_GPIO, 0);
-            ESP_LOGI(TAG, "🔋 电源保持引脚已拉低，设备关机 (GPIO%d)", POWER_HOLD_GPIO);
-            
-            // 进入深度睡眠
-            esp_deep_sleep_start();
-        } else {
-            low_voltage_startup_ = false;
-            ESP_LOGI(TAG, "🔋 正常电压启动: 未满足连续%d次≤%dmV条件", consecutive_needed, (int)LOW_VOLTAGE_THRESHOLD_MV);
-        }
-    }
-
-
     void InitializeLWSDataPointManager() {
         
         // 设置 LWSDataPointManager 的回调函数
@@ -750,8 +706,6 @@ public:
     bool NeedBlockLowBattery() override {
         return true;
     }
-    // 启动电压是否过低(true表示不允许启动)
-    bool IsLowVoltageStartup() const { return low_voltage_startup_; }
     // 是否低电量(基于PowerManager阈值)
     // bool IsLowBattery() const override { return PowerManager::GetInstance().IsLowBattery(); }
     // Set short_press_time to a small non-zero value to enable multiple-click detection reliably

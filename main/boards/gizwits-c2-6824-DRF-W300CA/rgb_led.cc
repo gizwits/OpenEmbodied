@@ -18,9 +18,9 @@ void RgbLed::Initialize() {
     // 配置 LEDC 定时器
     ledc_timer_config_t timer_config = {
         .speed_mode = LEDC_LOW_SPEED_MODE,
-        .duty_resolution = LEDC_TIMER_12_BIT,  // 改为12位分辨率，获得更精细的控制
+        .duty_resolution = LEDC_TIMER_10_BIT,  // 10位分辨率 (1024级)
         .timer_num = LEDC_TIMER_1,
-        .freq_hz = 1000,
+        .freq_hz = 15000,  // 30kHz，完全无噪音
         .clk_cfg = LEDC_AUTO_CLK
     };
     ledc_timer_config(&timer_config);
@@ -93,10 +93,10 @@ void RgbLed::SetBrightness(uint8_t brightness) {
 void RgbLed::UpdatePwm() {
     if (!initialized_) return;
     
-    // 应用亮度系数 - 12位分辨率 (0-4095)
-    uint32_t scaled_r = (red_ * brightness_ * 4095) / (100 * 255);
-    uint32_t scaled_g = (green_ * brightness_ * 4095) / (100 * 255);
-    uint32_t scaled_b = (blue_ * brightness_ * 4095) / (100 * 255);
+    // 应用亮度系数 - 10位分辨率 (0-1023)
+    uint32_t scaled_r = (red_ * brightness_ * 1023) / (100 * 255);
+    uint32_t scaled_g = (green_ * brightness_ * 1023) / (100 * 255);
+    uint32_t scaled_b = (blue_ * brightness_ * 1023) / (100 * 255);
 
     // 设置 PWM 占空比 (交换G和B通道映射)
     ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_3, scaled_r);  // 红色

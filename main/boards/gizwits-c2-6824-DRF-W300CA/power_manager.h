@@ -29,9 +29,9 @@
 // 负载压降补偿配置（根据规格书调整）
 #define MAX_MOTOR_CURRENT_MA 50.0          // 电机最大电流50mA
 #define MAX_LED_CURRENT_MA 400.0           // LED最大电流400mA
-#define BATTERY_INTERNAL_RESISTANCE_MOHM 300.0  // 电池内阻300mΩ（进一步增加）
-#define LINE_RESISTANCE_MOHM 150.0         // 线路阻抗150mΩ（进一步增加）
-#define PWM_INTERFERENCE_COMPENSATION_MV 240  // PWM干扰补偿240mV（微调-10mV）
+#define BATTERY_INTERNAL_RESISTANCE_MOHM 200.0  // 电池内阻300mΩ（进一步增加）
+#define LINE_RESISTANCE_MOHM 90.0         // 线路阻抗150mΩ（进一步增加）
+#define PWM_INTERFERENCE_COMPENSATION_MV 100  // PWM干扰补偿240mV（微调-10mV）
 
 class PowerManager {
 private:
@@ -62,14 +62,7 @@ private:
     uint8_t baseline_soc_ = 100;                            // 无负载参考SOC
     bool baseline_valid_ = false;                           // 基线是否有效
     uint32_t last_no_load_time_ms_ = 0;                    // 最近无负载开始时间
-    // 关机判定稳定窗口/去抖
     uint32_t last_load_change_time_ms_ = 0;                // 最近一次负载变化时间
-    uint32_t ignore_shutdown_until_ms_ = 0;                // 在该时间点之前跳过关机判定
-    uint8_t shutdown_below_count_ = 0;                     // 连续低于阈值的计数
-    uint32_t last_voltage_mv_ = 0;                         // 最近一次用于判定的电压
-    bool shutdown_checks_enabled_ = false;                  // 是否允许执行关机判定
-    bool startup_check_pending_ = false;                    // 开机最终判定是否待执行
-    uint32_t startup_check_after_ms_ = 0;                   // 开机最终判定的起始时间点
     
     
     // 电量平滑过渡相关变量
@@ -82,12 +75,6 @@ private:
     // 补偿状态变量
     bool is_compensating = false;                           // 是否正在补偿
     uint32_t last_compensation_mv_ = 0;                     // 最近一次补偿绝对值(mV)
-    // 低电/关机阈值（根据需求）
-    static constexpr uint8_t LOW_BATTERY_SOC = 10;          // 低电量播报：≤10%
-    static constexpr uint8_t LOW_BATTERY_SOC_HYS = 2;       // 回滞：≥12%恢复
-    static constexpr uint16_t SHUTDOWN_CUTOFF_MV = 3470;    // 放电截止：3.4V（关机）
-    static constexpr uint16_t LOW_BATTERY_VOLTAGE_MV = 3500; // 低电量播报：3.45V
-    bool low_battery_ = false;                               // 低电量状态
 
     // 电压-SOC对照表（阶梯式显示：0,10,20,30,40,50,60,70,80,90,100）
     static constexpr struct VoltageSocPair {
@@ -95,16 +82,16 @@ private:
         uint8_t soc;         // 电量百分比
     } dischargeCurve[] = {
         {4200, 100}, // 充满电电压
-        {4100, 90},  // 90%
-        {4000, 80},  // 80%
-        {3900, 70},  // 70%
-        {3800, 60},  // 60%
-        {3700, 50},  // 50%
-        {3600, 40},  // 40%
-        {3550, 30},  // 30%
-        {3500, 20},  // 20%
-        {3450, 10},  // 10%
-        {3400, 0}    // 0% - 放电截止关机
+        {4110, 90},  // 90%
+        {4020, 80},  // 80%
+        {3930, 70},  // 70%
+        {3840, 60},  // 60%
+        {3750, 50},  // 50%
+        {3660, 40},  // 40%
+        {3570, 30},  // 30%
+        {3480, 20},  // 20%
+        {3390, 10},  // 10%
+        {3290, 1}    // 1% - 放电截止
     };
 
     // 查表函数 - 根据电压估算SOC
@@ -190,70 +177,66 @@ private:
         
         // 动态负载补偿：根据实际负载状态计算补偿值
         // 目标：与无负载参考相比，显示电量波动≤10%
-        // uint32_t compensation_mv = 0;
+        uint32_t compensation_mv = 0;
         
-        // if (motor_running_ || led_enabled_) {
-        //     // 基于实际负载电流计算补偿值
-        //     float motor_current_ma = (motor_speed_ / 100.0f) * MAX_MOTOR_CURRENT_MA;
-        //     float led_current_ma = (led_brightness_ / 100.0f) * MAX_LED_CURRENT_MA;
-        //     float actual_current_ma = motor_current_ma + led_current_ma + SYSTEM_BASE_CURRENT_MA;
-        //     
-        //     float total_resistance_mohm = BATTERY_INTERNAL_RESISTANCE_MOHM + LINE_RESISTANCE_MOHM;
-        //     float voltage_drop_mv = (actual_current_ma * total_resistance_mohm) / 1000.0f;
-        //     
-        //     // 基础补偿（微调-10mV）
-        //     compensation_mv = (uint32_t)voltage_drop_mv + 90; // 基础额外补偿90mV
-        //     
-        //     // 模式1（白色）功率较大，增加额外补偿
-        //     if (led_mode_ == 1) {
-        //         compensation_mv += 90; // 白色模式额外90mV（微调-10mV）
-        //     }
-        //     
-        //     // 高亮度时增加额外补偿
-        //     if (led_brightness_ > 80) {
-        //         compensation_mv += 40; // 高亮度额外40mV（微调-10mV）
-        //     }
-        //     
-        //     
-        //     // 有负载时：ADC读数偏低（负载压降），需要加上补偿值来恢复真实电压
-        //     voltage += compensation_mv;
-        //     is_compensating = true;
-        //     last_compensation_mv_ = compensation_mv;
-        //     
-        //     ESP_LOGD("PowerManager", "🔋 负载补偿: 启用, 补偿值: +%" PRIu32 "mV (电机:%.1fmA, LED:%.1fmA, 模式:%d, 总电流:%.1fmA, 压降:%.1fmV)",
-        //              compensation_mv, motor_current_ma, led_current_ma, led_mode_, actual_current_ma, voltage_drop_mv);
+        if (motor_running_ || led_enabled_) {
+            // 基于实际负载电流计算补偿值
+            float motor_current_ma = (motor_speed_ / 100.0f) * MAX_MOTOR_CURRENT_MA;
+            float led_current_ma = (led_brightness_ / 100.0f) * MAX_LED_CURRENT_MA;
+            float actual_current_ma = motor_current_ma + led_current_ma + SYSTEM_BASE_CURRENT_MA;
+            
+            float total_resistance_mohm = BATTERY_INTERNAL_RESISTANCE_MOHM + LINE_RESISTANCE_MOHM;
+            float voltage_drop_mv = (actual_current_ma * total_resistance_mohm) / 1000.0f;
+            
+            // 基础补偿（降低补偿值）
+            compensation_mv = (uint32_t)voltage_drop_mv + 10; // 基础额外补偿30mV
+            
+            // 模式1（白色）功率较大，增加额外补偿
+            if (led_mode_ == 1) {
+                compensation_mv += 50; // 白色模式额外30mV
+            }
+            
+            // 高亮度时增加额外补偿
+            if (led_brightness_ > 80) {
+                compensation_mv += 10; // 高亮度额外10mV
+            }
+            
+            
+            // 有负载时：ADC读数偏低（负载压降），需要加上补偿值来恢复真实电压
+            voltage += compensation_mv;
+            is_compensating = true;
+            last_compensation_mv_ = compensation_mv;
+            
+            ESP_LOGD("PowerManager", "🔋 负载补偿: 启用, 补偿值: +%" PRIu32 "mV (电机:%.1fmA, LED:%.1fmA, 模式:%d, 总电流:%.1fmA, 压降:%.1fmV)",
+                     compensation_mv, motor_current_ma, led_current_ma, led_mode_, actual_current_ma, voltage_drop_mv);
 
-        //     // 将负载下的SOC限制在无负载基线±10%以内（若基线有效）
-        //     if (baseline_valid_) {
-        //         uint8_t current_soc = estimate_soc_from_voltage((uint16_t)voltage);
-        //         int16_t diff = (int16_t)current_soc - (int16_t)baseline_soc_;
-        //         if (diff > 3) {
-        //             uint8_t target_soc = (uint8_t)std::min(100, (int)baseline_soc_ + 3);
-        //             uint16_t target_v = voltage_for_soc(target_soc);
-        //             int32_t delta_v = (int32_t)target_v - (int32_t)voltage;
-        //             voltage = (uint32_t)((int32_t)voltage + delta_v);
-        //             ESP_LOGD("PowerManager", "🔋 SOC上限钳位: %d%%→%d%%, 电压调整 +%" PRId32 " mV", current_soc, target_soc, delta_v);
-        //         } else if (diff < -7) { // 下限稍宽，避免误触发
-        //             int target_soc_int = (int)baseline_soc_ - 7;
-        //             if (target_soc_int < 0) target_soc_int = 0;
-        //             uint8_t target_soc = (uint8_t)target_soc_int;
-        //             uint16_t target_v = voltage_for_soc(target_soc);
-        //             int32_t delta_v = (int32_t)target_v - (int32_t)voltage;
-        //             voltage = (uint32_t)((int32_t)voltage + delta_v);
-        //             ESP_LOGD("PowerManager", "🔋 SOC下限钳位: %d%%→%d%%, 电压调整 +%" PRId32 " mV", current_soc, target_soc, delta_v);
-        //         }
-        //     }
-        // } else {
-        //     // 无负载时：电压读数正常，不需要补偿
-        //     compensation_mv = 0;
-        //     is_compensating = false;
-        //     last_compensation_mv_ = 0;
-        //     ESP_LOGD("PowerManager", "🔋 负载补偿: 禁用, 补偿值: 0mV");
-        // }
-        
-        // 禁用负载补偿 - 直接使用原始电压读数
-        is_compensating = false;
-        last_compensation_mv_ = 0;
+            // 将负载下的SOC限制在无负载基线±10%以内（若基线有效）
+            if (baseline_valid_) {
+                uint8_t current_soc = estimate_soc_from_voltage((uint16_t)voltage);
+                int16_t diff = (int16_t)current_soc - (int16_t)baseline_soc_;
+                if (diff > 3) {
+                    uint8_t target_soc = (uint8_t)std::min(100, (int)baseline_soc_ + 3);
+                    uint16_t target_v = voltage_for_soc(target_soc);
+                    int32_t delta_v = (int32_t)target_v - (int32_t)voltage;
+                    voltage = (uint32_t)((int32_t)voltage + delta_v);
+                    ESP_LOGD("PowerManager", "🔋 SOC上限钳位: %d%%→%d%%, 电压调整 +%" PRId32 " mV", current_soc, target_soc, delta_v);
+                } else if (diff < -7) { // 下限稍宽，避免误触发
+                    int target_soc_int = (int)baseline_soc_ - 7;
+                    if (target_soc_int < 0) target_soc_int = 0;
+                    uint8_t target_soc = (uint8_t)target_soc_int;
+                    uint16_t target_v = voltage_for_soc(target_soc);
+                    int32_t delta_v = (int32_t)target_v - (int32_t)voltage;
+                    voltage = (uint32_t)((int32_t)voltage + delta_v);
+                    ESP_LOGD("PowerManager", "🔋 SOC下限钳位: %d%%→%d%%, 电压调整 +%" PRId32 " mV", current_soc, target_soc, delta_v);
+                }
+            }
+        } else {
+            // 无负载时：电压读数正常，不需要补偿
+            compensation_mv = 0;
+            is_compensating = false;
+            last_compensation_mv_ = 0;
+            ESP_LOGD("PowerManager", "🔋 负载补偿: 禁用, 补偿值: 0mV");
+        }
         
         return voltage;
     }
@@ -409,97 +392,27 @@ public:
 
 
     void CheckBatteryStatus() {
-        // 在电机和RGB工作时延迟采样，避免PWM干扰
-        static uint32_t last_motor_rgb_time = 0;
-        uint32_t current_time = esp_timer_get_time() / 1000; // ms
-        
-        // 如果电机或RGB刚工作过，延迟采样
-        if (current_time - last_motor_rgb_time < 500) { // 增加到500ms延迟
-            return;
-        }
-        
-        // 更新电机和RGB工作时间记录
-        if (motor_running_ || led_enabled_) {
-            last_motor_rgb_time = current_time;
-        }
+        // 在电机和RGB工作时延迟采样，避免PWM干扰（已禁用）
+        // static uint32_t last_motor_rgb_time = 0;
+        // uint32_t current_time = esp_timer_get_time() / 1000; // ms
+        // 
+        // // 如果电机或RGB刚工作过，延迟采样
+        // if (current_time - last_motor_rgb_time < 500) { // 增加到500ms延迟
+        //     return;
+        // }
+        // 
+        // // 更新电机和RGB工作时间记录
+        // if (motor_running_ || led_enabled_) {
+        //     last_motor_rgb_time = current_time;
+        // }
 
+        uint32_t current_time = esp_timer_get_time() / 1000; // ms
         ReadBatteryAdcData();
         
         CheckChargingStatus();
 
-        // 若处于开机阶段且到达判定时间，执行一次“10次中≥5次≤阈值”的开机判定
-        bool startup_check_time_reached = startup_check_pending_ && (current_time >= startup_check_after_ms_);
-        if (startup_check_time_reached) {
-            static uint8_t startup_window_count = 0;
-            static uint8_t startup_below_count = 0;
-            startup_window_count++;
-            if (last_voltage_mv_ <= SHUTDOWN_CUTOFF_MV) startup_below_count++;
-            if (startup_window_count >= 10) {
-                if (startup_below_count >= 5) {
-                    ESP_LOGW("PowerManager", "🔋 开机最终判定: 10次有%d次≤%dmV，不允许开机，执行关机", startup_below_count, SHUTDOWN_CUTOFF_MV);
-                    // 清零并关机
-                    startup_window_count = 0;
-                    startup_below_count = 0;
-                    EnterDeepSleepIfNotCharging();
-                    return;
-                }
-                // 判定通过，启用后续关机判定
-                startup_check_pending_ = false;
-                shutdown_checks_enabled_ = true;
-                shutdown_below_count_ = 0;
-                ignore_shutdown_until_ms_ = current_time; // 允许立刻开始正常关机判定
-                ESP_LOGI("PowerManager", "🔋 开机最终判定通过: ≤%dmV次数=%d/10，启用关机判定", SHUTDOWN_CUTOFF_MV, startup_below_count);
-                startup_window_count = 0;
-                startup_below_count = 0;
-            }
-            return;
-        }
-
-        // 关机保护：3.3V 放电截止（加入稳定窗口与去抖）
-        uint32_t now_ms = esp_timer_get_time() / 1000;
-        uint32_t v_now_mv = GetBatteryVoltage();
-        last_voltage_mv_ = v_now_mv;
-        // 开机阶段：在启动最终判定完成前，不允许开启关机判定
-        if (!shutdown_checks_enabled_ && now_ms >= ignore_shutdown_until_ms_ && !startup_check_pending_) {
-            shutdown_checks_enabled_ = true;
-            shutdown_below_count_ = 0;
-        }
-        // 仅在通过开机最终判定后，才允许触发关机判定
-        if (shutdown_checks_enabled_ && now_ms >= ignore_shutdown_until_ms_ && !startup_check_pending_) {
-            if (v_now_mv <= SHUTDOWN_CUTOFF_MV) {
-                if (shutdown_below_count_ < 255) shutdown_below_count_++;
-            } else {
-                shutdown_below_count_ = 0;
-            }
-            // 连续10次（约1秒）低于阈值才关机
-            if (shutdown_below_count_ >= 10) {
-                ESP_LOGW("PowerManager", "🔋 放电截止: 电压=%" PRIu32 "mV ≤ %dmV (连续10次), 即将关机", v_now_mv, SHUTDOWN_CUTOFF_MV);
-                EnterDeepSleepIfNotCharging();
-            }
-        } else {
-            ESP_LOGD("PowerManager", "🔋 跳过关机判定: %s 稳定窗口剩余 %d ms", 
-                     startup_check_pending_ ? "开机阶段禁用," : (shutdown_checks_enabled_ ? "负载刚变化," : "禁用状态,"),
-                     (int)(ignore_shutdown_until_ms_ - now_ms));
-        }
-
-        // 低电量播报（直接使用最终滤波电压与阈值比较，无回滞）
-        bool prev_low = low_battery_;
-        low_battery_ = (v_now_mv <= LOW_BATTERY_VOLTAGE_MV);
-        if (prev_low != low_battery_) {
-            ESP_LOGI("PowerManager", "🔋 低电量状态: %s (电压:%dmV, 阈值:%dmV)",
-                     low_battery_ ? "进入" : "退出", (int)v_now_mv, LOW_BATTERY_VOLTAGE_MV);
-            
-            // 低电量状态变化时仅记录日志
-            if (low_battery_) {
-                // 进入低电量状态
-                ESP_LOGI("PowerManager", "Enter low battery mode");
-            } else {
-                // 退出低电量状态
-                ESP_LOGI("PowerManager", "Exit low battery mode");
-            }
-        }
-
         // 计算目标电量（纯ADC电压法）
+        uint32_t v_now_mv = GetBatteryVoltage();
         uint8_t soc_now = estimate_soc_from_voltage(v_now_mv);
         uint8_t calculated_battery_level = soc_now;
         
@@ -526,57 +439,32 @@ public:
         print_counter++;
         if (print_counter >= 50) {
             print_counter = 0;
-            uint32_t voltage = GetBatteryVoltage();
-            float actual_voltage = voltage / 1000.0f;
-            // auto comp_info = GetLoadCompensationInfo(); // 负载补偿已禁用
             
-            ESP_LOGI("PowerManager", "🔋 ===== 电池状态详情 =====");
-            ESP_LOGI("PowerManager", "🔋 实时状态: 电压=%" PRIu32 "mV, 补偿=禁用, 电机=%s, LED=%s, 模式=%d",
-                     voltage,
-                     motor_running_ ? "开" : "关", led_enabled_ ? "开" : "关", led_mode_);
-            ESP_LOGI("PowerManager", "🔋 ADC原始值: %d, 平均值: %" PRIu32 "", adc_value, average_adc);
-            ESP_LOGI("PowerManager", "🔋 检测电压: %" PRIu32 "mV (%.2fV)", voltage, actual_voltage);
-            ESP_LOGI("PowerManager", "🔋 电压法电量: %d%%", estimate_soc_from_voltage(voltage));
-            ESP_LOGI("PowerManager", "🔋 计算电量: %d%%", target_battery_level_);
-            ESP_LOGI("PowerManager", "🔋 显示电量: %d%%", displayed_battery_level_);
-            ESP_LOGI("PowerManager", "🔋 系统状态: 电机=%s/%d%%, LED=%s/%d%%, 模式=%d",
-                     motor_running_ ? "开" : "关", motor_speed_,
-                     led_enabled_ ? "开" : "关", led_brightness_, led_mode_);
-            
-            auto smooth_info = GetBatterySmoothInfo();
-            ESP_LOGI("PowerManager", "🔋 平滑过渡: 计算=%d%%, 显示=%d%%, 目标=%d%%, 过渡中=%s", 
-                     smooth_info.calculated_level, smooth_info.displayed_level, smooth_info.target_level,
-                     smooth_info.is_smoothing ? "是" : "否");
-            ESP_LOGI("PowerManager", "🔋 充电状态: %s", is_charging_ ? "充电中" : "未充电");
-            // 计算第一层滤波（仅三次采集）的电压和电量
-            int first_layer_mv = adc_value;
+            // 计算原始电压（补偿前）
+            int mv = average_adc;
             if (cali_inited_) {
-                (void)adc_cali_raw_to_voltage(cali_handle_, adc_value, &first_layer_mv);
+                (void)adc_cali_raw_to_voltage(cali_handle_, average_adc, &mv);
             }
-            uint32_t first_layer_voltage = (uint32_t)((int64_t)first_layer_mv * VBAT_SCALE_NUM / VBAT_SCALE_DEN);
-            uint8_t first_layer_soc = estimate_soc_from_voltage(first_layer_voltage);
+            uint32_t original_voltage = (uint32_t)((int64_t)mv * VBAT_SCALE_NUM / VBAT_SCALE_DEN);
             
-            ESP_LOGI("PowerManager", "🔋 第一层滤波: ADC=%d, 电压=%" PRIu32 "mV, 电量=%d%%", adc_value, first_layer_voltage, first_layer_soc);
-            ESP_LOGI("PowerManager", "🔋 最终滤波: ADC=%" PRIu32 ", 电压=%" PRIu32 "mV, 电量=%d%%", average_adc, voltage, displayed_battery_level_);
-            ESP_LOGI("PowerManager", "🔋 =========================");
+            // 获取补偿后的电压
+            uint32_t voltage = GetBatteryVoltage();
+            
+            // 计算补偿值
+            uint32_t compensation = voltage > original_voltage ? (voltage - original_voltage) : 0;
+            
+            // 电池状态详细打印
+            bool has_load = motor_running_ || led_enabled_;
+            ESP_LOGI("PowerManager", "🔋 ADC: %d, 原始: %" PRIu32 "mV, 补偿: +%" PRIu32 "mV, 最终: %" PRIu32 "mV, 电量: %d%%, 充电: %s, 负载: %s",
+                     adc_value, original_voltage, compensation, voltage, 
+                     displayed_battery_level_, is_charging_ ? "是" : "否",
+                     has_load ? (motor_running_ && led_enabled_ ? "电机+灯" : (motor_running_ ? "电机" : "灯")) : "无");
         }
     }
 
     bool IsCharging() { return is_charging_; }
 
     uint8_t GetBatteryLevel() { return battery_level_; }
-    // 提供关机连续判定状态给外部（开机复用）
-    bool IsShutdownConditionMet() const { return shutdown_below_count_ >= 10; }
-    // 提供最近一次电压读数（最终滤波）
-    uint32_t GetLastVoltageMv() const { return last_voltage_mv_; }
-    // 启动判定是否已完成
-    bool IsStartupCheckDone() const { return !startup_check_pending_; }
-    // 允许/禁止关机判定（应用层在开机最终判定通过后再开启）
-    static void SetShutdownChecksEnabled(bool enabled) {
-        PowerManager& instance = GetInstance();
-        instance.shutdown_checks_enabled_ = enabled;
-        if (enabled) instance.shutdown_below_count_ = 0;
-    }
     
     // 立即检测一次电量
     void CheckBatteryStatusImmediately() {
@@ -598,16 +486,6 @@ public:
             esp_timer_stop(instance.timer_handle_);
             ESP_ERROR_CHECK(esp_timer_start_periodic(instance.timer_handle_, 100000));  // 100ms采样
             ESP_LOGI("PowerManager", "🔋 ADC句柄已设置，定时器已启动");
-            // 启动时默认禁用关机判定，待应用完成最终判定后再开启
-            instance.shutdown_checks_enabled_ = false;
-            // 记录起始时间，用于自动开启关机判定（延时）
-            uint32_t now_ms = esp_timer_get_time() / 1000;
-            // 将稳定窗口覆盖到开机最终判定结束后再延长1秒
-            // 开机最终判定延后到8秒（更稳定）
-            instance.startup_check_pending_ = true;
-            instance.startup_check_after_ms_ = now_ms + 8000;
-            instance.ignore_shutdown_until_ms_ = instance.startup_check_after_ms_ + 1000;
-            instance.shutdown_below_count_ = 0;
         }
     }
 
@@ -626,10 +504,8 @@ public:
         if (load_changed) {
             ESP_LOGI("PowerManager", "🔋 负载状态变化：电机=%s, LED=%s, 模式=%d", 
                      motor_running ? "开" : "关", led_enabled ? "开" : "关", led_mode);
-            // 记录负载变化时间，提供电压稳定窗口，避免滑动平均历史造成误判
+            // 记录负载变化时间
             last_load_change_time_ms_ = esp_timer_get_time() / 1000; // ms
-            ignore_shutdown_until_ms_ = last_load_change_time_ms_ + 1000; // 稳定1秒
-            shutdown_below_count_ = 0; // 重置去抖计数
         }
     }
     
@@ -693,11 +569,6 @@ public:
             }
         }
         return GetBatteryVoltage();
-    }
-
-    // 获取低电量状态
-    bool IsLowBattery() const {
-        return low_battery_;
     }
 
     void EnterDeepSleepIfNotCharging() {
