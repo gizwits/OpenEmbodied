@@ -781,7 +781,8 @@ if (mqtt_client.isInitialized()) {
         // 每30秒检查一次电量
         auto now = std::chrono::steady_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - last_battery_check_time_).count();
-        if (duration >= 30) {
+        auto battery_check_time_offset = Board::GetInstance().GetBatteryCheckTimeOffset();
+        if (duration >= battery_check_time_offset) {
             CheckBatteryLevel();
             last_battery_check_time_ = now;
         }

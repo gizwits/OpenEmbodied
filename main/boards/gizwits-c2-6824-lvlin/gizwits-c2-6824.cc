@@ -44,12 +44,6 @@ private:
     VbAduioCodec audio_codec;
     bool sleep_flag_ = false;
     uint32_t power_on_time_;  // 上电时间戳
-    // 碰撞连续触发检测
-    int64_t collision_last_ts_us_ = 0;
-    int64_t collision_accum_us_ = 0;
-    static constexpr int64_t COLLISION_MAX_INTERVAL_US = 300000;   // 300ms
-    static constexpr int64_t COLLISION_THRESHOLD_US    = 600000;  // 600ms
-    static constexpr int64_t COLLISION_WAKE_THRESHOLD_US    = 1000000;  // 600ms
     
     // 唤醒词列表
     std::vector<std::string> wake_words_ = {"你好小智", "你好小云", "合养精灵", "嗨小火人", "你好冬冬"};
@@ -71,6 +65,10 @@ private:
     }
 
     void run_sleep_mode(bool need_delay = true){
+        if (sleep_flag_) {
+            return;
+        }
+        sleep_flag_ = true;
         auto& application = Application::GetInstance();
         if (need_delay) {
             application.Alert("", "", "", Lang::Sounds::P3_SLEEP);
@@ -99,6 +97,12 @@ private:
                 app.StopListening();
             });
             rec_button_->OnPressDown([this]() {
+                if (Application::GetInstance().IsTmpFactoryTestMode()) {
+                    Application::GetInstance().PlaySound(Lang::Sounds::P3_SUCCESS);
+                    return;
+                }
+                
+                WakeUpPowerSaveTimer();
                 // 检查是否已经过了5秒
                 if ((esp_timer_get_time() / 1000 - power_on_time_) < 5000) {
                     return;
@@ -110,10 +114,17 @@ private:
             });
         } else {
             rec_button_->OnPressDown([this]() {
+                WakeUpPowerSaveTimer();
                 auto &app = Application::GetInstance();
                 app.ToggleChatState();
             });
             boot_button_.OnClick([this]() {
+
+                if (Application::GetInstance().IsTmpFactoryTestMode()) {
+                    Application::GetInstance().PlaySound(Lang::Sounds::P3_SUCCESS);
+                    return;
+                }
+                WakeUpPowerSaveTimer();
                 auto &app = Application::GetInstance();
                 app.ToggleChatState();
             });
@@ -251,6 +262,7 @@ public:
 
 
         audio_codec.OnWakeUp([this](const std::string& command) {
+            WakeUpPowerSaveTimer();
             ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());
             if (IsCommandInList(command, wake_words_)){
                 ESP_LOGE(TAG, "vb6824 recv cmd: %d", Application::GetInstance().GetDeviceState());
@@ -271,10 +283,14 @@ public:
     }
 
     virtual void WakeUpPowerSaveTimer() {
+        sleep_flag_ = false;
         if (power_save_timer_) {
             power_save_timer_->WakeUp();
         }
     };
+
+    virtual int GetBatteryCheckTimeOffset() override { return 60; }
+
 
     virtual bool NeedSilentStartup() override {
         return false;

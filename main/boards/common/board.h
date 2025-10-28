@@ -96,6 +96,7 @@ public:
     virtual bool NeedSilentStartup() { return false; }
     virtual bool NeedBlockLowBattery() { return false; }
     virtual void WakeWordDetected() {};
+    virtual int GetBatteryCheckTimeOffset() { return 30; }
     
     // 数据点相关方法
     virtual const char* GetGizwitsProtocolJson() const { return nullptr; }
