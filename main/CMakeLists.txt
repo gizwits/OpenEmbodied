@@ -18,7 +18,6 @@ set(SOURCES "audio/audio_codec.cc"
             "display/eye_display.cc"
             "display/eye_display_horizontal.cc"
             "display/eye_display_horizontal_emojis.cc"
-            "display/lottie_display.cc"
             "display/lv_mem_psram.c"
             "protocols/protocol.cc"
             "watchdog.cc"
@@ -174,6 +173,10 @@ if(CONFIG_USE_EYE_STYLE_VB6824 OR CONFIG_USE_AUDIO_CODEC_DECODE_OPUS)
                             "audio/codecs/es8389_audio_codec.cc"
                             "display/lottie_display.cc"
                             "audio/codecs/es8388_audio_codec.cc")
+endif()
+
+if(CONFIG_LV_USE_LOTTIE)
+    list(APPEND SOURCES "display/lottie_display.cc")
 endif()
 
 idf_component_register(SRCS ${SOURCES}
