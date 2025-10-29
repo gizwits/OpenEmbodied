@@ -131,6 +131,8 @@ choice BOARD_TYPE
         bool "机智云ESP32-S3 6824 ST7735S"
     config BOARD_TYPE_ESP32S3_XUNGUAN_AMOLED_1_28
         bool "讯管"
+    config BOARD_TYPE_GIZWITS_S3_RH
+        bool "机智云ESP32-S3 RH"
     config BOARD_TYPE_ESP32S3_XUNGUAN_AMOLED_1_28_OLD
         bool "讯管old"
 endchoice
