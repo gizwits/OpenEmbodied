@@ -875,7 +875,7 @@ void Application::OnWakeWordDetected() {
 
     if (device_state_ == kDeviceStateIdle) {
         ResetDecoder();
-        PlaySound(Lang::Sounds::P3_SUCCESS);
+        PlaySound(Lang::Sounds::P3_WAKE_WORD);
         audio_service_.EncodeWakeWord();
 
         if (!protocol_->IsAudioChannelOpened()) {
@@ -904,7 +904,7 @@ void Application::OnWakeWordDetected() {
     } else if (device_state_ == kDeviceStateSpeaking) {
         AbortSpeaking(kAbortReasonWakeWordDetected);
         ResetDecoder();
-        PlaySound(Lang::Sounds::P3_SUCCESS);
+        PlaySound(Lang::Sounds::P3_WAKE_WORD);
         SetDeviceState(kDeviceStateListening);
     } else if (device_state_ == kDeviceStateActivating) {
         SetDeviceState(kDeviceStateIdle);
@@ -1031,7 +1031,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     
     if (IsTmpFactoryTestMode()) {
         // 临时测试模式，播放提示音
-        PlaySound(Lang::Sounds::P3_SUCCESS);
+        PlaySound(Lang::Sounds::P3_WAKE_WORD);
         return;
     }
     
@@ -1050,7 +1050,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     if (device_state_ == kDeviceStateIdle) {
         Schedule([this, wake_word]() {
             audio_service_.ResetDecoder();
-            audio_service_.PlaySound(Lang::Sounds::P3_IM_IN);
+            audio_service_.PlaySound(Lang::Sounds::P3_WAKE_WORD);
 
             ToggleChatState();
             if (protocol_) {
@@ -1071,7 +1071,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
             ESP_LOGI(TAG, "WakeWordInvoke(kDeviceStateSpeaking)");
             protocol_->SendAbortSpeaking(kAbortReasonNone);
             audio_service_.ResetDecoder();
-            audio_service_.PlaySound(Lang::Sounds::P3_IM_IN);
+            audio_service_.PlaySound(Lang::Sounds::P3_WAKE_WORD);
             
         }, "WakeWordInvoke_AbortSpeaking");
     } else if (device_state_ == kDeviceStateListening) { 
@@ -1079,7 +1079,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
         protocol_->PreAbortSpeaking();
         Schedule([this]() {
             ResetDecoder();
-            PlaySound(Lang::Sounds::P3_IM_IN);
+            PlaySound(Lang::Sounds::P3_WAKE_WORD);
             SetDeviceState(kDeviceStateListening);
         });
     } else if (device_state_ == kDeviceStateSleeping) {

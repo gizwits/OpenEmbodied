@@ -285,7 +285,6 @@ public:
         ESP_LOGI(TAG, "Initializing Data Point Manager...");
         InitializeDataPointManager();
         ESP_LOGI(TAG, "Data Point Manager initialized.");
-
     }
 
     virtual void WakeUpPowerSaveTimer() {
