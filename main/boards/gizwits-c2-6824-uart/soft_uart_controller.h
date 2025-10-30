@@ -28,7 +28,7 @@ public:
         gpio_set_direction((gpio_num_t)rx_gpio_, GPIO_MODE_INPUT);
         gpio_set_pull_mode((gpio_num_t)rx_gpio_, GPIO_PULLDOWN_ONLY);
         // Start single task for TX and enable-state monitor
-        xTaskCreate(task_entry, "su_uart", 2048, this, 5, &task_);
+        xTaskCreate(task_entry, "su_uart", 1024, this, 5, &task_);
         return ESP_OK;
     }
 
