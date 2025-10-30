@@ -867,6 +867,14 @@ public:
 		UpdateBatteryLoadComp();
     }
 
+
+    virtual int GetPeriod() override { 
+        return 3; 
+    }
+    virtual int GetMaxFrameNum() override { 
+        return 50;
+    }
+
     virtual void WakeUpPowerSaveTimer() {
         if (power_save_timer_) {
             power_save_timer_->WakeUp();
