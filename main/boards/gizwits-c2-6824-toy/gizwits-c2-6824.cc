@@ -350,7 +350,7 @@ public:
 
         audio_codec.OnWakeUp([this](const std::string& command) {
             ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());
-            if (command == "你好小智" || command.find("小云") != std::string::npos){
+            if (command == "小智小智" || command == "你好小智" || command.find("小云") != std::string::npos){
                 ESP_LOGE(TAG, "vb6824 recv cmd: %d", Application::GetInstance().GetDeviceState());
                 Application::GetInstance().WakeWordInvoke("你好小智");
             } else if (command == "开始配网") {
