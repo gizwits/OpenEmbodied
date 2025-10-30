@@ -671,6 +671,14 @@ void EyeDisplayHorizontalEmo::StartSadAnimation() {
 
 
 void EyeDisplayHorizontalEmo::StartVertigoAnimation() {
+    // 禁用屏幕滚动与滚动条，避免出现滚动条
+    {
+        lv_obj_t* screen = lv_screen_active();
+        if (screen) {
+            lv_obj_clear_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_set_scrollbar_mode(screen, LV_SCROLLBAR_MODE_OFF);
+        }
+    }
     lv_obj_add_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
     

@@ -42,7 +42,8 @@ void Backlight::RestoreBrightness() {
     }
     
     ESP_LOGI(TAG, "Restoring brightness to %d", saved_brightness);
-    SetBrightness(saved_brightness);
+    // SetBrightness(saved_brightness);
+    SetBrightness(10);
 }
 
 void Backlight::SetBrightness(uint8_t brightness, bool permanent) {
@@ -68,6 +69,9 @@ void Backlight::SetBrightness(uint8_t brightness, bool permanent) {
     // } else {
     //     target_brightness_ = brightness;
     // }
+
+    // Set target brightness so transition timer has a valid goal
+    target_brightness_ = brightness;
 
     step_ = (target_brightness_ > brightness_) ? 1 : -1;
 

@@ -11,8 +11,7 @@
 
 
 #include "led/single_led.h"
-// #include "xunguan_display.h"
-#include "display/eye_display.h"
+#include "display/eye_display_horizontal_emojis.h"
 #include "display/display.h"
 
 #include <wifi_station.h>
@@ -43,7 +42,8 @@ class MovecallMojiESP32S3 : public WifiBoard {
 private:
     Button boot_button_;
     Button touch_button_;
-    EyeDisplay* display_;
+    EyeDisplayHorizontalEmo* display_;
+
     bool need_power_off_ = false;
     i2c_master_bus_handle_t i2c_bus_;
     // LIS2HH12专用I2C
@@ -245,6 +245,13 @@ private:
             ESP_LOGE(TAG, "Panel init failed: %s", esp_err_to_name(ret));
             return;
         }
+
+        // Set column/row gap to align visible window and avoid bottom artifacts
+        ret = esp_lcd_panel_set_gap(panel, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Panel set gap failed: %s", esp_err_to_name(ret));
+            return;
+        }
         
         // Invert colors for ST7789W3
         ret = esp_lcd_panel_invert_color(panel, DISPLAY_INVERT_COLOR);
@@ -267,9 +274,9 @@ private:
             return;
         }
         
-        display_ = new EyeDisplay(panel_io, panel,
+        display_ = new EyeDisplayHorizontalEmo(panel_io, panel,
             DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
-            DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y,
+            DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY,
             &qrcode_img,
             {
                 .text_font = &font_puhui_20_4,
@@ -279,7 +286,7 @@ private:
     }
 
     int MaxBacklightBrightness() {
-        return 8;
+        return 50;
     }
 
     void InitializeChargingGpio() {
@@ -648,12 +655,12 @@ public:
                 auto& wifi_manager = WifiConnectionManager::GetInstance();
                 esp_err_t ret = wifi_manager.Connect(CONFIG_PRODUCT_TEST_WIFI, CONFIG_PRODUCT_TEST_WIFI_PASSWORD);
                 ESP_LOGI(TAG, "产测模式临时连接产测路由器 ret: %d", ret);
-                if (ret == ESP_OK) {
-                    display_->UpdateTestItemStatus("wifi", 1);
-                } else {
-                    // 设置失败
-                    display_->UpdateTestItemStatus("wifi", 2);
-                }
+                // if (ret == ESP_OK) {
+                //     display_->UpdateTestItemStatus("wifi", 1);
+                // } else {
+                //     // 设置失败
+                //     display_->UpdateTestItemStatus("wifi", 2);
+                // }
             }, "factory_test_mode");
 
             Application::GetInstance().Schedule([this]() {
@@ -664,11 +671,11 @@ public:
                 bool discharging = false;
                 GetBatteryLevel(level, charging, discharging);
                 // 合理范围：1..100 认为有效（0 可能意味着未接电池/异常）
-                if (level >= 1 && level <= 100) {
-                    display_->UpdateTestItemStatus("battery", 1);
-                } else {
-                    display_->UpdateTestItemStatus("battery", 2);
-                }
+                // if (level >= 1 && level <= 100) {
+                //     display_->UpdateTestItemStatus("battery", 1);
+                // } else {
+                //     display_->UpdateTestItemStatus("battery", 2);
+                // }
             }, "adc_test");
         }
     }
@@ -679,7 +686,7 @@ public:
 
     virtual void WakeWordDetected() override {
         ESP_LOGI(TAG, "WakeWordDetected");
-        display_->UpdateTestItemStatus("mic", 1);
+        // display_->UpdateTestItemStatus("mic", 1);
 
         GetAudioCodec()->EnableOutput(true);
         Application::GetInstance().PlaySound(Lang::Sounds::P3_SUCCESS);
