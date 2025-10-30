@@ -65,6 +65,7 @@ private:
     // RGB灯光状态管理
     bool rgb_light_on_ = false;
     TaskHandle_t rgb_task_handle_ = nullptr;
+    bool rainbow_enabled_ = false; // 渐变任务使能标志（任务常驻，按此开关运行）
     
     // K51按键颜色循环状态
     uint8_t k51_color_mode_ = 7; // 0=全彩渐变, 1=白, 2=红, 3=绿, 4=蓝, 5=黄, 6=青, 7=紫
@@ -201,6 +202,11 @@ private:
     // 设备关机方法
     virtual void PowerOff() override {
         ESP_LOGI(TAG, "PowerOff called");
+        
+        // 等待电量不足播报完成（如果正在播报）
+        ESP_LOGI(TAG, "等待电量不足播报完成...");
+        vTaskDelay(pdMS_TO_TICKS(3000));  // 等待3秒让电量不足播报完成
+        
         // 关闭所有功能
         StopRgbLightEffect();
         motor_control_.Stop();
@@ -681,7 +687,7 @@ private:
             [this](int value) { 
                 ESP_LOGI(TAG, "收到灯光模式数据点设置: light_mode = %d", value);
                 
-                // 如果亮度为0，自动打开灯光和电机以便看到模式效果
+                // 如果亮度为0，自动打开灯光以便看到模式效果
                 uint8_t current_brightness = GetBrightness_();
                 if (current_brightness == 0) {
                     LWSDataPointManager::GetInstance().SetDataPointValue("brightness", 80);
@@ -885,7 +891,12 @@ public:
         ESP_LOGI(TAG, "SetRgbBrightness: 数据点=%d, 应用=%d", (int)brightness, (int)applied);
         rgb_led_.SetBrightness(applied);
         if (brightness > 0) {
-            StartRgbLightEffect();
+            if (current_led_mode_ == 0) {
+                StartRgbLightEffect();
+            } else {
+                // 非模式0仅点亮静态颜色/效果，不使能彩虹任务
+                rgb_light_on_ = true;
+            }
         } else {
             StopRgbLightEffect();
         }
@@ -944,85 +955,72 @@ public:
     
     // 启动RGB灯光效果
     void StartRgbLightEffect() {
-        if (rgb_light_on_) {
-            return; // 已经在运行
-        }
-        
+        // 打开开关
+        rainbow_enabled_ = true;
         rgb_light_on_ = true;
         UpdateBatteryLoadComp();
-        
         // 设置RGB LED亮度（按映射规则应用）
         auto brightness = GetBrightness_();
         rgb_led_.SetBrightness(MapAppliedBrightness_(brightness));
-        
-        // 创建RGB灯光任务
+        // 若任务尚未创建，创建一次常驻任务
+        if (rgb_task_handle_ != nullptr) {
+            return;
+        }
         xTaskCreate([](void* param) {
             CustomBoard* board = static_cast<CustomBoard*>(param);
             
             // 全彩渐变彩虹色效果 - 无限循环
             ESP_LOGI(TAG, "开始全彩渐变彩虹色效果");
             
-			while (board->rgb_light_on_) {
-				// 关键帧序列(带低/高亮点)，严格按用户指定顺序：
-				// → 粉 → 红 → 橙 → 黄(高亮) → 浅绿(低亮) → 绿 → 浅青(低亮) → 青 → 浅蓝(低亮) → 蓝 → 浅紫(低亮) → 浅粉(低亮)
-				struct Key {
-					uint8_t r, g, b; float v_factor; // v_factor用于低亮度关键帧
-				};
-				const Key keys[] = {
-					{255, 182, 193, 1.00f}, // 浅粉(R+B 起始不降亮)
-					{255, 105, 180, 1.00f}, // 粉(R+B)
-					{255,   0,   0, 1.00f}, // 红(R)
-					{255, 165,   0, 1.00f}, // 橙(R+G)
-					{255, 255,   0, 1.15f}, // 黄(R+G 高亮)
-					{144, 238, 144, 0.80f}, // 浅绿(G 低亮)
-					{  0, 255,   0, 1.00f}, // 绿(G)
-					{127, 255, 212, 0.80f}, // 浅青(G+B 低亮)(aquamarine)
-					{  0, 255, 255, 1.00f}, // 青(G+B)
-					{173, 216, 230, 0.80f}, // 浅蓝(B 低亮)(light sky blue)
-					{  0,   0, 255, 1.00f}, // 蓝(B)
-					{216, 191, 216, 0.80f}, // 浅紫(B+R 低亮)(thistle)
-					{255, 182, 193, 0.75f}  // 回到浅粉(R+B 低亮)
-				};
-				const int nkeys = sizeof(keys)/sizeof(keys[0]);
-				const int steps_per_segment = 140;             // 更细的过渡步数
-				const TickType_t step_delay = pdMS_TO_TICKS(12);
-                // 使用映射后的亮度计算用户亮度比例
-                float user_v = board->MapAppliedBrightness_(board->GetBrightness_()) / 100.0f; if (user_v < 0.01f) user_v = 0.01f;
-				for (int i = 0; i < nkeys - 1 && board->rgb_light_on_; ++i) {
-					// 源/目标(在线性色域中插值)
-					float r1 = SrgbToLinear(keys[i].r);
-					float g1 = SrgbToLinear(keys[i].g);
-					float b1 = SrgbToLinear(keys[i].b);
-					float r2 = SrgbToLinear(keys[i+1].r);
-					float g2 = SrgbToLinear(keys[i+1].g);
-					float b2 = SrgbToLinear(keys[i+1].b);
-					for (int k = 0; k <= steps_per_segment && board->rgb_light_on_; ++k) {
-						float t = (float)k / (float)steps_per_segment;
-						float te = t * t * (3.f - 2.f * t); // smoothstep
-						float v_scale = keys[i].v_factor + (keys[i+1].v_factor - keys[i].v_factor) * te;
-						float rl = r1 + (r2 - r1) * te;
-						float gl = g1 + (g2 - g1) * te;
-						float bl = b1 + (b2 - b1) * te;
-						uint8_t r = LinearToSrgb(rl) ;
-						uint8_t g = LinearToSrgb(gl) ;
-						uint8_t b = LinearToSrgb(bl) ;
-						// 应用用户亮度与关键帧低亮度系数
-						r = (uint8_t)(r * fminf(fmaxf(user_v * v_scale, 0.0f), 1.0f));
-						g = (uint8_t)(g * fminf(fmaxf(user_v * v_scale, 0.0f), 1.0f));
-						b = (uint8_t)(b * fminf(fmaxf(user_v * v_scale, 0.0f), 1.0f));
-						board->SetRgbColor(r, g, b);
-						vTaskDelay(step_delay);
-					}
-				}
-			}
-            
-            // 关闭灯光
-            board->SetRgbColor(0, 0, 0);
-            ESP_LOGI(TAG, "RGB灯光已关闭");
-            
-            board->rgb_task_handle_ = nullptr;
-            vTaskDelete(nullptr);
-        }, "rgb_light_task", 2048, this, 1, &rgb_task_handle_);
+            while (true) {
+                // 未使能时休眠等待
+                if (!board->rainbow_enabled_) {
+                    vTaskDelay(pdMS_TO_TICKS(100));
+                    continue;
+                }
+                // 关键帧表（v_factor 用百分比整数，避免浮点）
+                struct Key { uint8_t r, g, b, v_percent; };
+                static const Key keys[] = {
+                    {255, 182, 193, 100},
+                    {255, 105, 180, 100},
+                    {255,   0,   0, 100},
+                    {255, 165,   0, 100},
+                    {255, 255,   0, 115},
+                    {144, 238, 144,  90},
+                    {  0, 255,   0, 100},
+                    {127, 255, 212,  90},
+                    {  0, 255, 255, 100},
+                    {173, 216, 230,  90},
+                    {  0,   0, 255, 100},
+                    {216, 191, 216,  90},
+                    {255, 182, 193,  85}
+                };
+                const int nkeys = sizeof(keys)/sizeof(keys[0]);
+                const int steps_per_segment = 60;
+                const TickType_t step_delay = pdMS_TO_TICKS(32);
+                int applied_brightness = board->MapAppliedBrightness_(board->GetBrightness_());
+                // 确保低亮度时也能看见（至少30%）
+                if (applied_brightness < 30) applied_brightness = 30;
+                for (int i = 0; i < nkeys - 1 && board->rainbow_enabled_; ++i) {
+                    int r1 = keys[i].r,   g1 = keys[i].g,   b1 = keys[i].b,   v1 = keys[i].v_percent;
+                    int r2 = keys[i+1].r, g2 = keys[i+1].g, b2 = keys[i+1].b, v2 = keys[i+1].v_percent;
+                    for (int k = 0; k <= steps_per_segment && board->rainbow_enabled_; ++k) {
+                        int r = r1 + ((r2 - r1) * k) / steps_per_segment;
+                        int g = g1 + ((g2 - g1) * k) / steps_per_segment;
+                        int b = b1 + ((b2 - b1) * k) / steps_per_segment;
+                        int v = v1 + ((v2 - v1) * k) / steps_per_segment; // 百分比
+                        int scaled_r = (r * v * applied_brightness) / (100 * 100);
+                        int scaled_g = (g * v * applied_brightness) / (100 * 100);
+                        int scaled_b = (b * v * applied_brightness) / (100 * 100);
+                        if (scaled_r > 255) scaled_r = 255;
+                        if (scaled_g > 255) scaled_g = 255;
+                        if (scaled_b > 255) scaled_b = 255;
+                        board->SetRgbColor((uint8_t)scaled_r, (uint8_t)scaled_g, (uint8_t)scaled_b);
+                        vTaskDelay(step_delay);
+                    }
+                }
+            }
+        }, "rgb_light_task", 4096, this, 1, &rgb_task_handle_);
     }
     
     // 停止RGB灯光效果
@@ -1032,15 +1030,9 @@ public:
         }
         
         rgb_light_on_ = false;
+        rainbow_enabled_ = false; // 任务不断，关闭使能
         SetRgbColor(0, 0, 0);
         UpdateBatteryLoadComp();
-        
-        // 删除正在运行的RGB任务
-        if (rgb_task_handle_ != nullptr) {
-            vTaskDelete(rgb_task_handle_);
-            rgb_task_handle_ = nullptr;
-            ESP_LOGI(TAG, "RGB渐变任务已删除");
-        }
         
         ESP_LOGI(TAG, "停止RGB灯光效果");
     }
@@ -1049,6 +1041,10 @@ public:
     ~CustomBoard() {
         // 停止RGB灯光效果
         StopRgbLightEffect();
+        if (rgb_task_handle_ != nullptr) {
+            vTaskDelete(rgb_task_handle_);
+            rgb_task_handle_ = nullptr;
+        }
         
         if (adc_button_k50_) {
             delete adc_button_k50_;

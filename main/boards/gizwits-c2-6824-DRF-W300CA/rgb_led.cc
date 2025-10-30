@@ -20,7 +20,7 @@ void RgbLed::Initialize() {
         .speed_mode = LEDC_LOW_SPEED_MODE,
         .duty_resolution = LEDC_TIMER_10_BIT,  // 10位分辨率 (1024级)
         .timer_num = LEDC_TIMER_1,
-        .freq_hz = 15000,  // 30kHz，完全无噪音
+        .freq_hz = 15000,
         .clk_cfg = LEDC_AUTO_CLK
     };
     ledc_timer_config(&timer_config);
