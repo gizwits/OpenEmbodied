@@ -62,6 +62,17 @@ public:
     virtual Led* GetLed();
     virtual AudioCodec* GetAudioCodec() = 0;
     virtual bool GetTemperature(float& esp32temp);
+
+    virtual int GetPeriod() { 
+        return 1; 
+    }
+    virtual int GetMaxFrameNum() { 
+#ifdef CONFIG_IDF_TARGET_ESP32C2
+        return 17;
+#else
+        return 25;
+#endif
+    }
     // 是否要 bo 一下
     virtual bool NeedPlayProcessVoice() { return true; }
     virtual Servo* GetServo();

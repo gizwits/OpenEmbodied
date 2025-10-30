@@ -625,7 +625,7 @@ bool AudioService::PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> pa
             if (packet && !packet->payload.empty()) {
                 ESP_LOGD(TAG, "Dropping packet with payload size: %u bytes", (unsigned int)packet->payload.size());
                 packet->payload.clear();  // 清空音频数据
-                packet->payload.shrink_to_fit();  // 释放向量占用的内存
+                // packet->payload.shrink_to_fit();  // 释放向量占用的内存
             }
             audio_queue_cv_.notify_all();
             return false;

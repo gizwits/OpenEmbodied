@@ -807,7 +807,6 @@ if (mqtt_client.isInitialized()) {
                     if (!packet->payload.empty()) {
                         ESP_LOGD(TAG, "Clearing unsent packet payload: %u bytes", (unsigned int)packet->payload.size());
                         packet->payload.clear();
-                        packet->payload.shrink_to_fit();
                     }
                 }
             }
