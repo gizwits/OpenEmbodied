@@ -288,7 +288,16 @@ public:
                 extra_light_on = cached_brightness > 0;
             }
         }
-        InitializeGpio(EXTRA_LIGHT_GPIO, extra_light_on);
+        // InitializeGpio(EXTRA_LIGHT_GPIO, extra_light_on);
+
+        gpio_config_t io_conf = {};
+        io_conf.pin_bit_mask = (1ULL << LED_GPIO);
+        io_conf.mode = GPIO_MODE_OUTPUT;
+        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        io_conf.intr_type = GPIO_INTR_DISABLE;
+        gpio_config(&io_conf);
+        gpio_set_level(LED_GPIO, 0);
         
         audio_codec.OnWakeUp([this](const std::string& command) {
             ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());

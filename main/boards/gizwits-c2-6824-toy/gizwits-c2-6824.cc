@@ -29,7 +29,6 @@ private:
     Button boot_button_;
     VbAduioCodec audio_codec;
     Button volume_up_button_;
-    Button volume_down_button_;
     // Button prev_button_;
     Button next_button_;
     // Minimal idle power-save (no heap, no std::function)
@@ -37,6 +36,12 @@ private:
     volatile int idle_ticks_ = 0;
     static constexpr int SLEEP_SECONDS = 60 * 20;
     static constexpr int SHUTDOWN_SECONDS = -1; // not used
+
+    // Net light control
+    esp_timer_handle_t net_light_check_timer_ = nullptr;
+    esp_timer_handle_t net_light_blink_timer_ = nullptr;
+    volatile bool net_light_blinking_ = false;
+    volatile int net_light_level_ = 0;
 
 
     // 上电计数器相关
@@ -93,6 +98,54 @@ private:
         // esp_deep_sleep_enable_gpio_wakeup(1ULL << BOOT_BUTTON_GPIO, ESP_GPIO_WAKEUP_GPIO_LOW);
         
         esp_deep_sleep_start();
+    }
+
+    static void NetLightBlinkCb(void* arg) {
+        auto* self = static_cast<CustomBoard*>(arg);
+        if (!self->net_light_blinking_) {
+            return;
+        }
+        self->net_light_level_ = !self->net_light_level_;
+        gpio_set_level(NET_LIGHT_GPIO, self->net_light_level_);
+    }
+
+    static void NetLightCheckCb(void* arg) {
+        auto* self = static_cast<CustomBoard*>(arg);
+        wifi_ap_record_t ap_info;
+        if (esp_wifi_sta_get_ap_info(&ap_info) != ESP_OK) {
+            // Not connected: turn off and stop blinking
+            ESP_LOGI(TAG, "WiFi not connected, turning NET light off");
+            self->net_light_blinking_ = false;
+            if (self->net_light_blink_timer_) {
+                esp_timer_stop(self->net_light_blink_timer_);
+            }
+            self->net_light_level_ = 0;
+            gpio_set_level(NET_LIGHT_GPIO, 0);
+            return;
+        }
+
+        int rssi = ap_info.rssi;
+        ESP_LOGI(TAG, "RSSI: %d dBm", rssi);
+        if (rssi >= NET_RSSI_GOOD_DBM) {
+            // Solid on
+            self->net_light_blinking_ = false;
+            if (self->net_light_blink_timer_) {
+                esp_timer_stop(self->net_light_blink_timer_);
+            }
+            self->net_light_level_ = 1;
+            gpio_set_level(NET_LIGHT_GPIO, 1);
+        } else {
+            // Blink when signal is bad
+            if (!self->net_light_blinking_) {
+                self->net_light_blinking_ = true;
+                self->net_light_level_ = 0;
+                gpio_set_level(NET_LIGHT_GPIO, self->net_light_level_);
+                if (self->net_light_blink_timer_) {
+                    esp_timer_stop(self->net_light_blink_timer_);
+                    esp_timer_start_periodic(self->net_light_blink_timer_, 500000); // 500ms
+                }
+            }
+        }
     }
 
 
@@ -184,15 +237,6 @@ private:
             GetAudioCodec()->SetOutputVolume(100);
         });
 
-        volume_down_button_.OnClick([this]() {
-            auto codec = GetAudioCodec();
-            auto volume = codec->output_volume() - 10;
-            if (volume < 0) {
-                volume = 0;
-            }
-            codec->SetOutputVolume(volume);
-        });
-
     }
     // 物联网初始化，添加对 AI 可见设备
     void InitializeIot() {
@@ -243,7 +287,7 @@ private:
 
 public:
     CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO),
-    volume_up_button_(VOLUME_UP_BUTTON_GPIO), volume_down_button_(VOLUME_DOWN_BUTTON_GPIO),
+    volume_up_button_(VOLUME_UP_BUTTON_GPIO),
     next_button_(NEXT_BUTTON_GPIO),
     power_counter_settings_("power_counter", true) {      
 
@@ -294,6 +338,16 @@ public:
         gpio_config(&io_conf);
         gpio_set_level(LED_GPIO, 0);
 
+        // NET light GPIO init (off by default)
+        gpio_config_t net_conf = {};
+        net_conf.pin_bit_mask = (1ULL << NET_LIGHT_GPIO);
+        net_conf.mode = GPIO_MODE_OUTPUT;
+        net_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+        net_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        net_conf.intr_type = GPIO_INTR_DISABLE;
+        gpio_config(&net_conf);
+        gpio_set_level(NET_LIGHT_GPIO, 0);
+
         audio_codec.OnWakeUp([this](const std::string& command) {
             ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());
             if (command == "你好小智" || command.find("小云") != std::string::npos){
@@ -303,6 +357,25 @@ public:
                 ResetWifiConfiguration();
             }
         });
+
+        // Create timers for net light control
+        {
+            esp_timer_create_args_t blink_args = {
+                .callback = &CustomBoard::NetLightBlinkCb,
+                .arg = this,
+                .name = "net_light_blink"
+            };
+            ESP_ERROR_CHECK(esp_timer_create(&blink_args, &net_light_blink_timer_));
+
+            esp_timer_create_args_t check_args = {
+                .callback = &CustomBoard::NetLightCheckCb,
+                .arg = this,
+                .name = "net_light_check"
+            };
+            ESP_ERROR_CHECK(esp_timer_create(&check_args, &net_light_check_timer_));
+            // Poll every 3s
+            ESP_ERROR_CHECK(esp_timer_start_periodic(net_light_check_timer_, 3000000));
+        }
     }
 
     ~CustomBoard() {
@@ -313,6 +386,16 @@ public:
             esp_timer_stop(idle_timer_);
             esp_timer_delete(idle_timer_);
             idle_timer_ = nullptr;
+        }
+        if (net_light_check_timer_) {
+            esp_timer_stop(net_light_check_timer_);
+            esp_timer_delete(net_light_check_timer_);
+            net_light_check_timer_ = nullptr;
+        }
+        if (net_light_blink_timer_) {
+            esp_timer_stop(net_light_blink_timer_);
+            esp_timer_delete(net_light_blink_timer_);
+            net_light_blink_timer_ = nullptr;
         }
     }
 
