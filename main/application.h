@@ -94,6 +94,8 @@ public:
     void PlayMusic(const char* url);
     AudioService& GetAudioService() { return audio_service_; }
     bool IsNormalReset() const { return is_normal_reset_; }  // 获取重启状态
+    bool IsSilentStartup() const { return is_silent_startup_; }  // 获取静默启动状态
+    void ClearSilentStartup() { is_silent_startup_ = false; }  // 清除静默启动状态
 
     bool IsWebsocketWorking() const { return protocol_ ? protocol_->IsAudioChannelOpened() : false; }
     bool HasWebsocketError() const { return protocol_ ? protocol_->HasErrorOccurred() : false; }

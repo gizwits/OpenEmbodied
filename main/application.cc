@@ -224,7 +224,8 @@ void Application::Alert(const char* status, const char* message, const char* emo
     display->SetStatus(status);
     display->SetEmotion(emotion);
     display->SetChatMessage("system", message);
-    if (!sound.empty()) {
+    // 静默启动时不播放提示音
+    if (!sound.empty() && !is_silent_startup_) {
         audio_service_.PlaySound(sound);
     }
 }
@@ -371,6 +372,14 @@ void Application::Start() {
     if (!is_normal_reset_) {
         ESP_LOGW(TAG, "Abnormal reset detected - reason: %d", reset_reason);
     }
+    
+    bool need_silent = Board::GetInstance().NeedSilentStartup();
+    ESP_LOGI(TAG, "Board::NeedSilentStartup() 返回: %d", need_silent);
+    if (need_silent) {
+        ESP_LOGI(TAG, "板级代码设置静默启动");
+        is_silent_startup_ = true;
+    }
+    ESP_LOGI(TAG, "最终 is_silent_startup_: %d", is_silent_startup_);
     
     Settings settings("wifi", true);
 
@@ -778,7 +787,11 @@ if (mqtt_client.isInitialized()) {
         auto now = std::chrono::steady_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - last_battery_check_time_).count();
         if (duration >= 30) {
-            CheckBatteryLevel();
+            if (!CheckBatteryLevel() && Board::GetInstance().NeedBlockLowBattery()) {
+                // 电池电量不足且需要阻止低电量运行，执行关机操作
+                ESP_LOGW(TAG, "Low battery detected during operation, shutting down...");
+                Board::GetInstance().PowerOff();
+            }
             last_battery_check_time_ = now;
         }
 
@@ -1304,7 +1317,7 @@ bool Application::CheckBatteryLevel() {
     bool discharging = false;
     if (Board::GetInstance().GetBatteryLevel(level, charging, discharging)) {
         // ESP_LOGI(TAG, "current Battery level: %d, charging: %d, discharging: %d", level, charging, discharging);
-        if (level <= 15 && discharging) {
+        if (level <= 1 && discharging) {
             // 电量
             PlaySound(Lang::Sounds::P3_BATTLE_LOW);
             return false;

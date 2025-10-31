@@ -14,7 +14,10 @@
 #include "assets/lang_config.h"
 #include "vb6824.h"
 #include <esp_wifi.h>
+#include <esp_system.h>
 #include "data_point_manager.h"
+#include "device_state_event.h"
+#include "settings.h"
 
 #include <esp_lcd_panel_vendor.h>
 #include <driver/spi_common.h>
@@ -26,7 +29,7 @@
 #define TAG "CustomBoard"
 
 #define RESET_WIFI_CONFIGURATION_COUNT 3
-#define SLEEP_TIME_SEC 60 * 3
+#define SLEEP_TIME_SEC 10 * 1
 // #define SLEEP_TIME_SEC 30
 class CustomBoard : public WifiBoard {
 private:
@@ -40,6 +43,20 @@ private:
     bool is_sleep_ = false;
 
     PowerManager* power_manager_;
+    
+    // LED control
+    enum LedMode { kLedSolid, kLedSlowBlink, kLedFastBlink };
+    esp_timer_handle_t led_timer_ = nullptr;
+    LedMode led_mode_ = kLedSolid;
+    int led_logic_level_ = 0; // 0 = ON (active-low), 1 = OFF
+    bool thinking_active_ = false;
+
+    // 静默启动：插上USB充电时不上电启动，需长按电源键启动
+    static bool silent_startup_from_board_;
+
+    bool IsSilent() const {
+        return Application::GetInstance().IsSilentStartup() || silent_startup_from_board_;
+    }
     
     // 唤醒词列表
     std::vector<std::string> wake_words_ = {"你好小智", "你好小云", "合养精灵", "嗨小火人"};
@@ -60,6 +77,83 @@ private:
         power_save_timer_->SetEnabled(true);
     }
 
+    void EnsureLedTimerCreated() {
+        if (led_timer_ != nullptr) return;
+        const esp_timer_create_args_t timer_args = {
+            .callback = [](void* arg) {
+                auto* self = static_cast<CustomBoard*>(arg);
+                self->led_logic_level_ = (self->led_logic_level_ == 0) ? 1 : 0;
+                gpio_set_level(BUILTIN_LED_GPIO, self->led_logic_level_);
+            },
+            .arg = this,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "led_blink_timer",
+            .skip_unhandled_events = true,
+        };
+        ESP_ERROR_CHECK(esp_timer_create(&timer_args, &led_timer_));
+    }
+
+    void StopLedTimer() {
+        if (led_timer_ && esp_timer_is_active(led_timer_)) {
+            ESP_ERROR_CHECK(esp_timer_stop(led_timer_));
+        }
+    }
+
+    void SetLedSolidOn() {
+        StopLedTimer();
+        led_mode_ = kLedSolid;
+        led_logic_level_ = 0; // active-low: 0 means ON
+        gpio_set_level(BUILTIN_LED_GPIO, led_logic_level_);
+    }
+
+    void SetLedBlink(uint64_t period_ms) {
+        EnsureLedTimerCreated();
+        StopLedTimer();
+        // Ensure we start from ON state for visibility
+        led_logic_level_ = 0;
+        gpio_set_level(BUILTIN_LED_GPIO, led_logic_level_);
+        ESP_ERROR_CHECK(esp_timer_start_periodic(led_timer_, period_ms * 1000));
+    }
+
+    void ApplyLedMode(LedMode mode) {
+        if (IsSilent()) {
+            // 静默启动期间，强制关闭LED且不闪烁
+            StopLedTimer();
+            led_mode_ = kLedSolid;
+            led_logic_level_ = 1; // OFF for active-low
+            gpio_set_level(BUILTIN_LED_GPIO, led_logic_level_);
+            return;
+        }
+        if (mode == kLedSolid) {
+            SetLedSolidOn();
+        } else if (mode == kLedSlowBlink) {
+            led_mode_ = kLedSlowBlink;
+            SetLedBlink(500); // 0.5s period
+        } else {
+            led_mode_ = kLedFastBlink;
+            SetLedBlink(500); // 0.5s period
+        }
+    }
+
+    void InitializeDeviceStateEvent() {
+        DeviceStateEventManager::GetInstance().RegisterStateChangeCallback(
+            [this](DeviceState prev, DeviceState curr) {
+                // Speaking has highest priority -> solid on
+                if (curr == kDeviceStateSpeaking) {
+                    ApplyLedMode(kLedSolid);
+                    return;
+                }
+                // Listening -> slow blink
+                if (curr == kDeviceStateListening) {
+                    ApplyLedMode(kLedSlowBlink);
+                    return;
+                }
+                // Other states -> solid on
+                ApplyLedMode(kLedSolid);
+            }
+        );
+    }
+
     void run_sleep_mode(bool need_delay = true){
         auto& application = Application::GetInstance();
         if (need_delay) {
@@ -73,8 +167,7 @@ private:
     }
 
     void InitializeButtons() {
-
-        const int chat_mode = Application::GetInstance().GetChatMode();
+        
         boot_button_.OnPressDown([this]() {
             ESP_LOGI(TAG, "boot_button_.OnPressDown");
             // 开灯
@@ -101,9 +194,19 @@ private:
         power_button_.OnPressDown([this]() {
             ESP_LOGI(TAG, "power_button_.OnPressDown");
             auto& app = Application::GetInstance();
-            app.ToggleChatState();
-            // 开灯
-            gpio_set_level(BUILTIN_LED_GPIO, 0);
+            // 静默启动时，短按不生效
+            if (app.IsSilentStartup() || silent_startup_from_board_) {
+                ESP_LOGI(TAG, "静默启动，短按无效");
+                return;
+            }
+            // 无条件先打断，再直接进入监听并强制开启语音处理，确保“秒停+立即监听”
+            app.AbortSpeaking(kAbortReasonNone);
+            app.StartListening();
+            app.GetAudioService().EnableVoiceProcessing(true, true);
+            // 非静默：进入监听后用统一灯效（慢闪），避免出现可对话但灯不亮
+            if (!IsSilent()) {
+                ApplyLedMode(kLedSlowBlink);
+            }
 
         });
         
@@ -121,6 +224,34 @@ private:
                 first_level = 1;
                 ESP_LOGI(TAG, "首次上电5秒内，忽略长按操作");
             } else {
+                // 如果为静默启动，长按视为用户主动启动：清除静默标志并重启
+                if (app.IsSilentStartup() || silent_startup_from_board_) {
+                    Settings settings("system", true);
+                    settings.SetInt("silent_next", 0);
+                    settings.SetInt("user_wakeup", 1);
+                    ESP_LOGI(TAG, "静默启动下长按：清除silent_next并设置user_wakeup，重启");
+                    esp_restart();
+                    return;
+                }
+                // 刷新一次充电状态并写入 NVS silent_next 与 S3 一致
+                bool is_charging_now = false;
+                if (power_manager_) {
+                    for (int i = 0; i < 2; ++i) {
+                        power_manager_->CheckBatteryStatusImmediately();
+                        vTaskDelay(pdMS_TO_TICKS(20));
+                    }
+                    is_charging_now = power_manager_->IsCharging();
+                    ESP_LOGI(TAG, "长按键操作前充电状态: %s", is_charging_now ? "充电中" : "未充电");
+                }
+                {
+                    Settings settings("system", true);
+                    settings.SetInt("silent_next", is_charging_now ? 1 : 0);
+                    if (is_charging_now) {
+                        ESP_LOGI(TAG, "充电状态下关机，先保存silent_next=1");
+                    } else {
+                        ESP_LOGI(TAG, "电池模式下关机，保存silent_next=0");
+                    }
+                }
                 // 提前播放音频
                 // 非休眠模式才播报
                 if (!is_sleep_) {
@@ -141,12 +272,19 @@ private:
             ESP_LOGI(TAG, "power_button_.OnPressUp");
             if (need_power_off_) {
                 need_power_off_ = false;
-                // 使用静态函数来避免lambda捕获问题
+                // 等待关机提示音播放完成后再关机，行为与 S3 版本一致
                 xTaskCreate([](void* arg) {
                     auto* board = static_cast<CustomBoard*>(arg);
-                    Application::GetInstance().SetDeviceState(kDeviceStateIdle);
-                    board->run_sleep_mode(false);
-
+                    auto& app = Application::GetInstance();
+                    ESP_LOGI(TAG, "等待音频播放完成");
+                    int wait_count = 0;
+                    while (!app.GetAudioService().IsIdle() && wait_count < 50) {
+                        vTaskDelay(pdMS_TO_TICKS(100));
+                        wait_count++;
+                    }
+                    ESP_LOGI(TAG, "音频播放完成，准备关机");
+                    app.SetDeviceState(kDeviceStateIdle);
+                    board->PowerOff();
                     vTaskDelete(NULL);
                 }, "power_off_task", 4028, this, 10, NULL);
             }
@@ -245,7 +383,7 @@ private:
     }
 
 public:
-    CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), power_button_(POWER_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO){      
+    CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), power_button_(POWER_BUTTON_GPIO, false, 1000), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO){      
         gpio_config_t io_conf = {};
         io_conf.pin_bit_mask = (1ULL << BUILTIN_LED_GPIO);
         io_conf.mode = GPIO_MODE_OUTPUT;
@@ -253,7 +391,9 @@ public:
         io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
         io_conf.intr_type = GPIO_INTR_DISABLE;
         gpio_config(&io_conf);
-        gpio_set_level(BUILTIN_LED_GPIO, 0);
+        // 默认拉高，避免上电过程中可见亮灯；后续根据静默状态再决定
+        gpio_set_level(BUILTIN_LED_GPIO, 1);
+        led_logic_level_ = 1;
 
 
         power_on_time_ = esp_timer_get_time() / 1000; // 转换为毫秒
@@ -271,6 +411,7 @@ public:
         InitializeIot();
 
         ESP_LOGI(TAG, "Initializing LED Signal...");
+        InitializeDeviceStateEvent();
         Settings settings("wifi", true);
         auto s_factory_test_mode = settings.GetInt("ft_mode", 0);
 
@@ -284,8 +425,47 @@ public:
         InitializePowerManager();
         ESP_LOGI(TAG, "Power Manager initialized.");
 
+        // 立即检测一次充电状态
+        power_manager_->CheckBatteryStatusImmediately();
+
+        // 检查开机复位原因与充电状态，决定是否静默启动
+        auto reset_reason = esp_reset_reason();
+        Settings sys_settings("system", false);
+        int silent_next = sys_settings.GetInt("silent_next", 0);
+        int user_wakeup = sys_settings.GetInt("user_wakeup", 0);
+        if (user_wakeup == 1) {
+            Settings sys_settings_rw("system", true);
+            sys_settings_rw.SetInt("user_wakeup", 0);
+            silent_startup_from_board_ = false;
+        } else if (silent_next == 1) {
+            Settings sys_settings_rw("system", true);
+            sys_settings_rw.SetInt("silent_next", 0);
+            silent_startup_from_board_ = true;
+        } else if (reset_reason == ESP_RST_POWERON) {
+            bool is_charging = power_manager_->IsCharging();
+            if (is_charging) {
+                silent_startup_from_board_ = true;
+            }
+        }
+
+        // 静默启动时，禁止点亮内置指示灯，并禁用省电计时器
+        if (silent_startup_from_board_) {
+            led_logic_level_ = 1; // active-low: 1=OFF
+            gpio_set_level(BUILTIN_LED_GPIO, led_logic_level_);
+            SetPowerSaveTimer(false);
+        } else {
+            // 正常启动：恢复到常亮初始态（后续状态机会切换）
+            led_logic_level_ = 0;
+            gpio_set_level(BUILTIN_LED_GPIO, led_logic_level_);
+            SetPowerSaveTimer(true);
+        }
+
         audio_codec.OnWakeUp([this](const std::string& command) {
             ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());
+            // 静默启动时忽略唤醒词
+            if (Application::GetInstance().IsSilentStartup() || silent_startup_from_board_) {
+                return;
+            }
             if (IsCommandInList(command, wake_words_)){
                 ESP_LOGE(TAG, "vb6824 recv cmd: %d", Application::GetInstance().GetDeviceState());
                 // if(Application::GetInstance().GetDeviceState() != kDeviceStateListening){
@@ -330,6 +510,26 @@ public:
         return &audio_codec;
     }
 
+    // 关机行为与 S3 版本保持一致：拉低保持脚；若在充电，则重启以进入静默/充电逻辑
+    virtual void PowerOff() override {
+        ESP_LOGI(TAG, "PowerOff called, setting POWER_HOLD_GPIO low");
+        gpio_set_level(POWER_HOLD_GPIO, 0);
+
+        bool is_charging = power_manager_ && power_manager_->IsCharging();
+        if (is_charging) {
+            // 充电场景统一按 S3 行为：重启进入静默充电
+            ESP_LOGI(TAG, "USB充电模式，重启设备以检测NVS标志");
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            esp_restart();
+        }
+        // 电池模式下，直接拉低保持脚即可真正关机
+    }
+
+    // 返回是否需要在充电时静默启动
+    virtual bool NeedSilentStartup() override {
+        return silent_startup_from_board_;
+    }
+
     void SetPowerSaveTimer(bool enable) {
         power_save_timer_->SetEnabled(enable);
     }
@@ -361,3 +561,6 @@ public:
 };
 
 DECLARE_BOARD(CustomBoard);
+
+// 静态成员定义
+bool CustomBoard::silent_startup_from_board_ = false;
