@@ -1,0 +1,23 @@
+# Name,   Type, SubType, Offset,  Size, Flags
+# Note: if you have increased the bootloader size, make sure to update the offsets to avoid overlap
+nvs,        data, nvs,     0x11000,  0x4000,
+config_data, data, nvs,    0x15000,  0x2000,
+otadata,    data, ota,     0x17000,  0x2000,
+phy_init,   data, phy,     0x19000,  0x1000,
+ota_0,      app,  ota_0,   0x20000,  0x320000,
+ota_1,      app,  ota_1,   0x340000, 0x320000,
+flash_tone, data, 0x27,    0x660000, 0xE4000,
+auth_data,  data, nvs,     0x744000, 0x2000,
+local_data, data, nvs,     0x746000, 0x32000,
+coredump, data, coredump,  0x778000, 0x10000,
+model,    data, spiffs,    0x800000, 4M,
+log_data,   data, nvs,     0xD00000, 2M,
+extra_data, data, nvs,     0xF00000, 0x1000,
+
+# 计算剩余空间
+# 总闪存大小假设为16M（0x1000000）
+# 已使用空间计算：
+# 0x11000 + 0x4000 + 0x2000 + 0x2000 + 0x1000 + 0x320000 + 0x320000 + 0xE4000 + 0x2000 + 0x32000 + 0x10000 + 4M + 2M + 0x100000
+# = 0x1000000
+# 剩余空间 = 0x1000000 - 0x1000000 = 0x0
+# 剩余空间为 0M

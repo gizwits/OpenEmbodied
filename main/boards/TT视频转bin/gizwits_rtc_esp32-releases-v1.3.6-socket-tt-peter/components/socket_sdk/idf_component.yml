@@ -1,0 +1,10 @@
+dependencies:
+  espressif/zlib: "^1.3.0"
+  joltwallet/littlefs: "==1.14.5"
+  esp_websocket_client: "^1.2.3"
+  nimble_peripheral_utils:
+    path: ${IDF_PATH}/examples/bluetooth/nimble/common/nimble_peripheral_utils
+  protocol_examples_common:
+    path: ${IDF_PATH}/examples/common_components/protocol_examples_common
+  espressif/led_strip: "^2.4.1"
+  kylewang4929/esp-wifi-connect: "3.0.0"

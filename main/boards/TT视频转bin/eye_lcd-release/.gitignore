@@ -1,0 +1,6 @@
+target/
+old/
+bitmap_array
+frames_1s
+frames_5s
+build/

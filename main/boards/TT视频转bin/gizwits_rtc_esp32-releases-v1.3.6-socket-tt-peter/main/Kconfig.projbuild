@@ -1,0 +1,130 @@
+menu "Atom Config"
+
+    choice AUDIO_DECODER_SUPPORT
+        prompt "Audio Decoder"
+        default AUDIO_SUPPORT_PCM_DECODER
+    
+    config AUDIO_SUPPORT_G711A_DECODER
+        bool "AUDIUO-G711-DECODER"
+    
+    config AUDIO_SUPPORT_OPUS_DECODER
+        bool "AUDIO-OPUS-DECODER"
+    
+    config AUDIO_SUPPORT_AAC_DECODER
+        bool "AUDIO-AAC-DECODER"
+    config AUDIO_SUPPORT_PCM_DECODER
+        bool "AUDIO-PCM-DECODER"
+    endchoice
+    
+    choice ACTIVED_MODE_SUPPORT
+        prompt "Activated Mode"
+        default ACTIVED_MODE_BUTTON
+    
+    config ACTIVED_MODE_SERVER_VAD
+        bool "ACTIVED-MODE-SERVER-VAD"
+    
+    config ACTIVED_MODE_BUTTON
+        bool "ACTIVED_MODE_BUTTON"
+
+    config ACTIVED_MODE_BUTTON_AND_WAKEUP
+        bool "ACTIVED_MODE_BUTTON_AND_WAKEUP"
+    
+    config ACTIVED_MODE_SERVER_VAD_AND_WAKEUP
+        bool "ACTIVED_MODE_SERVER_VAD_AND_WAKEUP"
+    
+    endchoice
+
+    choice TT_MUSIC_HARDWARE_VERION
+        prompt "TT Music Hardware Version"
+        default TT_MUSIC_HW_1V5
+    
+    config TT_MUSIC_HW_1V5
+        bool "TT Music Hardware V1.5"
+    
+    config TT_MUSIC_HW_1V3
+        bool "TT Music Hardware V1.3 or V1.2BX"
+    
+    endchoice
+
+    choice TEST_MODE
+        prompt "Test Mode"
+        default TEST_MODE_NONE
+    
+    config TEST_MODE_VOICE
+        bool "TEST-MODE-VOICE"
+    
+    config TEST_MODE_SERVER_VAD
+        bool "TEST-MODE-SERVER-VAD"
+    
+    config TEST_MODE_NONE
+        bool "TEST-MODE-NONE"
+    
+    endchoice
+
+    choice FACTORY_TEST_MODE
+        prompt "Factory Test Mode"
+        default FACTORY_TEST_MODE_ENABLE
+    
+    config FACTORY_TEST_MODE_ENABLE
+        bool "Factory Test Mode Enable"
+    
+    config FACTORY_TEST_MODE_DISABLE
+        bool "Factory Test Mode Disable"
+        
+    endchoice
+
+    config SERVO_SUPPORT
+        bool "Enable servo motor support"
+        default n
+        help
+            Enable this option to support servo motor control functionality.
+
+    config SUPPORT_HEART_BEAT
+        bool "Enable heart beat support"
+        default n
+        help
+            Enable this option to support servo motor control functionality.
+        
+
+    choice AUDIO_WAKE_UP_SUPPORT
+        prompt "Select wake up word"
+        default WAKE_UP_HAIMIANBAOBAO
+        help
+            Select which wake up word to use.
+
+        config WAKE_UP_HAIMIANBAOBAO
+            bool "Hai Mian Bao Bao"
+            help
+                Use "Hai Mian Bao Bao" as wake up word
+        config WAKE_UP_MOFANGMOFANG
+            bool "Mo Fang Mo Fang"
+            help
+                Use "Mo Fang Mo Fang" as wake up word
+        config WAKE_UP_XIAOZHIXIAOZHI
+            bool "Xiao Zhi Xiao Zhi"
+            help
+                Use "Xiao Zhi Xiao Zhi" as wake up word
+        config WAKE_UP_XIAOYUNXIAOYUN
+            bool "Xiao Yun Xiao Yun"
+            help
+                Use "Xiao Yun Xiao Yun" as wake up word             
+        config WAKE_UP_NONE
+            bool "NONE"
+            help
+                Use "NONE" as wake up word
+    endchoice
+
+    choice TRACE_LOG
+        prompt "Trace log"
+        default TRACE_LOG_DISABLE
+    
+    config TRACE_LOG_DISABLE
+        bool "Disable trace log"
+    
+    config TRACE_LOG_ENABLE
+        bool "Enable trace log"
+
+    endchoice
+
+
+endmenu

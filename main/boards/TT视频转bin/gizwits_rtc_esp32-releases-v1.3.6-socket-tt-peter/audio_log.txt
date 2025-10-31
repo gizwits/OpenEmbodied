@@ -1,0 +1,4 @@
+Executing action: monitor
+Serial port /dev/cu.usbmodem11401
+Connecting...
+Detecting chip type... ESP32-S3
