@@ -171,7 +171,7 @@ std::string Esp32Camera::Explain(const std::string& question) {
     // 配置HTTP客户端，使用分块传输编码
     http->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
     http->SetHeader("Client-Id", Board::GetInstance().GetUuid().c_str());
-    http->SetHeader("Tenant-Id", CONFIG_CUSTOM_TENANT_ID.c_str());
+    http->SetHeader("Tenant-Id", CONFIG_CUSTOM_TENANT_ID);
     if (!explain_token_.empty()) {
         http->SetHeader("Authorization", "Bearer " + explain_token_);
     }
