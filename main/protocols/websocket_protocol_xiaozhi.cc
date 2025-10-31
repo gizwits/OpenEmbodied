@@ -131,6 +131,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     websocket_->SetHeader("Protocol-Version", std::to_string(version_).c_str());
     websocket_->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
     websocket_->SetHeader("Client-Id", Board::GetInstance().GetUuid().c_str());
+    websocket_->SetHeader("Tenant-Id", CONFIG_CUSTOM_TENANT_ID.c_str());
 
     websocket_->OnData([this](const char* data, size_t len, bool binary) {
         if (binary) {
