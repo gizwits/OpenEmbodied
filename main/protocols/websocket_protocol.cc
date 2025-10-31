@@ -263,6 +263,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     static bool is_first_packet_ = false;
     static bool is_start_progress_ = false;
     static bool is_detect_emotion_ = false;
+    static int audio_packet_count_ = 0;  // 音频包计数器
     error_occurred_ = false;
     busy_sending_audio_ = false;  // 重置音频发送标志
     std::string url = std::string("ws://") + room_params_.api_domain + std::string("/v1/chat") + std::string("?bot_id=") + std::string(room_params_.bot_id);
@@ -295,13 +296,19 @@ bool WebsocketProtocol::OpenAudioChannel() {
         if (event_type.empty() || event_type.length() >= 64) {
             return;
         }
-        // ESP_LOGI(TAG, "event_type: %.*s", (int)event_type.length(), event_type.data());
+        ESP_LOGI(TAG, "event_type: %.*s", (int)event_type.length(), event_type.data());
 
         // if(event_type != "chat.created") {
         //     return;
         // }
         if(event_type == "conversation.audio.delta") {
             // ESP_LOGI(TAG, "conversation.audio.delta");
+
+            // 开场白没有明确的事件，只能用这种方式来检测是否要切换到说话模式
+            if (need_check_play_prologue_ == true && need_play_prologue_ == true) {
+                Application::GetInstance().SetDeviceState(kDeviceStateSpeaking);
+                need_check_play_prologue_= false;
+            }
 
             constexpr std::string_view content_key = "\"content\":\"";
             size_t content_start = str_data.find(content_key);
@@ -349,6 +356,15 @@ bool WebsocketProtocol::OpenAudioChannel() {
                         base64_content.length());
 
                     if (ret == 0 && actual_len > 0) {
+                        // 增加音频包计数器
+                        audio_packet_count_++;
+                        
+                        // 每接收到5包音频数据打印一个日志
+                        if (audio_packet_count_ % 5 == 0) {
+                            ESP_LOGI(TAG, "Received %d audio packets, current packet size: %d bytes", 
+                                     audio_packet_count_, actual_len);
+                        }
+                        
                         if (on_incoming_audio_ != nullptr) {
                             // 队列长度限制逻辑在下游
                             if (is_first_packet_ == true) {
@@ -406,7 +422,6 @@ bool WebsocketProtocol::OpenAudioChannel() {
 
             if (event_type == "chat.created") {
                 ParseServerHello(root);
-
             } else if (event_type == "conversation.chat.created") {
                 auto id = cJSON_GetObjectItem(root, "id");
                 ESP_LOGI(TAG, "conversation.chat.created: %s", id->valuestring);
@@ -433,11 +448,15 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 ESP_LOGI(TAG, "conversation.chat.in_progress");
                 MqttClient::getInstance().sendTraceLog("info", "conversation.chat.in_progress");
 
+                // 已经触发了对话 则不用检测开场白了
+                need_check_play_prologue_ = false;
+
                 is_detect_emotion_ = false;
                 is_first_packet_ = true;
                 is_start_progress_ = true;
                 cached_packet_count_ = 0;
                 packet_cache_.clear();
+                audio_packet_count_ = 0;  // 重置音频包计数器
 
                 // 立即暂停上传
                 speech_stopped_recorded_ = true;
@@ -555,6 +574,12 @@ bool WebsocketProtocol::OpenAudioChannel() {
         SetError(Lang::Strings::SERVER_NOT_CONNECTED);
         return false;
     }
+
+    // 连接成功
+    if (need_play_prologue_ == true) {
+        need_check_play_prologue_ = true;
+    }
+
 
     // Wait for server hello
     EventBits_t bits = xEventGroupWaitBits(event_group_handle_, WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT, pdTRUE, pdFALSE, pdMS_TO_TICKS(5000));
@@ -716,7 +741,6 @@ void WebsocketProtocol::ParseServerHello(const cJSON* root) {
 
 void WebsocketProtocol::SwitchToSpeaking() {
     
-    message_cache_.clear();
     message_buffer_.clear();
     message_buffer_ = "{";
     message_buffer_ += "\"type\":\"tts\",";

@@ -12,7 +12,10 @@
                 "CONFIG_SR_WN_WN9_NIHAOXIAOXIN_TTS=n",
                 "CONFIG_SR_WN_WN9_HILILI_TTS=y",
                 "CONFIG_PRODUCT_TEST_WIFI=\"XUNGUAN_TEST#@#@\"",
-                "CONFIG_PRODUCT_TEST_WIFI_PASSWORD=\"12345678\""
+                "CONFIG_PRODUCT_TEST_WIFI_PASSWORD=\"12345678\"",
+                "CONFIG_ESP_WIFI_IRAM_OPT=y",
+                "CONFIG_ESP_WIFI_RX_IRAM_OPT=y",
+                "CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=128"
             ]
         }
     ]

@@ -297,6 +297,13 @@ void AudioService::AudioOutputTask() {
         /* Update the last output time */
         last_output_time_ = std::chrono::steady_clock::now();
         debug_statistics_.playback_count++;
+        
+        // 输出管道内的包数量
+        // {
+        //     std::lock_guard<std::mutex> guard(audio_queue_mutex_);
+        //     ESP_LOGI(TAG, "Audio pipeline status - Decode queue: %zu, Playback queue: %zu", 
+        //              audio_decode_queue_.size(), audio_playback_queue_.size());
+        // }
 
         // 检查是否需要启动语音处理（等待播放完成）
         if (pending_voice_processing_start_) {
@@ -367,6 +374,10 @@ void AudioService::OpusCodecTask() {
                 lock.lock();
                 audio_playback_queue_.push_back(std::move(task));
                 audio_queue_cv_.notify_all();
+                
+                // 输出解码后的管道状态
+                // ESP_LOGI(TAG, "Audio decode completed - Decode queue: %zu, Playback queue: %zu", 
+                //          audio_decode_queue_.size(), audio_playback_queue_.size());
             } else {
                 ESP_LOGE(TAG, "Failed to decode audio");
                 lock.lock();

@@ -20,6 +20,14 @@
 #include "ota.h"
 #include "audio_service.h"
 #include "device_state_event.h"
+#include "w25q64_flash.h"
+
+
+#define FLASH_PIN_MOSI GPIO_NUM_3  // FLASH_DI
+#define FLASH_PIN_MISO GPIO_NUM_39  // FLASH_DO
+#define FLASH_PIN_CLK  GPIO_NUM_11  // FLASH_CLK
+#define FLASH_PIN_CS   GPIO_NUM_40  // FLASH_CS
+
 
 #define MAIN_EVENT_SCHEDULE (1 << 0)
 #define MAIN_EVENT_SEND_AUDIO (1 << 1)

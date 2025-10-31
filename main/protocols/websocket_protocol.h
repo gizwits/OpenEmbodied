@@ -28,6 +28,8 @@ public:
 private:
     std::unique_ptr<WebSocket> websocket_;
     EventGroupHandle_t event_group_handle_;
+    bool need_play_prologue_ = true;
+    bool need_check_play_prologue_ = true;
     TaskHandle_t close_task_handle_ = nullptr;
     std::vector<AudioStreamPacket> packet_cache_;
     int cached_packet_count_ = 0;
