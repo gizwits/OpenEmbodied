@@ -790,18 +790,13 @@ if (mqtt_client.isInitialized()) {
         // 每30秒检查一次电量
         auto now = std::chrono::steady_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - last_battery_check_time_).count();
-<<<<<<< HEAD
-        if (duration >= 30) {
+        auto battery_check_time_offset = Board::GetInstance().GetBatteryCheckTimeOffset();
+        if (duration >= battery_check_time_offset) {
             if (!CheckBatteryLevel() && Board::GetInstance().NeedBlockLowBattery()) {
                 // 电池电量不足且需要阻止低电量运行，执行关机操作
                 ESP_LOGW(TAG, "Low battery detected during operation, shutting down...");
                 Board::GetInstance().PowerOff();
             }
-=======
-        auto battery_check_time_offset = Board::GetInstance().GetBatteryCheckTimeOffset();
-        if (duration >= battery_check_time_offset) {
-            CheckBatteryLevel();
->>>>>>> 93cea7f969ec9d253e2cdd9f4e98f0ad06d54b05
             last_battery_check_time_ = now;
         }
 

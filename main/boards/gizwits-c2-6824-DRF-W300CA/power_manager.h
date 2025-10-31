@@ -572,17 +572,22 @@ public:
     }
 
     void EnterDeepSleepIfNotCharging() {
+        ESP_LOGI("PowerManager", "EnterDeepSleepIfNotCharging");
         // 不在充电就真休眠
         if (is_charging_ == 0) {
-            vb6824_shutdown();
-            vTaskDelay(pdMS_TO_TICKS(200));
-            // 配置唤醒源 只有电源域是VDD3P3_RTC的才能唤醒深睡
-            uint64_t wakeup_pins = (BIT(GPIO_NUM_1));
-            esp_deep_sleep_enable_gpio_wakeup(wakeup_pins, ESP_GPIO_WAKEUP_GPIO_LOW);
-            ESP_LOGI("PowerMgr", "ready to esp_deep_sleep_start");
-            vTaskDelay(pdMS_TO_TICKS(10));
+            // 非充电 直接关机
+            gpio_set_level(POWER_HOLD_GPIO, 0);
+        } else {
+            // 充电中，进休眠
+            // vb6824_shutdown();
+            // vTaskDelay(pdMS_TO_TICKS(200));
+            // // 配置唤醒源 只有电源域是VDD3P3_RTC的才能唤醒深睡
+            // uint64_t wakeup_pins = (BIT(POWER_BUTTON_GPIO));
+            // esp_deep_sleep_enable_gpio_wakeup(wakeup_pins, ESP_GPIO_WAKEUP_GPIO_LOW);
+            // ESP_LOGI("PowerMgr", "ready to esp_deep_sleep_start");
+            // vTaskDelay(pdMS_TO_TICKS(10));
             
-            esp_deep_sleep_start();
+            // esp_deep_sleep_start();
         }
     }
 };
