@@ -721,7 +721,7 @@ void MqttClient::processSendQueue() {
         } else if (msg.qos == MQTT_SEND_CONTROL_TOKEN_REFRESH) {
             // 处理 token 刷新请求
             ESP_LOGI(TAG, "Processing token refresh in main loop");
-            GetRoomInfo(false);
+            GetRoomInfo(true);
         } else {
             // 正常发送MQTT消息
             if (mqtt_) {

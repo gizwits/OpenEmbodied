@@ -425,7 +425,11 @@ void Application::Start() {
     int level = 0;
     bool charging = false;
     bool discharging = false;
-    if (Board::GetInstance().GetBatteryLevel(level, charging, discharging)) {
+    bool hasBattery = Board::GetInstance().GetBatteryLevel(level, charging, discharging);
+    if (
+        Board::GetInstance().NeedSilentStartup() && 
+        hasBattery
+    ) {
         ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
         if (charging) {
             // 静默启动
@@ -786,12 +790,18 @@ if (mqtt_client.isInitialized()) {
         // 每30秒检查一次电量
         auto now = std::chrono::steady_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - last_battery_check_time_).count();
+<<<<<<< HEAD
         if (duration >= 30) {
             if (!CheckBatteryLevel() && Board::GetInstance().NeedBlockLowBattery()) {
                 // 电池电量不足且需要阻止低电量运行，执行关机操作
                 ESP_LOGW(TAG, "Low battery detected during operation, shutting down...");
                 Board::GetInstance().PowerOff();
             }
+=======
+        auto battery_check_time_offset = Board::GetInstance().GetBatteryCheckTimeOffset();
+        if (duration >= battery_check_time_offset) {
+            CheckBatteryLevel();
+>>>>>>> 93cea7f969ec9d253e2cdd9f4e98f0ad06d54b05
             last_battery_check_time_ = now;
         }
 
@@ -815,7 +825,6 @@ if (mqtt_client.isInitialized()) {
                     if (!packet->payload.empty()) {
                         ESP_LOGD(TAG, "Clearing unsent packet payload: %u bytes", (unsigned int)packet->payload.size());
                         packet->payload.clear();
-                        packet->payload.shrink_to_fit();
                     }
                 }
             }
@@ -883,7 +892,7 @@ void Application::OnWakeWordDetected() {
 
     if (device_state_ == kDeviceStateIdle) {
         ResetDecoder();
-        PlaySound(Lang::Sounds::P3_SUCCESS);
+        PlaySound(Lang::Sounds::P3_WAKE_WORD);
         audio_service_.EncodeWakeWord();
 
         if (!protocol_->IsAudioChannelOpened()) {
@@ -912,7 +921,7 @@ void Application::OnWakeWordDetected() {
     } else if (device_state_ == kDeviceStateSpeaking) {
         AbortSpeaking(kAbortReasonWakeWordDetected);
         ResetDecoder();
-        PlaySound(Lang::Sounds::P3_SUCCESS);
+        PlaySound(Lang::Sounds::P3_WAKE_WORD);
         SetDeviceState(kDeviceStateListening);
     } else if (device_state_ == kDeviceStateActivating) {
         SetDeviceState(kDeviceStateIdle);
@@ -1039,7 +1048,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     
     if (IsTmpFactoryTestMode()) {
         // 临时测试模式，播放提示音
-        PlaySound(Lang::Sounds::P3_SUCCESS);
+        PlaySound(Lang::Sounds::P3_WAKE_WORD);
         return;
     }
     
@@ -1058,7 +1067,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     if (device_state_ == kDeviceStateIdle) {
         Schedule([this, wake_word]() {
             audio_service_.ResetDecoder();
-            audio_service_.PlaySound(Lang::Sounds::P3_IM_IN);
+            audio_service_.PlaySound(Lang::Sounds::P3_WAKE_WORD);
 
             ToggleChatState();
             if (protocol_) {
@@ -1079,7 +1088,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
             ESP_LOGI(TAG, "WakeWordInvoke(kDeviceStateSpeaking)");
             protocol_->SendAbortSpeaking(kAbortReasonNone);
             audio_service_.ResetDecoder();
-            audio_service_.PlaySound(Lang::Sounds::P3_IM_IN);
+            audio_service_.PlaySound(Lang::Sounds::P3_WAKE_WORD);
             
         }, "WakeWordInvoke_AbortSpeaking");
     } else if (device_state_ == kDeviceStateListening) { 
@@ -1087,7 +1096,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
         protocol_->PreAbortSpeaking();
         Schedule([this]() {
             ResetDecoder();
-            PlaySound(Lang::Sounds::P3_IM_IN);
+            PlaySound(Lang::Sounds::P3_WAKE_WORD);
             SetDeviceState(kDeviceStateListening);
         });
     } else if (device_state_ == kDeviceStateSleeping) {

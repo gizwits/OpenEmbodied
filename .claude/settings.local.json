@@ -5,7 +5,8 @@
       "Bash(grep:*)",
       "Bash(idf.py:*)",
       "Bash(find:*)",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(grep:*)"
     ],
     "deny": [],
     "ask": []

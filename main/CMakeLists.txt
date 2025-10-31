@@ -18,7 +18,6 @@ set(SOURCES "audio/audio_codec.cc"
             "display/eye_display.cc"
             "display/eye_display_horizontal.cc"
             "display/eye_display_horizontal_emojis.cc"
-            "display/lottie_display.cc"
             "display/lv_mem_psram.c"
             "protocols/protocol.cc"
             "watchdog.cc"
@@ -75,6 +74,8 @@ elseif(CONFIG_BOARD_TYPE_DOIT_ESP32S3_EYE_6824)
     set(BOARD_TYPE "doit-esp32s3-eye-6824")
 elseif(CONFIG_BOARD_TYPE_GIZWITS_S3_VB6824_LCD)
     set(BOARD_TYPE "gizwits-s3-vb6824-lcd")
+elseif(CONFIG_BOARD_TYPE_GIZWITS_S3_RH)
+    set(BOARD_TYPE "gizwits-s3-rh")
 elseif(CONFIG_BOARD_TYPE_GIZWITS_S3_VB6824_ST7735S)
     set(BOARD_TYPE "gizwits-s3-vb6824-st7735s")
 elseif(CONFIG_BOARD_TYPE_GIZWITS_GOKIT5)
@@ -101,6 +102,8 @@ elseif(CONFIG_BOARD_TYPE_GIZWITS_C2_6824_LVLIN)
     set(BOARD_TYPE "gizwits-c2-6824-lvlin")
 elseif(CONFIG_BOARD_TYPE_GIZWITS_C2_6824_TOY)
     set(BOARD_TYPE "gizwits-c2-6824-toy")
+elseif(CONFIG_BOARD_TYPE_GIZWITS_C2_6824_UART)
+    set(BOARD_TYPE "gizwits-c2-6824-uart")
 elseif(CONFIG_BOARD_TYPE_GIZWITS_C2_6824_BIRDCAGE)
     set(BOARD_TYPE "gizwits-c2-6824-birdcage")
 elseif(CONFIG_BOARD_TYPE_GIZWITS_C2_6824_DRF_W300CA)
@@ -174,6 +177,10 @@ if(CONFIG_USE_EYE_STYLE_VB6824 OR CONFIG_USE_AUDIO_CODEC_DECODE_OPUS)
                             "audio/codecs/es8389_audio_codec.cc"
                             "display/lottie_display.cc"
                             "audio/codecs/es8388_audio_codec.cc")
+endif()
+
+if(CONFIG_LV_USE_LOTTIE)
+    list(APPEND SOURCES "display/lottie_display.cc")
 endif()
 
 idf_component_register(SRCS ${SOURCES}

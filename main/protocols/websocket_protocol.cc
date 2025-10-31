@@ -755,20 +755,11 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "\"use_cbr\":false,";
     message += "\"frame_size_ms\":60,";
     message += "\"limit_config\":{";
-#ifdef CONFIG_IDF_TARGET_ESP32C2
-    
-    if (network_type == NetworkType::ML307) {
-        message += "\"period\":1,";
-        message += "\"max_frame_num\":25";
-    } else {
-        ESP_LOGI(TAG, "network_type: %d", static_cast<int>(network_type));
-        message += "\"period\":3,";
-        message += "\"max_frame_num\":50";
-    }
-#else
-    message += "\"period\":1,";
-    message += "\"max_frame_num\":25";
-#endif
+    int period = Board::GetInstance().GetPeriod();
+    int max_frame_num = Board::GetInstance().GetMaxFrameNum();
+
+    message += "\"period\":" + std::to_string(period) + ",";
+    message += "\"max_frame_num\":" + std::to_string(max_frame_num);
     message += "}";
     message += "},";
     message += "\"speech_rate\":" + std::to_string(speed) + ",";

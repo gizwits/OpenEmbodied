@@ -169,6 +169,8 @@ static uint32_t baudrate_to_cycles(soft_uart_baudrate_t baudrate)
      * used to prepare the next bits (loop, shifts, logic...).
      */
     switch (baudrate) {
+    case SOFT_UART_19200: // ~52.08us per bit
+        return ((CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ * 5208) / 100 - 30);
     case SOFT_UART_115200: // 115200, 8.63us per bit
         return ((CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ * 863) / 100 - 20);
     case SOFT_UART_230400: // 4.34us per bit

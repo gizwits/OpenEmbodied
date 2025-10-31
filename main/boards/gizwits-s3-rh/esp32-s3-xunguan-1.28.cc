@@ -23,7 +23,7 @@
 
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_ops.h>
-#include <esp_lcd_gc9a01.h>
+#include <esp_lcd_panel_st7789.h>
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
@@ -202,8 +202,8 @@ private:
         }
     }
 
-    // GC9A01初始化
-    void InitializeGc9a01Display() {
+    // ST7789W3初始化 (240x296)
+    void InitializeSt7789Display() {
         esp_lcd_panel_io_spi_config_t io_config = {
             .cs_gpio_num = DISPLAY_SPI_CS_PIN,
             .dc_gpio_num = DISPLAY_SPI_DC_PIN,
@@ -223,12 +223,12 @@ private:
         
         esp_lcd_panel_dev_config_t panel_config = {
             .reset_gpio_num = DISPLAY_SPI_RESET_PIN,
-            .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR,
+            .rgb_ele_order = DISPLAY_RGB_ORDER,
             .bits_per_pixel = 16,
         };
         
         esp_lcd_panel_handle_t panel = nullptr;
-        ret = esp_lcd_new_panel_gc9a01(panel_io, &panel_config, &panel);
+        ret = esp_lcd_new_panel_st7789(panel_io, &panel_config, &panel);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Panel creation failed: %s", esp_err_to_name(ret));
             return;
@@ -246,8 +246,8 @@ private:
             return;
         }
         
-        // Invert colors for GC9A01
-        ret = esp_lcd_panel_invert_color(panel, true);
+        // Invert colors for ST7789W3
+        ret = esp_lcd_panel_invert_color(panel, DISPLAY_INVERT_COLOR);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Panel color invert failed: %s", esp_err_to_name(ret));
             return;
@@ -597,7 +597,7 @@ public:
         InitializeGpio(AUDIO_CODEC_PA_PIN, true);
         // InitializeGpio(DISPLAY_BACKLIGHT_PIN, false);
         InitializeSpi();
-        InitializeGc9a01Display();
+        InitializeSt7789Display();
         InitializeLis2hh12I2c(); // 新增LIS2HH12专用I2C
         InitializeLis2hh12();    // 初始化LIS2HH12
         
