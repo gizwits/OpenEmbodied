@@ -65,7 +65,7 @@ private:
     TaskHandle_t video_task_handle_ = nullptr;
     bool video_playing_ = false;
     int video_group_index_ = 0; // use group 0 by default
-    static constexpr int kVideoFrameDelayMs = 150; // ~6-7 FPS，降低播放速度
+    static constexpr int kVideoFrameDelayMs = 200; // ~5 FPS，降低播放速度和CPU占用，避免影响音频
     lv_obj_t* video_img_ = nullptr;
     lv_img_dsc_t video_img_dsc_{};
     TickType_t allow_switch_after_tick_ = 0;
@@ -165,7 +165,8 @@ private:
                         } else {
                             // 这里可以触发你的摇晃事件
                             if (board->ChannelIsOpen()) {
-                                board->display_->SetEmotion("vertigo");
+                                // 注释掉旧的表情动画，改用视频播放，节省内存
+                                // board->display_->SetEmotion("vertigo");
                                 Application::GetInstance().SendTextToAI("用户正在摇晃你");
                             } else {
                                 ESP_LOGI("LIS2HH12", "Channel is not open");
@@ -385,8 +386,8 @@ private:
                 ESP_LOGE(TAG, "read frame %u failed", (unsigned int)idx);
                 break;
             }
-            // 每帧短锁，更新 LVGL 图像
-            if (lvgl_port_lock(50)) {
+            // 每帧短锁，更新 LVGL 图像（减少锁定时间，避免阻塞音频任务）
+            if (lvgl_port_lock(20)) {  // 从50ms减少到20ms，更快释放锁
                 self->video_img_dsc_.header.w = DISPLAY_WIDTH;
                 self->video_img_dsc_.header.h = DISPLAY_HEIGHT;
                 self->video_img_dsc_.header.cf = LV_COLOR_FORMAT_RGB565;
@@ -425,7 +426,8 @@ private:
         }
         ESP_LOGI(TAG, "StartVideoPlayback group=%d", video_group_index_);
         video_playing_ = true;
-        xTaskCreate(VideoPlayTask, "video_play", 4096, this, 5, &video_task_handle_);
+        // 降低优先级从5到2，避免阻塞音频任务（音频任务通常是3-4优先级）
+        xTaskCreate(VideoPlayTask, "video_play", 4096, this, 1, &video_task_handle_);
         last_started_group_ = video_group_index_;
         last_start_tick_ = now;
     }
@@ -541,7 +543,8 @@ private:
                     ESP_LOGI(TAG, "触摸唤醒");
                     return;
                 }
-                display_->SetEmotion("loving");
+                // 注释掉旧的表情动画，改用视频播放，节省内存
+                // display_->SetEmotion("loving");
                 if (ChannelIsOpen()) {
                     Application::GetInstance().SendTextToAI("用户正在抚摸你");
                 } else {
@@ -589,7 +592,8 @@ private:
                 // 使用静态函数来避免lambda捕获问题
                 xTaskCreate([](void* arg) {
                     auto* board = static_cast<MovecallMojiESP32S3*>(arg);
-                    board->display_->SetEmotion("neutral");
+                    // 注释掉旧的表情动画，改用视频播放，节省内存
+                    // board->display_->SetEmotion("neutral");
 
                     if (board->IsCharging()) {
                         // 充电中，只关闭背光
