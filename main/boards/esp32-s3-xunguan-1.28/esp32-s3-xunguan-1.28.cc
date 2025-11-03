@@ -363,7 +363,8 @@ private:
                 if (self->video_img_ == nullptr) {
                     self->video_img_ = lv_image_create(lv_screen_active());
                     lv_obj_set_size(self->video_img_, DISPLAY_WIDTH, DISPLAY_HEIGHT);
-                    lv_obj_align(self->video_img_, LV_ALIGN_CENTER, 0, 0);
+                    // 使用顶部对齐并向上偏移15像素
+                    lv_obj_align(self->video_img_, LV_ALIGN_TOP_MID, 0, -15);
                 }
                 self->video_img_dsc_.header.w = DISPLAY_WIDTH;
                 self->video_img_dsc_.header.h = DISPLAY_HEIGHT;
@@ -440,9 +441,11 @@ private:
     }
 
     int EmotionToGroup(const std::string& name) {
-        if (name == "neutral") return 0;
-        if (name == "happy")   return 1;
+        if (name == "happy")   return 0;
+        if (name == "neutral") return 1;
         if (name == "sad")     return 2;
+        if (name == "surprise") return 3;
+        if (name == "listen") return 4;
         return 0;
     }
 
@@ -481,7 +484,8 @@ private:
             if (video_img_ == nullptr) {
                 video_img_ = lv_image_create(lv_screen_active());
                 lv_obj_set_size(video_img_, DISPLAY_WIDTH, DISPLAY_HEIGHT);
-                lv_obj_align(video_img_, LV_ALIGN_CENTER, 0, 0);
+                // 使用顶部对齐并向上偏移20像素
+                lv_obj_align(video_img_, LV_ALIGN_TOP_MID, 0, -20);
             }
             lv_obj_move_foreground(video_img_);
             lvgl_port_unlock();
