@@ -160,6 +160,8 @@ private:
                         last_shake_time = current_time; // 更新上次触发时间
                         shake_count = 0; // 触发后清零
 
+                        board->CycleVideoGroup();
+
                         if (Application::GetInstance().IsFactoryTestMode()) {
                             board->display_->UpdateTestItem("sensor", 1);
                         } else {
@@ -545,6 +547,8 @@ private:
                 }
                 // 注释掉旧的表情动画，改用视频播放，节省内存
                 // display_->SetEmotion("loving");
+                this->CycleVideoGroup();
+
                 if (ChannelIsOpen()) {
                     Application::GetInstance().SendTextToAI("用户正在抚摸你");
                 } else {
