@@ -222,6 +222,7 @@ void WebsocketProtocol::CloseAudioChannelTask(void* param) {
     WebsocketProtocol* self = static_cast<WebsocketProtocol*>(param);
     
     ESP_LOGI(TAG, "Closing audio channel...");
+    self->ws_client_initiated_close_ = true; // 由本端主动触发关闭
     
     // 1. 先停止音频上传 - 设置标志位防止新的音频数据发送
     self->busy_sending_audio_ = true;
@@ -232,6 +233,7 @@ void WebsocketProtocol::CloseAudioChannelTask(void* param) {
     
     // 3. 发送关闭帧给服务器
     if (self->websocket_) {
+        ESP_LOGI(TAG, "WS Close() called by client");
         self->websocket_->Close();
     }
     
@@ -564,23 +566,27 @@ bool WebsocketProtocol::OpenAudioChannel() {
     });
 
     websocket_->OnDisconnected([this](bool is_clean) {
+        int64_t t_us = esp_timer_get_time();
         auto chat_mode = Application::GetInstance().GetChatMode();
         // chat_mode == 0 表示按键说话，这种情况下不重连
         if (is_clean || chat_mode == 0) {
-            ESP_LOGI(TAG, "Websocket disconnected cleanly");
+            ESP_LOGI(TAG, "Websocket disconnected cleanly (client_initiated=%d) t_us=%lld", ws_client_initiated_close_, (long long)t_us);
             reconnect_attempts_ = 0;   // 正常断开，重置重连计数
             should_reconnect_ = false; // 正常断开不需要重连
         } else {
-            ESP_LOGI(TAG, "Websocket disconnected unexpectedly");
+            ESP_LOGI(TAG, "Websocket disconnected unexpectedly (client_initiated=%d) t_us=%lld", ws_client_initiated_close_, (long long)t_us);
             // 异常断开，尝试重连
             should_reconnect_ = true;
             HandleReconnect();
         }
+        bool was_client = ws_client_initiated_close_;
+        ws_client_initiated_close_ = false;
         if (on_audio_channel_closed_ != nullptr) {
             on_audio_channel_closed_(is_clean);
         }
     });
 
+    ws_client_initiated_close_ = false;
     ESP_LOGI(TAG, "Connecting to websocket server: %s", url.c_str());
     if (!websocket_->Connect(url.c_str())) {
         ESP_LOGE(TAG, "Failed to connect to websocket server");

@@ -77,7 +77,7 @@ bool Ota::CheckVersion() {
     http->SetHeader("Activation-Version", has_serial_number_ ? "2" : "1");
     http->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
     http->SetHeader("Client-Id", board.GetUuid());
-    http->SetHeader("Tenant-Id", CONFIG_CUSTOM_TENANT_ID.c_str());
+    http->SetHeader("Tenant-Id", CONFIG_CUSTOM_TENANT_ID);
     if (has_serial_number_) {
         http->SetHeader("Serial-Number", serial_number_.c_str());
     }
@@ -460,7 +460,7 @@ esp_err_t Ota::Activate() {
     http->SetHeader("Activation-Version", has_serial_number_ ? "2" : "1");
     http->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
     http->SetHeader("Client-Id", board.GetUuid());
-    http->SetHeader("Tenant-Id", CONFIG_CUSTOM_TENANT_ID.c_str());
+    http->SetHeader("Tenant-Id", CONFIG_CUSTOM_TENANT_ID);
     if (has_serial_number_) {
         http->SetHeader("Serial-Number", serial_number_.c_str());
     }

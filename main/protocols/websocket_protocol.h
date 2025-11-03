@@ -45,6 +45,7 @@ private:
     bool need_check_play_prologue_ = true;
 
     TaskHandle_t close_task_handle_ = nullptr;
+    bool ws_client_initiated_close_ = false; // 标记是否由本端主动触发WS关闭
     std::vector<AudioStreamPacket> packet_cache_;
     int cached_packet_count_ = 0;
     
