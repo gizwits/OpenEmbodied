@@ -70,16 +70,20 @@ void MqttClient::InitAttrsFromJson() {
         cJSON* unit = cJSON_GetObjectItem(position, "unit");
         if (!byte_offset || !bit_offset || !len || !unit) continue;
         
+        // 解析 data_type 字段
+        cJSON* data_type = cJSON_GetObjectItem(attr, "data_type");
+        
         Attr a;
         a.name = name->valuestring;
         a.byte_offset = byte_offset->valueint;
         a.bit_offset = bit_offset->valueint;
         a.len = len->valueint;
         a.unit = unit->valuestring;
+        a.data_type = data_type && data_type->valuestring ? data_type->valuestring : "";
         g_attrs.push_back(a);
         
-        ESP_LOGI(TAG, "Added attribute: %s (byte_offset=%d, bit_offset=%d, len=%d, unit=%s)", 
-                 a.name.c_str(), a.byte_offset, a.bit_offset, a.len, a.unit.c_str());
+        ESP_LOGI(TAG, "Added attribute: %s (byte_offset=%d, bit_offset=%d, len=%d, unit=%s, data_type=%s)", 
+                 a.name.c_str(), a.byte_offset, a.bit_offset, a.len, a.unit.c_str(), a.data_type.c_str());
     }
     
     attr_size_ = (attr_count + 8 - 1) / 8;
@@ -1110,13 +1114,35 @@ void MqttClient::app2devMsgHandler(const uint8_t *data, int32_t len)
                         } else if (attr.unit == "byte") {
                             int len = attr.len; 
                             int byte_start = attr_size_ + bit_bytes + payload_byte_index;
-                            int value = 0;
-                            for (int l = 0; l < len; ++l) {
-                                value |= (business_instruction[byte_start + l] << (8 * l));
+                            
+                            // 检查是否为 binary 类型
+                            if (attr.data_type == "binary") {
+                                // 提取原始二进制数据
+                                if (business_instruction_len >= byte_start + len) {
+                                    const uint8_t* binary_data = business_instruction + byte_start;
+                                    ESP_LOGI(TAG, "binary attr: %s, len=%d", attr.name.c_str(), len);
+                                    
+                                    // 调用二进制数据点处理方法
+                                    if (Board::GetInstance().GetGizwitsProtocolJson()) {
+                                        Board::GetInstance().ProcessBinaryDataPointValue(attr.name, binary_data, len);
+                                    } else {
+                                        ESP_LOGW(TAG, "Board does not support data points, skipping binary data point processing");
+                                    }
+                                } else {
+                                    ESP_LOGE(TAG, "Binary data out of bounds: byte_start=%d, len=%d, available=%d", 
+                                             byte_start, len, business_instruction_len);
+                                }
+                            } else {
+                                // 非 binary 类型，按原来的方式处理为 int
+                                int value = 0;
+                                for (int l = 0; l < len; ++l) {
+                                    value |= (business_instruction[byte_start + l] << (8 * l));
+                                }
+                                ESP_LOGI(TAG, "byte attr: %s = %d", attr.name.c_str(), value);
+                                processAttrValue(attr.name, value);
                             }
+                            
                             payload_byte_index += len;
-                            ESP_LOGI(TAG, "byte attr: %s = %d", attr.name.c_str(), value);
-                            processAttrValue(attr.name, value);
                         }
                     }
                 }

@@ -357,6 +357,10 @@ public:
         DataPointManager::GetInstance().ProcessDataPointValue(name, value);
     }
 
+    void ProcessBinaryDataPointValue(const std::string& name, const uint8_t* data, size_t data_len) override {
+        DataPointManager::GetInstance().ProcessBinaryDataPointValue(name, data, data_len);
+    }
+
     virtual Led* GetLed() override {
         static CircularStrip led(BUILTIN_LED_GPIO, 4);
         return &led;

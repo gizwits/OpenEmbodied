@@ -4,11 +4,10 @@
 #include <cstdint>
 #include <cstddef>
 #include <functional>
-#include <map>
 
-class DataPointManager {
+class UartDataPointManager {
 public:
-    static DataPointManager& GetInstance();
+    static UartDataPointManager& GetInstance();
     
     // 获取机智云协议配置
     virtual const char* GetGizwitsProtocolJson() const;
@@ -41,23 +40,17 @@ public:
         std::function<void(int)> set_volume_callback,
         std::function<int()> get_rssi_callback,
         std::function<int()> get_brightness_callback,
-        std::function<void(int)> set_brightness_callback
+        std::function<void(int)> set_brightness_callback,
+        std::function<int()> get_speed_callback,
+        std::function<void(int)> set_speed_callback,
+        std::function<void(const uint8_t*, size_t)> set_control_value_callback
     );
 
-    // 初始化：从存储加载并应用缓存的数据点
-    void InitFromStorage();
-
-    // 查询缓存数据点（如果不存在则返回false）
-    bool GetCachedDataPoint(const std::string& name, int& value) const;
-
-    // 设置缓存但不触发回调（用于内部恢复时调用回调前的缓存同步）
-    void SetCachedDataPoint(const std::string& name, int value);
-
 protected:
-    DataPointManager() = default;
-    virtual ~DataPointManager() = default;
-    DataPointManager(const DataPointManager&) = delete;
-    DataPointManager& operator=(const DataPointManager&) = delete;
+    UartDataPointManager() = default;
+    virtual ~UartDataPointManager() = default;
+    UartDataPointManager(const UartDataPointManager&) = delete;
+    UartDataPointManager& operator=(const UartDataPointManager&) = delete;
     
     // 回调函数
     std::function<bool()> is_charging_callback_;
@@ -69,7 +62,7 @@ protected:
     std::function<int()> get_rssi_callback_;
     std::function<int()> get_brightness_callback_;
     std::function<void(int)> set_brightness_callback_;
-
-    // 简单的内存缓存
-    std::map<std::string, int> cache_;
+    std::function<int()> get_speed_callback_;
+    std::function<void(int)> set_speed_callback_;
+    std::function<void(const uint8_t*, size_t)> set_control_value_callback_;
 };

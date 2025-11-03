@@ -86,6 +86,8 @@ public:
     virtual void SetPowerSaveMode(bool enabled) = 0;
     virtual int GetDefaultChatMode() { return 1; }
     virtual bool IsWifiConfigMode();
+
+    virtual bool ForceSilentStartup() { return false; }
     
     virtual std::string GetBoardJson() = 0;
     virtual std::string GetDeviceStatusJson() = 0;
@@ -116,6 +118,7 @@ public:
     virtual bool SetDataPointValue(const std::string& name, int value) { return false; }
     virtual void GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) { data_size = 0; }
     virtual void ProcessDataPointValue(const std::string& name, int value) {}
+    virtual void ProcessBinaryDataPointValue(const std::string& name, const uint8_t* data, size_t data_len) {}
 
 };
 

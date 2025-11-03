@@ -929,6 +929,11 @@ public:
         LWSDataPointManager::GetInstance().ProcessDataPointValue(name, value);
     }
 
+    void ProcessBinaryDataPointValue(const std::string& name, const uint8_t* data, size_t data_len) override {
+        // LWSDataPointManager 目前没有 binary 数据点，但保持接口一致性
+        ESP_LOGW(TAG, "ProcessBinaryDataPointValue called for %s but LWSDataPointManager doesn't support binary data points", name.c_str());
+    }
+
     // RGB LED 控制接口
     void SetRgbColor(uint8_t r, uint8_t g, uint8_t b) {
         rgb_led_.SetColor(r, g, b);

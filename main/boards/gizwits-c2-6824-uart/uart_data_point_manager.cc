@@ -1,29 +1,21 @@
-#include "data_point_manager.h"
+#include "Uart_data_point_manager.h"
 #include <esp_log.h>
 #include <esp_wifi.h>
 #include <functional>
 #include <cstdlib>
 #include <chrono>
 #include <cmath>
-#include <cstring>
-#include "wifi_station.h"
-#include "settings.h"
 
-#define TAG "DataPointManager"
+#define TAG "UartDataPointManager"
 
-DataPointManager& DataPointManager::GetInstance() {
-    static DataPointManager instance;
-    static bool initialized = false;
-    if (!initialized) {
-        instance.InitFromStorage();
-        initialized = true;
-    }
+UartDataPointManager& UartDataPointManager::GetInstance() {
+    static UartDataPointManager instance;
     return instance;
 }
 
 // 标准实现：获取机智云协议配置
-const char* DataPointManager::GetGizwitsProtocolJson() const {
-    static const char* protocol_json = R"json(
+const char* UartDataPointManager::GetGizwitsProtocolJson() const {
+    return R"json(
 {
   "name": "标准设备",
   "packetVersion": "0x00000004",
@@ -198,19 +190,38 @@ const char* DataPointManager::GetGizwitsProtocolJson() const {
           "desc": "屏幕亮度"
         },
         {
-            "data_type": "binary",
-            "desc": "",
-            "display_name": "ssid",
-            "id": 9,
-            "name": "ssid",
-            "position": {
-                "bit_offset": 0,
-                "byte_offset": 0,
-                "len": 100,
-                "unit": "byte"
-            },
-            "type": "status_readonly"
-        }
+          "display_name": "语速",
+          "name": "speed",
+          "data_type": "uint8",
+          "position": {
+            "bit_offset": 0,
+            "len": 1,
+            "unit": "byte",
+            "byte_offset": 0
+          },
+          "uint_spec": {
+            "addition": -50,
+            "max": 150,
+            "ratio": 1,
+            "min": 0
+          },
+          "type": "status_writable",
+          "id": 9
+        },
+        {
+          "display_name": "控制指令",
+          "name": "control_value",
+          "data_type": "binary",
+          "position": {
+              "byte_offset": 4,
+              "unit": "byte",
+              "len": 30,
+              "bit_offset": 0
+          },
+          "type": "status_writable",
+          "id": 7,
+          "desc": ""
+      }
       ],
       "name": "entity0",
       "id": 0
@@ -218,16 +229,15 @@ const char* DataPointManager::GetGizwitsProtocolJson() const {
   ]
 }
 )json";
-    return protocol_json;
 }
 
 // 标准实现：获取数据点数量
-size_t DataPointManager::GetDataPointCount() const {
-    return 9; // 9个标准数据点
+size_t UartDataPointManager::GetDataPointCount() const {
+    return 10; // 10个标准数据点（包括新增的语速）
 }
 
 // 标准实现：获取数据点值
-bool DataPointManager::GetDataPointValue(const std::string& name, int& value) const {
+bool UartDataPointManager::GetDataPointValue(const std::string& name, int& value) const {
     if (name == "switch") {
         value = 1; // 开关状态，固定为1
         return true;
@@ -304,18 +314,19 @@ bool DataPointManager::GetDataPointValue(const std::string& name, int& value) co
             value = 0;
         }
         return true;
+    } else if (name == "speed") {
+        if (get_speed_callback_) {
+            value = get_speed_callback_();
+        } else {
+            value = 0; // 默认语速为0（对应-50%到150%范围中的0）
+        }
+        return true;
     }
     return false;
 }
 
 // 标准实现：设置数据点值
-bool DataPointManager::SetDataPointValue(const std::string& name, int value) {
-    // 写入缓存与存储
-    cache_[name] = value;
-    // 使用 NVS 进行持久化
-    Settings settings("datapoint", true);
-    settings.SetInt(name, value);
-
+bool UartDataPointManager::SetDataPointValue(const std::string& name, int value) {
     if (name == "chat_mode") {
         if (set_chat_mode_callback_) {
             set_chat_mode_callback_(value);
@@ -331,36 +342,46 @@ bool DataPointManager::SetDataPointValue(const std::string& name, int value) {
             set_brightness_callback_(value);
             return true;
         }
+    } else if (name == "speed") {
+        if (set_speed_callback_) {
+            // 限制语速值在有效范围内 (0-200, 对应-50%到150%)
+            int clamped_value = std::max(0, std::min(200, value));
+            set_speed_callback_(clamped_value);
+            return true;
+        }
+    } else if (name == "control_value") {
+        // control_value 是 binary 类型，不能通过 SetDataPointValue(int) 处理
+        // 应该使用 ProcessBinaryDataPointValue 方法
+        ESP_LOGW(TAG, "control_value is binary type, use ProcessBinaryDataPointValue instead");
+        return false;
     }
     return false;
 }
 
 // 标准实现：生成上报数据
-void DataPointManager::GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) {
- 
+void UartDataPointManager::GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) {
+
     // 固定头部
     buffer[0] = 0x00;
     buffer[1] = 0x00;
     buffer[2] = 0x00;
     buffer[3] = 0x03;
     
-    // mqtt 可变长度
-    buffer[4] = 0x73;
-    // flag
-    buffer[5] = 0x00;
     // 命令标识
+    buffer[4] = 0x0b;
+    buffer[5] = 0x00;
     buffer[6] = 0x00;
     buffer[7] = 0x93;
     
-    // SN
+    // sn
     buffer[8] = 0x00;
     buffer[9] = 0x00;
     buffer[10] = 0x00;
     buffer[11] = 0x02;
     
-    // 数据类型
-    buffer[12] = 0x14;
     // flag
+    buffer[12] = 0x14;
+    // 
     buffer[13] = 0x03;
     buffer[14] = 0xff;
 
@@ -409,35 +430,23 @@ void DataPointManager::GenerateReportData(uint8_t* buffer, size_t buffer_size, s
         buffer[19] = 0;
     }
 
-    // 获取 ssid
-    std::string ssid = WifiStation::GetInstance().GetSsid();
-    if (ssid.length() > 100) {
-        ssid = ssid.substr(0, 100);
-    }
-    
-    // 总是复制SSID数据，长度不够100字节的部分用0填充
-    if (ssid.length() > 0) {
-        memcpy(buffer + 20, ssid.c_str(), ssid.length());
-    }
-    
-    // 用0填充剩余空间到100字节
-    if (ssid.length() < 100) {
-        memset(buffer + 20 + ssid.length(), 0, 100 - ssid.length());
+    // 语速
+    if (get_speed_callback_) {
+        buffer[20] = get_speed_callback_();
+    } else {
+        buffer[20] = 0;
     }
 
-    data_size = 20 + 100;  // 固定为120字节
-    
-    ESP_LOGD(TAG, "SSID length: %zu, padded to 100 bytes, total data size: %zu", 
-             ssid.length(), data_size);
+    data_size = 21;
 }
 
 // 标准实现：处理数据点值
-void DataPointManager::ProcessDataPointValue(const std::string& name, int value) {
+void UartDataPointManager::ProcessDataPointValue(const std::string& name, int value) {
     ESP_LOGI(TAG, "ProcessDataPointValue: %s = %d", name.c_str(), value);
     
-    // ssid 是 binary 类型，不能通过 int 处理
-    if (name == "ssid") {
-        ESP_LOGW(TAG, "ssid is binary type, use ProcessBinaryDataPointValue instead");
+    // control_value 是 binary 类型，不能通过 int 处理
+    if (name == "control_value") {
+        ESP_LOGW(TAG, "control_value is binary type, use ProcessBinaryDataPointValue instead");
         return;
     }
     
@@ -445,11 +454,22 @@ void DataPointManager::ProcessDataPointValue(const std::string& name, int value)
 }
 
 // 标准实现：处理二进制数据点值
-void DataPointManager::ProcessBinaryDataPointValue(const std::string& name, const uint8_t* data, size_t data_len) {
+void UartDataPointManager::ProcessBinaryDataPointValue(const std::string& name, const uint8_t* data, size_t data_len) {
     ESP_LOGI(TAG, "ProcessBinaryDataPointValue: %s, len = %zu", name.c_str(), data_len);
+    
+    if (name == "control_value") {
+        if (set_control_value_callback_) {
+            ESP_LOGI(TAG, "Calling set_control_value_callback with %zu bytes", data_len);
+            set_control_value_callback_(data, data_len);
+        } else {
+            ESP_LOGW(TAG, "set_control_value_callback_ is not set");
+        }
+    } else {
+        ESP_LOGW(TAG, "Unknown binary data point: %s", name.c_str());
+    }
 }
 
-void DataPointManager::SetCallbacks(
+void UartDataPointManager::SetCallbacks(
     std::function<bool()> is_charging_callback,
     std::function<int()> get_chat_mode_callback,
     std::function<void(int)> set_chat_mode_callback,
@@ -458,7 +478,10 @@ void DataPointManager::SetCallbacks(
     std::function<void(int)> set_volume_callback,
     std::function<int()> get_rssi_callback,
     std::function<int()> get_brightness_callback,
-    std::function<void(int)> set_brightness_callback
+    std::function<void(int)> set_brightness_callback,
+    std::function<int()> get_speed_callback,
+    std::function<void(int)> set_speed_callback,
+    std::function<void(const uint8_t*, size_t)> set_control_value_callback
 ) {
     is_charging_callback_ = is_charging_callback;
     get_chat_mode_callback_ = get_chat_mode_callback;
@@ -469,50 +492,7 @@ void DataPointManager::SetCallbacks(
     get_rssi_callback_ = get_rssi_callback;
     get_brightness_callback_ = get_brightness_callback;
     set_brightness_callback_ = set_brightness_callback;
-}
-
-void DataPointManager::InitFromStorage() {
-    // 加载已知可写数据点
-    Settings settings("datapoint", false);
-
-    // chat_mode, volume_set, brightness 为可写数据点
-    int v;
-    v = settings.GetInt("chat_mode", -1);
-    if (v != -1) {
-        cache_["chat_mode"] = v;
-        if (set_chat_mode_callback_) {
-            set_chat_mode_callback_(v);
-        }
-    }
-
-    v = settings.GetInt("volume_set", -1);
-    if (v != -1) {
-        cache_["volume_set"] = v;
-        if (set_volume_callback_) {
-            set_volume_callback_(v);
-        }
-    }
-
-    v = settings.GetInt("brightness", -1);
-    if (v != -1) {
-        cache_["brightness"] = v;
-        if (set_brightness_callback_) {
-            set_brightness_callback_(v);
-        }
-    }
-}
-
-bool DataPointManager::GetCachedDataPoint(const std::string& name, int& value) const {
-    auto it = cache_.find(name);
-    if (it == cache_.end()) {
-        return false;
-    }
-    value = it->second;
-    return true;
-}
-
-void DataPointManager::SetCachedDataPoint(const std::string& name, int value) {
-    cache_[name] = value;
-    Settings settings("datapoint", true);
-    settings.SetInt(name, value);
+    get_speed_callback_ = get_speed_callback;
+    set_speed_callback_ = set_speed_callback;
+    set_control_value_callback_ = set_control_value_callback;
 }

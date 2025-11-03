@@ -14,7 +14,7 @@
 #include "power_manager.h"
 #include "vb6824.h"
 #include <esp_wifi.h>
-#include "data_point_manager.h"
+#include "uart_data_point_manager.h"
 #include "settings.h"
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
@@ -148,7 +148,7 @@ private:
             }
         });
 
-        // prev_button_.OnClick([this]() {
+        // next_button_.OnClick([this]() {
         //     int64_t now = esp_timer_get_time();
         //     if (Application::GetInstance().GetDeviceState() == DeviceState::kDeviceStateIdle) {
         //         Application::GetInstance().CancelPlayMusic();
@@ -161,43 +161,27 @@ private:
         //             Application::GetInstance().SendTextToAI("给我播放一首歌");
         //         }
         //     }
-            
+        // });
+        // volume_up_button_.OnClick([this]() {
+        //     auto codec = GetAudioCodec();
+        //     auto volume = codec->output_volume() + 10;
+        //     if (volume > 100) {
+        //         volume = 100;
+        //     }
+        //     codec->SetOutputVolume(volume);
+        // });
+        // volume_up_button_.OnLongPress([this]() {
+        //     GetAudioCodec()->SetOutputVolume(100);
         // });
 
-        next_button_.OnClick([this]() {
-            int64_t now = esp_timer_get_time();
-            if (Application::GetInstance().GetDeviceState() == DeviceState::kDeviceStateIdle) {
-                Application::GetInstance().CancelPlayMusic();
-                Application::GetInstance().ToggleChatState();
-                vTaskDelay(pdMS_TO_TICKS(2000));
-                Application::GetInstance().SendTextToAI("给我播放一首歌");
-            } else {
-                if (now - prev_last_click_time_ > 10* 1000000) { // 5秒
-                    prev_last_click_time_ = now;
-                    Application::GetInstance().SendTextToAI("给我播放一首歌");
-                }
-            }
-        });
-        volume_up_button_.OnClick([this]() {
-            auto codec = GetAudioCodec();
-            auto volume = codec->output_volume() + 10;
-            if (volume > 100) {
-                volume = 100;
-            }
-            codec->SetOutputVolume(volume);
-        });
-        volume_up_button_.OnLongPress([this]() {
-            GetAudioCodec()->SetOutputVolume(100);
-        });
-
-        volume_down_button_.OnClick([this]() {
-            auto codec = GetAudioCodec();
-            auto volume = codec->output_volume() - 10;
-            if (volume < 0) {
-                volume = 0;
-            }
-            codec->SetOutputVolume(volume);
-        });
+        // volume_down_button_.OnClick([this]() {
+        //     auto codec = GetAudioCodec();
+        //     auto volume = codec->output_volume() - 10;
+        //     if (volume < 0) {
+        //         volume = 0;
+        //     }
+        //     codec->SetOutputVolume(volume);
+        // });
 
     }
     // 物联网初始化，添加对 AI 可见设备
@@ -208,8 +192,8 @@ private:
 
     void InitializeDataPointManager() {
         // 设置 DataPointManager 的回调函数
-        DataPointManager::GetInstance().SetCallbacks(
-            [this]() -> bool { return false; }, // IsCharging - toy 版本可能没有充电功能
+        UartDataPointManager::GetInstance().SetCallbacks(
+            [this]() -> bool { return IsCharging(); },
             []() -> int { return Application::GetInstance().GetChatMode(); },
             [](int value) { Application::GetInstance().SetChatMode(value); },
             [this]() -> int { 
@@ -227,15 +211,36 @@ private:
                 }
                 return 0;
             },
-            [this]() -> int { return 100; }, // 固定亮度 100%
-            [this](int value) { 
-                /* toy 版本可能没有亮度调节 */
-                // 只处理 0 和 100
-                if (value == 0) {
-                    gpio_set_level(EXTRA_LIGHT_GPIO, 0);
-                } 
-                if (value == 100) {
-                    gpio_set_level(EXTRA_LIGHT_GPIO, 1);
+            [this]() -> int { return GetBrightness(); },
+            [this](int value) { SetBrightness(value); },
+            [this]() -> int { return GetSpeed_(); },
+            [this](int value) { SetSpeed(value); },
+            [this](const uint8_t* data, size_t len) { 
+                // 解析协议格式：【动作 A】【动作 B】【时间】
+                // 每组 3 字节：动作A(1字节) + 动作B(1字节) + 时间(1字节，单位可能是10ms或100ms，暂时按100ms处理)
+                // 时间为 0 时忽略该动作
+                const size_t ACTION_GROUP_SIZE = 3; // 每组 3 字节
+                size_t group_count = len / ACTION_GROUP_SIZE;
+                
+                for (size_t i = 0; i < group_count; i++) {
+                    size_t offset = i * ACTION_GROUP_SIZE;
+                    uint8_t action_a = data[offset];
+                    uint8_t action_b = data[offset + 1];
+                    uint8_t time_byte = data[offset + 2];
+                    // 时间转换为毫秒（单位为秒，最大 255 秒 = 255000ms）
+                    uint32_t duration_ms = time_byte * 1000;
+                    
+                    // 当时间为 0 时忽略这个动作
+                    if (time_byte == 0) {
+                        ESP_LOGD(TAG, "Group %zu: time is 0, skipping", i);
+                        continue;
+                    }
+                    
+                    // 同时发送动作 A 和动作 B（协议：data0 = action_a, data1 = action_b）
+                    // 两个动作会同时执行，而不是顺序执行
+                    ESP_LOGI(TAG, "Queueing dual motion: A=0x%02X B=0x%02X, duration: %lu ms", 
+                             action_a, action_b, (unsigned long)duration_ms);
+                    motion_tx_.startMotion(action_a, action_b, duration_ms);
                 }
             }
         );
@@ -246,6 +251,30 @@ private:
         PowerManager::GetInstance();
     }
 
+    // 语速相关方法
+    int GetSpeed_() {
+        // 从设置中获取语速，默认值为0（对应正常语速）
+        Settings settings("wifi", true);
+        return settings.GetInt("speed", 50);
+    }
+    int GetVoiceSpeed() {
+        int speed = GetSpeed_();
+        return speed - 50;
+    }
+
+    void SetSpeed(int speed) {
+        // 限制语速值在有效范围内 (0-200, 对应-50%到150%)
+        int clamped_speed = std::max(0, std::min(200, speed));
+        Settings settings("wifi", true);
+        settings.SetInt("speed", clamped_speed);
+        ESP_LOGI(TAG, "Speed set to: %d", clamped_speed);
+
+        MqttClient::getInstance().GetRoomInfo(false);
+    }
+
+    bool isAIWorking() {
+        return gpio_get_level(GPIO_NUM_2) == 0;
+    }
 
 public:
     CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO),
@@ -278,18 +307,6 @@ public:
 
         InitializeGpio(POWER_GPIO, true);
 
-        // 根据缓存亮度决定是否点亮灯
-        int cached_brightness = -1;
-        bool extra_light_on = true;  // 未设置过时默认打开
-        {
-            Settings dp_settings("datapoint", false);
-            cached_brightness = dp_settings.GetInt("brightness", -1);
-            if (cached_brightness != -1) {
-                extra_light_on = cached_brightness > 0;
-            }
-        }
-        // InitializeGpio(EXTRA_LIGHT_GPIO, extra_light_on);
-
         gpio_config_t io_conf = {};
         io_conf.pin_bit_mask = (1ULL << LED_GPIO);
         io_conf.mode = GPIO_MODE_OUTPUT;
@@ -300,22 +317,15 @@ public:
         gpio_set_level(LED_GPIO, 0);
         
         audio_codec.OnWakeUp([this](const std::string& command) {
+            if (!isAIWorking()) {
+                return;
+            }
             ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());
             if (command == "你好小智" || command.find("小云") != std::string::npos){
                 ESP_LOGE(TAG, "vb6824 recv cmd: %d", Application::GetInstance().GetDeviceState());
                 Application::GetInstance().WakeWordInvoke("你好小智");
             } else if (command == "开始配网") {
                 ResetWifiConfiguration();
-            } else if (command == "前进" || command == "过来") {
-                ESP_LOGI(TAG, "语音触发：前进");
-                motion_tx_.startMotion(0x02, 1500);
-            } else if (command == "后退" || command == "走开" || command == "滚开"|| command == "滚蛋") {
-                ESP_LOGI(TAG, "语音触发：后退");
-                // 定时动作：后退1.5秒后自动停止
-                motion_tx_.startMotion(0x03, 1500);
-            } else if (command == "停下") {
-                ESP_LOGI(TAG, "语音触发：停下");
-                motion_tx_.stopMotion();
             }
         });
 
@@ -332,7 +342,7 @@ public:
                     // 工作模式：关闭省电，保证低时延/更稳定吞吐
                     wifi_station.SetPowerSaveMode(false);
                     Application::GetInstance().ToggleChatState();
-                    Application::GetInstance().PlaySound(Lang::Sounds::P3_WAKE_UP);
+                    Application::GetInstance().PlaySound(Lang::Sounds::P3_SUCCESS);
                 });
             } else {
                 ESP_LOGI(TAG, "U0RXD=HIGH -> AI模块休眠");
@@ -356,6 +366,11 @@ public:
             esp_timer_delete(idle_timer_);
             idle_timer_ = nullptr;
         }
+    }
+
+    virtual bool ForceSilentStartup() override {
+        // gpio2 高电平 则静默启动
+        return !isAIWorking();
     }
 
     void InitializeGpio(gpio_num_t gpio_num_, bool output = false) {
@@ -397,27 +412,31 @@ public:
 
     // 数据点相关方法实现
     const char* GetGizwitsProtocolJson() const override {
-        return DataPointManager::GetInstance().GetGizwitsProtocolJson();
+        return UartDataPointManager::GetInstance().GetGizwitsProtocolJson();
     }
 
     size_t GetDataPointCount() const override {
-        return DataPointManager::GetInstance().GetDataPointCount();
+        return UartDataPointManager::GetInstance().GetDataPointCount();
     }
 
     bool GetDataPointValue(const std::string& name, int& value) const override {
-        return DataPointManager::GetInstance().GetDataPointValue(name, value);
+        return UartDataPointManager::GetInstance().GetDataPointValue(name, value);
     }
 
     bool SetDataPointValue(const std::string& name, int value) override {
-        return DataPointManager::GetInstance().SetDataPointValue(name, value);
+        return UartDataPointManager::GetInstance().SetDataPointValue(name, value);
     }
 
     void GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) override {
-        DataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
+        UartDataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
     }
 
     void ProcessDataPointValue(const std::string& name, int value) override {
-        DataPointManager::GetInstance().ProcessDataPointValue(name, value);
+        UartDataPointManager::GetInstance().ProcessDataPointValue(name, value);
+    }
+
+    void ProcessBinaryDataPointValue(const std::string& name, const uint8_t* data, size_t data_len) override {
+        UartDataPointManager::GetInstance().ProcessBinaryDataPointValue(name, data, data_len);
     }
 };
 

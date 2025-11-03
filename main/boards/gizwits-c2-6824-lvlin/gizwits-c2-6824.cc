@@ -390,6 +390,11 @@ public:
         LvlinDataPointManager::GetInstance().ProcessDataPointValue(name, value);
     }
 
+    void ProcessBinaryDataPointValue(const std::string& name, const uint8_t* data, size_t data_len) override {
+        // LvlinDataPointManager 目前没有 binary 数据点，但保持接口一致性
+        ESP_LOGW(TAG, "ProcessBinaryDataPointValue called for %s but LvlinDataPointManager doesn't support binary data points", name.c_str());
+    }
+
 };
 
 DECLARE_BOARD(CustomBoard);

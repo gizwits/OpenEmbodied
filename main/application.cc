@@ -386,6 +386,10 @@ void Application::Start() {
 
     ESP_LOGI(TAG, "chat_mode_: %d", chat_mode_);
     Auth::getInstance().init();
+
+    if (board.ForceSilentStartup()) {
+        is_silent_startup_ = true;
+    }
     
     SetDeviceState(kDeviceStateStarting);
     /* Setup the display */
