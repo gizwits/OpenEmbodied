@@ -42,12 +42,15 @@ Ota::~Ota() {
 
 const std::string& Ota::GetCheckVersionUrl() const {
     static thread_local std::string url;
-    Settings settings("wifi", false);
-    url = settings.GetString("ota_url");
-    if (url.empty()) {
-        // url = "http://45.78.224.94:8002/xiaozhi/ota/";
-        url = "http://192.168.68.10:8002/xiaozhi/ota/";
-    }
+    // Settings settings("wifi", false);
+    // url = settings.GetString("ota_url");
+    // if (url.empty()) {
+    //     // url = "http://45.78.224.94:8002/xiaozhi/ota/";
+    //     // url = "http://xiaozhi.iotsdk.com/xiaozhi/ota/";
+    //     url = "http://192.168.68.10:8002/xiaozhi/ota/";
+    // }
+    // url = "http://192.168.68.10:8002/xiaozhi/ota/";
+    url = "http://xiaozhi.gizwits.com:8002/xiaozhi/ota/";
     return url;
 }
 
@@ -86,6 +89,20 @@ bool Ota::CheckVersion() {
     http->SetHeader("Content-Type", "application/json");
 
     std::string data = board.GetJson();
+    // 当 need_activation 为 1 时，将 CONFIG_CUSTOM_TENANT_ID 和 uid 加入请求
+    {
+        Settings settings("wifi", true);
+        int need_activation = settings.GetInt("need_activation");
+        if (need_activation == 1) {
+            ESP_LOGI(TAG, "need_activation is 1 xiaozhi");
+            settings.SetInt("need_activation", 0);
+            // 补充 header：已设置 Tenant-Id，这里补充 User-Id（uid）
+            std::string uid = settings.GetString("uid");
+            if (!uid.empty()) {
+                http->SetHeader("User-Id", uid.c_str());
+            }
+        }
+    }
     std::string method = data.length() > 0 ? "POST" : "GET";
     http->SetContent(std::move(data));
 
