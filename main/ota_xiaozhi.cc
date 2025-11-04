@@ -50,7 +50,7 @@ const std::string& Ota::GetCheckVersionUrl() const {
     //     url = "http://192.168.68.10:8002/xiaozhi/ota/";
     // }
     // url = "http://192.168.68.10:8002/xiaozhi/ota/";
-    url = "http://xiaozhi.gizwits.com:8002/xiaozhi/ota/";
+    url = "https://xiaozhi.gizwitsapi.com/xiaozhi/ota/";
     return url;
 }
 

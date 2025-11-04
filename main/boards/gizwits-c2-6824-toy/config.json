@@ -15,7 +15,11 @@
                 "CONFIG_USE_EYE_STYLE_VB6824=y",
                 "CONFIG_USE_AUDIO_PROCESSOR=n",
                 "CONFIG_TMP_PRODUCT_TEST_WIFI=\"FACTORY_TEST#@#@\"",
-                "CONFIG_TMP_PRODUCT_TEST_WIFI_PASSWORD=\"12345678\""
+                "CONFIG_TMP_PRODUCT_TEST_WIFI_PASSWORD=\"12345678\"",
+                "CONFIG_USE_DEVICE_AEC=y",
+                "CONFIG_CUSTOM_TENANT_ID=1985610999907569666",
+                "CONFIG_PROTOCOL_TYPE_XIAOZHI=y",
+                "CONFIG_LANGUAGE_EN_US=y"
             ]
         }
     ]
