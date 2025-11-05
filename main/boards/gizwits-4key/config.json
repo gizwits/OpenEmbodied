@@ -8,7 +8,7 @@
                 "CONFIG_USE_AUDIO_PROCESSOR=y",
                 "CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS=n",
                 "CONFIG_USE_DEVICE_AEC=y",
-                "CONFIG_CUSTOM_TENANT_ID=1985610999907569666",
+                "CONFIG_CUSTOM_TENANT_ID=\"1985610999907569666\"",
                 "CONFIG_PROTOCOL_TYPE_XIAOZHI=y",
                 "CONFIG_LANGUAGE_EN_US=y"
             ]

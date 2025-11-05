@@ -31,6 +31,10 @@ bool WebsocketProtocol::Start() {
 }
 
 bool WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
+    // if (need_abort_speaking_) {
+    //     ESP_LOGI(TAG, "SendAudio: ignore audio");
+    //     return false;
+    // }
     if (websocket_ == nullptr || !websocket_->IsConnected()) {
         return false;
     }
@@ -135,6 +139,10 @@ bool WebsocketProtocol::OpenAudioChannel() {
 
     websocket_->OnData([this](const char* data, size_t len, bool binary) {
         if (binary) {
+            // if (need_abort_speaking_) {
+            //     ESP_LOGI(TAG, "OnData: ignore audio");
+            //     return;
+            // }
             if (on_incoming_audio_ != nullptr) {
                 AudioStreamPacket packet;
                 

@@ -891,7 +891,6 @@ void Application::OnWakeWordDetected() {
         //     protocol_->SendAudio(*packet);
         // }
         // // Set the chat state to wake word detected
-        // protocol_->SendWakeWordDetected(wake_word);
         SetListeningMode(chat_mode_ == 2  ? kListeningModeRealtime : kListeningModeAutoStop);
 #else
         SetListeningMode(chat_mode_ == 2  ? kListeningModeRealtime : kListeningModeAutoStop);
@@ -1050,9 +1049,9 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
             audio_service_.PlaySound(Lang::Sounds::P3_IM_IN);
 
             ToggleChatState();
-            if (protocol_) {
-                protocol_->SendWakeWordDetected(wake_word); 
-            }
+            // if (protocol_) {
+            //     protocol_->SendWakeWordDetected(wake_word); 
+            // }
             auto& board = Board::GetInstance();
             auto backlight = board.GetBacklight();
             if (backlight) {

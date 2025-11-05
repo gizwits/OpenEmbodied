@@ -301,7 +301,7 @@ config CUSTOM_WAKE_WORD
  
 config CUSTOM_TENANT_ID
     string "Custom Tenant ID"
-    default "1984114841210589185"
+    default ""
     help
         租户id
         
