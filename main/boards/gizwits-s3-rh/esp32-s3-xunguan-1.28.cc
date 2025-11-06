@@ -164,7 +164,7 @@ private:
                 if (shake_count > 0) shake_count -= shake_count_decay;
             }
             last_ax = ax; last_ay = ay; last_az = az;
-            vTaskDelay(pdMS_TO_TICKS(100));
+            vTaskDelay(pdMS_TO_TICKS(50));
         }
     }
 
@@ -361,7 +361,7 @@ private:
             //     InnerResetWifiConfiguration();
             // }
             app.ToggleChatState();
-            display_->TestNextEmotion();
+            // display_->TestNextEmotion();
         });
         boot_button_.OnLongPress([this]() {
             ESP_LOGI(TAG, "boot_button_.OnLongPress");
@@ -475,7 +475,7 @@ private:
         i2c_device_config_t dev_cfg = {
             .dev_addr_length = I2C_ADDR_BIT_LEN_7,
             .device_address = LIS2HH12_I2C_ADDR,
-            .scl_speed_hz = 400000,  // 降低到100kHz，提高稳定性
+            .scl_speed_hz = 300000, 
         };
         ret = i2c_master_bus_add_device(lis2hh12_i2c_bus_, &dev_cfg, &lis2hh12_dev_);
         if (ret != ESP_OK) {
@@ -616,7 +616,7 @@ public:
         }
         InitializeButtons();
         InitializeIot();
-        xTaskCreatePinnedToCore(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 1024 * 3, this, 1, NULL, 0); // 启动检测任务
+        xTaskCreatePinnedToCore(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 1024 * 4, this, 1, NULL, 0); // 启动检测任务
         InitializePowerManager();
         InitializePowerSaveTimer();
         // ESP_LOGI(TAG, "ReadADC2_CH1_Oneshot");

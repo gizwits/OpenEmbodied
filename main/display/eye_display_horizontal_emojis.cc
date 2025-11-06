@@ -636,7 +636,7 @@ void EyeDisplayHorizontalEmo::StartSadAnimation() {
     // 获取嘴巴实际尺寸来精确居中
     lv_obj_update_layout(mouth_);
     lv_coord_t mouth_width = lv_obj_get_width(mouth_);
-    lv_obj_set_pos(mouth_, (width_ - mouth_width) / 2, height_ - ScaleHeight(40) - DISPLAY_VERTICAL_OFFSET + ScaleHeight(30));  // sad表情：动态居中
+    lv_obj_set_pos(mouth_, (width_ - mouth_width) / 2, height_ - ScaleHeight(50) - DISPLAY_VERTICAL_OFFSET);  // sad表情：动态居中，调整垂直位置
     lv_obj_set_style_img_recolor(mouth_, lv_color_hex(EYE_COLOR), 0);  // 设置青色
     lv_obj_set_style_img_recolor_opa(mouth_, LV_OPA_COVER, 0);  // 设置不透明度
     
@@ -645,12 +645,12 @@ void EyeDisplayHorizontalEmo::StartSadAnimation() {
     
     // 重新调整位置，确保旋转后仍然居中
     // 使用已获取的mouth_width变量
-    lv_obj_set_pos(mouth_, (width_ + mouth_width) / 2, height_ - ScaleHeight(32) - DISPLAY_VERTICAL_OFFSET + ScaleHeight(30));
+    lv_obj_set_pos(mouth_, (width_ + mouth_width) / 2, height_ - ScaleHeight(45) - DISPLAY_VERTICAL_OFFSET);
 
     // 创建嘴巴动画
     lv_anim_init(&mouth_anim_);
     lv_anim_set_var(&mouth_anim_, mouth_);
-    lv_anim_set_values(&mouth_anim_, height_ - ScaleHeight(40) - DISPLAY_VERTICAL_OFFSET + ScaleHeight(50), height_ - ScaleHeight(50) - DISPLAY_VERTICAL_OFFSET + ScaleHeight(50));  // sad表情：动画基线下移50
+    lv_anim_set_values(&mouth_anim_, height_ - ScaleHeight(50) - DISPLAY_VERTICAL_OFFSET, height_ - ScaleHeight(55) - DISPLAY_VERTICAL_OFFSET);  // sad表情：调整动画位置
     lv_anim_set_time(&mouth_anim_, 1200);
     lv_anim_set_delay(&mouth_anim_, 0);
     lv_anim_set_exec_cb(&mouth_anim_, (lv_anim_exec_xcb_t)lv_obj_set_y);
@@ -709,14 +709,16 @@ void EyeDisplayHorizontalEmo::StartVertigoAnimation() {
     lv_img_set_src(left_heart, &spiral_img_64);
     lv_obj_set_style_img_recolor(left_heart, lv_color_hex(EYE_COLOR), 0);  // 设置为白色
     lv_obj_set_style_img_recolor_opa(left_heart, LV_OPA_COVER, 0);  // 完全不透明
-    lv_obj_align(left_heart, LV_ALIGN_LEFT_MID, -20, -DISPLAY_VERTICAL_OFFSET);  // 左眼位置，适配横屏
+    // 使用中心点为参考，动态计算眼距
+    lv_obj_align(left_heart, LV_ALIGN_CENTER, -ScaleWidth(35), -DISPLAY_VERTICAL_OFFSET);  // 左眼位置，动态适配
     
     // 创建右眼爱心图片
     lv_obj_t* right_heart = lv_img_create(lv_screen_active());
     lv_img_set_src(right_heart, &spiral_img_64);
     lv_obj_set_style_img_recolor(right_heart, lv_color_hex(EYE_COLOR), 0);  // 设置为白色
     lv_obj_set_style_img_recolor_opa(right_heart, LV_OPA_COVER, 0);  // 完全不透明
-    lv_obj_align(right_heart, LV_ALIGN_RIGHT_MID, 20, -DISPLAY_VERTICAL_OFFSET);  // 右眼位置，适配横屏
+    // 使用中心点为参考，动态计算眼距
+    lv_obj_align(right_heart, LV_ALIGN_CENTER, ScaleWidth(35), -DISPLAY_VERTICAL_OFFSET);  // 右眼位置，动态适配
     
     // 缩小图片 - 适配横屏
     lv_img_set_zoom(left_heart, 86);  // 适配横屏尺寸
@@ -811,14 +813,16 @@ void EyeDisplayHorizontalEmo::StartLovingAnimation() {
     lv_img_set_src(left_heart, &hart_img);
     lv_obj_set_style_img_recolor(left_heart, lv_color_hex(EYE_COLOR), 0);  // 设置为白色
     lv_obj_set_style_img_recolor_opa(left_heart, LV_OPA_COVER, 0);  // 完全不透明
-    lv_obj_align(left_heart, LV_ALIGN_LEFT_MID, -20, -DISPLAY_VERTICAL_OFFSET);  // 左眼位置，向左偏移18像素增加间距
+    // 使用中心点为参考，左眼向左偏移适当距离
+    lv_obj_align(left_heart, LV_ALIGN_CENTER, -ScaleWidth(35), -DISPLAY_VERTICAL_OFFSET);  // 动态计算眼距
  
     // 创建右眼爱心图片
     lv_obj_t* right_heart = lv_img_create(lv_screen_active());
     lv_img_set_src(right_heart, &hart_img);
     lv_obj_set_style_img_recolor(right_heart, lv_color_hex(EYE_COLOR), 0);  // 设置为白色
     lv_obj_set_style_img_recolor_opa(right_heart, LV_OPA_COVER, 0);  // 完全不透明
-    lv_obj_align(right_heart, LV_ALIGN_RIGHT_MID, 20, -DISPLAY_VERTICAL_OFFSET);  // 右眼位置，向右偏移18像素增加间距
+    // 使用中心点为参考，右眼向右偏移适当距离
+    lv_obj_align(right_heart, LV_ALIGN_CENTER, ScaleWidth(35), -DISPLAY_VERTICAL_OFFSET);  // 动态计算眼距
  
     // 保存爱心对象指针，以便在状态切换时清理
     left_heart_ = left_heart;
@@ -947,13 +951,13 @@ void EyeDisplayHorizontalEmo::StartShockedAnimation() {
     // 获取嘴巴实际尺寸来精确居中
     lv_obj_update_layout(mouth_);
     lv_coord_t mouth_width = lv_obj_get_width(mouth_);
-    lv_obj_set_pos(mouth_, (width_ - mouth_width) / 2, height_ - ScaleHeight(70) - DISPLAY_VERTICAL_OFFSET + ScaleHeight(45));  // 动态居中
+    lv_obj_set_pos(mouth_, (width_ - mouth_width) / 2, height_ - ScaleHeight(45) - DISPLAY_VERTICAL_OFFSET);  // 动态居中，上移位置
     
     // 为嘴巴添加大小动画，模拟震惊的效果
     static lv_anim_t mouth_size_anim;
     lv_anim_init(&mouth_size_anim);
     lv_anim_set_var(&mouth_size_anim, mouth_);
-    lv_anim_set_values(&mouth_size_anim, ScaleSize(20), ScaleSize(35));  // 从小到大变化
+    lv_anim_set_values(&mouth_size_anim, ScaleSize(15), ScaleSize(25));  // 从小到大变化，减小最大值
     lv_anim_set_time(&mouth_size_anim, 800);
     lv_anim_set_exec_cb(&mouth_size_anim, [](void* obj, int32_t value) {
         lv_obj_t* o = (lv_obj_t*)obj;
@@ -1812,11 +1816,11 @@ void EyeDisplayHorizontalEmo::StartShockedEmojiAnimation() {
     // 嘴巴（椭圆形状）
     shocked_mouth_ = lv_obj_create(shocked_face_);
     lv_obj_remove_style_all(shocked_mouth_);
-    lv_obj_set_size(shocked_mouth_, ScaleSize(30), ScaleSize(30));  // 动态适配
+    lv_obj_set_size(shocked_mouth_, ScaleSize(20), ScaleSize(20));  // 动态适配，缩小初始尺寸
     lv_obj_set_style_radius(shocked_mouth_, LV_RADIUS_CIRCLE, 0);  // 圆形
     lv_obj_set_style_bg_color(shocked_mouth_, lv_color_hex(EYE_COLOR), 0);
     lv_obj_set_style_bg_opa(shocked_mouth_, LV_OPA_COVER, 0);
-    lv_obj_align(shocked_mouth_, LV_ALIGN_CENTER, 0, ScaleHeight(50) - VERTICAL_OFFSET);  // 动态适配
+    lv_obj_align(shocked_mouth_, LV_ALIGN_CENTER, 0, ScaleHeight(35) - VERTICAL_OFFSET);  // 动态适配，上移位置
     
     // 三条竖线（震惊标记）- 右边长，左边短，长度减小三分之一，间距增加7，整体向左移动19向上移动10
     shocked_line1_ = lv_obj_create(shocked_face_);
@@ -1884,9 +1888,9 @@ void EyeDisplayHorizontalEmo::StartShockedEmojiAnimation() {
     lv_anim_set_playback_time(&mouth_anim, 2000);
     lv_anim_set_exec_cb(&mouth_anim, [](void* obj, int32_t v) {
         lv_obj_t* mouth = (lv_obj_t*)obj;
-        // 缩小三分之一（2/3）后的张嘴动画
-        int32_t width = 30 + (v * 8) / 100;    // 30-38
-        int32_t height = 30 + (v * 13) / 100;  // 30-43
+        // 缩小动画幅度，避免超出屏幕
+        int32_t width = 20 + (v * 5) / 100;    // 20-25
+        int32_t height = 20 + (v * 8) / 100;  // 20-28
         lv_obj_set_size(mouth, width, height);
     });
     lv_anim_set_path_cb(&mouth_anim, lv_anim_path_ease_in_out);
@@ -1993,9 +1997,8 @@ void EyeDisplayHorizontalEmo::StartLovingEmojiAnimation() {
     lv_obj_set_style_img_recolor_opa(left_star, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_transform_zoom(left_star, 256, 0);  // 初始缩放为100%
     // 以屏幕中线为基准对称摆放（保证嘴巴在中间，双星镜像）
-    const int STAR_SPACING_X = 35;  // 缩小间距30（总间距-30，单侧-15）
-    // 整体下移 10 像素
-    lv_obj_align(left_star, LV_ALIGN_CENTER, -STAR_SPACING_X, -DISPLAY_VERTICAL_OFFSET);
+    // 动态计算眼距
+    lv_obj_align(left_star, LV_ALIGN_CENTER, -ScaleWidth(35), -DISPLAY_VERTICAL_OFFSET);
     
     // 创建右眼五角星图片
     lv_obj_t* right_star = lv_img_create(lv_screen_active());
@@ -2005,7 +2008,7 @@ void EyeDisplayHorizontalEmo::StartLovingEmojiAnimation() {
     // 设置图片抗锯齿，减少模糊
     lv_obj_set_style_img_recolor_opa(right_star, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_transform_zoom(right_star, 256, 0);  // 初始缩放为100%
-    lv_obj_align(right_star, LV_ALIGN_CENTER, STAR_SPACING_X, -DISPLAY_VERTICAL_OFFSET);
+    lv_obj_align(right_star, LV_ALIGN_CENTER, ScaleWidth(35), -DISPLAY_VERTICAL_OFFSET);
     
     // 创建嘴巴图片对象
     lv_obj_t* mouth = lv_img_create(lv_screen_active());
