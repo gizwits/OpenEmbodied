@@ -9,8 +9,9 @@
                 "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions.csv\"",
                 "CONFIG_LV_FONT_MONTSERRAT_22=y",
                 "CONFIG_SR_WN_WN9_NIHAOXIAOXIN_TTS=y",
-                "CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=256"
-
+                "CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=256",
+                "CONFIG_ESP_WIFI_IRAM_OPT=y",
+                "CONFIG_ESP_WIFI_RX_IRAM_OPT=y"
             ]
         }
     ]
