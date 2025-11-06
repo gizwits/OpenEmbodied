@@ -11,7 +11,7 @@
 #include <map>
 
 // 显示元素向上偏移量（像素）
-#define DISPLAY_VERTICAL_OFFSET 0
+#define DISPLAY_VERTICAL_OFFSET 20
 
 // 产测项结构体
 struct TestItem {
@@ -224,6 +224,11 @@ public:
     void TestNextEmotion();
 
 private:
+    // 基于屏幕尺寸的动态计算辅助函数
+    inline int ScaleWidth(int base_value) const;
+    inline int ScaleHeight(int base_value) const;
+    inline int ScaleSize(int base_value) const;
+    
     void SetupUI();
     void StartIdleAnimation();
     void StartHappyAnimation();

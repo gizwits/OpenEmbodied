@@ -361,7 +361,7 @@ private:
             //     InnerResetWifiConfiguration();
             // }
             app.ToggleChatState();
-            // display_->TestNextEmotion();
+            display_->TestNextEmotion();
         });
         boot_button_.OnLongPress([this]() {
             ESP_LOGI(TAG, "boot_button_.OnLongPress");
