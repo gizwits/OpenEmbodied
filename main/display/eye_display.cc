@@ -154,6 +154,12 @@ void EyeDisplay::SetEmotion(const char* emotion) {
         return;
     }
 
+    // 检查是否禁用表情切换
+    if (emotion_disabled_) {
+        ESP_LOGI(TAG, "Emotion disabled, ignore: %s", emotion);
+        return;
+    }
+
     // 将表情字符串复制到队列中
     char* emotion_copy = static_cast<char*>(pvPortMalloc(MAX_EMOTION_LENGTH));
     if (emotion_copy == nullptr) {
@@ -186,6 +192,12 @@ void EyeDisplay::EmotionTask(void* arg) {
 
 void EyeDisplay::ProcessEmotionChange(const char* emotion) {
     if (emotion == nullptr) {
+        return;
+    }
+    
+    // 测试模式或RGB测试激活时忽略表情切换
+    if (test_mode_active_ || rgb_test_active_) {
+        ESP_LOGI(TAG, "Test mode active, ignore emotion: %s", emotion);
         return;
     }
     
@@ -1005,6 +1017,10 @@ void EyeDisplay::TestNextEmotion() {
 
 void EyeDisplay::EnterWifiConfig() {
     ESP_LOGI(TAG, "EnterWifiConfig");
+    
+    // 禁用表情切换
+    emotion_disabled_ = true;
+    
     if (qrcode_img_) {
         ESP_LOGI(TAG, "EnterWifiConfig qrcode_img_ is not null");
         DisplayLockGuard lock(this);
@@ -1025,6 +1041,9 @@ void EyeDisplay::EnterWifiConfig() {
 
 void EyeDisplay::EnterOTAMode() {
     ESP_LOGI(TAG, "EnterOTAMode");
+    
+    // 禁用表情切换
+    emotion_disabled_ = true;
     
     DisplayLockGuard lock(this);
     
@@ -1090,3 +1109,239 @@ void EyeDisplay::SetOTAProgress(int progress) {
     
     ESP_LOGI(TAG, "OTA Progress: %d%%", progress);
 } 
+
+void EyeDisplay::EnterTestMode() {
+    ESP_LOGI(TAG, "EnterTestMode");
+    
+    DisplayLockGuard lock(this);
+    
+    // 设置测试模式标志
+    test_mode_active_ = true;
+    
+    // 停止所有当前动画
+    lv_anim_del(left_eye_, nullptr);
+    lv_anim_del(right_eye_, nullptr);
+    lv_anim_del(mouth_, nullptr);
+    lv_anim_del(left_hand_, nullptr);
+    lv_anim_del(right_hand_, nullptr);
+    
+    // 清空屏幕
+    auto screen = lv_screen_active();
+    lv_obj_clean(screen);
+    
+    // 设置黑色背景
+    lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
+    
+    // 创建产测模式容器
+    test_mode_container_ = lv_obj_create(screen);
+    lv_obj_set_size(test_mode_container_, width_, height_);
+    lv_obj_set_style_bg_color(test_mode_container_, lv_color_black(), 0);
+    lv_obj_set_style_border_width(test_mode_container_, 0, 0);
+    lv_obj_set_style_pad_all(test_mode_container_, 10, 0);
+    lv_obj_align(test_mode_container_, LV_ALIGN_CENTER, 0, 0);
+    
+    // 创建标题
+    test_mode_title_ = lv_label_create(test_mode_container_);
+    lv_label_set_text(test_mode_title_, "Production Test");
+    lv_obj_set_style_text_font(test_mode_title_, fonts_.text_font, 0);
+    lv_obj_set_style_text_color(test_mode_title_, lv_color_hex(EYE_COLOR), 0);
+    lv_obj_align(test_mode_title_, LV_ALIGN_TOP_MID, 0, 5);  // 调整位置
+    
+    // 创建测试项列表容器
+    test_mode_list_ = lv_obj_create(test_mode_container_);
+    lv_obj_set_size(test_mode_list_, width_ - 20, height_ - 50);  // 增加高度
+    lv_obj_set_style_bg_color(test_mode_list_, lv_color_black(), 0);
+    lv_obj_set_style_border_width(test_mode_list_, 1, 0);
+    lv_obj_set_style_border_color(test_mode_list_, lv_color_hex(EYE_COLOR), 0);
+    lv_obj_set_style_pad_all(test_mode_list_, 3, 0);  // 减小内边距
+    lv_obj_align(test_mode_list_, LV_ALIGN_TOP_MID, 0, 35);  // 调整位置
+    
+    // 清空测试项标签映射
+    test_item_labels_.clear();
+    
+    ESP_LOGI(TAG, "Test mode initialized");
+}
+
+void EyeDisplay::StartRGBTest() {
+    ESP_LOGI(TAG, "StartRGBTest");
+    DisplayLockGuard lock(this);
+
+    // 标记
+    rgb_test_active_ = true;
+    test_mode_active_ = true; // 在测试期间也禁止表情切换
+
+    // 清空屏幕
+    auto screen = lv_screen_active();
+    lv_obj_clean(screen);
+
+    // 初始化阶段
+    rgb_test_phase_ = 0;
+
+    // 立即设置第一种颜色（红）
+    lv_obj_set_style_bg_color(screen, lv_color_hex(0xFF0000), 0);
+
+    // 创建或重启定时器，每3秒切换颜色
+    if (rgb_test_timer_ == nullptr) {
+        esp_timer_create_args_t args = {
+            .callback = [](void* arg) {
+                EyeDisplay* self = static_cast<EyeDisplay*>(arg);
+                if (!self->rgb_test_active_) return;
+                DisplayLockGuard lock(self);
+                auto screen = lv_screen_active();
+                self->rgb_test_phase_ = (self->rgb_test_phase_ + 1) % 3;
+                switch (self->rgb_test_phase_) {
+                    case 0: // 红
+                        lv_obj_set_style_bg_color(screen, lv_color_hex(0xFF0000), 0);
+                        break;
+                    case 1: // 蓝
+                        lv_obj_set_style_bg_color(screen, lv_color_hex(0x0000FF), 0);
+                        break;
+                    case 2: // 白
+                        lv_obj_set_style_bg_color(screen, lv_color_hex(0xFFFFFF), 0);
+                        break;
+                }
+            },
+            .arg = this,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "rgb_test_timer"
+        };
+        esp_timer_create(&args, &rgb_test_timer_);
+    }
+    esp_timer_stop(rgb_test_timer_);
+    esp_timer_start_periodic(rgb_test_timer_, 3000000); // 3s
+}
+
+void EyeDisplay::StopRGBTest() {
+    ESP_LOGI(TAG, "StopRGBTest");
+    rgb_test_active_ = false;
+    if (rgb_test_timer_) {
+        esp_timer_stop(rgb_test_timer_);
+    }
+
+    // 结束后回到测试列表界面，并显示现有测试项
+    EnterTestMode();
+    SetTestItems(test_items_);
+}
+
+void EyeDisplay::SetTestItems(const std::vector<TestItem>& test_items) {
+    if (test_mode_list_ == nullptr) {
+        ESP_LOGW(TAG, "Test mode not initialized");
+        return;
+    }
+    
+    DisplayLockGuard lock(this);
+    
+    // 清空现有测试项标签
+    for (auto& pair : test_item_labels_) {
+        if (pair.second != nullptr) {
+            lv_obj_del(pair.second);
+        }
+    }
+    test_item_labels_.clear();
+    
+    // 保存测试项
+    test_items_ = test_items;
+    
+    // 创建测试项标签
+    int y_offset = 2;
+    for (size_t i = 0; i < test_items_.size(); ++i) {
+        const auto& item = test_items_[i];
+        
+        // 创建测试项容器
+        lv_obj_t* item_container = lv_obj_create(test_mode_list_);
+        lv_obj_set_size(item_container, width_ - 30, 18);  // 减小高度
+        lv_obj_set_style_bg_color(item_container, lv_color_black(), 0);
+        lv_obj_set_style_border_width(item_container, 0, 0);
+        lv_obj_set_style_pad_all(item_container, 1, 0);  // 减小内边距
+        lv_obj_set_pos(item_container, 5, y_offset);
+        
+        // 创建测试项名称标签
+        lv_obj_t* name_label = lv_label_create(item_container);
+        lv_label_set_text(name_label, item.name.c_str());
+        lv_obj_set_style_text_font(name_label, fonts_.text_font, 0);
+        lv_obj_set_style_text_color(name_label, lv_color_white(), 0);
+        lv_obj_set_style_text_letter_space(name_label, 0, 0);  // 减小字间距
+        lv_obj_align(name_label, LV_ALIGN_LEFT_MID, 3, 0);
+        
+        // 创建测试状态标签
+        lv_obj_t* status_label = lv_label_create(item_container);
+        const char* text = (item.status == 1) ? "PASS" : ((item.status == 2) ? "FAIL" : "等待测试");
+        lv_label_set_text(status_label, text);
+        lv_obj_set_style_text_font(status_label, fonts_.text_font, 0);
+        lv_color_t color = (item.status == 1) ? lv_color_hex(0x00FF00) : ((item.status == 2) ? lv_color_hex(0xFF0000) : lv_color_hex(0xFFFF00));
+        lv_obj_set_style_text_color(status_label, color, 0);
+        lv_obj_set_style_text_letter_space(status_label, 0, 0);  // 减小字间距
+        lv_obj_align(status_label, LV_ALIGN_RIGHT_MID, -3, 0);
+        
+        // 保存状态标签的引用
+        test_item_labels_[item.id] = status_label;
+        
+        y_offset += 20;  // 减小行间距
+    }
+    
+    ESP_LOGI(TAG, "Set %zu test items", test_items_.size());
+}
+
+void EyeDisplay::UpdateTestItem(const std::string& id, bool pass) {
+    if (rgb_test_active_) {
+        ESP_LOGW(TAG, "RGB test active, ignore update test item");
+        return;
+    }
+
+    if (test_mode_list_ == nullptr) {
+        ESP_LOGW(TAG, "Test mode not initialized");
+        return;
+    }
+    
+    // 查找对应的测试项
+    auto it = std::find_if(test_items_.begin(), test_items_.end(),
+        [&id](const TestItem& item) { return item.id == id; });
+    
+    if (it == test_items_.end()) {
+        ESP_LOGW(TAG, "Test item with id '%s' not found", id.c_str());
+        return;
+    }
+    
+    // 更新测试项状态（true->1, false->0 等待）
+    it->status = pass ? 1 : 0;
+    
+    // 更新UI
+    auto label_it = test_item_labels_.find(id);
+    if (label_it != test_item_labels_.end()) {
+        DisplayLockGuard lock(this);
+        
+        lv_label_set_text(label_it->second, pass ? "PASS" : "等待测试");
+        lv_obj_set_style_text_color(label_it->second, pass ? lv_color_hex(0x00FF00) : lv_color_hex(0xFFFF00), 0);
+    }
+    
+    ESP_LOGI(TAG, "Updated test item '%s': %s", id.c_str(), pass ? "PASS" : "FAIL");
+}
+
+void EyeDisplay::UpdateTestItemStatus(const std::string& id, int status) {
+    if (rgb_test_active_) {
+        ESP_LOGW(TAG, "RGB test active, ignore update test item status");
+        return;
+    }
+    if (test_mode_list_ == nullptr) {
+        ESP_LOGW(TAG, "Test mode not initialized");
+        return;
+    }
+    auto it = std::find_if(test_items_.begin(), test_items_.end(),
+        [&id](const TestItem& item) { return item.id == id; });
+    if (it == test_items_.end()) {
+        ESP_LOGW(TAG, "Test item with id '%s' not found", id.c_str());
+        return;
+    }
+    if (status < 0) status = 0;
+    if (status > 2) status = 2;
+    it->status = status;
+    auto label_it = test_item_labels_.find(id);
+    if (label_it != test_item_labels_.end()) {
+        DisplayLockGuard lock(this);
+        const char* text = (status == 1) ? "PASS" : ((status == 2) ? "FAIL" : "等待测试");
+        lv_label_set_text(label_it->second, text);
+        lv_color_t color = (status == 1) ? lv_color_hex(0x00FF00) : ((status == 2) ? lv_color_hex(0xFF0000) : lv_color_hex(0xFFFF00));
+        lv_obj_set_style_text_color(label_it->second, color, 0);
+    }
+    ESP_LOGI(TAG, "Updated test item '%s' status: %d", id.c_str(), status);
+}

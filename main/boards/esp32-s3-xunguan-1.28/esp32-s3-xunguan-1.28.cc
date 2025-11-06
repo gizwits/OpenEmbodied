@@ -143,7 +143,7 @@ private:
                         last_shake_time = current_time; // 更新上次触发时间
                         shake_count = 0; // 触发后清零
 
-                        if (Application::GetInstance().IsFactoryTestMode()) {
+                        if (Application::GetInstance().IsTmpFactoryTestMode()) {
                             board->display_->UpdateTestItem("sensor", 1);
                         } else {
                             // 这里可以触发你的摇晃事件
@@ -337,7 +337,7 @@ private:
 
         boot_button_.OnClick([this]() {
 
-            if (Application::GetInstance().IsFactoryTestMode()) {
+            if (Application::GetInstance().IsTmpFactoryTestMode()) {
                 // 通过按键测试
                 display_->UpdateTestItem("key", 1);
                 return;
@@ -628,7 +628,7 @@ public:
             NULL                       // 任务句柄
         );
 
-        if (Application::GetInstance().IsFactoryTestMode()) {
+        if (Application::GetInstance().IsTmpFactoryTestMode()) {
             display_->EnterTestMode();
             display_->SetTestItems(test_items);
             // 开始产测模式

@@ -17,6 +17,7 @@ extern "C" {
  * @brief Enumeration for the usable baudrates by the software UART
  */
 typedef enum {
+    SOFT_UART_19200,
     SOFT_UART_115200,
     SOFT_UART_230400,
     SOFT_UART_460800,

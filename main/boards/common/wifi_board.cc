@@ -34,11 +34,17 @@ std::string WifiBoard::GetBoardType() {
 }
 void OnWifiConfigEvent(WifiConfigEvent event, const std::string& message) {
     switch (event) {
-        case WifiConfigEvent::CONFIG_PACKET_RECEIVED:
+        case WifiConfigEvent::CONFIG_PACKET_RECEIVED: {
             ESP_LOGI("APP", "收到配置包: %s", message.c_str());
             auto& application = Application::GetInstance();
             application.PlaySound(Lang::Sounds::P3_CONNECTING);
             break;
+        }
+        case WifiConfigEvent::CONFIG_FAILED: {
+            ESP_LOGI("APP", "配置失败: %s", message.c_str());
+            Application::GetInstance().PlaySound(Lang::Sounds::P3_CONFIG_FAIL);
+            break;
+        }
     }
 }
 

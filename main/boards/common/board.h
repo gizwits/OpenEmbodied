@@ -62,6 +62,17 @@ public:
     virtual Led* GetLed();
     virtual AudioCodec* GetAudioCodec() = 0;
     virtual bool GetTemperature(float& esp32temp);
+
+    virtual int GetPeriod() { 
+        return 1; 
+    }
+    virtual int GetMaxFrameNum() { 
+#ifdef CONFIG_IDF_TARGET_ESP32C2
+        return 17;
+#else
+        return 25;
+#endif
+    }
     // 是否要 bo 一下
     virtual bool NeedPlayProcessVoice() { return true; }
     virtual Servo* GetServo();
@@ -75,6 +86,8 @@ public:
     virtual void SetPowerSaveMode(bool enabled) = 0;
     virtual int GetDefaultChatMode() { return 1; }
     virtual bool IsWifiConfigMode();
+
+    virtual bool ForceSilentStartup() { return false; }
     
     virtual std::string GetBoardJson() = 0;
     virtual std::string GetDeviceStatusJson() = 0;
@@ -95,6 +108,8 @@ public:
     // 充电状态是否静默启动
     virtual bool NeedSilentStartup() { return false; }
     virtual bool NeedBlockLowBattery() { return false; }
+    virtual void WakeWordDetected() {};
+    virtual int GetBatteryCheckTimeOffset() { return 30; }
     
     // 数据点相关方法
     virtual const char* GetGizwitsProtocolJson() const { return nullptr; }
@@ -103,6 +118,7 @@ public:
     virtual bool SetDataPointValue(const std::string& name, int value) { return false; }
     virtual void GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) { data_size = 0; }
     virtual void ProcessDataPointValue(const std::string& name, int value) {}
+    virtual void ProcessBinaryDataPointValue(const std::string& name, const uint8_t* data, size_t data_len) {}
 
 };
 

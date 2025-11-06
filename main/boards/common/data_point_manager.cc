@@ -434,7 +434,19 @@ void DataPointManager::GenerateReportData(uint8_t* buffer, size_t buffer_size, s
 // 标准实现：处理数据点值
 void DataPointManager::ProcessDataPointValue(const std::string& name, int value) {
     ESP_LOGI(TAG, "ProcessDataPointValue: %s = %d", name.c_str(), value);
+    
+    // ssid 是 binary 类型，不能通过 int 处理
+    if (name == "ssid") {
+        ESP_LOGW(TAG, "ssid is binary type, use ProcessBinaryDataPointValue instead");
+        return;
+    }
+    
     SetDataPointValue(name, value);
+}
+
+// 标准实现：处理二进制数据点值
+void DataPointManager::ProcessBinaryDataPointValue(const std::string& name, const uint8_t* data, size_t data_len) {
+    ESP_LOGI(TAG, "ProcessBinaryDataPointValue: %s, len = %zu", name.c_str(), data_len);
 }
 
 void DataPointManager::SetCallbacks(

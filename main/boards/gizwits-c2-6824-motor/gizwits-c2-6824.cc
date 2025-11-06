@@ -374,6 +374,10 @@ public:
         DataPointManager::GetInstance().ProcessDataPointValue(name, value);
     }
 
+    void ProcessBinaryDataPointValue(const std::string& name, const uint8_t* data, size_t data_len) override {
+        DataPointManager::GetInstance().ProcessBinaryDataPointValue(name, data, data_len);
+    }
+
     // 电机控制相关公共方法
     MotorDriver& GetMotorDriver() {
         return motor_driver;

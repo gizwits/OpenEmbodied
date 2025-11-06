@@ -8,7 +8,6 @@
 #include <cstdarg>
 
 #include "soft_uart.h"
-#include "soft_uart_config.h"
 #include "application.h"
 #include "system_info.h"
 #include "watchdog.h"

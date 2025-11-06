@@ -46,6 +46,7 @@ struct Attr {
     int bit_offset;
     int len;
     std::string unit; // "bit" or "byte"
+    std::string data_type; // "bool", "enum", "uint8", "binary", etc.
     // 可扩展更多字段
 };
 

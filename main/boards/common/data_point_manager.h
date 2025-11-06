@@ -28,6 +28,9 @@ public:
     // 处理数据点值
     virtual void ProcessDataPointValue(const std::string& name, int value);
     
+    // 处理二进制数据点值
+    virtual void ProcessBinaryDataPointValue(const std::string& name, const uint8_t* data, size_t data_len);
+    
     // 设置依赖的回调函数
     void SetCallbacks(
         std::function<bool()> is_charging_callback,

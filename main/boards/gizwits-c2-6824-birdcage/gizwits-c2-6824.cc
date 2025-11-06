@@ -442,6 +442,10 @@ public:
     void ProcessDataPointValue(const std::string& name, int value) override {
         DataPointManager::GetInstance().ProcessDataPointValue(name, value);
     }
+
+    void ProcessBinaryDataPointValue(const std::string& name, const uint8_t* data, size_t data_len) override {
+        DataPointManager::GetInstance().ProcessBinaryDataPointValue(name, data, data_len);
+    }
 };
 
 DECLARE_BOARD(CustomBoard);

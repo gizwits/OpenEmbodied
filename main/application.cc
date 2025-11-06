@@ -224,7 +224,8 @@ void Application::Alert(const char* status, const char* message, const char* emo
     display->SetStatus(status);
     display->SetEmotion(emotion);
     display->SetChatMessage("system", message);
-    if (!sound.empty()) {
+    // 静默启动时不播放提示音
+    if (!sound.empty() && !is_silent_startup_) {
         audio_service_.PlaySound(sound);
     }
 }
@@ -372,6 +373,14 @@ void Application::Start() {
         ESP_LOGW(TAG, "Abnormal reset detected - reason: %d", reset_reason);
     }
     
+    bool need_silent = Board::GetInstance().NeedSilentStartup();
+    ESP_LOGI(TAG, "Board::NeedSilentStartup() 返回: %d", need_silent);
+    if (need_silent) {
+        ESP_LOGI(TAG, "板级代码设置静默启动");
+        is_silent_startup_ = true;
+    }
+    ESP_LOGI(TAG, "最终 is_silent_startup_: %d", is_silent_startup_);
+    
     Settings settings("wifi", true);
 
 #ifdef CONFIG_DEFAULT_CHAT_MODE
@@ -386,6 +395,10 @@ void Application::Start() {
 
     ESP_LOGI(TAG, "chat_mode_: %d", chat_mode_);
     Auth::getInstance().init();
+
+    if (board.ForceSilentStartup()) {
+        is_silent_startup_ = true;
+    }
     
     SetDeviceState(kDeviceStateStarting);
     /* Setup the display */
@@ -779,8 +792,13 @@ if (mqtt_client.isInitialized()) {
         // 每30秒检查一次电量
         auto now = std::chrono::steady_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - last_battery_check_time_).count();
-        if (duration >= 30) {
-            CheckBatteryLevel();
+        auto battery_check_time_offset = Board::GetInstance().GetBatteryCheckTimeOffset();
+        if (duration >= battery_check_time_offset) {
+            if (!CheckBatteryLevel() && Board::GetInstance().NeedBlockLowBattery()) {
+                // 电池电量不足且需要阻止低电量运行，执行关机操作
+                ESP_LOGW(TAG, "Low battery detected during operation, shutting down...");
+                Board::GetInstance().PowerOff();
+            }
             last_battery_check_time_ = now;
         }
 
@@ -804,7 +822,6 @@ if (mqtt_client.isInitialized()) {
                     if (!packet->payload.empty()) {
                         ESP_LOGD(TAG, "Clearing unsent packet payload: %u bytes", (unsigned int)packet->payload.size());
                         packet->payload.clear();
-                        packet->payload.shrink_to_fit();
                     }
                 }
             }
@@ -872,7 +889,7 @@ void Application::OnWakeWordDetected() {
 
     if (device_state_ == kDeviceStateIdle) {
         ResetDecoder();
-        PlaySound(Lang::Sounds::P3_SUCCESS);
+        PlaySound(Lang::Sounds::P3_WAKE_WORD);
         audio_service_.EncodeWakeWord();
 
         if (!protocol_->IsAudioChannelOpened()) {
@@ -900,7 +917,7 @@ void Application::OnWakeWordDetected() {
     } else if (device_state_ == kDeviceStateSpeaking) {
         AbortSpeaking(kAbortReasonWakeWordDetected);
         ResetDecoder();
-        PlaySound(Lang::Sounds::P3_SUCCESS);
+        PlaySound(Lang::Sounds::P3_WAKE_WORD);
         SetDeviceState(kDeviceStateListening);
     } else if (device_state_ == kDeviceStateActivating) {
         SetDeviceState(kDeviceStateIdle);
@@ -1027,7 +1044,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     
     if (IsTmpFactoryTestMode()) {
         // 临时测试模式，播放提示音
-        PlaySound(Lang::Sounds::P3_SUCCESS);
+        PlaySound(Lang::Sounds::P3_WAKE_WORD);
         return;
     }
     
@@ -1046,7 +1063,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     if (device_state_ == kDeviceStateIdle) {
         Schedule([this, wake_word]() {
             audio_service_.ResetDecoder();
-            audio_service_.PlaySound(Lang::Sounds::P3_IM_IN);
+            audio_service_.PlaySound(Lang::Sounds::P3_WAKE_WORD);
 
             ToggleChatState();
             // if (protocol_) {
@@ -1067,7 +1084,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
             ESP_LOGI(TAG, "WakeWordInvoke(kDeviceStateSpeaking)");
             protocol_->SendAbortSpeaking(kAbortReasonNone);
             audio_service_.ResetDecoder();
-            audio_service_.PlaySound(Lang::Sounds::P3_IM_IN);
+            audio_service_.PlaySound(Lang::Sounds::P3_WAKE_WORD);
             
         }, "WakeWordInvoke_AbortSpeaking");
     } else if (device_state_ == kDeviceStateListening) { 
@@ -1075,7 +1092,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
         protocol_->PreAbortSpeaking();
         Schedule([this]() {
             ResetDecoder();
-            PlaySound(Lang::Sounds::P3_IM_IN);
+            PlaySound(Lang::Sounds::P3_WAKE_WORD);
             SetDeviceState(kDeviceStateListening);
         });
     } else if (device_state_ == kDeviceStateSleeping) {
@@ -1312,7 +1329,7 @@ bool Application::CheckBatteryLevel() {
     bool discharging = false;
     if (Board::GetInstance().GetBatteryLevel(level, charging, discharging)) {
         // ESP_LOGI(TAG, "current Battery level: %d, charging: %d, discharging: %d", level, charging, discharging);
-        if (level <= 15 && discharging) {
+        if (level <= 1 && discharging) {
             // 电量
             PlaySound(Lang::Sounds::P3_BATTLE_LOW);
             return false;

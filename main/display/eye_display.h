@@ -176,6 +176,16 @@ public:
     virtual void EnterWifiConfig() override;
     virtual void EnterOTAMode() override;
     virtual void SetOTAProgress(int progress) override;
+    
+    // 产测模式相关方法
+    virtual void EnterTestMode() override;
+    virtual void SetTestItems(const std::vector<TestItem>& test_items) override;
+    virtual void UpdateTestItem(const std::string& id, bool pass) override;
+    virtual void UpdateTestItemStatus(const std::string& id, int status) override;
+    
+    // RGB三基色检测
+    virtual void StartRGBTest() override;
+    virtual void StopRGBTest() override;
 
 
     // 测试方法：按序号切换表情
@@ -213,6 +223,19 @@ private:
 
     lv_obj_t* ota_progress_bar_ = nullptr;
     lv_obj_t* ota_number_label_ = nullptr;
+    
+    // 产测模式相关UI元素
+    lv_obj_t* test_mode_container_ = nullptr;
+    lv_obj_t* test_mode_title_ = nullptr;
+    lv_obj_t* test_mode_list_ = nullptr;
+    std::vector<TestItem> test_items_;
+    std::map<std::string, lv_obj_t*> test_item_labels_;
+    bool test_mode_active_ = false;
+
+    // RGB三基色检测
+    bool rgb_test_active_ = false;
+    int rgb_test_phase_ = 0; // 0: red, 1: blue, 2: white
+    esp_timer_handle_t rgb_test_timer_ = nullptr;
 
     esp_lcd_panel_io_handle_t panel_io_;
     esp_lcd_panel_handle_t panel_;
@@ -249,6 +272,9 @@ private:
     bool vertigo_locked_ = false;
     int64_t vertigo_unlock_time_ = 0; // us
     esp_timer_handle_t vertigo_timer_ = nullptr;
+    
+    // OTA和配网模式禁用表情切换
+    bool emotion_disabled_ = false;
 };
 
 #endif // EYE_DISPLAY_H 
