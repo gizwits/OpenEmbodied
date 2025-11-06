@@ -5,6 +5,8 @@
 #include <esp_flash.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 // W25Q64 命令定义
 #define W25Q64_CMD_WRITE_ENABLE       0x06
@@ -87,6 +89,13 @@ public:
     uint32_t GetPageSize() const { return W25Q64_PAGE_SIZE; }
     uint32_t GetSectorSize() const { return W25Q64_SECTOR_SIZE; }
     bool IsInitialized() const { return initialized_; }
+    
+    // HTTP 下载到 Flash
+    esp_err_t DownloadToFlash(const char* url, uint32_t flash_address, 
+                              void (*progress_callback)(size_t downloaded, size_t total) = nullptr);
+    
+    // 批量擦除（一次性擦除整个区域，更快但会阻塞）
+    esp_err_t BulkErase(uint32_t address, size_t size);
     
 private:
     W25Q64Flash();  // 构造函数私有化

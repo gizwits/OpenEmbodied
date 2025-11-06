@@ -1,12 +1,12 @@
 #include "w25q64_flash.h"
 #include <esp_log.h>
 #include <string.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
 #include <inttypes.h>
 #include <esp_flash.h>
 #include <esp_flash_spi_init.h>
 #include <driver/spi_common.h>
+#include <esp_http_client.h>
+#include <esp_tls.h>
 
 static const char* TAG = "W25Q64";
 
@@ -51,9 +51,9 @@ esp_err_t W25Q64Flash::Initialize(int mosi_pin, int miso_pin, int clk_pin, int c
     };
 
     // 初始化 SPI 总线（使用 SPI3_HOST，避免与屏幕的 SPI2_HOST 冲突）
+    // 先尝试释放之前可能存在的配置
     esp_err_t ret = spi_bus_initialize(SPI3_HOST, &bus_cfg, SPI_DMA_CH_AUTO);
     if (ret == ESP_ERR_INVALID_STATE) {
-        // SPI 总线已经初始化，这可能是正常的
         ESP_LOGI(TAG, "SPI3_HOST already initialized, skipping bus init");
     } else if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize SPI bus: %s", esp_err_to_name(ret));
@@ -242,7 +242,15 @@ esp_err_t W25Q64Flash::SectorErase(uint32_t address) {
     // 对齐到扇区边界
     address = address & ~(W25Q64_SECTOR_SIZE - 1);
     
-    return esp_flash_erase_region(esp_flash_handle_, address, W25Q64_SECTOR_SIZE);
+    // 使用更长的超时时间
+    esp_err_t ret = esp_flash_erase_region(esp_flash_handle_, address, W25Q64_SECTOR_SIZE);
+    if (ret == ESP_ERR_TIMEOUT) {
+        ESP_LOGW(TAG, "First erase attempt timed out, retrying...");
+        vTaskDelay(pdMS_TO_TICKS(100));  // 等待一下再重试
+        ret = esp_flash_erase_region(esp_flash_handle_, address, W25Q64_SECTOR_SIZE);
+    }
+    
+    return ret;
 }
 
 esp_err_t W25Q64Flash::Block32KErase(uint32_t address) {
@@ -253,7 +261,15 @@ esp_err_t W25Q64Flash::Block32KErase(uint32_t address) {
     // 对齐到 32K 块边界
     address = address & ~(W25Q64_BLOCK_32K_SIZE - 1);
     
-    return esp_flash_erase_region(esp_flash_handle_, address, W25Q64_BLOCK_32K_SIZE);
+    // 使用更长的超时时间
+    esp_err_t ret = esp_flash_erase_region(esp_flash_handle_, address, W25Q64_BLOCK_32K_SIZE);
+    if (ret == ESP_ERR_TIMEOUT) {
+        ESP_LOGW(TAG, "First 32K block erase attempt timed out, retrying...");
+        vTaskDelay(pdMS_TO_TICKS(200));  // 等待更长时间
+        ret = esp_flash_erase_region(esp_flash_handle_, address, W25Q64_BLOCK_32K_SIZE);
+    }
+    
+    return ret;
 }
 
 esp_err_t W25Q64Flash::Block64KErase(uint32_t address) {
@@ -264,7 +280,15 @@ esp_err_t W25Q64Flash::Block64KErase(uint32_t address) {
     // 对齐到 64K 块边界
     address = address & ~(W25Q64_BLOCK_64K_SIZE - 1);
     
-    return esp_flash_erase_region(esp_flash_handle_, address, W25Q64_BLOCK_64K_SIZE);
+    // 使用更长的超时时间
+    esp_err_t ret = esp_flash_erase_region(esp_flash_handle_, address, W25Q64_BLOCK_64K_SIZE);
+    if (ret == ESP_ERR_TIMEOUT) {
+        ESP_LOGW(TAG, "First 64K block erase attempt timed out, retrying...");
+        vTaskDelay(pdMS_TO_TICKS(300));  // 等待更长时间
+        ret = esp_flash_erase_region(esp_flash_handle_, address, W25Q64_BLOCK_64K_SIZE);
+    }
+    
+    return ret;
 }
 
 esp_err_t W25Q64Flash::ChipErase() {
@@ -394,4 +418,242 @@ bool W25Q64Flash::SelfTest() {
     ESP_LOGI(TAG, "Sector Size: %d KB", W25Q64_SECTOR_SIZE / 1024);
     
     return true;
+}
+
+esp_err_t W25Q64Flash::BulkErase(uint32_t address, size_t size) {
+    if (!initialized_) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    if (address + size > chip_size_) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    // 对齐地址到扇区边界
+    uint32_t aligned_addr = address & ~(W25Q64_SECTOR_SIZE - 1);
+    uint32_t end_addr = (address + size + W25Q64_SECTOR_SIZE - 1) & ~(W25Q64_SECTOR_SIZE - 1);
+    size_t erase_size = end_addr - aligned_addr;
+    
+    ESP_LOGI(TAG, "Bulk erasing %zu bytes at 0x%06" PRIX32 " (aligned: 0x%06" PRIX32 " - 0x%06" PRIX32 ")", 
+             erase_size, address, aligned_addr, end_addr - 1);
+    
+    // 直接调用 esp_flash 的批量擦除，让底层驱动处理超时
+    esp_err_t ret = esp_flash_erase_region(esp_flash_handle_, aligned_addr, erase_size);
+    
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Bulk erase failed: %s", esp_err_to_name(ret));
+    } else {
+        ESP_LOGI(TAG, "Bulk erase completed successfully");
+    }
+    
+    return ret;
+}
+
+esp_err_t W25Q64Flash::DownloadToFlash(const char* url, uint32_t flash_address, 
+                                       void (*progress_callback)(size_t downloaded, size_t total)) {
+    if (!initialized_) {
+        ESP_LOGE(TAG, "Flash not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    if (!url) {
+        ESP_LOGE(TAG, "Invalid URL");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    if (flash_address >= chip_size_) {
+        ESP_LOGE(TAG, "Flash address 0x%06" PRIX32 " exceeds chip size", flash_address);
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    ESP_LOGI(TAG, "Starting download from: %s", url);
+    ESP_LOGI(TAG, "Target flash address: 0x%06" PRIX32, flash_address);
+    
+    // HTTP 客户端配置
+    esp_http_client_config_t config = {};
+    config.url = url;
+    config.timeout_ms = 30000;  // 30秒超时
+    config.buffer_size = 4096;  // 接收缓冲区大小
+    config.buffer_size_tx = 1024;
+    config.disable_auto_redirect = false;
+    config.max_redirection_count = 5;
+    
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (!client) {
+        ESP_LOGE(TAG, "Failed to initialize HTTP client");
+        return ESP_ERR_NO_MEM;
+    }
+    
+    esp_err_t err = esp_http_client_open(client, 0);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open HTTP connection: %s", esp_err_to_name(err));
+        esp_http_client_cleanup(client);
+        return err;
+    }
+    
+    // 获取内容长度
+    int content_length = esp_http_client_fetch_headers(client);
+    if (content_length < 0) {
+        ESP_LOGE(TAG, "Failed to fetch headers, content_length = %d", content_length);
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return ESP_FAIL;
+    }
+    
+    // 检查状态码
+    int status_code = esp_http_client_get_status_code(client);
+    if (status_code != 200) {
+        ESP_LOGE(TAG, "HTTP request failed with status code: %d", status_code);
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return ESP_FAIL;
+    }
+    
+    ESP_LOGI(TAG, "Content length: %d bytes", content_length);
+    
+    // 检查文件大小是否超过 Flash 容量
+    if (flash_address + content_length > chip_size_) {
+        ESP_LOGE(TAG, "File size (%d bytes) exceeds available flash space at 0x%06" PRIX32, 
+                 content_length, flash_address);
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    
+    // 使用批量擦除（更简单，让底层驱动处理）
+    ESP_LOGI(TAG, "Erasing flash area for %d bytes...", content_length);
+    
+    // 方案1：尝试使用批量擦除（可能更快）
+    err = BulkErase(flash_address, content_length);
+    
+    if (err == ESP_ERR_TIMEOUT) {
+        // 方案2：如果批量擦除超时，尝试分段擦除
+        ESP_LOGW(TAG, "Bulk erase timed out, trying segmented erase...");
+        
+        uint32_t start_sector = flash_address / W25Q64_SECTOR_SIZE;
+        uint32_t end_address = flash_address + content_length - 1;
+        uint32_t end_sector = end_address / W25Q64_SECTOR_SIZE;
+        uint32_t current_addr = start_sector * W25Q64_SECTOR_SIZE;
+        uint32_t end_addr = (end_sector + 1) * W25Q64_SECTOR_SIZE;
+        
+        // 分批擦除，每次最多擦除 256KB (4个64KB块)
+        const size_t MAX_ERASE_SIZE = 256 * 1024;
+        
+        while (current_addr < end_addr) {
+            size_t erase_size = (end_addr - current_addr > MAX_ERASE_SIZE) ? 
+                               MAX_ERASE_SIZE : (end_addr - current_addr);
+            
+            ESP_LOGI(TAG, "Erasing %zu KB at 0x%06" PRIX32 "...", 
+                     erase_size / 1024, current_addr);
+            
+            // 尝试直接调用底层的区域擦除
+            err = esp_flash_erase_region(esp_flash_handle_, current_addr, erase_size);
+            
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to erase region at 0x%06" PRIX32 ": %s", 
+                         current_addr, esp_err_to_name(err));
+                esp_http_client_close(client);
+                esp_http_client_cleanup(client);
+                return err;
+            }
+            
+            current_addr += erase_size;
+            
+            // 每擦除一段就让出 CPU，防止看门狗超时
+            vTaskDelay(pdMS_TO_TICKS(50));
+        }
+        
+        ESP_LOGI(TAG, "Segmented erase completed");
+    } else if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to erase flash: %s", esp_err_to_name(err));
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return err;
+    }
+    
+    ESP_LOGI(TAG, "Erase complete, starting download...");
+    
+    // 分配缓冲区
+    const size_t buffer_size = 4096;
+    uint8_t* buffer = (uint8_t*)heap_caps_malloc(buffer_size, MALLOC_CAP_DMA);
+    if (!buffer) {
+        ESP_LOGE(TAG, "Failed to allocate buffer");
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return ESP_ERR_NO_MEM;
+    }
+    
+    size_t total_downloaded = 0;
+    uint32_t write_address = flash_address;
+    
+    // 下载并写入 Flash
+    while (total_downloaded < content_length) {
+        int data_read = esp_http_client_read(client, (char*)buffer, buffer_size);
+        if (data_read < 0) {
+            ESP_LOGE(TAG, "Error reading data from HTTP stream");
+            free(buffer);
+            esp_http_client_close(client);
+            esp_http_client_cleanup(client);
+            return ESP_FAIL;
+        } else if (data_read > 0) {
+            // 写入 Flash
+            err = Write(write_address, buffer, data_read);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to write to flash at 0x%06" PRIX32 ": %s", 
+                         write_address, esp_err_to_name(err));
+                free(buffer);
+                esp_http_client_close(client);
+                esp_http_client_cleanup(client);
+                return err;
+            }
+            
+            total_downloaded += data_read;
+            write_address += data_read;
+            
+            // 调用进度回调
+            if (progress_callback) {
+                progress_callback(total_downloaded, content_length);
+            }
+            
+            // 打印进度（每 10%）
+            static int last_percent = -1;
+            int percent = (total_downloaded * 100) / content_length;
+            if (percent != last_percent && percent % 10 == 0) {
+                ESP_LOGI(TAG, "Download progress: %d%% (%zu/%d bytes)", 
+                         percent, total_downloaded, content_length);
+                last_percent = percent;
+            }
+        } else {
+            // data_read == 0，下载完成
+            break;
+        }
+        
+        // 喂狗，防止看门狗超时
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+    
+    free(buffer);
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    
+    if (total_downloaded != content_length) {
+        ESP_LOGE(TAG, "Download incomplete: %zu/%d bytes", total_downloaded, content_length);
+        return ESP_FAIL;
+    }
+    
+    ESP_LOGI(TAG, "Download complete! %zu bytes written to flash at 0x%06" PRIX32, 
+             total_downloaded, flash_address);
+    
+    // 验证写入的数据（可选，读取前几个字节进行检查）
+    uint8_t verify_buffer[16];
+    err = Read(flash_address, verify_buffer, sizeof(verify_buffer));
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "First 16 bytes: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
+                 verify_buffer[0], verify_buffer[1], verify_buffer[2], verify_buffer[3],
+                 verify_buffer[4], verify_buffer[5], verify_buffer[6], verify_buffer[7],
+                 verify_buffer[8], verify_buffer[9], verify_buffer[10], verify_buffer[11],
+                 verify_buffer[12], verify_buffer[13], verify_buffer[14], verify_buffer[15]);
+    }
+    
+    return ESP_OK;
 }

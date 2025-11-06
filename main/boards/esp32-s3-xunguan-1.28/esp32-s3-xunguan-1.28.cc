@@ -15,6 +15,8 @@
 #include "display/eye_display.h"
 #include "display/display.h"
 
+#include "w25q64_flash.h"
+
 #include <wifi_station.h>
 #include "power_save_timer.h"
 #include <esp_log.h>
@@ -298,23 +300,27 @@ private:
 
     static void VideoPlayTask(void* arg) {
         auto* self = static_cast<MovecallMojiESP32S3*>(arg);
-        const esp_partition_t* part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "video");
-        if (!part) {
-            ESP_LOGE(TAG, "video partition not found");
+        
+        // 使用外置 Flash
+        auto& flash = W25Q64Flash::GetInstance();
+        if (!flash.IsInitialized()) {
+            ESP_LOGE(TAG, "External flash not initialized");
             self->video_playing_ = false;
             vTaskDelete(nullptr);
             return;
         }
+        
         // Read header: 1 byte count + N*4 bytes frame counts
         uint8_t group_count = 0;
-        if (esp_partition_read(part, 0, &group_count, 1) != ESP_OK || group_count == 0) {
+        if (flash.Read(0, &group_count, 1) != ESP_OK || group_count == 0) {
             ESP_LOGE(TAG, "invalid video header");
             self->video_playing_ = false;
             vTaskDelete(nullptr);
             return;
         }
+        
         std::vector<uint32_t> frame_counts(group_count, 0);
-        if (esp_partition_read(part, 1, frame_counts.data(), group_count * sizeof(uint32_t)) != ESP_OK) {
+        if (flash.Read(1, (uint8_t*)frame_counts.data(), group_count * sizeof(uint32_t)) != ESP_OK) {
             ESP_LOGE(TAG, "read frame counts failed");
             self->video_playing_ = false;
             vTaskDelete(nullptr);
@@ -355,7 +361,7 @@ private:
         uint32_t idx = 0;
         {
             size_t off0 = group_base[g] + idx * frame_size;
-            if (esp_partition_read(part, off0, buf, frame_size) != ESP_OK) {
+            if (flash.Read(off0, buf, frame_size) != ESP_OK) {
                 ESP_LOGE(TAG, "read first frame %u failed", (unsigned int)idx);
                 free(buf);
                 self->video_playing_ = false;
@@ -384,7 +390,7 @@ private:
         }
         while (self->video_playing_) {
             size_t off = group_base[g] + idx * frame_size;
-            if (esp_partition_read(part, off, buf, frame_size) != ESP_OK) {
+            if (flash.Read(off, buf, frame_size) != ESP_OK) {
                 ESP_LOGE(TAG, "read frame %u failed", (unsigned int)idx);
                 break;
             }
@@ -461,10 +467,13 @@ private:
     }
 
     int ReadVideoGroupCount() {
-        const esp_partition_t* part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "video");
-        if (!part) return 0;
+        auto& flash = W25Q64Flash::GetInstance();
+        if (!flash.IsInitialized()) {
+            ESP_LOGE(TAG, "External flash not initialized in ReadVideoGroupCount");
+            return 0;
+        }
         uint8_t cnt = 0;
-        if (esp_partition_read(part, 0, &cnt, 1) != ESP_OK) return 0;
+        if (flash.Read(0, &cnt, 1) != ESP_OK) return 0;
         return (int)cnt;
     }
 
@@ -793,6 +802,19 @@ private:
         });
     }
 
+    void InitializeFlash() {
+        auto& flash = W25Q64Flash::GetInstance();
+         // 初始化 Flash
+        esp_err_t flash_ret = flash.Initialize(FLASH_PIN_MOSI, FLASH_PIN_MISO, 
+            FLASH_PIN_CLK, FLASH_PIN_CS, 10000);
+        if (flash_ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize Flash: %s", esp_err_to_name(flash_ret));
+        // return;
+        } else {
+        ESP_LOGI(TAG, "Flash initialized successfully!");
+        }
+    }
+
 public:
     MovecallMojiESP32S3() : boot_button_(BOOT_BUTTON_GPIO), touch_button_(TOUCH_BUTTON_GPIO) { 
         // 记录上电时间
@@ -805,14 +827,15 @@ public:
         InitializeChargingGpio();
 
         InitializeGpio(POWER_GPIO, true);
+        InitializeGpio(GPIO_NUM_1, true);
 
         InitializeI2c();
         InitializeGpio(AUDIO_CODEC_PA_PIN, true);
         // InitializeGpio(DISPLAY_BACKLIGHT_PIN, false);
         InitializeSpi();
         InitializeGc9a01Display();
-        InitializeLis2hh12I2c(); // 新增LIS2HH12专用I2C
-        InitializeLis2hh12();    // 初始化LIS2HH12
+        // InitializeLis2hh12I2c(); // 新增LIS2HH12专用I2C
+        // InitializeLis2hh12();    // 初始化LIS2HH12
         
         // 检查I2C设备是否正常
         if (lis2hh12_dev_ == nullptr) {
@@ -822,7 +845,7 @@ public:
         }
         InitializeButtons();
         InitializeIot();
-        xTaskCreatePinnedToCore(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 1024 * 3, this, 1, NULL, 0); // 启动检测任务
+        // xTaskCreatePinnedToCore(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 1024 * 3, this, 1, NULL, 0); // 启动检测任务
         InitializePowerManager();
         InitializePowerSaveTimer();
         // ESP_LOGI(TAG, "ReadADC2_CH1_Oneshot");
@@ -831,6 +854,8 @@ public:
             power_manager_->CheckBatteryStatusImmediately();
             ESP_LOGI(TAG, "启动时立即检测电量: %d", power_manager_->GetBatteryLevel());
         }
+
+        InitializeFlash();
 
         xTaskCreate(
             RestoreBacklightTask,      // 任务函数
@@ -952,7 +977,8 @@ public:
     virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
         charging = IsCharging();
         discharging = !charging;
-        level = power_manager_->GetBatteryLevel();
+        // level = power_manager_->GetBatteryLevel();
+        level = 100;
         ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
         return true;
     }

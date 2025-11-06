@@ -257,4 +257,10 @@ const lv_img_dsc_t qrcode_img = {
 };
 
 
+#define FLASH_PIN_MOSI GPIO_NUM_3  // FLASH_DI
+#define FLASH_PIN_MISO GPIO_NUM_39  // FLASH_DO
+#define FLASH_PIN_CLK  GPIO_NUM_11  // FLASH_CLK
+#define FLASH_PIN_CS   GPIO_NUM_40  // FLASH_CS
+
+
 #endif // _BOARD_CONFIG_H_

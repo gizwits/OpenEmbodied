@@ -14,3 +14,4 @@ main/assets/lang_config.h
 scripts/auth.py
 scripts/.env
 scripts/auth/auth.py
+scripts/video_2_bin/**/*.mp4

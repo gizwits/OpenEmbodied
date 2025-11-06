@@ -21,6 +21,14 @@
 #define TAG "Application"
 
 
+
+// 带进度回调的使用
+void download_progress(size_t downloaded, size_t total) {
+    int percent = (downloaded * 100) / total;
+    printf("Progress: %d%% (%zu/%zu bytes)\n", percent, downloaded, total);
+}
+
+
 static const char* const STATE_STRINGS[] = {
     "unknown",
     "starting",
@@ -419,6 +427,16 @@ void Application::Start() {
 
     /* Wait for the network to be ready */
     board.StartNetwork();
+
+    // 下载表情包到 Flash
+    // auto& flash = W25Q64Flash::GetInstance();
+   
+    // esp_err_t download_ret = flash.DownloadToFlash(
+    //     "http://xbgroup-1251025085.cos.ap-guangzhou.myqcloud.com/video/emotions.bin",
+    //     0x000000,
+    //     download_progress
+    // );
+    // 下载表情包到 Flash
 
     bool battery_ok = CheckBatteryLevel();
     if (!battery_ok) {
