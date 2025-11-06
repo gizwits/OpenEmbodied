@@ -26,6 +26,7 @@
 #define DISPLAY_MIRROR_Y true
 #define DISPLAY_SWAP_XY false
 
+
 #define DISPLAY_OFFSET_X  0
 #define DISPLAY_OFFSET_Y  0
 
@@ -41,7 +42,7 @@
 #define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
 
 
-#define DISPLAY_SPI_SCLK_HZ     (20 * 1000 * 1000)
+#define DISPLAY_SPI_SCLK_HZ     (40 * 1000 * 1000)
 
 #define AUDIO_CODEC_ES7210_ADDR  ES7210_CODEC_DEFAULT_ADDR
 
@@ -60,7 +61,6 @@
 #define BAT_ADC_ATTEN    ADC_ATTEN_DB_11 // ADC attenuation
 #define BAT_ADC_UNIT     ADC_UNIT_2
 #define POWER_CHARGE_LED_PIN GPIO_NUM_NC
-
 
 // 自动生成的螺旋图像数据
 static const uint8_t qrcode_map[] =  {
@@ -255,5 +255,12 @@ const lv_img_dsc_t qrcode_img = {
     .data_size = sizeof(qrcode_map),
     .data = qrcode_map,
 };
+
+
+#define FLASH_PIN_MOSI GPIO_NUM_3  // FLASH_DI
+#define FLASH_PIN_MISO GPIO_NUM_39  // FLASH_DO
+#define FLASH_PIN_CLK  GPIO_NUM_11  // FLASH_CLK
+#define FLASH_PIN_CS   GPIO_NUM_40  // FLASH_CS
+
 
 #endif // _BOARD_CONFIG_H_

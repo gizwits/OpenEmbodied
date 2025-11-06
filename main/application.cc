@@ -11,6 +11,7 @@
 #include "mcp_server.h"
 #include "wifi_station.h"
 #include "watchdog.h"
+#include "w25q64_flash.h"
 
 #include "settings.h"
 #include <cstring>
@@ -38,6 +39,14 @@ static const char* const STATE_STRINGS[] = {
     "power_off",
     "invalid_state"
 };
+
+
+// 带进度回调的使用
+void download_progress(size_t downloaded, size_t total) {
+    int percent = (downloaded * 100) / total;
+    printf("Progress: %d%% (%zu/%zu bytes)\n", percent, downloaded, total);
+}
+
 
 Application::Application() {
     event_group_ = xEventGroupCreate();
@@ -452,6 +461,17 @@ void Application::Start() {
 
     /* Wait for the network to be ready */
     board.StartNetwork();
+
+
+    // 下载表情包到 Flash
+    // auto& flash = W25Q64Flash::GetInstance();
+   
+    // esp_err_t download_ret = flash.DownloadToFlash(
+    //     "http://xbgroup-1251025085.cos.ap-guangzhou.myqcloud.com/video/emotions.bin",
+    //     0x000000,
+    //     download_progress
+    // );
+    // 下载表情包到 Flash
 
     // auto json = board.GetJson();
     // ESP_LOGI(TAG, "json: %s", json.c_str());

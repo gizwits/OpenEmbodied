@@ -15,6 +15,8 @@
 #include "display/eye_display.h"
 #include "display/display.h"
 
+#include "w25q64_flash.h"
+
 #include <wifi_station.h>
 #include "power_save_timer.h"
 #include <esp_log.h>
@@ -24,6 +26,9 @@
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_gc9a01.h>
+#include <esp_partition.h>
+#include <esp_lvgl_port.h>
+#include <lvgl.h>
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
@@ -44,6 +49,9 @@ private:
     Button boot_button_;
     Button touch_button_;
     EyeDisplay* display_;
+    // LCD handles for direct frame blitting
+    esp_lcd_panel_io_handle_t panel_io_handle_ = nullptr;
+    esp_lcd_panel_handle_t panel_handle_ = nullptr;
     bool need_power_off_ = false;
     i2c_master_bus_handle_t i2c_bus_;
     // LIS2HH12专用I2C
@@ -54,6 +62,17 @@ private:
     TickType_t last_touch_time_ = 0;  // 上次抚摸触发时间
     PowerSaveTimer* power_save_timer_;
     bool is_charging_sleep_ = false;
+
+    // Simple video playback state
+    TaskHandle_t video_task_handle_ = nullptr;
+    bool video_playing_ = false;
+    int video_group_index_ = 0; // use group 0 by default
+    static constexpr int kVideoFrameDelayMs = 200; // ~5 FPS，降低播放速度和CPU占用，避免影响音频
+    lv_obj_t* video_img_ = nullptr;
+    lv_img_dsc_t video_img_dsc_{};
+    TickType_t allow_switch_after_tick_ = 0;
+    int last_started_group_ = -1;
+    TickType_t last_start_tick_ = 0;
 
     std::vector<TestItem> test_items = {
         {"lcd", "LCD测试", 1},
@@ -143,12 +162,15 @@ private:
                         last_shake_time = current_time; // 更新上次触发时间
                         shake_count = 0; // 触发后清零
 
+                        board->CycleVideoGroup();
+
                         if (Application::GetInstance().IsTmpFactoryTestMode()) {
                             board->display_->UpdateTestItem("sensor", 1);
                         } else {
                             // 这里可以触发你的摇晃事件
                             if (board->ChannelIsOpen()) {
-                                board->display_->SetEmotion("vertigo");
+                                // 注释掉旧的表情动画，改用视频播放，节省内存
+                                // board->display_->SetEmotion("vertigo");
                                 Application::GetInstance().SendTextToAI("用户正在摇晃你");
                             } else {
                                 ESP_LOGI("LIS2HH12", "Channel is not open");
@@ -214,8 +236,7 @@ private:
             .lcd_param_bits = 8,
         };
         
-        esp_lcd_panel_io_handle_t panel_io = nullptr;
-        esp_err_t ret = esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_config, &panel_io);
+        esp_err_t ret = esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_config, &panel_io_handle_);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Panel IO creation failed: %s", esp_err_to_name(ret));
             return;
@@ -227,47 +248,46 @@ private:
             .bits_per_pixel = 16,
         };
         
-        esp_lcd_panel_handle_t panel = nullptr;
-        ret = esp_lcd_new_panel_gc9a01(panel_io, &panel_config, &panel);
+        ret = esp_lcd_new_panel_gc9a01(panel_io_handle_, &panel_config, &panel_handle_);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Panel creation failed: %s", esp_err_to_name(ret));
             return;
         }
         
-        ret = esp_lcd_panel_reset(panel);
+        ret = esp_lcd_panel_reset(panel_handle_);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Panel reset failed: %s", esp_err_to_name(ret));
             return;
         }
         
-        ret = esp_lcd_panel_init(panel);
+        ret = esp_lcd_panel_init(panel_handle_);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Panel init failed: %s", esp_err_to_name(ret));
             return;
         }
         
         // Invert colors for GC9A01
-        ret = esp_lcd_panel_invert_color(panel, true);
+        ret = esp_lcd_panel_invert_color(panel_handle_, true);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Panel color invert failed: %s", esp_err_to_name(ret));
             return;
         }
         
         // Mirror display
-        ret = esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
+        ret = esp_lcd_panel_mirror(panel_handle_, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Panel mirror failed: %s", esp_err_to_name(ret));
             return;
         }
         
         // Turn on display
-        ret = esp_lcd_panel_disp_on_off(panel, true);
+        ret = esp_lcd_panel_disp_on_off(panel_handle_, true);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Panel display on failed: %s", esp_err_to_name(ret));
             return;
         }
         
-        display_ = new EyeDisplay(panel_io, panel,
+        display_ = new EyeDisplay(panel_io_handle_, panel_handle_,
             DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
             DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y,
             &qrcode_img,
@@ -276,6 +296,217 @@ private:
                 .icon_font = &font_awesome_20_4,
                 .emoji_font = font_emoji_64_init(),
             });
+    }
+
+    static void VideoPlayTask(void* arg) {
+        auto* self = static_cast<MovecallMojiESP32S3*>(arg);
+        
+        // 使用外置 Flash
+        auto& flash = W25Q64Flash::GetInstance();
+        if (!flash.IsInitialized()) {
+            ESP_LOGE(TAG, "External flash not initialized");
+            self->video_playing_ = false;
+            vTaskDelete(nullptr);
+            return;
+        }
+        
+        // Read header: 1 byte count + N*4 bytes frame counts
+        uint8_t group_count = 0;
+        if (flash.Read(0, &group_count, 1) != ESP_OK || group_count == 0) {
+            ESP_LOGE(TAG, "invalid video header");
+            self->video_playing_ = false;
+            vTaskDelete(nullptr);
+            return;
+        }
+        
+        std::vector<uint32_t> frame_counts(group_count, 0);
+        if (flash.Read(1, (uint8_t*)frame_counts.data(), group_count * sizeof(uint32_t)) != ESP_OK) {
+            ESP_LOGE(TAG, "read frame counts failed");
+            self->video_playing_ = false;
+            vTaskDelete(nullptr);
+            return;
+        }
+        // compute offsets
+        const uint32_t frame_size = DISPLAY_WIDTH * DISPLAY_HEIGHT * 2;
+        uint32_t data_offset = 1 + group_count * sizeof(uint32_t);
+        std::vector<uint32_t> group_base(group_count, 0);
+        uint32_t acc_frames = 0;
+        for (int i = 0; i < group_count; ++i) {
+            group_base[i] = data_offset + acc_frames * frame_size;
+            acc_frames += frame_counts[i];
+        }
+        int g = self->video_group_index_;
+        if (g < 0 || g >= group_count) g = 0;
+        uint32_t frames = frame_counts[g];
+        ESP_LOGI(TAG, "Video header: groups=%u, frame_size=%u, data_offset=%u, play_group=%d, frames_in_group=%u, group_base=%u",
+                 (unsigned)group_count, (unsigned)frame_size, (unsigned)data_offset, g, (unsigned)frames, (unsigned)group_base[g]);
+        if (frames == 0) {
+            self->video_playing_ = false;
+            vTaskDelete(nullptr);
+            return;
+        }
+        // allocate frame buffer
+        // Prefer DMA-capable internal memory for SPI DMA
+        uint8_t* buf = (uint8_t*)heap_caps_malloc(frame_size, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+        if (!buf) buf = (uint8_t*)heap_caps_malloc(frame_size, MALLOC_CAP_DMA);
+        if (!buf) buf = (uint8_t*)heap_caps_malloc(frame_size, MALLOC_CAP_INTERNAL);
+        if (!buf) buf = (uint8_t*)malloc(frame_size);
+        if (!buf) {
+            ESP_LOGE(TAG, "no memory for frame buffer");
+            self->video_playing_ = false;
+            vTaskDelete(nullptr);
+            return;
+        }
+        // 先读取首帧并设置到图像，再显示，避免切组时先显示空白导致黑屏扫描
+        uint32_t idx = 0;
+        {
+            size_t off0 = group_base[g] + idx * frame_size;
+            if (flash.Read(off0, buf, frame_size) != ESP_OK) {
+                ESP_LOGE(TAG, "read first frame %u failed", (unsigned int)idx);
+                free(buf);
+                self->video_playing_ = false;
+                vTaskDelete(nullptr);
+                return;
+            }
+            if (lvgl_port_lock(1000)) {
+                if (self->video_img_ == nullptr) {
+                    self->video_img_ = lv_image_create(lv_screen_active());
+                    lv_obj_set_size(self->video_img_, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+                    // 使用顶部对齐并向上偏移15像素
+                    lv_obj_align(self->video_img_, LV_ALIGN_TOP_MID, 0, -15);
+                }
+                self->video_img_dsc_.header.w = DISPLAY_WIDTH;
+                self->video_img_dsc_.header.h = DISPLAY_HEIGHT;
+                self->video_img_dsc_.header.cf = LV_COLOR_FORMAT_RGB565;
+                self->video_img_dsc_.data = buf;
+                self->video_img_dsc_.data_size = frame_size;
+                lv_img_set_src(self->video_img_, &self->video_img_dsc_);
+                lv_obj_move_foreground(self->video_img_);
+                lv_obj_clear_flag(self->video_img_, LV_OBJ_FLAG_HIDDEN);
+                lvgl_port_unlock();
+            }
+            vTaskDelay(pdMS_TO_TICKS(kVideoFrameDelayMs));
+            idx = (idx + 1) % frames;
+        }
+        while (self->video_playing_) {
+            size_t off = group_base[g] + idx * frame_size;
+            if (flash.Read(off, buf, frame_size) != ESP_OK) {
+                ESP_LOGE(TAG, "read frame %u failed", (unsigned int)idx);
+                break;
+            }
+            // 每帧短锁，更新 LVGL 图像（减少锁定时间，避免阻塞音频任务）
+            if (lvgl_port_lock(20)) {  // 从50ms减少到20ms，更快释放锁
+                self->video_img_dsc_.header.w = DISPLAY_WIDTH;
+                self->video_img_dsc_.header.h = DISPLAY_HEIGHT;
+                self->video_img_dsc_.header.cf = LV_COLOR_FORMAT_RGB565;
+                self->video_img_dsc_.data = buf;
+                self->video_img_dsc_.data_size = frame_size;
+                lv_img_set_src(self->video_img_, &self->video_img_dsc_);
+                lvgl_port_unlock();
+            }
+            if ((idx % 10) == 0) {
+                ESP_LOGI(TAG, "Playing group=%d idx=%u/%u off=%u", g, (unsigned)idx, (unsigned)frames, (unsigned)off);
+            }
+            vTaskDelay(pdMS_TO_TICKS(kVideoFrameDelayMs));
+            idx = (idx + 1) % frames; // 当前分组循环播放，直到按键切换
+        }
+        free(buf);
+        self->video_playing_ = false;
+        // 清理任务句柄，允许后续启动新的播放任务
+        self->video_task_handle_ = nullptr;
+        vTaskDelete(nullptr);
+    }
+
+    void StartVideoPlayback() {
+        // 重入保护：同一组1秒内的重复启动忽略
+        TickType_t now = xTaskGetTickCount();
+        if (last_started_group_ == video_group_index_ &&
+            (now - last_start_tick_) < pdMS_TO_TICKS(1000)) {
+            return;
+        }
+        // 若已有任务在跑，先停止并等待退出
+        if (video_task_handle_ != nullptr) {
+            video_playing_ = false;
+            for (int i = 0; i < 50 && video_task_handle_ != nullptr; ++i) { // 最多等 500ms
+                vTaskDelay(pdMS_TO_TICKS(10));
+            }
+            video_task_handle_ = nullptr;
+        }
+        ESP_LOGI(TAG, "StartVideoPlayback group=%d", video_group_index_);
+        video_playing_ = true;
+        // 降低优先级从5到2，避免阻塞音频任务（音频任务通常是3-4优先级）
+        xTaskCreate(VideoPlayTask, "video_play", 4096, this, 1, &video_task_handle_);
+        last_started_group_ = video_group_index_;
+        last_start_tick_ = now;
+    }
+
+    void StopVideoPlayback() {
+        if (!video_playing_ && video_task_handle_ == nullptr) return;
+        video_playing_ = false;
+        // 等待任务自删除清理句柄
+        for (int i = 0; i < 50 && video_task_handle_ != nullptr; ++i) { // 最多等 500ms
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+        video_task_handle_ = nullptr;
+    }
+
+    int EmotionToGroup(const std::string& name) {
+        if (name == "happy")   return 0;
+        if (name == "neutral") return 1;
+        if (name == "sad")     return 2;
+        if (name == "surprise") return 3;
+        if (name == "listen") return 4;
+        return 0;
+    }
+
+    void PlayEmotion(const std::string& name) {
+        int g = EmotionToGroup(name);
+        video_group_index_ = g;
+        if (video_playing_) StopVideoPlayback();
+        StartVideoPlayback();
+    }
+
+    int ReadVideoGroupCount() {
+        auto& flash = W25Q64Flash::GetInstance();
+        if (!flash.IsInitialized()) {
+            ESP_LOGE(TAG, "External flash not initialized in ReadVideoGroupCount");
+            return 0;
+        }
+        uint8_t cnt = 0;
+        if (flash.Read(0, &cnt, 1) != ESP_OK) return 0;
+        return (int)cnt;
+    }
+
+    void CycleVideoGroup() {
+        // 开机后一段时间内禁止切换，避免上电抖动
+        if (xTaskGetTickCount() < allow_switch_after_tick_) {
+            return;
+        }
+        // 简单防抖：1200ms 内忽略重复触发
+        static uint32_t last_switch_tick = 0;
+        uint32_t now = xTaskGetTickCount();
+        if (last_switch_tick != 0 && (now - last_switch_tick) < pdMS_TO_TICKS(1200)) {
+            return;
+        }
+        last_switch_tick = now;
+
+        int cnt = ReadVideoGroupCount();
+        if (cnt <= 0) return;
+        // 不再先全屏黑清屏，直接切组并启动，减少可见的自上而下扫描
+        if (lvgl_port_lock(100)) {
+            if (video_img_ == nullptr) {
+                video_img_ = lv_image_create(lv_screen_active());
+                lv_obj_set_size(video_img_, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+                // 使用顶部对齐并向上偏移20像素
+                lv_obj_align(video_img_, LV_ALIGN_TOP_MID, 0, -20);
+            }
+            lv_obj_move_foreground(video_img_);
+            lvgl_port_unlock();
+        }
+        video_group_index_ = (video_group_index_ + 1) % cnt;
+        if (video_playing_) StopVideoPlayback();
+        StartVideoPlayback();
+        ESP_LOGI(TAG, "Switch video group to %d / %d", video_group_index_, cnt);
     }
 
     int MaxBacklightBrightness() {
@@ -306,59 +537,44 @@ private:
         static int first_level = gpio_get_level(BOOT_BUTTON_GPIO);
         ESP_LOGI(TAG, "first_level: %d", first_level);
 
-        // touch_button_.OnPressDown([this]() {
+        touch_button_.OnPressDown([this]() {
           
-        //     ESP_LOGI(TAG, "touch_button_.OnPressDown");
+            ESP_LOGI(TAG, "touch_button_.OnPressDown");
 
-        //     TickType_t current_time = xTaskGetTickCount();
-        //     const TickType_t touch_cooldown = pdMS_TO_TICKS(5000); // 5秒冷却时间
+            TickType_t current_time = xTaskGetTickCount();
+            const TickType_t touch_cooldown = pdMS_TO_TICKS(5000); // 5秒冷却时间
             
-        //     // 检查是否已经过了冷却时间
-        //     if (current_time - last_touch_time_ >= touch_cooldown) {
-        //         last_touch_time_ = current_time; // 更新上次触发时间
+            // 检查是否已经过了冷却时间
+            if (current_time - last_touch_time_ >= touch_cooldown) {
+                last_touch_time_ = current_time; // 更新上次触发时间
 
-        //         //切换表情
-        //         if (CheckAndHandleEnterSleepMode()) {
-        //             // 交给休眠逻辑托管
-        //             ESP_LOGI(TAG, "触摸唤醒");
-        //             return;
-        //         }
-        //         display_->SetEmotion("loving");
-        //         if (ChannelIsOpen()) {
-        //             Application::GetInstance().SendTextToAI("用户正在抚摸你");
-        //         } else {
-        //             ESP_LOGI("touch", "Channel is not open");
-        //             Application::GetInstance().ToggleChatState();
-        //         }
-        //     } else {
-        //         ESP_LOGI("touch", "Touch detected but in cooldown period");
-        //     }
-        // });
+                //切换表情
+                if (CheckAndHandleEnterSleepMode()) {
+                    // 交给休眠逻辑托管
+                    ESP_LOGI(TAG, "触摸唤醒");
+                    return;
+                }
+                // 注释掉旧的表情动画，改用视频播放，节省内存
+                // display_->SetEmotion("loving");
+                this->CycleVideoGroup();
+
+                if (ChannelIsOpen()) {
+                    Application::GetInstance().SendTextToAI("用户正在抚摸你");
+                } else {
+                    ESP_LOGI("touch", "Channel is not open");
+                    Application::GetInstance().ToggleChatState();
+                }
+            } else {
+                ESP_LOGI("touch", "Touch detected but in cooldown period");
+            }
+        });
 
         boot_button_.OnClick([this]() {
-
-            if (Application::GetInstance().IsTmpFactoryTestMode()) {
-                // 通过按键测试
-                display_->UpdateTestItem("key", 1);
-                return;
-            }
-
-
-            if (CheckAndHandleEnterSleepMode()) {
-                // 交给休眠逻辑托管
-                ESP_LOGI(TAG, "长按唤醒");
-                return;
-            }
-            auto& app = Application::GetInstance();
-            // if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
-            //     InnerResetWifiConfiguration();
-            // }
-            app.ToggleChatState();
-            // display_->TestNextEmotion();
+            // 单击：切换到下一个表情组
+            CycleVideoGroup();
         });
         boot_button_.OnLongPress([this]() {
             ESP_LOGI(TAG, "boot_button_.OnLongPress");
-            auto& app = Application::GetInstance();
             // 计算设备运行时间
             int64_t current_time = esp_timer_get_time() / 1000; // 转换为毫秒
             int64_t uptime_ms = current_time - power_on_time_;
@@ -389,7 +605,8 @@ private:
                 // 使用静态函数来避免lambda捕获问题
                 xTaskCreate([](void* arg) {
                     auto* board = static_cast<MovecallMojiESP32S3*>(arg);
-                    board->display_->SetEmotion("neutral");
+                    // 注释掉旧的表情动画，改用视频播放，节省内存
+                    // board->display_->SetEmotion("neutral");
 
                     if (board->IsCharging()) {
                         // 充电中，只关闭背光
@@ -408,6 +625,11 @@ private:
         boot_button_.OnMultipleClick([this]() {
             InnerResetWifiConfiguration();
         }, 3);
+
+        // 单击：切到下一组并持续播放该组
+        boot_button_.OnClick([this]() {
+            CycleVideoGroup();
+        });
     }
 
     // 物联网初始化，添加对 AI 可见设备
@@ -468,7 +690,7 @@ private:
         i2c_device_config_t dev_cfg = {
             .dev_addr_length = I2C_ADDR_BIT_LEN_7,
             .device_address = LIS2HH12_I2C_ADDR,
-            .scl_speed_hz = 400000,  // 降低到100kHz，提高稳定性
+            .scl_speed_hz = 100000,  // 降低到100kHz，提高稳定性
         };
         ret = i2c_master_bus_add_device(lis2hh12_i2c_bus_, &dev_cfg, &lis2hh12_dev_);
         if (ret != ESP_OK) {
@@ -580,6 +802,19 @@ private:
         });
     }
 
+    void InitializeFlash() {
+        auto& flash = W25Q64Flash::GetInstance();
+         // 初始化 Flash
+        esp_err_t flash_ret = flash.Initialize(FLASH_PIN_MOSI, FLASH_PIN_MISO, 
+            FLASH_PIN_CLK, FLASH_PIN_CS, 10000);
+        if (flash_ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize Flash: %s", esp_err_to_name(flash_ret));
+        // return;
+        } else {
+        ESP_LOGI(TAG, "Flash initialized successfully!");
+        }
+    }
+
 public:
     MovecallMojiESP32S3() : boot_button_(BOOT_BUTTON_GPIO), touch_button_(TOUCH_BUTTON_GPIO) { 
         // 记录上电时间
@@ -592,6 +827,7 @@ public:
         InitializeChargingGpio();
 
         InitializeGpio(POWER_GPIO, true);
+        InitializeGpio(GPIO_NUM_1, true);
 
         InitializeI2c();
         InitializeGpio(AUDIO_CODEC_PA_PIN, true);
@@ -619,6 +855,8 @@ public:
             ESP_LOGI(TAG, "启动时立即检测电量: %d", power_manager_->GetBatteryLevel());
         }
 
+        InitializeFlash();
+
         xTaskCreate(
             RestoreBacklightTask,      // 任务函数
             "restore_backlight",       // 名字
@@ -627,6 +865,11 @@ public:
             5,                         // 优先级
             NULL                       // 任务句柄
         );
+
+        // 开机：固定从组0开始播放，并在2秒后才允许切组，避免上电抖动
+        video_group_index_ = 0;
+        StartVideoPlayback();
+        allow_switch_after_tick_ = xTaskGetTickCount() + pdMS_TO_TICKS(2000);
 
         if (Application::GetInstance().IsTmpFactoryTestMode()) {
             display_->EnterTestMode();
@@ -734,7 +977,8 @@ public:
     virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
         charging = IsCharging();
         discharging = !charging;
-        level = power_manager_->GetBatteryLevel();
+        // level = power_manager_->GetBatteryLevel();
+        level = 100;
         ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
         return true;
     }
