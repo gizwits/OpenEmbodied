@@ -174,13 +174,13 @@ void AudioService::Start() {
     /* Start the opus codec task */
     int task_size = 2048 * 13;
 #ifdef CONFIG_USE_EYE_STYLE_VB6824
-    task_size = 1024 * 8;  // 减少栈大小，因为不需要编码逻辑
+    task_size = 1024 * 16;  // 增加栈大小到16KB，避免栈溢出（从8KB增加到16KB）
 #endif
-    xTaskCreate([](void* arg) {
+    xTaskCreatePinnedToCore([](void* arg) {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->OpusCodecTask();
         vTaskDelete(NULL);
-    }, "opus_codec", task_size, this, 7, &opus_codec_task_handle_);
+    }, "opus_codec", task_size, this, 10, &opus_codec_task_handle_, 0);  // 优先级10，核心0
 }
 
 void AudioService::Stop() {
@@ -873,7 +873,7 @@ void AudioService::PlaySound(const std::string_view& sound) {
         auto payload_size = ntohs(p3->payload_size);
         auto packet = std::make_unique<AudioStreamPacket>();
         packet->sample_rate = 16000;
-        packet->frame_duration = 60;
+        packet->frame_duration = OPUS_FRAME_DURATION_MS;
         packet->payload.resize(payload_size);
         memcpy(packet->payload.data(), p3->payload, payload_size);
         p += payload_size;
