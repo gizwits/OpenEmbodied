@@ -55,7 +55,8 @@ private:
     static bool silent_startup_from_board_;
 
     bool IsSilent() const {
-        return Application::GetInstance().IsSilentStartup() || silent_startup_from_board_;
+        // 仅充电导致的静默启动才认为是静默；异常重启不视为静默
+        return silent_startup_from_board_;
     }
     
     // 唤醒词列表
@@ -170,13 +171,14 @@ private:
         
         boot_button_.OnPressDown([this]() {
             ESP_LOGI(TAG, "boot_button_.OnPressDown");
-            // 开灯
-            gpio_set_level(BUILTIN_LED_GPIO, 0);
         });
         boot_button_.OnLongPress([this]() {
             ESP_LOGI(TAG, "boot_button_.OnLongPress");
-            // auto &app = Application::GetInstance();
-            // app.ToggleChatState();
+            // 仅充电静默时禁用，异常重启的静默允许长按进入配网
+            if (silent_startup_from_board_) {
+                ESP_LOGI(TAG, "充电静默启动状态，长按 BOOT 不进入配网");
+                return;
+            }
             ResetWifiConfiguration();
         });
 
@@ -194,9 +196,9 @@ private:
         power_button_.OnPressDown([this]() {
             ESP_LOGI(TAG, "power_button_.OnPressDown");
             auto& app = Application::GetInstance();
-            // 静默启动时，短按不生效
-            if (app.IsSilentStartup() || silent_startup_from_board_) {
-                ESP_LOGI(TAG, "静默启动，短按无效");
+            // 只有充电导致的静默启动才禁用按键，异常重启的静默启动允许按键工作
+            if (silent_startup_from_board_) {
+                ESP_LOGI(TAG, "充电静默启动状态，短按电源键不执行操作");
                 return;
             }
             // 无条件先打断，再直接进入监听并强制开启语音处理，确保“秒停+立即监听”
@@ -224,12 +226,12 @@ private:
                 first_level = 1;
                 ESP_LOGI(TAG, "首次上电5秒内，忽略长按操作");
             } else {
-                // 如果为静默启动，长按视为用户主动启动：清除静默标志并重启
-                if (app.IsSilentStartup() || silent_startup_from_board_) {
+                // 只有充电导致的静默启动才需要长按唤醒，异常重启的静默启动直接执行关机
+                if (silent_startup_from_board_) {
                     Settings settings("system", true);
                     settings.SetInt("silent_next", 0);
                     settings.SetInt("user_wakeup", 1);
-                    ESP_LOGI(TAG, "静默启动下长按：清除silent_next并设置user_wakeup，重启");
+                    ESP_LOGI(TAG, "充电静默启动状态，长按清除静默标志并重启");
                     esp_restart();
                     return;
                 }
@@ -446,7 +448,13 @@ public:
             if (is_charging) {
                 silent_startup_from_board_ = true;
             }
+        } else {
+            // 异常重启（如看门狗复位、掉电复位等），应该正常启动，不要静默
+            ESP_LOGI(TAG, "异常重启（reset_reason: %d），设置正常启动", reset_reason);
+            silent_startup_from_board_ = false;
         }
+
+        ESP_LOGI(TAG, "silent_startup_from_board_ 最终值: %d", silent_startup_from_board_);
 
         // 静默启动时，禁止点亮内置指示灯，并禁用省电计时器
         if (silent_startup_from_board_) {
@@ -462,8 +470,9 @@ public:
 
         audio_codec.OnWakeUp([this](const std::string& command) {
             ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());
-            // 静默启动时忽略唤醒词
-            if (Application::GetInstance().IsSilentStartup() || silent_startup_from_board_) {
+            // 只有充电导致的静默启动才忽略唤醒词，异常重启的静默启动允许唤醒词工作
+            if (silent_startup_from_board_) {
+                ESP_LOGI(TAG, "充电静默启动状态，忽略唤醒词: %s", command.c_str());
                 return;
             }
             if (IsCommandInList(command, wake_words_)){
