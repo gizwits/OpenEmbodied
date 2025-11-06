@@ -11,7 +11,7 @@
 #include <map>
 
 // 显示元素向上偏移量（像素）
-#define DISPLAY_VERTICAL_OFFSET 20
+#define DISPLAY_VERTICAL_OFFSET 0
 
 // 产测项结构体
 struct TestItem {

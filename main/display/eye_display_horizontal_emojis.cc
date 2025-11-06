@@ -644,9 +644,7 @@ void EyeDisplayHorizontalEmo::StartSadAnimation() {
     lv_obj_set_style_transform_angle(mouth_, 1800, 0);  // 180度 = 1800 * 0.1度
     
     // 重新调整位置，确保旋转后仍然居中
-    // 获取嘴巴实际尺寸来精确居中 - 用于悲伤表情右边嘴角
-    lv_obj_update_layout(mouth_);
-    lv_coord_t mouth_width = lv_obj_get_width(mouth_);
+    // 使用已获取的mouth_width变量
     lv_obj_set_pos(mouth_, (width_ + mouth_width) / 2, height_ - ScaleHeight(32) - DISPLAY_VERTICAL_OFFSET + ScaleHeight(30));
 
     // 创建嘴巴动画
@@ -1156,9 +1154,9 @@ void EyeDisplayHorizontalEmo::StartThinkingAnimation() {
     // 设置右手位置
     // 获取右手实际尺寸来精确定位
     lv_obj_update_layout(right_hand_);
-    lv_coord_t hand_width = lv_obj_get_width(right_hand_);
-    lv_coord_t hand_height = lv_obj_get_height(right_hand_);
-    lv_obj_set_pos(right_hand_, width_ - hand_width - ScaleWidth(20), height_ - hand_height - ScaleHeight(10) - DISPLAY_VERTICAL_OFFSET);
+    lv_coord_t right_hand_width = lv_obj_get_width(right_hand_);
+    lv_coord_t right_hand_height = lv_obj_get_height(right_hand_);
+    lv_obj_set_pos(right_hand_, width_ - right_hand_width - ScaleWidth(20), height_ - right_hand_height - ScaleHeight(10) - DISPLAY_VERTICAL_OFFSET);
     // 左手左右移动动画
     static lv_anim_t left_hand_anim;
     lv_anim_init(&left_hand_anim);
@@ -1177,9 +1175,8 @@ void EyeDisplayHorizontalEmo::StartThinkingAnimation() {
     static lv_anim_t right_hand_anim;
     lv_anim_init(&right_hand_anim);
     lv_anim_set_var(&right_hand_anim, right_hand_);
-    // 获取右手实际宽度来计算动画范围
-    lv_coord_t hand_width = lv_obj_get_width(right_hand_);
-    lv_anim_set_values(&right_hand_anim, width_ - hand_width - ScaleWidth(20), width_ - hand_width - ScaleWidth(40));
+    // 使用之前已获取的right_hand_width变量来计算动画范围
+    lv_anim_set_values(&right_hand_anim, width_ - right_hand_width - ScaleWidth(20), width_ - right_hand_width - ScaleWidth(40));
     lv_anim_set_time(&right_hand_anim, 1000);
     lv_anim_set_delay(&right_hand_anim, 0);
     lv_anim_set_exec_cb(&right_hand_anim, (lv_anim_exec_xcb_t)lv_obj_set_x);
