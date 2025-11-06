@@ -119,7 +119,7 @@ public:
     virtual void GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) { data_size = 0; }
     virtual void ProcessDataPointValue(const std::string& name, int value) {}
     virtual void ProcessBinaryDataPointValue(const std::string& name, const uint8_t* data, size_t data_len) {}
-
+    virtual std::string GetSystemInfoJson();
 };
 
 #define DECLARE_BOARD(BOARD_CLASS_NAME) \

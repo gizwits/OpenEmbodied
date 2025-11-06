@@ -124,29 +124,15 @@ void Protocol::SendWakeWordDetected(const std::string& wake_word) {
 
 
 void Protocol::SendStartListening(ListeningMode mode) {
-    // std::string message = "{\"session_id\":\"" + session_id_ + "\"";
-    // message += ",\"type\":\"listen\",\"state\":\"start\"";
-    // if (mode == kListeningModeRealtime) {
-    //     message += ",\"mode\":\"realtime\"";
-    // } else if (mode == kListeningModeAutoStop) {
-    //     message += ",\"mode\":\"auto\"";
-    // } else {
-    //     message += ",\"mode\":\"manual\"";
-    // }
-    // message += "}";
-    // SendText(message);
+  
 }
 
 void Protocol::SendStopListening() {
-    // std::string message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"listen\",\"state\":\"stop\"}";
-    // SendText(message);
 }
 
 
-// void Protocol::SendMcpMessage(const std::string& payload) {
-//     std::string message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"mcp\",\"payload\":" + payload + "}";
-//     SendText(message);
-// }
+void Protocol::SendMcpMessage(const std::string& payload) {
+}
 
 bool Protocol::IsTimeout() const {
     const int kTimeoutSeconds = 60;

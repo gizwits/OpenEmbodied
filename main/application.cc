@@ -497,6 +497,14 @@ void Application::Start() {
 
     // protocol_已经在上面创建过了，不需要重复创建
 
+#ifdef CONFIG_PROTOCOL_TYPE_XIAOZHI
+
+    // Add MCP common tools before initializing the protocol
+    auto& mcp_server = McpServer::GetInstance();
+    mcp_server.AddCommonTools();
+    mcp_server.AddUserOnlyTools();
+#endif
+
     protocol_->OnNetworkError([this](const std::string& message) {
         ESP_LOGE(TAG, "OnNetworkError: %s", message.c_str());
         std::string messageData = "socket 通道错误: " + message;
@@ -627,7 +635,12 @@ void Application::Start() {
                     ESP_LOGW(TAG, "Unknown system command: %s", command->valuestring);
                 }
             }
-        } else if (strcmp(type->valuestring, "alert") == 0) {
+        } else if (strcmp(type->valuestring, "mcp") == 0) {
+            auto payload = cJSON_GetObjectItem(root, "payload");
+            if (cJSON_IsObject(payload)) {
+                McpServer::GetInstance().ParseMessage(payload);
+            }
+        }  else if (strcmp(type->valuestring, "alert") == 0) {
             auto status = cJSON_GetObjectItem(root, "status");
             auto message = cJSON_GetObjectItem(root, "message");
             auto emotion = cJSON_GetObjectItem(root, "emotion");
@@ -1154,11 +1167,11 @@ bool Application::CanEnterSleepMode() {
 }
 
 void Application::SendMcpMessage(const std::string& payload) {
-    // Schedule([this, payload]() {
-    //     if (protocol_) {
-    //         protocol_->SendMcpMessage(payload);
-    //     }
-    // });
+    Schedule([this, payload]() {
+        if (protocol_) {
+            protocol_->SendMcpMessage(payload);
+        }
+    });
 }
 
 void Application::PlaySound(const std::string_view& sound) {

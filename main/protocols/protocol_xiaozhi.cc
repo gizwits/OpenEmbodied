@@ -85,44 +85,6 @@ bool Protocol::IsAudioChannelBusy() const {
 
 void Protocol::PreAbortSpeaking() {
 
-    // need_abort_speaking_ = true;
-    // // 如果已有定时器在运行，先停止它
-    // ESP_LOGI(TAG, "PreAbortSpeaking: busy_timer_ != nullptr");
-    // if (busy_timer_ != nullptr) {
-    //     esp_timer_stop(busy_timer_);
-    //     esp_timer_delete(busy_timer_);
-    //     busy_timer_ = nullptr;
-    // }
-    // ESP_LOGI(TAG, "PreAbortSpeaking: busy_timer_ == nullptr");
-    // // 创建300ms定时器
-    // esp_timer_create_args_t timer_args = {
-    //     .callback = [](void* arg) {
-    //         auto* self = static_cast<Protocol*>(arg);
-    //         self->need_abort_speaking_ = false;
-    //         self->SendAbortSpeaking(kAbortReasonNone);
-    //     },
-    //     .arg = this,
-    //     .dispatch_method = ESP_TIMER_TASK,
-    //     .name = "BusyTimer",
-    //     .skip_unhandled_events = false,
-    // };
-
-    // ESP_LOGI(TAG, "PreAbortSpeaking: esp_timer_create");
-    // esp_err_t ret = esp_timer_create(&timer_args, &busy_timer_);
-    // if (ret != ESP_OK) {
-    //     ESP_LOGE(TAG, "Failed to create busy timer: %s", esp_err_to_name(ret));
-    //     need_abort_speaking_ = false;
-    //     return;
-    // }
-
-    // ret = esp_timer_start_once(busy_timer_, 200000); 
-    // if (ret != ESP_OK) {
-    //     ESP_LOGE(TAG, "Failed to start busy timer: %s", esp_err_to_name(ret));
-    //     esp_timer_delete(busy_timer_);
-    //     busy_timer_ = nullptr;
-    //     need_abort_speaking_ = false;
-    //     return;
-    // }
 }
 
 
@@ -131,10 +93,10 @@ void Protocol::SendStopListening() {
     SendText(message);
 }
 
-// void Protocol::SendMcpMessage(const std::string& payload) {
-//     std::string message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"mcp\",\"payload\":" + payload + "}";
-//     SendText(message);
-// }
+void Protocol::SendMcpMessage(const std::string& payload) {
+    std::string message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"mcp\",\"payload\":" + payload + "}";
+    SendText(message);
+}
 
 bool Protocol::IsTimeout() const {
     const int kTimeoutSeconds = 120;
