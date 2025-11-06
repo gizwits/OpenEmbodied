@@ -107,6 +107,7 @@ private:
     int cs_pin_;
     uint32_t chip_size_;
     uint32_t jedec_id_;
+    SemaphoreHandle_t mutex_;  // 互斥锁，保护 flash 并发访问
     
     // 内部辅助函数
     esp_err_t WriteEnable();

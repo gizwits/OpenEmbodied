@@ -66,7 +66,7 @@ EyeDisplay::EyeDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_
         .io_handle = panel_io_,
         .panel_handle = panel_,
         .control_handle = nullptr,
-        .buffer_size = static_cast<uint32_t>(width_ * 20),
+        .buffer_size = static_cast<uint32_t>(width_ * 10),
         .double_buffer = true,
         .trans_size = 0,
         .hres = static_cast<uint32_t>(width_),
@@ -174,6 +174,8 @@ void EyeDisplay::SetEmotion(const char* emotion) {
         ESP_LOGW(TAG, "Failed to send emotion to queue");
         vPortFree(emotion_copy);
     }
+
+    return;
 }
 
 void EyeDisplay::EmotionTask(void* arg) {
@@ -311,9 +313,9 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
         right_hand_ = nullptr;
     }
 
-    // 确保眼睛对象可见并重置为默认状态
-    lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
+    // 隐藏眼睛对象，改用视频播放，节省内存
+    lv_obj_add_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
     
     // 重置眼睛旋转角度（特别是从生气状态切换出来时）
     lv_obj_set_style_transform_angle(left_eye_, 0, 0);
@@ -333,7 +335,8 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
     lv_anim_del(left_eye_, nullptr);
     lv_anim_del(right_eye_, nullptr);
 
-    // 根据状态启动新的动画
+    // 禁用所有表情动画，改用视频播放，节省内存（注释掉所有动画启动）
+    /*
     switch (current_state_) {
         case EyeState::SURPRISED:
         case EyeState::IDLE:
@@ -377,6 +380,7 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
             StartVertigoAnimation();
             break;
     }
+    */
 
     if (current_state_ == EyeState::VERTIGO || current_state_ == EyeState::LOVING) {
         // 眩晕动画需要锁定
@@ -969,8 +973,8 @@ void EyeDisplay::SetupUI() {
     lv_obj_set_style_shadow_width(right_eye_, 0, 0);
     lv_obj_set_style_outline_width(right_eye_, 0, 0);
 
-    // 启动默认的待机动画
-    StartIdleAnimation();
+    // 禁用默认的待机动画，改用视频播放，节省内存
+    // StartIdleAnimation();
 }
 
 void EyeDisplay::TestNextEmotion() {
@@ -1018,25 +1022,25 @@ void EyeDisplay::TestNextEmotion() {
 void EyeDisplay::EnterWifiConfig() {
     ESP_LOGI(TAG, "EnterWifiConfig");
     
-    // 禁用表情切换
-    emotion_disabled_ = true;
+    // // 禁用表情切换
+    // emotion_disabled_ = true;
     
-    if (qrcode_img_) {
-        ESP_LOGI(TAG, "EnterWifiConfig qrcode_img_ is not null");
-        DisplayLockGuard lock(this);
-        auto screen = lv_screen_active();
-        // 设置背景为白色
-        lv_obj_set_style_bg_color(screen, lv_color_white(), 0);
-        // 删除所有子对象（清空屏幕）
-        lv_obj_clean(screen);
-        // 显示二维码图片
-        if (qrcode_img_) {
-            lv_obj_t* img = lv_img_create(screen);
-            lv_img_set_src(img, qrcode_img_);
-            lv_obj_set_style_img_recolor(img, lv_color_hex(EYE_COLOR), 0);
-            lv_obj_center(img);
-        }
-    }
+    // if (qrcode_img_) {
+    //     ESP_LOGI(TAG, "EnterWifiConfig qrcode_img_ is not null");
+    //     DisplayLockGuard lock(this);
+    //     auto screen = lv_screen_active();
+    //     // 设置背景为白色
+    //     lv_obj_set_style_bg_color(screen, lv_color_white(), 0);
+    //     // 删除所有子对象（清空屏幕）
+    //     lv_obj_clean(screen);
+    //     // 显示二维码图片
+    //     if (qrcode_img_) {
+    //         lv_obj_t* img = lv_img_create(screen);
+    //         lv_img_set_src(img, qrcode_img_);
+    //         lv_obj_set_style_img_recolor(img, lv_color_hex(EYE_COLOR), 0);
+    //         lv_obj_center(img);
+    //     }
+    // }
 }
 
 void EyeDisplay::EnterOTAMode() {
@@ -1345,3 +1349,4 @@ void EyeDisplay::UpdateTestItemStatus(const std::string& id, int status) {
     }
     ESP_LOGI(TAG, "Updated test item '%s' status: %d", id.c_str(), status);
 }
+

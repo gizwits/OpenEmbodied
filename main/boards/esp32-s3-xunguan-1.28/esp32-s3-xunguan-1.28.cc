@@ -67,7 +67,7 @@ private:
     TaskHandle_t video_task_handle_ = nullptr;
     bool video_playing_ = false;
     int video_group_index_ = 0; // use group 0 by default
-    static constexpr int kVideoFrameDelayMs = 200; // ~5 FPS，降低播放速度和CPU占用，避免影响音频
+    static constexpr int kVideoFrameDelayMs = 100; // ~5 FPS，降低播放速度和CPU占用，避免影响音频
     lv_obj_t* video_img_ = nullptr;
     lv_img_dsc_t video_img_dsc_{};
     TickType_t allow_switch_after_tick_ = 0;
@@ -171,7 +171,11 @@ private:
                             if (board->ChannelIsOpen()) {
                                 // 注释掉旧的表情动画，改用视频播放，节省内存
                                 // board->display_->SetEmotion("vertigo");
+                                #ifdef CONFIG_LANGUAGE_ZH_CN
                                 Application::GetInstance().SendTextToAI("用户正在摇晃你");
+                                #else
+                                Application::GetInstance().SendTextToAI("User is shaking you");
+                                #endif
                             } else {
                                 ESP_LOGI("LIS2HH12", "Channel is not open");
                             }
@@ -478,22 +482,33 @@ private:
     }
 
     void CycleVideoGroup() {
+        ESP_LOGI(TAG, "CycleVideoGroup");
         // 开机后一段时间内禁止切换，避免上电抖动
         if (xTaskGetTickCount() < allow_switch_after_tick_) {
             return;
         }
+        ESP_LOGI(TAG, "CycleVideoGroup 1");
+
         // 简单防抖：1200ms 内忽略重复触发
         static uint32_t last_switch_tick = 0;
         uint32_t now = xTaskGetTickCount();
         if (last_switch_tick != 0 && (now - last_switch_tick) < pdMS_TO_TICKS(1200)) {
             return;
         }
+        ESP_LOGI(TAG, "CycleVideoGroup 2");
+
         last_switch_tick = now;
 
         int cnt = ReadVideoGroupCount();
+        ESP_LOGI(TAG, "CycleVideoGroup 3");
+
         if (cnt <= 0) return;
         // 不再先全屏黑清屏，直接切组并启动，减少可见的自上而下扫描
+        ESP_LOGI(TAG, "CycleVideoGroup 4");
+
         if (lvgl_port_lock(100)) {
+            ESP_LOGI(TAG, "CycleVideoGroup 5");
+
             if (video_img_ == nullptr) {
                 video_img_ = lv_image_create(lv_screen_active());
                 lv_obj_set_size(video_img_, DISPLAY_WIDTH, DISPLAY_HEIGHT);
@@ -502,9 +517,12 @@ private:
             }
             lv_obj_move_foreground(video_img_);
             lvgl_port_unlock();
+            ESP_LOGI(TAG, "CycleVideoGroup 6");
         }
         video_group_index_ = (video_group_index_ + 1) % cnt;
         if (video_playing_) StopVideoPlayback();
+        ESP_LOGI(TAG, "CycleVideoGroup 7");
+
         StartVideoPlayback();
         ESP_LOGI(TAG, "Switch video group to %d / %d", video_group_index_, cnt);
     }
@@ -559,7 +577,11 @@ private:
                 this->CycleVideoGroup();
 
                 if (ChannelIsOpen()) {
+                    #ifdef CONFIG_LANGUAGE_ZH_CN
                     Application::GetInstance().SendTextToAI("用户正在抚摸你");
+                    #else
+                    Application::GetInstance().SendTextToAI("User is touching you");
+                    #endif
                 } else {
                     ESP_LOGI("touch", "Channel is not open");
                     Application::GetInstance().ToggleChatState();
@@ -690,7 +712,7 @@ private:
         i2c_device_config_t dev_cfg = {
             .dev_addr_length = I2C_ADDR_BIT_LEN_7,
             .device_address = LIS2HH12_I2C_ADDR,
-            .scl_speed_hz = 100000,  // 降低到100kHz，提高稳定性
+            .scl_speed_hz = 50000,  // 降低到50kHz，提高稳定性
         };
         ret = i2c_master_bus_add_device(lis2hh12_i2c_bus_, &dev_cfg, &lis2hh12_dev_);
         if (ret != ESP_OK) {

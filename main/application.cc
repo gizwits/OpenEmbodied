@@ -42,10 +42,10 @@ static const char* const STATE_STRINGS[] = {
 
 
 // 带进度回调的使用
-void download_progress(size_t downloaded, size_t total) {
-    int percent = (downloaded * 100) / total;
-    printf("Progress: %d%% (%zu/%zu bytes)\n", percent, downloaded, total);
-}
+// void download_progress(size_t downloaded, size_t total) {
+//     int percent = (downloaded * 100) / total;
+//     printf("Progress: %d%% (%zu/%zu bytes)\n", percent, downloaded, total);
+// }
 
 
 Application::Application() {
@@ -462,6 +462,7 @@ void Application::Start() {
     /* Wait for the network to be ready */
     board.StartNetwork();
 
+    // vTaskDelay(pdMS_TO_TICKS(5000));
 
     // 下载表情包到 Flash
     // auto& flash = W25Q64Flash::GetInstance();

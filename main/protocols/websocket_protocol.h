@@ -29,8 +29,6 @@ public:
 
     virtual bool Start() override;
     virtual bool OpenAudioChannel() override;
-    virtual void SendStopListening() override;
-    virtual void SendTextToAI(const std::string& text);
     virtual void CloseAudioChannel() override;
     virtual bool IsAudioChannelOpened() const override;
     virtual bool SendAudio(const AudioStreamPacket& packet) override;

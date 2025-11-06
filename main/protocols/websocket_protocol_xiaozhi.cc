@@ -359,45 +359,6 @@ bool WebsocketProtocol::IsAudioCanEnterSleepMode() const {
     return websocket_ != nullptr && websocket_->IsConnected() && !error_occurred_ && !IsTimeout();
 }
 
-void WebsocketProtocol::SendTextToAI(const std::string& text) {
-    // Create event ID
-    char event_id[32];
-    uint32_t random_value = esp_random();
-    snprintf(event_id, sizeof(event_id), "%lu", random_value);
-
-    // Build message
-    char message[512];
-    snprintf(message, sizeof(message),
-        "{\"id\":\"%s\",\"event_type\":\"conversation.message.create\",\"data\":{\"role\":\"user\",\"content_type\":\"text\",\"content\":\"%s\"}}",
-        event_id, text.c_str());
-
-    SendText(message);
-}
-
-void WebsocketProtocol::SendStopListening() {
-    if (!websocket_) {
-        return;
-    }
-
-    // Create event ID
-    char event_id[32];
-    uint32_t random_value = esp_random();
-    snprintf(event_id, sizeof(event_id), "%lu", random_value);
-
-    // Build complete message
-    char message[256];
-    snprintf(message, sizeof(message),
-        "{"
-            "\"id\":\"%s\","
-            "\"event_type\":\"input_audio_buffer.complete\","
-            "\"data\":{}"
-        "}", event_id);
-
-    // Send message
-    websocket_->Send(message);
-    ESP_LOGI(TAG, "SendStopListening: %s", message);
-}
-
 void WebsocketProtocol::HandleReconnect() {
     // Xiaozhi version doesn't need reconnect logic for now
     ESP_LOGI(TAG, "HandleReconnect called - not implemented in xiaozhi version");

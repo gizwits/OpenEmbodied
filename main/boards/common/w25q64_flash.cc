@@ -22,7 +22,11 @@ W25Q64Flash::W25Q64Flash()
     , initialized_(false)
     , cs_pin_(-1)
     , chip_size_(0)
-    , jedec_id_(0) {
+    , jedec_id_(0)
+    , mutex_(xSemaphoreCreateMutex()) {
+    if (mutex_ == nullptr) {
+        ESP_LOGE(TAG, "Failed to create flash mutex");
+    }
 }
 
 W25Q64Flash::~W25Q64Flash() {
@@ -193,7 +197,20 @@ esp_err_t W25Q64Flash::ReadJedecId(uint32_t* jedec_id) {
     if (!jedec_id || !esp_flash_handle_) {
         return ESP_ERR_INVALID_ARG;
     }
-    return esp_flash_read_id(esp_flash_handle_, jedec_id);
+    
+    if (mutex_ == nullptr) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        ESP_LOGE(TAG, "Failed to take flash mutex in ReadJedecId");
+        return ESP_ERR_TIMEOUT;
+    }
+    
+    esp_err_t ret = esp_flash_read_id(esp_flash_handle_, jedec_id);
+    xSemaphoreGive(mutex_);
+    
+    return ret;
 }
 
 esp_err_t W25Q64Flash::ReadUniqueId(uint8_t* unique_id) {
@@ -213,7 +230,19 @@ esp_err_t W25Q64Flash::Read(uint32_t address, uint8_t* data, size_t length) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    return esp_flash_read(esp_flash_handle_, data, address, length);
+    if (mutex_ == nullptr) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        ESP_LOGE(TAG, "Failed to take flash mutex in Read");
+        return ESP_ERR_TIMEOUT;
+    }
+    
+    esp_err_t ret = esp_flash_read(esp_flash_handle_, data, address, length);
+    xSemaphoreGive(mutex_);
+    
+    return ret;
 }
 
 esp_err_t W25Q64Flash::FastRead(uint32_t address, uint8_t* data, size_t length) {
@@ -231,7 +260,19 @@ esp_err_t W25Q64Flash::Write(uint32_t address, const uint8_t* data, size_t lengt
         return ESP_ERR_INVALID_ARG;
     }
     
-    return esp_flash_write(esp_flash_handle_, data, address, length);
+    if (mutex_ == nullptr) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        ESP_LOGE(TAG, "Failed to take flash mutex in Write");
+        return ESP_ERR_TIMEOUT;
+    }
+    
+    esp_err_t ret = esp_flash_write(esp_flash_handle_, data, address, length);
+    xSemaphoreGive(mutex_);
+    
+    return ret;
 }
 
 esp_err_t W25Q64Flash::SectorErase(uint32_t address) {
