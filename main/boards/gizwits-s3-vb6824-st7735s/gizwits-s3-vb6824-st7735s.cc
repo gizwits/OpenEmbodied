@@ -12,7 +12,7 @@
 #include <esp_lcd_st7735s.h>
 #include "data_point_manager.h"
 #include "led/single_led.h"
-#include "display/eye_display_horizontal_emojis.h"
+#include "display/eye_display_horizontal.h"
 #include "display/display.h"
 #include <esp_lvgl_port.h>
 
@@ -50,7 +50,7 @@ private:
     
     Button power_button_;
     VbAduioCodec audio_codec;
-    EyeDisplayHorizontalEmo* display_;
+    EyeDisplayHorizontal* display_;
     bool need_power_off_ = false;
     int64_t power_on_time_ = 0;  // 记录上电时间
     PowerManager* power_manager_;
@@ -199,7 +199,7 @@ private:
         
         // 创建显示对象
         DisplayFonts fonts = { .text_font = &font_puhui_20_4, .icon_font = nullptr, .emoji_font = nullptr };
-        display_ = new EyeDisplayHorizontalEmo(panel_io, panel,
+        display_ = new EyeDisplayHorizontal(panel_io, panel,
             DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
             DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY,
             fonts);
