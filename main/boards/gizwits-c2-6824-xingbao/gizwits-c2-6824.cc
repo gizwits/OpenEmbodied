@@ -47,9 +47,12 @@ private:
     // LED control
     enum LedMode { kLedSolid, kLedSlowBlink, kLedFastBlink };
     esp_timer_handle_t led_timer_ = nullptr;
+    esp_timer_handle_t thinking_timer_ = nullptr;
+    esp_timer_handle_t thinking_detect_timer_ = nullptr;
     LedMode led_mode_ = kLedSolid;
     int led_logic_level_ = 0; // 0 = ON (active-low), 1 = OFF
     bool thinking_active_ = false;
+    LedMode saved_led_mode_ = kLedSolid; // 保存思考前的LED状态
 
     // 静默启动：插上USB充电时不上电启动，需长按电源键启动
     static bool silent_startup_from_board_;
@@ -129,22 +132,94 @@ private:
             SetLedSolidOn();
         } else if (mode == kLedSlowBlink) {
             led_mode_ = kLedSlowBlink;
-            SetLedBlink(500); // 0.5s period
+            SetLedBlink(1000); // 1s period (慢闪：录音中/监听中)
         } else {
             led_mode_ = kLedFastBlink;
-            SetLedBlink(500); // 0.5s period
+            SetLedBlink(500); // 0.5s period (快闪：思考中)
+        }
+    }
+
+    void StartThinkingLed() {
+        if (IsSilent()) {
+            return;
+        }
+        if (!thinking_active_) {
+            thinking_active_ = true;
+            saved_led_mode_ = led_mode_; // 保存当前LED状态
+            ESP_LOGI(TAG, "开始思考状态，LED快闪");
+            ApplyLedMode(kLedFastBlink);
+            
+            // 创建思考定时器，2秒后自动结束
+            if (thinking_timer_ == nullptr) {
+                esp_timer_create_args_t timer_args = {
+                    .callback = [](void* arg) {
+                        auto* self = static_cast<CustomBoard*>(arg);
+                        self->StopThinkingLed();
+                    },
+                    .arg = this,
+                    .dispatch_method = ESP_TIMER_TASK,
+                    .name = "thinking_led_timer",
+                    .skip_unhandled_events = true,
+                };
+                ESP_ERROR_CHECK(esp_timer_create(&timer_args, &thinking_timer_));
+            }
+            esp_timer_stop(thinking_timer_);
+            esp_timer_start_once(thinking_timer_, 2000000); // 2秒
+        }
+    }
+
+    void StopThinkingLed() {
+        if (thinking_active_) {
+            thinking_active_ = false;
+            ESP_LOGI(TAG, "结束思考状态，恢复LED状态");
+            // 根据当前设备状态恢复LED
+            auto curr_state = Application::GetInstance().GetDeviceState();
+            if (curr_state == kDeviceStateListening) {
+                ApplyLedMode(kLedSlowBlink);
+            } else if (curr_state == kDeviceStateSpeaking) {
+                ApplyLedMode(kLedSolid);
+            } else {
+                ApplyLedMode(saved_led_mode_);
+            }
         }
     }
 
     void InitializeDeviceStateEvent() {
         DeviceStateEventManager::GetInstance().RegisterStateChangeCallback(
             [this](DeviceState prev, DeviceState curr) {
+                // 当从listening切换到speaking时，可能是思考状态
+                // 延迟一小段时间后启动思考LED（因为SetEmotion("thinking")会在状态切换后调用）
+                if (prev == kDeviceStateListening && curr == kDeviceStateSpeaking) {
+                    // 延迟100ms后启动思考LED，给SetEmotion("thinking")时间执行
+                    if (thinking_detect_timer_ == nullptr) {
+                        esp_timer_create_args_t timer_args = {
+                            .callback = [](void* arg) {
+                                auto* self = static_cast<CustomBoard*>(arg);
+                                // 假设从listening切换到speaking就是思考状态
+                                self->StartThinkingLed();
+                            },
+                            .arg = this,
+                            .dispatch_method = ESP_TIMER_TASK,
+                            .name = "thinking_detect_timer",
+                            .skip_unhandled_events = true,
+                        };
+                        ESP_ERROR_CHECK(esp_timer_create(&timer_args, &thinking_detect_timer_));
+                    }
+                    esp_timer_stop(thinking_detect_timer_);
+                    ESP_ERROR_CHECK(esp_timer_start_once(thinking_detect_timer_, 100000)); // 100ms延迟
+                }
+                
+                // 如果正在思考，LED保持快闪，不响应状态变化
+                if (thinking_active_) {
+                    return;
+                }
+                
                 // Speaking has highest priority -> solid on
                 if (curr == kDeviceStateSpeaking) {
                     ApplyLedMode(kLedSolid);
                     return;
                 }
-                // Listening -> slow blink
+                // Listening -> slow blink (1秒周期)
                 if (curr == kDeviceStateListening) {
                     ApplyLedMode(kLedSlowBlink);
                     return;
