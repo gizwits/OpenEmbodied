@@ -319,6 +319,14 @@ std::string WebsocketProtocol::GetHelloMessage() {
     cJSON_AddNumberToObject(audio_params, "channels", 1);
     cJSON_AddNumberToObject(audio_params, "frame_duration", OPUS_FRAME_DURATION_MS);
     cJSON_AddItemToObject(root, "audio_params", audio_params);
+    cJSON* input_params = cJSON_CreateObject();
+    cJSON_AddStringToObject(input_params, "format", "opus");
+#ifdef CONFIG_USE_EYE_STYLE_VB6824
+    cJSON_AddNumberToObject(input_params, "frame_duration", 20);
+#else
+    cJSON_AddNumberToObject(input_params, "frame_duration", 60);
+#endif
+    cJSON_AddItemToObject(root, "input_params", input_params);
     auto json_str = cJSON_PrintUnformatted(root);
     std::string message(json_str);
     cJSON_free(json_str);
