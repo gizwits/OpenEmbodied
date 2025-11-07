@@ -1777,6 +1777,18 @@ void EyeDisplayHorizontalEmo::StartNeutralFaceAnimation() {
         happy_mouth_mask_ = nullptr;
     }
 
+    // 确保屏幕级别创建的嘴巴对象被移除（防止干扰中性表情）
+    if (mouth_) {
+        lv_anim_del(mouth_, nullptr);
+        lv_obj_del(mouth_);
+        mouth_ = nullptr;
+    }
+    if (shocked_mouth_) {
+        lv_anim_del(shocked_mouth_, nullptr);
+        lv_obj_del(shocked_mouth_);
+        shocked_mouth_ = nullptr;
+    }
+
     lv_obj_t* screen = lv_screen_active();
 
     // 适配不同分辨率（以240x240为基准）- 参数与 StartHappyFaceAnimation 一致
