@@ -244,6 +244,10 @@ public:
         // 如果是从深度睡眠被碰撞 GPIO 唤醒，则先等待稳定摇晃，否则重新睡眠
         // WaitForCollisionShakeOrSleepIfWokenByCollision();
 
+        // 先初始化 PowerSaveTimer，因为按钮回调可能会立即调用它
+        ESP_LOGI(TAG, "Initializing Power Save Timer...");
+        InitializePowerSaveTimer();
+
         if (s_factory_test_mode == 0) {
             InitializeLedSignal();
             InitializeButtons();
@@ -258,9 +262,6 @@ public:
         io_conf.intr_type = GPIO_INTR_DISABLE;
         gpio_config(&io_conf);
         gpio_set_level(BUILTIN_LED_GPIO, 0);
-
-        ESP_LOGI(TAG, "Initializing Power Save Timer...");
-        InitializePowerSaveTimer();
 
         ESP_LOGI(TAG, "Initializing IoT components...");
         InitializeIot();

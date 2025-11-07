@@ -222,6 +222,7 @@ public:
 
     void EnterDeepSleepIfNotCharging() {
         // 不在充电就真休眠
+        ESP_LOGI("PowerManager", "EnterDeepSleepIfNotCharging");
         if (is_charging_) {
             // 充电中，只断开 socket
             Application::GetInstance().QuitTalking();
