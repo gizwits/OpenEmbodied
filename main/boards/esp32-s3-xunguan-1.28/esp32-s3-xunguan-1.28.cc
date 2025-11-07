@@ -660,11 +660,11 @@ private:
         thing_manager.AddThing(iot::CreateThing("Speaker")); 
         thing_manager.AddThing(iot::CreateThing("Screen"));   
     }
-    void InitializeGpio(gpio_num_t gpio_num_, bool output = false) {
+    void InitializeGpio(gpio_num_t gpio_num_, bool output = false, bool open_drain = false) {
         gpio_config_t config = {
             .pin_bit_mask = (1ULL << gpio_num_),
-            .mode = GPIO_MODE_OUTPUT,
-            .pull_up_en = GPIO_PULLUP_ENABLE,
+            .mode = open_drain ? GPIO_MODE_OUTPUT_OD : GPIO_MODE_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_ENABLE,  // 开漏输出通常需要上拉
             .pull_down_en = GPIO_PULLDOWN_DISABLE,
             .intr_type = GPIO_INTR_DISABLE,
         };
@@ -849,7 +849,7 @@ public:
         InitializeChargingGpio();
 
         InitializeGpio(POWER_GPIO, true);
-        InitializeGpio(GPIO_NUM_1, true);
+        InitializeGpio(GPIO_NUM_1, true, true);  // 开漏输出
 
         InitializeI2c();
         InitializeGpio(AUDIO_CODEC_PA_PIN, true);
