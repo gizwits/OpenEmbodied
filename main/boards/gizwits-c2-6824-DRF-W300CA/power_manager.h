@@ -430,35 +430,25 @@ public:
         }
         
         // 直接使用阶梯式电量显示，不进行平滑过渡
+        uint8_t old_level = battery_level_;
         battery_level_ = calculated_battery_level;
         target_battery_level_ = calculated_battery_level;
         displayed_battery_level_ = calculated_battery_level;
 
-        // 每50次检测打印一次详细信息（约5秒一次）
-        static uint32_t print_counter = 0;
-        print_counter++;
-        if (print_counter >= 50) {
-            print_counter = 0;
-            
-            // 计算原始电压（补偿前）
-            int mv = average_adc;
-            if (cali_inited_) {
-                (void)adc_cali_raw_to_voltage(cali_handle_, average_adc, &mv);
+        // 仅打印电量百分比，且降低打印频率
+        static uint16_t log_counter = 0;
+        bool should_log = (battery_level_ != old_level);
+        if (!should_log) {
+            log_counter++;
+            if (log_counter >= 300) {  // 每200次（30秒）打印一次
+                should_log = true;
+                log_counter = 0;
             }
-            uint32_t original_voltage = (uint32_t)((int64_t)mv * VBAT_SCALE_NUM / VBAT_SCALE_DEN);
-            
-            // 获取补偿后的电压
-            uint32_t voltage = GetBatteryVoltage();
-            
-            // 计算补偿值
-            uint32_t compensation = voltage > original_voltage ? (voltage - original_voltage) : 0;
-            
-            // 电池状态详细打印
-            bool has_load = motor_running_ || led_enabled_;
-            ESP_LOGI("PowerManager", "🔋 ADC: %d, 原始: %" PRIu32 "mV, 补偿: +%" PRIu32 "mV, 最终: %" PRIu32 "mV, 电量: %d%%, 充电: %s, 负载: %s",
-                     adc_value, original_voltage, compensation, voltage, 
-                     displayed_battery_level_, is_charging_ ? "是" : "否",
-                     has_load ? (motor_running_ && led_enabled_ ? "电机+灯" : (motor_running_ ? "电机" : "灯")) : "无");
+        } else {
+            log_counter = 0;  // 电量变化时重置计数器
+        }
+        if (should_log) {
+            ESP_LOGI("PowerManager", "电量: %u%%", battery_level_);
         }
     }
 

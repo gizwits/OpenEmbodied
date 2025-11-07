@@ -173,9 +173,23 @@ void AudioService::Start() {
 
     /* Start the opus codec task */
     int task_size = 2048 * 13;
-#ifdef CONFIG_USE_EYE_STYLE_VB6824
-    task_size = 1024 * 16;  // 增加栈大小到16KB，避免栈溢出（从8KB增加到16KB）
+    #ifdef CONFIG_USE_EYE_STYLE_VB6824
+            task_size = 1024 * 8;  // C2使用8KB
+        #ifdef CONFIG_IDF_TARGET_ESP32S3
+            task_size = 1024 * 16;  // S3使用16KB
+        #endif
+    #endif
+
+    ESP_LOGI(TAG, "opus_codec stack size: %d bytes (target=%s)", task_size,
+#ifdef CONFIG_IDF_TARGET_ESP32S3
+        "ESP32S3"
+#elif defined(CONFIG_IDF_TARGET_ESP32C2)
+        "ESP32C2"
+#else
+        "OTHER"
 #endif
+    );
+
     xTaskCreatePinnedToCore([](void* arg) {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->OpusCodecTask();
