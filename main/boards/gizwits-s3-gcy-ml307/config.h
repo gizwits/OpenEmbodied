@@ -49,8 +49,8 @@
 #define BAT_ADC_ATTEN    ADC_ATTEN_DB_11 // ADC attenuation
 #define BAT_ADC_UNIT     ADC_UNIT_2
 #define POWER_CHARGE_LED_PIN GPIO_NUM_NC
-#define CODEC_TX_GPIO           GPIO_NUM_10
-#define CODEC_RX_GPIO           GPIO_NUM_18
+#define CODEC_TX_GPIO           GPIO_NUM_3
+#define CODEC_RX_GPIO           GPIO_NUM_9
 
 #define ML307_RX_PIN GPIO_NUM_21
 #define ML307_TX_PIN GPIO_NUM_14
