@@ -257,6 +257,9 @@ private:
     void StartShockedEmojiAnimation();
     void StartLovingEmojiAnimation();
     void StartNeutralFaceAnimation();
+
+    // 清屏并重建基础容器和双眼（隐藏）
+    void RebuildBaseContainerHidden();
     // 统一清理当前已创建的表情对象/动画
     void ClearEmojiScene();
 

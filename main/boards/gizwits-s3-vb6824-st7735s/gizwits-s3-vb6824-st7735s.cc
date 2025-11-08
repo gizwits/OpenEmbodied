@@ -12,7 +12,7 @@
 #include <esp_lcd_st7735s.h>
 #include "data_point_manager.h"
 #include "led/single_led.h"
-#include "display/eye_display_horizontal_emojis.h"
+#include "display/eye_display_horizontal.h"
 #include "display/display.h"
 #include <esp_lvgl_port.h>
 
@@ -27,6 +27,7 @@
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
+#include "driver/ledc.h"
 #include "esp_timer.h"
 #include <esp_system.h>
 #include <freertos/FreeRTOS.h>
@@ -49,7 +50,7 @@ private:
     
     Button power_button_;
     VbAduioCodec audio_codec;
-    EyeDisplayHorizontalEmo* display_;
+    EyeDisplayHorizontal* display_;
     bool need_power_off_ = false;
     int64_t power_on_time_ = 0;  // 记录上电时间
     PowerManager* power_manager_;
@@ -198,7 +199,7 @@ private:
         
         // 创建显示对象
         DisplayFonts fonts = { .text_font = &font_puhui_20_4, .icon_font = nullptr, .emoji_font = nullptr };
-        display_ = new EyeDisplayHorizontalEmo(panel_io, panel,
+        display_ = new EyeDisplayHorizontal(panel_io, panel,
             DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
             DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY,
             fonts);
@@ -253,6 +254,11 @@ private:
             ESP_LOGI(TAG, "BOOT 按键短按");
         });
         boot_button_.OnLongPress([this]() {
+            // 仅充电静默时禁用，异常重启的静默允许长按进入配网
+            if (silent_startup_from_board_) {
+                ESP_LOGI(TAG, "充电静默启动状态，长按 BOOT 不进入配网");
+                return;
+            }
             ESP_LOGI(TAG, "BOOT 按键长按，进入配网");
             ResetWifiConfiguration();
         });
@@ -400,9 +406,9 @@ private:
             ESP_LOGI(TAG, "power_button_.OnPressDown");
             auto& app = Application::GetInstance();
             
-            // 如果是静默启动状态（充电插入），短按不执行任何操作
-            if (app.IsSilentStartup()) {
-                ESP_LOGI(TAG, "静默启动状态，短按电源键不执行操作");
+            // 只有充电导致的静默启动才禁用按键，异常重启的静默启动允许按键工作
+            if (silent_startup_from_board_) {
+                ESP_LOGI(TAG, "充电静默启动状态，短按电源键不执行操作");
                 return;
             }
     
@@ -449,9 +455,9 @@ private:
                 return;
             }
             
-            // 如果是静默启动状态，清除静默标志并重启（开机）
-            if (app.IsSilentStartup()) {
-                ESP_LOGI(TAG, "静默启动状态，长按清除静默标志并重启");
+            // 只有充电导致的静默启动才需要长按唤醒，异常重启的静默启动直接执行关机
+            if (silent_startup_from_board_) {
+                ESP_LOGI(TAG, "充电静默启动状态，长按清除静默标志并重启");
                 Settings settings("system", true);
                 settings.SetInt("silent_next", 0);
                 // 设置一个标志，表示用户主动唤醒，下次启动不应该静默
@@ -655,9 +661,9 @@ public:
             ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());
             auto& app = Application::GetInstance();
             
-            // 如果是静默启动状态，忽略唤醒词
-            if (app.IsSilentStartup()) {
-                ESP_LOGI(TAG, "静默启动状态，忽略唤醒词: %s", command.c_str());
+            // 只有充电导致的静默启动才忽略唤醒词，异常重启的静默启动允许唤醒词工作
+            if (silent_startup_from_board_) {
+                ESP_LOGI(TAG, "充电静默启动状态，忽略唤醒词: %s", command.c_str());
                 return;
             }
             
@@ -731,7 +737,7 @@ public:
         
         // 使用更平滑的背光恢复
         self->GetBacklight()->RestoreBrightness();
-
+        
         vTaskDelete(NULL); // 任务结束时删除自己
     }
 
@@ -815,6 +821,13 @@ public:
 
     void ProcessBinaryDataPointValue(const std::string& name, const uint8_t* data, size_t data_len) override {
         DataPointManager::GetInstance().ProcessBinaryDataPointValue(name, data, data_len);
+    }
+    virtual int GetPeriod() override { 
+        return 1; 
+    }
+    
+    virtual int GetMaxFrameNum() override { 
+        return 20;
     }
 
 };

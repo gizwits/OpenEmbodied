@@ -1201,6 +1201,22 @@ void MqttClient::ReportTimer() {
         return;
     }
     
+    // 检查是否正在播放音频（AI说话、音乐、讲故事），如果正在播放则跳过上报，避免卡顿
+    auto& app = Application::GetInstance();
+    auto device_state = app.GetDeviceState();
+    bool is_playing_audio = (device_state == kDeviceStateSpeaking);
+    
+    // 检查AudioService是否正在播放音频（包括AI说话、音乐、讲故事等）
+    // 注意：音乐播放也会通过AudioService解码，所以IsIdle()能覆盖所有音频播放情况
+    auto& audio_service = app.GetAudioService();
+    if (!is_playing_audio) {
+        is_playing_audio = !audio_service.IsIdle();
+    }
+    
+    if (is_playing_audio) {
+        return;
+    }
+    
     uint8_t binary_data[500];  // 固定500字节缓冲区，足够容纳各种数据
     size_t data_size = 0;
     

@@ -15,6 +15,7 @@
 #include "vb6824.h"
 #include <esp_wifi.h>
 #include "lws_data_point_manager.h"
+#include <esp_timer.h>
 
 #include <esp_lcd_panel_vendor.h>
 #include <driver/spi_common.h>
@@ -59,7 +60,7 @@ private:
     int64_t last_k51_click_ms_ = 0;
     
     // 唤醒词列表
-    std::vector<std::string> wake_words_ = {"你好小智", "你好小云", "合养精灵", "嗨小火人"};
+    std::vector<std::string> wake_words_ = {"你好小智", "你好小云", "合养精灵", "嗨小火人", "小蜜小蜜"};
     std::vector<std::string> network_config_words_ = {"开始配网"};
     
     // RGB灯光状态管理
@@ -69,6 +70,22 @@ private:
     
     // K51按键颜色循环状态
     uint8_t k51_color_mode_ = 7; // 0=全彩渐变, 1=白, 2=红, 3=绿, 4=蓝, 5=黄, 6=青, 7=紫
+
+	// 板载指示灯（GPIO_NUM_6）状态与定时器
+	esp_timer_handle_t builtin_led_timer_ = nullptr;
+	bool builtin_led_state_ = false; // true 表示输出高电平，false 表示输出低电平（该灯低电平点亮）
+
+	static void BuiltinLedTimerCallback(void* arg) {
+		CustomBoard* self = static_cast<CustomBoard*>(arg);
+		// 配网模式下 0.5s 闪烁；其他状态常亮（低电平点亮）
+		if (Board::GetInstance().IsWifiConfigMode()) {
+			self->builtin_led_state_ = !self->builtin_led_state_;
+			gpio_set_level(BUILTIN_LED_GPIO, self->builtin_led_state_ ? 1 : 0);
+		} else {
+			self->builtin_led_state_ = false;
+			gpio_set_level(BUILTIN_LED_GPIO, 0);
+		}
+	}
 
     void ApplyLedMode_(uint8_t mode) {
         // 限制模式范围
@@ -188,15 +205,9 @@ private:
         }
         application.QuitTalking();
 
-        // 检查不在充电就真休眠
-        bool charging = PowerManager::GetInstance().IsCharging();
-        ESP_LOGI(TAG, "🔋 准备进入休眠 - 当前充电状态: %s", charging ? "充电中" : "未充电");
-        if (charging) {
-            ESP_LOGI(TAG, "🔋 设备正在充电，跳过深度休眠");
-        } else {
-            ESP_LOGI(TAG, "🔋 设备未充电，进入深度休眠");
-        }
-        PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
+		// 统一休眠策略：无论充电或未充电，都不进入深度休眠
+		// 目的：保持 RGB 与电机运行，避免被关断
+		ESP_LOGI(TAG, "🔋 统一休眠策略：不进入深度休眠（充电/未充电一致处理）");
     }
     
     // 设备关机方法
@@ -369,9 +380,9 @@ private:
 			UpdateBatteryLoadComp();
         });
         
-        // 设置K51按钮点击回调 - 打断AI
-        adc_button_k51_->OnClick([this]() {
-            ESP_LOGI(TAG, " ===== K51按键按下 =====");
+        // 设置K51按钮短按回调 - 打断AI（参考xingbao实现）
+        adc_button_k51_->OnPressDown([this]() {
+            ESP_LOGI(TAG, " ===== K51按键短按 =====");
             ESP_LOGI(TAG, " 按键类型: K51按键 (ADC检测)");
             ESP_LOGI(TAG, " 检测范围: 1500-2500 (1.21V-2.01V)");
             
@@ -381,7 +392,6 @@ private:
                 return;
             }
 
-
             // 防止刚触发K50后短时间内误触发K51(保持简单的时间互斥,不做ADC硬校验)
             int64_t now_ms2 = esp_timer_get_time() / 1000;
             if (now_ms2 - last_k50_click_ms_ < 250) {
@@ -390,10 +400,12 @@ private:
             }
             last_k51_click_ms_ = now_ms2;
             
-            // 设备开机状态,打断AI思考和播放
+            // 无条件先打断，再直接进入监听并强制开启语音处理，确保"秒停+立即监听"
             auto &app = Application::GetInstance();
-            app.ToggleChatState();
-            ESP_LOGI(TAG, "K51打断已触发,ToggleChatState 调用完成,device_state_当前: [%d]", app.GetDeviceState());
+            app.AbortSpeaking(kAbortReasonNone);
+            app.StartListening();
+            app.GetAudioService().EnableVoiceProcessing(true, true);
+            ESP_LOGI(TAG, "K51短按打断已触发,device_state_当前: [%d]", app.GetDeviceState());
         });
         
         ESP_LOGI(TAG, "ADC按钮初始化完成");
@@ -445,8 +457,7 @@ private:
     }
 
     void InitializeButtons() {
-        // 初始化BOOT按键(GPIO8)- 参考gizwits-c2-6824.cc的实现
-        // BOOT按键长按 - 立即执行开关机(无需等待松开)
+        // BOOT按键长按
         boot_button_.OnLongPress([this]() {
             ESP_LOGI(TAG, " ===== BOOT按键长按 - 立即执行开关机 =====");
             ESP_LOGI(TAG, " 按键类型: BOOT按键 (GPIO8)");
@@ -482,7 +493,7 @@ private:
             }
         });
         
-        // BOOT按键松开 - 不再执行开关机(逻辑改为长按即时执行)
+        // BOOT按键松开
         boot_button_.OnPressUp([this]() {
             ESP_LOGI(TAG, " ===== BOOT按键松开 =====");
         });
@@ -594,7 +605,11 @@ private:
             },
             [this]() -> int { 
                 int brightness = GetBrightness_();
-                ESP_LOGI(TAG, "读取亮度数据点: brightness = %d", brightness);
+                static int brightness_print_counter = 0;
+                if (++brightness_print_counter >= 30) {
+                    brightness_print_counter = 0;
+                    ESP_LOGI(TAG, "读取亮度数据点: brightness = %d", brightness);
+                }
                 return brightness;
             },
             [this](int value) { 
@@ -641,7 +656,11 @@ private:
             // 灯光速度回调函数 - 直接读取数据点，不需要设置回调
             [this]() -> int { 
                 int light_speed = GetLightSpeed_();
-                ESP_LOGI(TAG, "读取电机速度数据点: light_speed = %d", light_speed);
+                static int light_speed_print_counter = 0;
+                if (++light_speed_print_counter >= 30) {
+                    light_speed_print_counter = 0;
+                    ESP_LOGI(TAG, "读取电机速度数据点: light_speed = %d", light_speed);
+                }
                 return light_speed;
             },
             [this](int value) { 
@@ -681,7 +700,11 @@ private:
             // 灯光模式回调函数
             [this]() -> int { 
                 int light_mode = GetLightMode_();
-                ESP_LOGI(TAG, "读取灯光模式数据点: light_mode = %d", light_mode);
+                static int light_mode_print_counter = 0;
+                if (++light_mode_print_counter >= 30) {
+                    light_mode_print_counter = 0;
+                    ESP_LOGI(TAG, "读取灯光模式数据点: light_mode = %d", light_mode);
+                }
                 return light_mode;
             },
             [this](int value) { 
@@ -715,7 +738,7 @@ public:
     // 是否低电量(基于PowerManager阈值)
     // bool IsLowBattery() const override { return PowerManager::GetInstance().IsLowBattery(); }
     // Set short_press_time to a small non-zero value to enable multiple-click detection reliably
-    CustomBoard() : boot_button_(BOOT_BUTTON_GPIO, false, 2000, 80), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO), 
+    CustomBoard() : boot_button_(BOOT_BUTTON_GPIO, false, 1500, 80), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO), 
                     adc_button_k50_(nullptr), adc_button_k51_(nullptr) {      
         // 记录上电时间
         power_on_time_ = esp_timer_get_time() / 1000; // 转换为毫秒
@@ -740,6 +763,15 @@ public:
         gpio_set_level(RGB_LED_R_GPIO, 0);
         gpio_set_level(RGB_LED_G_GPIO, 0);
         gpio_set_level(RGB_LED_B_GPIO, 0);
+
+		// 启动板载指示灯定时器：配网模式下0.5s闪烁，其他状态常亮
+		esp_timer_create_args_t led_timer_args = {
+			.callback = &CustomBoard::BuiltinLedTimerCallback,
+			.arg = this,
+			.name = "builtin_led_timer"
+		};
+		esp_timer_create(&led_timer_args, &builtin_led_timer_);
+		esp_timer_start_periodic(builtin_led_timer_, 500000); // 500ms
 
        
         ESP_LOGI(TAG, "Power rails init done");
