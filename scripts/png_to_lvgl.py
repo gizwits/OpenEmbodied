@@ -174,4 +174,5 @@ const lv_image_dsc_t {var_name} = {{
 if __name__ == "__main__":
     png_path = input("请输入PNG图片路径: ")
     output_path = input("请输入输出文件路径 (例如: spiral_image.h): ")
-    convert_png_to_lvgl_alpha8(png_path, output_path)
+    # convert_png_to_lvgl_alpha8(png_path, output_path)
+    convert_png_to_lvgl_rgb565(png_path, output_path)
