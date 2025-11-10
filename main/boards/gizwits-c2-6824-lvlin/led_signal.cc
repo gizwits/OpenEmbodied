@@ -20,10 +20,10 @@
 // Start of Selection
 
 LedSignal::LedSignal(gpio_num_t red_gpio, ledc_channel_t red_channel, 
-                    // gpio_num_t green_gpio, ledc_channel_t green_channel, 
+                    gpio_num_t green_gpio, ledc_channel_t green_channel, 
                     gpio_num_t blue_gpio, ledc_channel_t blue_channel) 
     : red_led_(new GpioLed(red_gpio, 1, LEDC_TIMER_0, red_channel)),
-    //   green_led_(new GpioLed(green_gpio, 1, LEDC_TIMER_1, green_channel)),
+      green_led_(new GpioLed(green_gpio, 1, LEDC_TIMER_1, green_channel)),
       blue_led_(new GpioLed(blue_gpio, 1, LEDC_TIMER_2, blue_channel)) {
     InitializeLeds();
 }
@@ -41,14 +41,14 @@ void LedSignal::SetColor(uint8_t red, uint8_t green, uint8_t blue) {
     };
 
     setLedState(red_led_, red);
-    // setLedState(green_led_, green);
+    setLedState(green_led_, green);
     setLedState(blue_led_, blue);
 }
 
 void LedSignal::SetBrightness(uint8_t brightness) {
     brightness_ = brightness;
     if (red_led_) red_led_->SetBrightness(brightness);
-    // if (green_led_) green_led_->SetBrightness(brightness);
+    if (green_led_) green_led_->SetBrightness(brightness);
     if (blue_led_) blue_led_->SetBrightness(brightness);
     ESP_LOGI(TAG, "SetBrightness: %d", brightness_);
 }
@@ -62,10 +62,10 @@ void LedSignal::InitializeLeds() {
         red_led_->SetBrightness(brightness_);
         red_led_->TurnOff();
     }
-    // if (green_led_) {
-    //     green_led_->SetBrightness(brightness_);
-    //     green_led_->TurnOff();
-    // }
+    if (green_led_) {
+        green_led_->SetBrightness(brightness_);
+        green_led_->TurnOff();
+    }
     if (blue_led_) {
         blue_led_->SetBrightness(brightness_);
         blue_led_->TurnOff();
@@ -74,7 +74,7 @@ void LedSignal::InitializeLeds() {
 
 LedSignal::~LedSignal() {
     delete red_led_;
-    // delete green_led_;
+    delete green_led_;
     delete blue_led_;
 }
 
@@ -253,8 +253,10 @@ void LedSignal::UpdateLedState() {
     bool is_working = CheckIfWorking();
     bool is_charging = CheckIfCharging();
     bool is_battery_low = CheckIfBatteryLow();
+    bool is_fully_charged = PowerManager::GetInstance().IsFullyCharged();
 
-    // ESP_LOGI(TAG, "is_working: %d, is_charging: %d, is_battery_low: %d", is_working, is_charging, is_battery_low);
+    // ESP_LOGI(TAG, "is_working: %d, is_charging: %d, is_battery_low: %d, is_fully_charged: %d", 
+    //          is_working, is_charging, is_battery_low, is_fully_charged);
     uint8_t red = 0, green = 0, blue = 0;
     uint8_t rgb_value = brightness_; // 增加亮度权重变量，命名为rgb_value
     bool need_blink = false;
@@ -271,8 +273,11 @@ void LedSignal::UpdateLedState() {
         blue = rgb_value; // 蓝色代表处于工作状态
         last_non_working_time = std::chrono::steady_clock::now();
     } else {
-       
-        if (is_battery_low) {
+        // 优先检查是否充满电
+        if (is_fully_charged) {
+            green = rgb_value; // 绿色代表充满电
+            // ESP_LOGI(TAG, "[LED状态] 电池已充满，亮绿灯");
+        } else if (is_battery_low) {
             red = rgb_value; // 红色代表电量低
             need_blink = true; // 低电量需要闪烁
         } else if (is_charging) {

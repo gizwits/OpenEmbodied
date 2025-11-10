@@ -13,7 +13,7 @@
 
 
 #include "led/single_led.h"
-#include "display/eye_display_horizontal_emojis.h"
+#include "display/lcd_display.h"
 #include "display/display.h"
 
 #include <wifi_station.h>
@@ -40,7 +40,7 @@ LV_FONT_DECLARE(font_awesome_20_4);
 class MovecallMojiESP32S3 : public DualNetworkBoard {
 private:
     Button boot_button_;
-    EyeDisplayHorizontalEmo* display_;
+    SpiLcdDisplay* display_;
 
     bool need_power_off_ = false;
     VbAduioCodec audio_codec;
@@ -51,14 +51,14 @@ private:
     PowerSaveTimer* power_save_timer_;
     bool is_charging_sleep_ = false;
 
-    std::vector<TestItem> test_items = {
-        {"lcd", "LCD测试", 1},
-        {"key", "按键测试", 0},
-        {"wifi", "WiFi连接测试", 0},
-        {"sensor", "陀螺仪测试", 0},
-        {"battery", "电池检测", 0},
-        {"mic", "麦克风检测", 0},
-    };
+    // std::vector<TestItem> test_items = {
+    //     {"lcd", "LCD测试", 1},
+    //     {"key", "按键测试", 0},
+    //     {"wifi", "WiFi连接测试", 0},
+    //     {"sensor", "陀螺仪测试", 0},
+    //     {"battery", "电池检测", 0},
+    //     {"mic", "麦克风检测", 0},
+    // };
 
     
     // 唤醒词列表
@@ -206,11 +206,19 @@ private:
             return;
         }
         
-        display_ = new EyeDisplayHorizontalEmo(panel_io, panel,
-            DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
-            DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY,
-            &qrcode_img,
-            {
+        // display_ = new EyeDisplayHorizontalEmo(panel_io, panel,
+        //     DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
+        //     DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY,
+        //     &qrcode_img,
+        //     {
+        //         .text_font = &font_puhui_20_4,
+        //         .icon_font = &font_awesome_20_4,
+        //         .emoji_font = font_emoji_64_init(),
+        //     });
+        display_ = new SpiLcdDisplay(panel_io, panel, DISPLAY_WIDTH,
+            DISPLAY_HEIGHT, DISPLAY_OFFSET_X,
+            DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X,
+            DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY,{
                 .text_font = &font_puhui_20_4,
                 .icon_font = &font_awesome_20_4,
                 .emoji_font = font_emoji_64_init(),
@@ -241,6 +249,64 @@ private:
         ESP_ERROR_CHECK(gpio_config(&io_conf2));
     }
 
+    // 初始化耳机检测GPIO
+    void InitializeHeadphoneDetection() {
+        // 配置HPR-SIGN为输入（检测耳机插入）
+        gpio_config_t hpr_conf = {
+            .pin_bit_mask = (1ULL << HPR_SIGN_PIN),
+            .mode = GPIO_MODE_INPUT,
+            .pull_up_en = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE
+        };
+        ESP_ERROR_CHECK(gpio_config(&hpr_conf));
+
+        // 配置MCU MUTE为输出（控制静音）
+        gpio_config_t mute_conf = {
+            .pin_bit_mask = (1ULL << MCU_MUTE_PIN),
+            .mode = GPIO_MODE_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE
+        };
+        ESP_ERROR_CHECK(gpio_config(&mute_conf));
+
+        gpio_set_level(MCU_MUTE_PIN, 0);
+
+        // 初始化时读取一次状态并设置MCU MUTE
+        UpdateMuteSignal();
+
+        ESP_LOGI(TAG, "Headphone detection GPIO initialized");
+    }
+
+    // 更新MCU MUTE信号
+    void UpdateMuteSignal() {
+        int hpr_level = gpio_get_level(HPR_SIGN_PIN);
+        // HPR-SIGN为高时，有耳机插入，输出MCU MUTE为高
+        // HPR-SIGN为低时，无耳机插入，输出MCU MUTE为低
+        gpio_set_level(MCU_MUTE_PIN, hpr_level);
+        ESP_LOGI(TAG, "HPR-SIGN: %d, MCU MUTE: %d", hpr_level, hpr_level);
+    }
+
+    // 耳机检测监控任务
+    static void HeadphoneDetectionTask(void* arg) {
+        auto* self = static_cast<MovecallMojiESP32S3*>(arg);
+        int last_hpr_level = -1;
+
+        for (;;) {
+            int current_hpr_level = gpio_get_level(HPR_SIGN_PIN);
+            
+            // 如果状态发生变化，更新MCU MUTE
+            if (current_hpr_level != last_hpr_level) {
+                self->UpdateMuteSignal();
+                last_hpr_level = current_hpr_level;
+            }
+
+            // 每100ms检查一次
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+    }
+
     void InitializeButtons() {
         static int first_level = gpio_get_level(BOOT_BUTTON_GPIO);
         ESP_LOGI(TAG, "first_level: %d", first_level);
@@ -250,7 +316,7 @@ private:
 
             if (Application::GetInstance().IsTmpFactoryTestMode()) {
                 // 通过按键测试
-                display_->UpdateTestItem("key", 1);
+                // display_->UpdateTestItem("key", 1);
                 return;
             }
 
@@ -411,9 +477,8 @@ public:
 
         // 设置I2C master日志级别为ERROR，忽略I2C事务失败的日志
         esp_log_level_set("i2c.master", ESP_LOG_ERROR);
-        
+        InitializeHeadphoneDetection();
         InitializeChargingGpio();
-
         InitializeGpio(POWER_GPIO, true);
         InitializeGpio(ML307_EN, true);
         InitializeSpi();
@@ -458,9 +523,19 @@ public:
             NULL                       // 任务句柄
         );
 
+        // 启动耳机检测监控任务
+        xTaskCreate(
+            HeadphoneDetectionTask,    // 任务函数
+            "headphone_detect",        // 名字
+            4096,                      // 栈大小
+            this,                      // 参数传递 this 指针
+            5,                         // 优先级
+            NULL                       // 任务句柄
+        );
+
         if (Application::GetInstance().IsTmpFactoryTestMode()) {
-            display_->EnterTestMode();
-            display_->SetTestItems(test_items);
+            // display_->EnterTestMode();
+            // display_->SetTestItems(test_items);
             // 开始产测模式
 
             Application::GetInstance().Schedule([this]() {
