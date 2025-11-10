@@ -171,12 +171,40 @@ private:
         boot_button_.OnPressUp([this]() {
             ESP_LOGI(TAG, "Press up");
             if(sleep_flag_){
+                sleep_flag_ = false;
+                // 检查是否在充电状态
+                bool is_charging = PowerManager::GetInstance().IsCharging();
+                if (!is_charging) {
+                    // 电池模式下，等待音频播放完成后再关机
+                    ESP_LOGI(TAG, "等待音频播放完成");
+                    int wait_count = 0;
+                    while (!Application::GetInstance().GetAudioService().IsIdle() && wait_count < 30) {
+                        vTaskDelay(pdMS_TO_TICKS(50));  // 50ms检查一次，更快响应
+                        wait_count++;
+                    }
+                    ESP_LOGI(TAG, "音频播放完成，准备关机");
+                    Application::GetInstance().SetDeviceState(kDeviceStateIdle);
+                }
                 PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
             }
         });
         rec_button_->OnPressUp([this]() {
             ESP_LOGI(TAG, "Press up");
             if(sleep_flag_){
+                sleep_flag_ = false;
+                // 检查是否在充电状态
+                bool is_charging = PowerManager::GetInstance().IsCharging();
+                if (!is_charging) {
+                    // 电池模式下，等待音频播放完成后再关机
+                    ESP_LOGI(TAG, "等待音频播放完成");
+                    int wait_count = 0;
+                    while (!Application::GetInstance().GetAudioService().IsIdle() && wait_count < 30) {
+                        vTaskDelay(pdMS_TO_TICKS(50));  // 50ms检查一次，更快响应
+                        wait_count++;
+                    }
+                    ESP_LOGI(TAG, "音频播放完成，准备关机");
+                    Application::GetInstance().SetDeviceState(kDeviceStateIdle);
+                }
                 PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
             }
         });

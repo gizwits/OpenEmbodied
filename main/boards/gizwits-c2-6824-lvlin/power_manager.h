@@ -48,9 +48,9 @@ private:
         uint8_t soc;       // State of Charge (percentage of battery capacity)
     } dischargeCurve[] = {
         {4140, 100}, // 100%
-        {4104, 95},  // 下降36mV
-        {4068, 90},  // 下降36mV
-        {4032, 85},  // 下降36mV
+        {4104, 100},  // 下降36mV
+        {4068, 100},  // 下降36mV
+        {4032, 100},  // 下降36mV
         {3996, 80},  // 下降36mV
         {3960, 75},  // 下降36mV
         {3924, 70},  // 下降36mV
@@ -91,22 +91,25 @@ private:
 
         ReadBatteryAdcData();
 
-        #define BATTERY_FULL_VOLTAGE 4300
-        #define BATTERY_NOT_CHARGING_VOLTAGE 4200
+        #define BATTERY_CHARGING_THRESHOLD 4300  // 充电阈值：>4300mV为充电，<=4300mV为未充电
 
-        static uint8_t not_charging_count = 0;
+        static uint16_t log_counter = 0;  // 用于每30秒打印一次（300次 * 100ms = 30秒）
         uint32_t voltage = average_adc == 0 ? adc_value*2 : average_adc*2;
-        if (voltage > BATTERY_FULL_VOLTAGE) {
-            is_charging_ = true;
-            not_charging_count = 0; // 重置计数器
-        } else if (voltage < BATTERY_NOT_CHARGING_VOLTAGE) {
-            if (is_charging_) {
-                not_charging_count++;
-                if (not_charging_count >= 20) {
-                    is_charging_ = false;
-                    not_charging_count = 0;
-                }
-            }
+        
+        // 先判断充电状态，再打印日志（确保日志显示的是最新状态）
+        // 简单判断：只有两种状态，充电或未充电
+        if (voltage > BATTERY_CHARGING_THRESHOLD) {
+            is_charging_ = true;   // 充电
+        } else {
+            is_charging_ = false;  // 未充电
+        }
+        
+        // 每30秒打印一次ADC值、电压和电量
+        log_counter++;
+        if (log_counter >= 300) {  // 300次 * 100ms = 30秒
+            ESP_LOGI("PowerManager", "ADC raw: %d, ADC avg: %lu, Voltage: %lu mV, Battery: %u%%, Charging: %s", 
+                     adc_value, average_adc, voltage, battery_level_, is_charging_ ? "Yes" : "No");
+            log_counter = 0;
         }
 
     }
