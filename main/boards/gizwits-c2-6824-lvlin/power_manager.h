@@ -109,13 +109,19 @@ private:
 
     void CheckBatteryStatus() {
 
-        ReadBatteryAdcData();
-
         #define BATTERY_FULL_VOLTAGE 4300
         #define BATTERY_NOT_CHARGING_VOLTAGE 4200
 
         static uint8_t not_charging_count = 0;
         static uint32_t log_counter = 0;
+        static uint32_t last_voltage = 0;
+        
+        // 在读取ADC之前，先保存当前电量（如果是非充电状态）
+        // 这样可以确保在检测到电压突然升高时，使用的是真实的非充电状态电量
+        uint8_t battery_level_before_adc = battery_level_;
+        
+        // 先读取ADC
+        ReadBatteryAdcData();
         uint32_t voltage = average_adc == 0 ? adc_value*2 : average_adc*2;
         
         bool previous_charging_state = is_charging_;
@@ -132,6 +138,8 @@ private:
                 }
             }
         }
+        
+        last_voltage = voltage;
         
         // 每50次（约5秒）打印一次状态信息，或者状态变化时立即打印
         if (previous_charging_state != is_charging_ || (log_counter++ % 50 == 0)) {
@@ -171,12 +179,17 @@ private:
         //          adc_values_[0], adc_values_[1], adc_values_[2], adc_values_[3], adc_values_[4], 
         //          adc_values_[5], adc_values_[6], adc_values_[7], adc_values_[8], adc_values_[9]);
 
+        // 检测电压是否突然升高（可能刚插上充电器）
+        // 如果电压从非充电范围（<4200mV）突然跳到充电范围（>4300mV），说明刚插上充电器
+        uint32_t current_voltage = average_adc * 2;
+
         // 注意：充电状态下也会采集ADC（用于检测充电状态），但不会用ADC值更新电量
         // 因为充电时ADC读取的是充电器电压（5V），不是电池电压，电量不准确
         // 充电状态下的电量由 UpdateChargingSimulation() 根据模拟计算更新
         // 只有在非充电状态，或者充电模拟未激活时，才根据ADC值更新电量
-        if (!is_charging_ || !is_charging_simulation_active_) {
-            CalculateBatteryLevel(average_adc*2);
+        // 当电压超过4.3V时，说明正在充电，不更新电量（避免错误更新为100%）
+        if ((!is_charging_ || !is_charging_simulation_active_) && current_voltage <= 4300) {
+            CalculateBatteryLevel(current_voltage);
         }
         // if(times++ % 50 == 0){
         //     ESP_LOGI("PowerManager", "adc: %d adc_avg: %ld, VBAT: %ld, battery_level_: %u%%", 
@@ -309,16 +322,30 @@ private:
     // 非充电状态下定期记录电量
     void RecordBatteryLevelWhenNotCharging() {
         int64_t current_time_us = esp_timer_get_time();
-        
-        // 首次记录或间隔时间到达
-        if (last_battery_record_time_us_ == 0 || 
-            (current_time_us - last_battery_record_time_us_) >= (BATTERY_RECORD_INTERVAL_MS * 1000)) {
-            last_recorded_level_ = battery_level_;
-            last_battery_record_time_us_ = current_time_us;
-            // 保存到本地存储
-            SaveBatteryLevelToStorage(battery_level_);
-            ESP_LOGI("PowerManager", "[电量记录] 非充电状态 - 记录电量: %d%%, 时间戳: %lld", 
-                     battery_level_, current_time_us / 1000000);
+        if (average_adc*2 < BATTERY_FULL_VOLTAGE) {
+            // 检查是否满足保存条件：间隔30秒 且 电量有变化
+            bool should_save = false;
+            
+            // 检查时间间隔（30秒 = 30000000微秒）
+            int64_t time_since_last_record = current_time_us - last_battery_record_time_us_;
+            bool time_interval_ok = (last_battery_record_time_us_ == 0) || 
+                                    (time_since_last_record >= 30000000);
+            
+            // 检查电量是否有变化
+            bool level_changed = (last_recorded_level_ != battery_level_);
+            
+            if (time_interval_ok && level_changed) {
+                should_save = true;
+            }
+            
+            if (should_save) {
+                last_recorded_level_ = battery_level_;
+                last_battery_record_time_us_ = current_time_us;
+                // 保存到本地存储
+                SaveBatteryLevelToStorage(battery_level_);
+                ESP_LOGI("PowerManager", "[电量记录] 非充电状态 - 记录电量: %d%%, 时间戳: %lld", 
+                         battery_level_, current_time_us / 1000000);
+            }
         }
     }
     
