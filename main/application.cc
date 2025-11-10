@@ -101,6 +101,8 @@ void Application::CheckNewVersion(Ota& ota) {
         retry_delay = 10; // 重置重试延迟时间
 
         if (ota.HasNewVersion()) {
+            // 等一下，防止 c2 音频队列太多数据
+            vTaskDelay(pdMS_TO_TICKS(1000));
             Alert(Lang::Strings::OTA_UPGRADE, Lang::Strings::UPGRADING, "happy", Lang::Sounds::P3_UPGRADE);
 
             vTaskDelay(pdMS_TO_TICKS(3000));
