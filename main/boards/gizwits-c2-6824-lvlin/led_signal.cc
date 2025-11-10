@@ -276,7 +276,7 @@ void LedSignal::UpdateLedState() {
         // 优先检查是否充满电
         if (is_fully_charged) {
             green = rgb_value; // 绿色代表充满电
-            ESP_LOGI(TAG, "[LED状态] 电池已充满，亮绿灯");
+            // ESP_LOGI(TAG, "[LED状态] 电池已充满，亮绿灯");
         } else if (is_battery_low) {
             red = rgb_value; // 红色代表电量低
             need_blink = true; // 低电量需要闪烁
