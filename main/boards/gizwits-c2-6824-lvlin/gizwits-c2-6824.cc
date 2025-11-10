@@ -42,8 +42,8 @@ private:
     Button* rec_button_ = nullptr;
     PowerSaveTimer* power_save_timer_;
     VbAduioCodec audio_codec;
-    bool sleep_flag_ = false;
     uint32_t power_on_time_;  // 上电时间戳
+    bool sleep_flag_ = false;
     
     // 唤醒词列表
     std::vector<std::string> wake_words_ = {"你好小智", "你好小云", "合养精灵", "嗨小火人", "你好冬冬"};
@@ -53,7 +53,11 @@ private:
         power_save_timer_ = new PowerSaveTimer(-1, SLEEP_TIME_SEC, portMAX_DELAY);  // peter mark 休眠时间
         power_save_timer_->OnEnterSleepMode([this]() {
             ESP_LOGI(TAG, "Enabling sleep mode");
-            run_sleep_mode(true);
+            auto& application = Application::GetInstance();
+            application.Alert("", "", "", Lang::Sounds::P3_SLEEP);
+            vTaskDelay(pdMS_TO_TICKS(3000));
+            ESP_LOGI(TAG, "Sleep mode");
+            PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
         });
         power_save_timer_->OnExitSleepMode([this]() {
             ESP_LOGI(TAG, "Shutting down");
@@ -64,27 +68,33 @@ private:
         power_save_timer_->SetEnabled(true);
     }
 
-    void run_sleep_mode(bool need_delay = true){
-        if (sleep_flag_) {
-            return;
-        }
-        sleep_flag_ = true;
-        auto& application = Application::GetInstance();
-        application.QuitTalking();
 
-        if (need_delay) {
+    void LongPressSleepCheck(int first_level) {
+        // 计算设备运行时间
+        int64_t current_time = esp_timer_get_time() / 1000; // 转换为毫秒
+        int64_t uptime_ms = current_time - power_on_time_;
+        ESP_LOGI(TAG, "设备运行时间: %lld ms", uptime_ms);
+        
+        // 首次上电5秒内且first_level==0才忽略
+        const int64_t MIN_UPTIME_MS = 5000; // 5秒
+        if (first_level == 0 && uptime_ms < MIN_UPTIME_MS) {
+            first_level = 1;
+            ESP_LOGI(TAG, "首次上电5秒内，忽略长按操作");
+        } else {
+            ESP_LOGI(TAG, "Long press");
+            sleep_flag_ = true;
+            auto& application = Application::GetInstance();
             application.Alert("", "", "", Lang::Sounds::P3_SLEEP);
-            vTaskDelay(pdMS_TO_TICKS(3000));
-            ESP_LOGI(TAG, "Sleep mode");
         }
-        // 检查不在充电就真休眠
-        PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
     }
 
     void InitializeButtons() {
 
         const int chat_mode = Application::GetInstance().GetChatMode();
         rec_button_ = new Button(BUILTIN_REC_BUTTON_GPIO);
+
+        static int rec_first_level = gpio_get_level(BUILTIN_REC_BUTTON_GPIO);
+        static int boot_first_level = gpio_get_level(BOOT_BUTTON_GPIO);
 
         if (chat_mode == 0) {
             rec_button_->OnPressUp([this]() {
@@ -136,32 +146,14 @@ private:
             });
         }
 
-        boot_button_.OnLongPress([this]() {
-            run_sleep_mode(true);
+        boot_button_.OnLongPress([this, boot_first_level]() {
+            LongPressSleepCheck(boot_first_level);
         });
-        rec_button_->OnLongPress([this]() {
-            run_sleep_mode(true);
+        rec_button_->OnLongPress([this, rec_first_level]() {
+            // 要忽略上电的时候首次长按
+            // 长按只播音频，并设置 flag，松手断电
+            LongPressSleepCheck(rec_first_level);
         });
-
-        // collision_button.OnPressDown([this]() {
-        //     ESP_LOGI(TAG, "collision_button.OnClick");
-        //     // 连续触发 1.5s，间隔<=300ms 视为有效
-        //     int64_t now = esp_timer_get_time();
-        //     if (collision_last_ts_us_ != 0 && (now - collision_last_ts_us_) <= COLLISION_MAX_INTERVAL_US) {
-        //         collision_accum_us_ += (now - collision_last_ts_us_);
-        //     } else {
-        //         // 超时或首次触发，重置累计
-        //         collision_accum_us_ = 0;
-        //     }
-        //     collision_last_ts_us_ = now;
-
-        //     if (collision_accum_us_ >= COLLISION_THRESHOLD_US) {
-        //         collision_accum_us_ = 0;
-        //         collision_last_ts_us_ = 0;
-        //         auto &app = Application::GetInstance();
-        //         app.ToggleChatState();
-        //     }
-        // });
 
         boot_button_.OnPressRepeat([this](uint16_t count) {
             ESP_LOGI(TAG, "boot_button_.OnPressRepeat: %d", count);
@@ -173,6 +165,19 @@ private:
             ESP_LOGI(TAG, "rec_button_.OnPressRepeat: %d", count);
             if(count >= RESET_WIFI_CONFIGURATION_COUNT){
                 ResetWifiConfiguration();
+            }
+        });
+
+        boot_button_.OnPressUp([this]() {
+            ESP_LOGI(TAG, "Press up");
+            if(sleep_flag_){
+                PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
+            }
+        });
+        rec_button_->OnPressUp([this]() {
+            ESP_LOGI(TAG, "Press up");
+            if(sleep_flag_){
+                PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
             }
         });
     }
