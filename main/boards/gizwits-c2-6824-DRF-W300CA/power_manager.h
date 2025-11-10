@@ -245,27 +245,14 @@ private:
     void CheckChargingStatus() {
         uint32_t voltage = GetBatteryVoltage();
         
-        #define BATTERY_FULL_VOLTAGE 4200      // 根据规格书4.20V
-        #define BATTERY_NOT_CHARGING_VOLTAGE 4100
+        // 充电状态判定：基于估算电压，与 xingbao 项目保持一致
+        static constexpr uint32_t BATTERY_CHARGING_THRESHOLD_MV = 4400;
+        bool new_is_charging = (voltage >= BATTERY_CHARGING_THRESHOLD_MV);
         
-        static uint8_t not_charging_count = 0;
         bool previous_charging = is_charging_;
-        
-        if (voltage > BATTERY_FULL_VOLTAGE) {
-            is_charging_ = true;
-            not_charging_count = 0;
-        } else if (voltage < BATTERY_NOT_CHARGING_VOLTAGE) {
-            if (is_charging_) {
-                not_charging_count++;
-                if (not_charging_count >= 20) { // 2秒确认
-                    is_charging_ = false;
-                    not_charging_count = 0;
-                }
-            }
-        }
-        
-        // 充电状态变化时立即打印
-        if (previous_charging != is_charging_) {
+        if (new_is_charging != is_charging_) {
+            is_charging_ = new_is_charging;
+            // 充电状态变化时立即打印
             ESP_LOGI("PowerManager", "🔋 充电状态变化: %s -> %s (电压: %" PRIu32 "mV)", 
                      previous_charging ? "充电中" : "未充电", 
                      is_charging_ ? "充电中" : "未充电", 

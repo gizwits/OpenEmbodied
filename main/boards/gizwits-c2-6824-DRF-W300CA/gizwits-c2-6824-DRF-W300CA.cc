@@ -29,12 +29,13 @@
 #include "motor_control.h"
 #include "esp_adc/adc_oneshot.h"
 #include <iot_button.h>
+#include "device_state_event.h"
 
 #define TAG "CustomBoard"
 
 
 #define RESET_WIFI_CONFIGURATION_COUNT 3
-#define SLEEP_TIME_SEC 60 * 3
+#define SLEEP_TIME_SEC 10 * 1
 
 // #define SLEEP_TIME_SEC 30
 class CustomBoard : public WifiBoard {
@@ -58,6 +59,7 @@ private:
     // 防交叉触发节流
     int64_t last_k50_click_ms_ = 0;
     int64_t last_k51_click_ms_ = 0;
+    int64_t last_k50_longpress_ms_ = 0;  // K50 长按时间，用于延长保护窗口
     
     // 唤醒词列表
     std::vector<std::string> wake_words_ = {"你好小智", "你好小云", "合养精灵", "嗨小火人", "小蜜小蜜"};
@@ -74,9 +76,25 @@ private:
 	// 板载指示灯（GPIO_NUM_6）状态与定时器
 	esp_timer_handle_t builtin_led_timer_ = nullptr;
 	bool builtin_led_state_ = false; // true 表示输出高电平，false 表示输出低电平（该灯低电平点亮）
+	
+	// 蓝灯状态管理（用于AI状态指示）
+	bool blue_led_on_ = false; // 蓝灯是否开启
+	
+	// K51 延迟打断定时器（用于防止 K50 误触发 K51）
+	esp_timer_handle_t k51_abort_timer_ = nullptr;
+	bool k51_pending_abort_ = false;  // 是否有待执行的打断操作
+	
+	// 静默启动标志（充电状态下不自动启动，需要长按BOOT按键）
+	bool silent_startup_from_board_ = false;
 
 	static void BuiltinLedTimerCallback(void* arg) {
 		CustomBoard* self = static_cast<CustomBoard*>(arg);
+		// 静默启动：强制关闭状态灯，避免任何闪烁
+		if (self->silent_startup_from_board_) {
+			self->builtin_led_state_ = false;
+			gpio_set_level(BUILTIN_LED_GPIO, 1); // active-low: 1=OFF
+			return;
+		}
 		// 配网模式下 0.5s 闪烁；其他状态常亮（低电平点亮）
 		if (Board::GetInstance().IsWifiConfigMode()) {
 			self->builtin_led_state_ = !self->builtin_led_state_;
@@ -99,50 +117,42 @@ private:
         // 更新当前模式
         current_led_mode_ = mode;
         
-        // 根据模式应用效果
+        // 根据模式应用效果（减少日志打印，避免影响音频）
         switch (mode) {
             case 0:
-                ESP_LOGI(TAG, "模式0: 全彩渐变");
                 StartRgbLightEffect();
                 break;
             case 1:
-                ESP_LOGI(TAG, "模式1: 白色");
                 rgb_light_on_ = true;
                 rgb_led_.SetBrightness(MapAppliedBrightness_(GetBrightness_()));
                 rgb_led_.SetColor(255, 255, 255);
                 break;
             case 2:
-                ESP_LOGI(TAG, "模式2: 红色");
                 rgb_light_on_ = true;
                 rgb_led_.SetBrightness(MapAppliedBrightness_(GetBrightness_()));
                 rgb_led_.SetColor(255, 0, 0);
                 break;
             case 3:
-                ESP_LOGI(TAG, "模式3: 绿色");
                 rgb_light_on_ = true;
                 rgb_led_.SetBrightness(MapAppliedBrightness_(GetBrightness_()));
                 rgb_led_.SetColor(0, 255, 0);
                 break;
             case 4:
-                ESP_LOGI(TAG, "模式4: 蓝色");
                 rgb_light_on_ = true;
                 rgb_led_.SetBrightness(MapAppliedBrightness_(GetBrightness_()));
                 rgb_led_.SetColor(0, 0, 255);
                 break;
             case 5:
-                ESP_LOGI(TAG, "模式5: 黄色");
                 rgb_light_on_ = true;
                 rgb_led_.SetBrightness(MapAppliedBrightness_(GetBrightness_()));
                 rgb_led_.SetColor(255, 255, 0);
                 break;
             case 6:
-                ESP_LOGI(TAG, "模式6: 青色");
                 rgb_light_on_ = true;
                 rgb_led_.SetBrightness(MapAppliedBrightness_(GetBrightness_()));
                 rgb_led_.SetColor(0, 255, 255);
                 break;
             case 7:
-                ESP_LOGI(TAG, "模式7: 紫色");
                 rgb_light_on_ = true;
                 rgb_led_.SetBrightness(MapAppliedBrightness_(GetBrightness_()));
                 rgb_led_.SetColor(255, 0, 255);
@@ -183,8 +193,8 @@ private:
 		uint8_t brightness = MapAppliedBrightness_(GetBrightness_()); // 使用应用亮度(0-100)
 		uint8_t motor_speed = motor_on_ ? GetLightSpeed_() : 0; // 电机速度
 		bool led_enabled = brightness > 0;
-		// 打印电机相关数据点
-		ESP_LOGI(TAG, "电机数据点: light_speed=%d, motor_on=%s", (int)motor_speed, motor_on_ ? "开" : "关");
+		// 减少日志打印，避免影响音频（只在调试时启用）
+		// ESP_LOGI(TAG, "电机数据点: light_speed=%d, motor_on=%s", (int)motor_speed, motor_on_ ? "开" : "关");
 		// 更新系统状态到PowerManager
 		PowerManager::GetInstance().UpdateSystemStatus(
 			motor_on_,      // 电机运行状态
@@ -195,6 +205,76 @@ private:
 		);
 		
 	}
+	
+	// 控制板载状态灯（GPIO_NUM_6，AI状态指示）
+	void SetBlueLed(bool on) {
+		if (blue_led_on_ == on) {
+			// 状态未变化，但如果是要关闭，仍然强制关闭（防止状态不一致）
+			if (!on) {
+				ESP_LOGI(TAG, "状态灯已关闭，强制确保关闭状态");
+				gpio_set_level(BUILTIN_LED_GPIO, 1);  // 高电平熄灭
+				// 停止定时器，避免定时器干扰
+				if (builtin_led_timer_) {
+					esp_timer_stop(builtin_led_timer_);
+				}
+			}
+			return;
+		}
+		blue_led_on_ = on;
+		
+		// 停止定时器，避免定时器干扰我们的控制
+		if (builtin_led_timer_) {
+			esp_timer_stop(builtin_led_timer_);
+		}
+		
+		if (on) {
+			// 开启状态灯：低电平点亮（该灯低电平点亮）
+			gpio_set_level(BUILTIN_LED_GPIO, 0);
+			ESP_LOGI(TAG, "状态灯开启（AI激活）");
+		} else {
+			// 关闭状态灯：高电平熄灭
+			gpio_set_level(BUILTIN_LED_GPIO, 1);
+			ESP_LOGI(TAG, "状态灯关闭（AI休眠）");
+		}
+	}
+	
+	// 初始化设备状态事件监听
+	void InitializeDeviceStateEvent() {
+		DeviceStateEventManager::GetInstance().RegisterStateChangeCallback(
+			[this](DeviceState prev, DeviceState curr) {
+				ESP_LOGI(TAG, "设备状态变化: %d -> %d", prev, curr);
+				
+				// 静默启动时，不响应状态变化，保持状态灯关闭
+				if (silent_startup_from_board_) {
+					SetBlueLed(false);
+					return;
+				}
+				
+				// 配网模式：恢复定时器，让定时器控制灯闪烁
+				if (curr == kDeviceStateWifiConfiguring) {
+					if (builtin_led_timer_) {
+						esp_timer_start_periodic(builtin_led_timer_, 500000); // 500ms
+					}
+					return;
+				}
+				
+				// 真正的休眠状态：sleeping -> 关闭状态灯
+				// idle 状态时设备还在运行，保持状态灯开启（表示设备在线）
+				if (curr == kDeviceStateSleeping) {
+					SetBlueLed(false);
+					return;
+				}
+				
+				// AI激活状态：listening 或 speaking -> 开启状态灯
+				if (curr == kDeviceStateListening || curr == kDeviceStateSpeaking) {
+					SetBlueLed(true);
+					return;
+				}
+				
+				// 其他状态保持当前状态灯状态不变
+			}
+		);
+	}
 
     void run_sleep_mode(bool need_delay = true){
         auto& application = Application::GetInstance();
@@ -204,6 +284,9 @@ private:
             ESP_LOGI(TAG, "Sleep mode");
         }
         application.QuitTalking();
+        
+        // 进入休眠时，关闭状态灯
+        SetBlueLed(false);
 
 		// 统一休眠策略：无论充电或未充电，都不进入深度休眠
 		// 目的：保持 RGB 与电机运行，避免被关断
@@ -211,12 +294,9 @@ private:
     }
     
     // 设备关机方法
+    // 关机行为与 xingbao 项目保持一致：拉低保持脚；若在充电，则重启以进入静默/充电逻辑
     virtual void PowerOff() override {
-        ESP_LOGI(TAG, "PowerOff called");
-        
-        // 等待电量不足播报完成（如果正在播报）
-        ESP_LOGI(TAG, "等待电量不足播报完成...");
-        vTaskDelay(pdMS_TO_TICKS(3000));  // 等待3秒让电量不足播报完成
+        ESP_LOGI(TAG, "PowerOff called, setting POWER_HOLD_GPIO low");
         
         // 关闭所有功能
         StopRgbLightEffect();
@@ -224,25 +304,24 @@ private:
         motor_on_ = false;
         device_powered_on_ = false;
         
-        // 关机前播报休眠提示音
-        {
-            auto codec = GetAudioCodec();
-            if (codec) {
-                codec->EnableOutput(true);
-            }
-            Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
-            vTaskDelay(pdMS_TO_TICKS(1500));
-        }
-        
-        // 拉低电源保持引脚，关闭电池供电
+        // 先拉低电源保持引脚
         gpio_set_level(POWER_HOLD_GPIO, 0);
-        ESP_LOGI(TAG, "🔋 电源保持引脚已拉低，设备关机 (GPIO%d)", POWER_HOLD_GPIO);
         
-        // 延时3秒
-        vTaskDelay(pdMS_TO_TICKS(3000));
-
-        // 进入深度睡眠
-        run_sleep_mode(false);
+        // 检查充电状态，如果在充电则重启（silent_next已在长按时保存）
+        bool is_charging = PowerManager::GetInstance().IsCharging();
+        if (is_charging) {
+            // 充电场景统一按 xingbao 行为：重启进入静默充电
+            ESP_LOGI(TAG, "USB充电模式，重启设备以检测NVS标志");
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            esp_restart();
+            return;
+        }
+        // 电池模式下，直接拉低保持脚即可真正关机
+    }
+    
+    // 返回是否需要在充电时静默启动
+    virtual bool NeedSilentStartup() override {
+        return silent_startup_from_board_;
     }
     void InitializeAdcButtons() {
         ESP_LOGI(TAG, "初始化ADC按钮...");
@@ -274,18 +353,36 @@ private:
             ESP_LOGI(TAG, " 按键类型: K50按键 (ADC检测)");
             ESP_LOGI(TAG, " 检测范围: 0-200 (0V-0.16V)");
             
+            // 静默启动时，K50按键无效
+            if (silent_startup_from_board_) {
+                ESP_LOGI(TAG, "充电静默启动状态，K50按键无效");
+                return;
+            }
+            
             if (!device_powered_on_) {
                 // 设备关机状态,不响应
                 ESP_LOGI(TAG, "设备关机状态,K50按键无效");
                 return;
             }
 
-            // 防止刚触发K51后短时间内误触发K50(保持简单的时间互斥,不做ADC硬校验)
+            // 防止刚触发K51后短时间内误触发K50(缩短时间窗口，提高响应速度)
             int64_t now_ms = esp_timer_get_time() / 1000;
-            if (now_ms - last_k51_click_ms_ < 250) {
+            if (now_ms - last_k51_click_ms_ < 100) {  // 从250ms缩短到100ms
                 ESP_LOGI(TAG, "K50按下但与K51间隔过短,忽略");
                 return;
             }
+            
+            // 如果 K51 有待执行的打断操作，取消它（防止切换灯光时误打断AI）
+            if (k51_pending_abort_) {
+                if (k51_abort_timer_) {
+                    esp_timer_stop(k51_abort_timer_);
+                    esp_timer_delete(k51_abort_timer_);
+                    k51_abort_timer_ = nullptr;
+                }
+                k51_pending_abort_ = false;
+                ESP_LOGI(TAG, "K50按下，取消K51的待执行打断操作");
+            }
+            
             last_k50_click_ms_ = now_ms;
             
             // 根据数据点判断当前状态
@@ -295,24 +392,20 @@ private:
             if (dp_brightness == 0) {
                 // 亮度为0，开启灯光、电机和模式
                 uint8_t current_mode = GetLightMode_();
-                ESP_LOGI(TAG, "亮度为0，开启灯光、电机和模式: %d", current_mode);
                 k51_color_mode_ = current_mode;
                 
                 // 检查电机速度数据点，如果为0则设置为100
                 if (dp_light_speed == 0) {
                     LWSDataPointManager::GetInstance().SetCachedDataPoint("light_speed", 100);
-                    ESP_LOGI(TAG, "数据点电机速度为0，已设置为100");
                     dp_light_speed = 100;
                 }
                 
                 // 启动电机
                 motor_control_.SetSpeed(dp_light_speed);
                 motor_control_.Start();
-                ESP_LOGI(TAG, "电机已启动，速度: %d", dp_light_speed);
 
                 // 设置亮度为80
                 LWSDataPointManager::GetInstance().SetCachedDataPoint("brightness", 80);
-                ESP_LOGI(TAG, "数据点亮度设置为80");
                 
                 // 应用灯光模式
                 ApplyLedMode_(current_mode);
@@ -322,19 +415,16 @@ private:
                 // 亮度不为0，切换到下一个模式
                 uint8_t current_mode = GetLightMode_();
                 uint8_t next_mode = (current_mode + 1) % 8;
-                ESP_LOGI(TAG, "亮度不为0，从模式%d切换到模式%d", current_mode, next_mode);
                 
                 // 检查电机速度数据点，如果为0则设置为100
                 if (dp_light_speed == 0) {
                     LWSDataPointManager::GetInstance().SetCachedDataPoint("light_speed", 100);
-                    ESP_LOGI(TAG, "数据点电机速度为0，已设置为100");
                     dp_light_speed = 100;
                 }
                 
                 // 启动电机（使用现有速度）
                 motor_control_.SetSpeed(dp_light_speed);
                 motor_control_.Start();
-                ESP_LOGI(TAG, "电机已启动，速度: %d", dp_light_speed);
                 
                 ApplyLedMode_(next_mode);
                 // 同步数据点（不触发回调）
@@ -348,10 +438,31 @@ private:
             ESP_LOGI(TAG, " 按键类型: K50按键 (ADC检测)");
             ESP_LOGI(TAG, " 检测范围: 0-200 (0V-0.16V)");
             
+            // 静默启动时，K50长按无效
+            if (silent_startup_from_board_) {
+                ESP_LOGI(TAG, "充电静默启动状态，K50长按无效");
+                return;
+            }
+            
             // 设备关机状态下不响应
             if (!device_powered_on_) {
                 ESP_LOGI(TAG, "设备关机状态,K50长按无效");
                 return;
+            }
+            
+            // 记录长按时间，用于延长保护窗口
+            int64_t now_ms = esp_timer_get_time() / 1000;
+            last_k50_longpress_ms_ = now_ms;
+            
+            // 如果 K51 有待执行的打断操作，取消它（防止长按关闭灯光时误打断AI）
+            if (k51_pending_abort_) {
+                if (k51_abort_timer_) {
+                    esp_timer_stop(k51_abort_timer_);
+                    esp_timer_delete(k51_abort_timer_);
+                    k51_abort_timer_ = nullptr;
+                }
+                k51_pending_abort_ = false;
+                ESP_LOGI(TAG, "K50长按，取消K51的待执行打断操作");
             }
             
             // 设备开机状态,强制关闭灯光和电机
@@ -380,11 +491,17 @@ private:
 			UpdateBatteryLoadComp();
         });
         
-        // 设置K51按钮短按回调 - 打断AI（参考xingbao实现）
+        // 设置K51按钮短按回调 - 打断AI（延迟执行，防止K50误触发）
         adc_button_k51_->OnPressDown([this]() {
             ESP_LOGI(TAG, " ===== K51按键短按 =====");
             ESP_LOGI(TAG, " 按键类型: K51按键 (ADC检测)");
             ESP_LOGI(TAG, " 检测范围: 1500-2500 (1.21V-2.01V)");
+            
+            // 静默启动时，K51按键无效
+            if (silent_startup_from_board_) {
+                ESP_LOGI(TAG, "充电静默启动状态，K51按键无效");
+                return;
+            }
             
             // 设备关机状态下不响应
             if (!device_powered_on_) {
@@ -392,20 +509,71 @@ private:
                 return;
             }
 
-            // 防止刚触发K50后短时间内误触发K51(保持简单的时间互斥,不做ADC硬校验)
             int64_t now_ms2 = esp_timer_get_time() / 1000;
-            if (now_ms2 - last_k50_click_ms_ < 250) {
+            
+            // 防止刚触发K50后短时间内误触发K51（双向保护）
+            if (now_ms2 - last_k50_click_ms_ < 100) {
                 ESP_LOGI(TAG, "K51按下但与K50间隔过短,忽略");
                 return;
             }
-            last_k51_click_ms_ = now_ms2;
             
-            // 无条件先打断，再直接进入监听并强制开启语音处理，确保"秒停+立即监听"
-            auto &app = Application::GetInstance();
-            app.AbortSpeaking(kAbortReasonNone);
-            app.StartListening();
-            app.GetAudioService().EnableVoiceProcessing(true, true);
-            ESP_LOGI(TAG, "K51短按打断已触发,device_state_当前: [%d]", app.GetDeviceState());
+            // 防止K50长按后误触发K51：如果K50在800ms内长按过，则忽略K51（长按后保护窗口）
+            if (now_ms2 - last_k50_longpress_ms_ < 800) {
+                ESP_LOGI(TAG, "K51按下但K50在800ms内长按过，可能是长按后的误触发，忽略K51");
+                return;
+            }
+            
+            // 如果已有待执行的打断操作，取消旧的定时器
+            if (k51_abort_timer_) {
+                esp_timer_stop(k51_abort_timer_);
+                esp_timer_delete(k51_abort_timer_);
+                k51_abort_timer_ = nullptr;
+            }
+            
+            last_k51_click_ms_ = now_ms2;
+            k51_pending_abort_ = true;
+            
+            // 延迟500ms执行打断操作，如果在这期间K50被触发，则取消（增加延迟时间，给K50更多时间取消）
+            esp_timer_create_args_t timer_args = {
+                .callback = [](void* arg) {
+                    auto* self = static_cast<CustomBoard*>(arg);
+                    if (!self->k51_pending_abort_) {
+                        // 已被取消，不执行
+                        return;
+                    }
+                    self->k51_pending_abort_ = false;
+                    self->k51_abort_timer_ = nullptr;
+                    
+                    // 执行打断操作，与语音唤醒的处理顺序保持一致
+                    auto &app = Application::GetInstance();
+                    
+                    // 确保音频输出已启用
+                    auto codec = self->GetAudioCodec();
+                    if (codec) {
+                        codec->EnableOutput(true);
+                    }
+                    
+                    // 执行打断操作
+                    app.AbortSpeaking(kAbortReasonNone);
+                    app.StartListening();
+                    
+                    // 通过 Schedule 异步播放"叮"声提示音，确保在 StartListening 的异步任务之后执行
+                    app.Schedule([&app]() {
+                        app.GetAudioService().ResetDecoder();
+                        app.GetAudioService().PlaySound(Lang::Sounds::P3_WAKE_WORD);
+                    }, "K51_PlayWakeSound");
+                    
+                    app.GetAudioService().EnableVoiceProcessing(true, true);
+                    ESP_LOGI("CustomBoard", "K51短按打断已触发,device_state_当前: [%d]", app.GetDeviceState());
+                },
+                .arg = this,
+                .dispatch_method = ESP_TIMER_TASK,
+                .name = "k51_abort_timer",
+                .skip_unhandled_events = true,
+            };
+            ESP_ERROR_CHECK(esp_timer_create(&timer_args, &k51_abort_timer_));
+            ESP_ERROR_CHECK(esp_timer_start_once(k51_abort_timer_, 500000)); // 500ms延迟
+            ESP_LOGI(TAG, "K51按下，延迟500ms执行打断操作（如果K50在期间被触发则取消）");
         });
         
         ESP_LOGI(TAG, "ADC按钮初始化完成");
@@ -459,8 +627,20 @@ private:
     void InitializeButtons() {
         // BOOT按键长按
         boot_button_.OnLongPress([this]() {
-            ESP_LOGI(TAG, " ===== BOOT按键长按 - 立即执行开关机 =====");
+            ESP_LOGI(TAG, " ===== BOOT按键长按 =====");
             ESP_LOGI(TAG, " 按键类型: BOOT按键 (GPIO8)");
+            
+            // 如果是静默启动状态，长按BOOT按键清除静默标志并重启
+            if (silent_startup_from_board_) {
+                Settings settings("system", true);
+                settings.SetInt("silent_next", 0);
+                settings.SetInt("user_wakeup", 1);
+                ESP_LOGI(TAG, "充电静默启动状态，长按BOOT清除静默标志并重启");
+                esp_restart();
+                return;
+            }
+            
+            ESP_LOGI(TAG, " ===== BOOT按键长按 - 立即执行开关机 =====");
             
             if (device_powered_on_) {
                 // 设备开机状态,立即关机
@@ -476,12 +656,35 @@ private:
                     return;
                 }
                 
-                xTaskCreate([](void* arg) {
-                    auto* board = static_cast<CustomBoard*>(arg);
-                    ESP_LOGI(TAG, "🔌 设备已关机");
-                    board->PowerOff();
-                    vTaskDelete(NULL);
-                }, "power_off_task", 4028, this, 10, NULL);
+                // 刷新一次充电状态并写入 NVS silent_next 与 xingbao 项目一致
+                bool is_charging_now = false;
+                {
+                    PowerManager::GetInstance().CheckBatteryStatusImmediately();
+                    vTaskDelay(pdMS_TO_TICKS(20));
+                    PowerManager::GetInstance().CheckBatteryStatusImmediately();
+                    vTaskDelay(pdMS_TO_TICKS(20));
+                    is_charging_now = PowerManager::GetInstance().IsCharging();
+                    ESP_LOGI(TAG, "长按键操作前充电状态: %s", is_charging_now ? "充电中" : "未充电");
+                }
+                {
+                    Settings settings("system", true);
+                    settings.SetInt("silent_next", is_charging_now ? 1 : 0);
+                    if (is_charging_now) {
+                        ESP_LOGI(TAG, "充电状态下关机，先保存silent_next=1");
+                    } else {
+                        ESP_LOGI(TAG, "电池模式下关机，保存silent_next=0");
+                    }
+                }
+                
+                // 提前播放音频，与 xingbao 项目保持一致
+                ESP_LOGI(TAG, "执行关机操作");
+                Application::GetInstance().QuitTalking();
+                vTaskDelay(pdMS_TO_TICKS(200));
+                auto codec = GetAudioCodec();
+                SetBlueLed(false);  // 关闭状态灯
+                codec->EnableOutput(true);
+                Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
+                need_power_off_ = true;
             } else {
                 // 设备关机状态,立即开机
                 xTaskCreate([](void* arg) {
@@ -496,10 +699,34 @@ private:
         // BOOT按键松开
         boot_button_.OnPressUp([this]() {
             ESP_LOGI(TAG, " ===== BOOT按键松开 =====");
+            if (need_power_off_) {
+                need_power_off_ = false;
+                // 等待关机提示音播放完成后再关机，行为与 xingbao 项目一致
+                xTaskCreate([](void* arg) {
+                    auto* board = static_cast<CustomBoard*>(arg);
+                    auto& app = Application::GetInstance();
+                    ESP_LOGI(TAG, "等待音频播放完成");
+                    int wait_count = 0;
+                    while (!app.GetAudioService().IsIdle() && wait_count < 50) {
+                        vTaskDelay(pdMS_TO_TICKS(100));
+                        wait_count++;
+                    }
+                    ESP_LOGI(TAG, "音频播放完成，准备关机");
+                    app.SetDeviceState(kDeviceStateIdle);
+                    board->PowerOff();
+                    vTaskDelete(NULL);
+                }, "power_off_task", 4028, this, 10, NULL);
+            }
         });
         
         // BOOT按键单击累计计数(600ms 窗口内三击进入配网)
         boot_button_.OnClick([this]() {
+            // 静默启动时，三击配网无效
+            if (silent_startup_from_board_) {
+                ESP_LOGI(TAG, "充电静默启动状态，三击配网无效");
+                return;
+            }
+            
             int64_t now_ms = esp_timer_get_time() / 1000;
             const int64_t TRIPLE_CLICK_WINDOW_MS = 600;
             if (now_ms - boot_button_last_click_ms_ > TRIPLE_CLICK_WINDOW_MS) {
@@ -614,6 +841,13 @@ private:
             },
             [this](int value) { 
                 ESP_LOGI(TAG, "收到亮度数据点设置: brightness = %d", value);
+                
+                // 静默启动时，不响应数据点设置
+                if (silent_startup_from_board_) {
+                    ESP_LOGI(TAG, "充电静默启动状态，忽略亮度数据点设置");
+                    return;
+                }
+                
                 SetRgbBrightness(value);
                 
                 // 根据亮度值控制电机
@@ -666,6 +900,12 @@ private:
             [this](int value) { 
                 ESP_LOGI(TAG, "收到电机速度数据点设置: light_speed = %d", value);
                 
+                // 静默启动时，不响应数据点设置
+                if (silent_startup_from_board_) {
+                    ESP_LOGI(TAG, "充电静默启动状态，忽略电机速度数据点设置");
+                    return;
+                }
+                
                 // 限制速度范围
                 if (value < 0) value = 0;
                 if (value > 100) value = 100;
@@ -709,6 +949,12 @@ private:
             },
             [this](int value) { 
                 ESP_LOGI(TAG, "收到灯光模式数据点设置: light_mode = %d", value);
+                
+                // 静默启动时，不响应数据点设置
+                if (silent_startup_from_board_) {
+                    ESP_LOGI(TAG, "充电静默启动状态，忽略灯光模式数据点设置");
+                    return;
+                }
                 
                 // 如果亮度为0，自动打开灯光以便看到模式效果
                 uint8_t current_brightness = GetBrightness_();
@@ -758,8 +1004,8 @@ public:
         io_conf.intr_type = GPIO_INTR_DISABLE;
         gpio_config(&io_conf);
         
-        // 初始化LED状态
-        gpio_set_level(BUILTIN_LED_GPIO, 0);  // 运行指示灯初始开启
+        // 初始化LED状态：默认关闭，避免静默启动时短暂点亮
+        gpio_set_level(BUILTIN_LED_GPIO, 1);  // active-low: 1=OFF
         gpio_set_level(RGB_LED_R_GPIO, 0);
         gpio_set_level(RGB_LED_G_GPIO, 0);
         gpio_set_level(RGB_LED_B_GPIO, 0);
@@ -795,21 +1041,78 @@ public:
 
         ESP_LOGI(TAG, "Initializing Power Manager...");
         InitializePowerManager();
-        
-        
         ESP_LOGI(TAG, "Power Manager initialized.");
+        
+        // 立即检测一次充电状态
+        PowerManager::GetInstance().CheckBatteryStatusImmediately();
+        
+        // 检查开机复位原因与充电状态，决定是否静默启动
+        auto reset_reason = esp_reset_reason();
+        Settings sys_settings("system", false);
+        int silent_next = sys_settings.GetInt("silent_next", 0);
+        int user_wakeup = sys_settings.GetInt("user_wakeup", 0);
+        if (user_wakeup == 1) {
+            Settings sys_settings_rw("system", true);
+            sys_settings_rw.SetInt("user_wakeup", 0);
+            silent_startup_from_board_ = false;
+        } else if (silent_next == 1) {
+            Settings sys_settings_rw("system", true);
+            sys_settings_rw.SetInt("silent_next", 0);
+            silent_startup_from_board_ = true;
+        } else if (reset_reason == ESP_RST_POWERON) {
+            bool is_charging = PowerManager::GetInstance().IsCharging();
+            if (is_charging) {
+                silent_startup_from_board_ = true;
+            }
+        } else {
+            // 异常重启（如看门狗复位、掉电复位等），应该正常启动，不要静默
+            ESP_LOGI(TAG, "异常重启（reset_reason: %d），设置正常启动", reset_reason);
+            silent_startup_from_board_ = false;
+        }
+        
+        ESP_LOGI(TAG, "silent_startup_from_board_ 最终值: %d", silent_startup_from_board_);
+        
+        // 静默启动时，禁止点亮状态灯，并禁用省电计时器
+        if (silent_startup_from_board_) {
+            SetBlueLed(false);  // 关闭状态灯
+            SetPowerSaveTimer(false);
+        }
 
         ESP_LOGI(TAG, "Initializing RGB LED and Motor Control...");
         
         rgb_led_.Initialize();
         motor_control_.Initialize();
         ESP_LOGI(TAG, "RGB LED and Motor Control initialized.");
+        
+        ESP_LOGI(TAG, "Initializing Device State Event...");
+        InitializeDeviceStateEvent();
+        ESP_LOGI(TAG, "Device State Event initialized.");
+        
+        // 初始化时检查当前设备状态，如果是 idle 或 sleeping，关闭状态灯
+        // 因为如果状态没有变化，状态变化事件不会触发
+        // 静默启动时也要关闭状态灯
+        if (silent_startup_from_board_) {
+            SetBlueLed(false);
+            ESP_LOGI(TAG, "静默启动，关闭状态灯");
+        } else {
+            auto& app = Application::GetInstance();
+            DeviceState current_state = app.GetDeviceState();
+            if (current_state == kDeviceStateIdle || current_state == kDeviceStateSleeping) {
+                SetBlueLed(false);
+                ESP_LOGI(TAG, "初始化时检测到休眠状态，关闭状态灯");
+            }
+        }
 
         // 开机时不启动电机和RGB灯,等待按键触发
         ESP_LOGI(TAG, "开机完成,等待按键触发电机和灯光");
 
         audio_codec.OnWakeUp([this](const std::string& command) {
             ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());
+            // 只有充电导致的静默启动才忽略唤醒词，异常重启的静默启动允许唤醒词工作
+            if (silent_startup_from_board_) {
+                ESP_LOGI(TAG, "充电静默启动状态，忽略唤醒词: %s", command.c_str());
+                return;
+            }
             if (IsCommandInList(command, wake_words_)){
                 ESP_LOGE(TAG, "vb6824 recv cmd: %d", Application::GetInstance().GetDeviceState());
                 // if(Application::GetInstance().GetDeviceState() != kDeviceStateListening){
@@ -835,7 +1138,14 @@ public:
         // 设置按键从当前模式的下一个开始
         k51_color_mode_ = light_mode;
         
-        if (brightness > 0) {
+        // 静默启动时，不恢复RGB灯和电机状态
+        if (silent_startup_from_board_) {
+            ESP_LOGI(TAG, "静默启动，不恢复RGB灯和电机状态");
+            // 确保RGB灯和电机都是关闭的
+            StopRgbLightEffect();
+            motor_control_.Stop();
+            motor_on_ = false;
+        } else if (brightness > 0) {
             // 应用数据点中的灯光模式
             ApplyLedMode_(light_mode);
             // 绑定：如果开关开启且亮度>0，则启动电机
@@ -1089,6 +1399,13 @@ public:
         if (rgb_task_handle_ != nullptr) {
             vTaskDelete(rgb_task_handle_);
             rgb_task_handle_ = nullptr;
+        }
+        
+        // 清理 K51 延迟打断定时器
+        if (k51_abort_timer_) {
+            esp_timer_stop(k51_abort_timer_);
+            esp_timer_delete(k51_abort_timer_);
+            k51_abort_timer_ = nullptr;
         }
         
         if (adc_button_k50_) {

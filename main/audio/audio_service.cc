@@ -155,8 +155,17 @@ void AudioService::Start() {
     /* Start the audio input task */
     int input_task_size = 1024 *4;
 #ifdef CONFIG_IDF_TARGET_ESP32C2
-    input_task_size = 1024 * 2;
+    input_task_size = 1024 * 4;  
 #endif
+    ESP_LOGI(TAG, "audio_input stack size: %d bytes (target=%s)", input_task_size,
+#ifdef CONFIG_IDF_TARGET_ESP32S3
+        "ESP32S3"
+#elif defined(CONFIG_IDF_TARGET_ESP32C2)
+        "ESP32C2"
+#else
+        "OTHER"
+#endif
+    );
     xTaskCreate([](void* arg) {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->AudioInputTask();
