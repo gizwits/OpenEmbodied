@@ -109,12 +109,9 @@ private:
 
     void CheckBatteryStatus() {
 
-        #define BATTERY_FULL_VOLTAGE 4300
-        #define BATTERY_NOT_CHARGING_VOLTAGE 4200
+        #define BATTERY_CHARGING_THRESHOLD 4400  // 充电阈值：>4400mV为充电，<=4400mV为未充电
 
-        static uint8_t not_charging_count = 0;
         static uint32_t log_counter = 0;
-        static uint32_t last_voltage = 0;
         
         // 在读取ADC之前，先保存当前电量（如果是非充电状态）
         // 这样可以确保在检测到电压突然升高时，使用的是真实的非充电状态电量
@@ -126,20 +123,12 @@ private:
         
         bool previous_charging_state = is_charging_;
         
-        if (voltage > BATTERY_FULL_VOLTAGE) {
-            is_charging_ = true;
-            not_charging_count = 0; // 重置计数器
-        } else if (voltage < BATTERY_NOT_CHARGING_VOLTAGE) {
-            if (is_charging_) {
-                not_charging_count++;
-                if (not_charging_count >= 20) {
-                    is_charging_ = false;
-                    not_charging_count = 0;
-                }
-            }
+        // 简单判断：只有两种状态，充电或未充电
+        if (voltage > BATTERY_CHARGING_THRESHOLD) {
+            is_charging_ = true;   // 充电
+        } else {
+            is_charging_ = false;  // 未充电
         }
-        
-        last_voltage = voltage;
         
         // 每50次（约5秒）打印一次状态信息，或者状态变化时立即打印
         if (previous_charging_state != is_charging_ || (log_counter++ % 50 == 0)) {
@@ -187,8 +176,8 @@ private:
         // 因为充电时ADC读取的是充电器电压（5V），不是电池电压，电量不准确
         // 充电状态下的电量由 UpdateChargingSimulation() 根据模拟计算更新
         // 只有在非充电状态，或者充电模拟未激活时，才根据ADC值更新电量
-        // 当电压超过4.3V时，说明正在充电，不更新电量（避免错误更新为100%）
-        if ((!is_charging_ || !is_charging_simulation_active_) && current_voltage <= 4300) {
+        // 当电压超过4.4V时，说明正在充电，不更新电量（避免错误更新为100%）
+        if ((!is_charging_ || !is_charging_simulation_active_) && current_voltage <= 4400) {
             CalculateBatteryLevel(current_voltage);
         }
         // if(times++ % 50 == 0){
@@ -322,7 +311,8 @@ private:
     // 非充电状态下定期记录电量
     void RecordBatteryLevelWhenNotCharging() {
         int64_t current_time_us = esp_timer_get_time();
-        if (average_adc*2 < BATTERY_FULL_VOLTAGE) {
+        #define BATTERY_CHARGING_THRESHOLD_FOR_RECORD 4400
+        if (average_adc*2 < BATTERY_CHARGING_THRESHOLD_FOR_RECORD) {
             // 检查是否满足保存条件：间隔30秒 且 电量有变化
             bool should_save = false;
             
@@ -409,8 +399,8 @@ public:
         }
         
         ESP_LOGI("PowerManager", "[初始化] PowerManager初始化完成，定时器已启动（每100ms执行一次）");
-        ESP_LOGI("PowerManager", "[初始化] 充电检测阈值: >%dmV为充电, <%dmV为非充电", 
-                 BATTERY_FULL_VOLTAGE, BATTERY_NOT_CHARGING_VOLTAGE);
+        ESP_LOGI("PowerManager", "[初始化] 充电检测阈值: >%dmV为充电, <=%dmV为非充电", 
+                 4400, 4400);
 
     }
 
