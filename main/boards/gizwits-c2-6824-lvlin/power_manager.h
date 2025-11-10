@@ -10,6 +10,7 @@
 #include <esp_sleep.h>
 #include <driver/rtc_io.h>
 #include "driver/gpio.h"
+#include <inttypes.h>
 
 // Battery ADC configuration
 #define BAT_ADC_CHANNEL  ADC_CHANNEL_3  // Battery voltage ADC channel
@@ -33,6 +34,7 @@ private:
     uint8_t battery_level_ = 100;
     uint32_t average_adc = 0;
     bool is_charging_ = false;
+    bool was_charging_ = false;  // 上一次的充电状态
 
     static constexpr uint8_t MAX_CHANGE_COUNT = 8;
     static constexpr uint32_t TIME_LIMIT = 2000000; // 2 seconds in microseconds
@@ -41,6 +43,18 @@ private:
     uint64_t last_change_time_ = 0;  // 最后一次状态变化的时间戳（微秒）
 
     adc_oneshot_unit_handle_t adc_handle_;
+
+    // 充电模拟相关变量
+    static constexpr uint32_t BATTERY_CAPACITY_MAH = 1000;  // 电池容量 1000mAh
+    static constexpr uint32_t CHARGE_CURRENT_MA = 260;      // 充电电流 500mA
+    static constexpr uint32_t BATTERY_RECORD_INTERVAL_MS = 60000;  // 非充电状态下每60秒记录一次电量
+    
+    bool is_charging_simulation_active_ = false;  // 是否正在进行充电模拟
+    bool is_fully_charged_ = false;               // 是否已充满
+    uint8_t charge_start_level_ = 0;              // 开始充电时的电量百分比
+    int64_t charge_start_time_us_ = 0;            // 开始充电的时间（微秒）
+    int64_t last_battery_record_time_us_ = 0;    // 上次记录电量的时间（微秒）
+    uint8_t last_recorded_level_ = 0;             // 上次记录的电量
 
     // 电压-电量对照表
     static constexpr struct VoltageSocPair {
@@ -109,6 +123,13 @@ private:
             }
         }
 
+        // 处理充电状态变化和充电模拟
+        HandleChargingStateChange();
+        
+        // 非充电状态下定期记录电量
+        if (!is_charging_) {
+            RecordBatteryLevelWhenNotCharging();
+        }
     }
 
     
@@ -132,7 +153,11 @@ private:
         //          adc_values_[0], adc_values_[1], adc_values_[2], adc_values_[3], adc_values_[4], 
         //          adc_values_[5], adc_values_[6], adc_values_[7], adc_values_[8], adc_values_[9]);
 
-        CalculateBatteryLevel(average_adc*2);
+        // 只有在非充电状态下才根据ADC值更新电量
+        // 充电状态下使用模拟电量值
+        if (!is_charging_ || !is_charging_simulation_active_) {
+            CalculateBatteryLevel(average_adc*2);
+        }
         // if(times++ % 50 == 0){
         //     ESP_LOGI("PowerManager", "adc: %d adc_avg: %ld, VBAT: %ld, battery_level_: %u%%", 
         //         adc_value, average_adc, average_adc*2, battery_level_);
@@ -141,6 +166,118 @@ private:
 
     void CalculateBatteryLevel(uint32_t average_adc) {
         battery_level_ = estimate_soc(average_adc);
+    }
+
+    // 处理充电状态变化
+    void HandleChargingStateChange() {
+        // 检测从不充电到充电的状态变化
+        if (is_charging_ && !was_charging_) {
+            // 进入充电状态
+            StartChargingSimulation();
+        } else if (!is_charging_ && was_charging_) {
+            // 退出充电状态
+            StopChargingSimulation();
+        }
+        
+        // 更新上一次的充电状态
+        was_charging_ = is_charging_;
+        
+        // 如果正在充电，更新充电模拟
+        if (is_charging_ && is_charging_simulation_active_) {
+            UpdateChargingSimulation();
+        }
+    }
+
+    // 开始充电模拟
+    void StartChargingSimulation() {
+        // 使用上次记录的非充电状态下的电量作为起始电量
+        // 如果没有记录，则使用当前电量
+        if (last_recorded_level_ > 0) {
+            charge_start_level_ = last_recorded_level_;
+        } else {
+            charge_start_level_ = battery_level_;
+        }
+        charge_start_time_us_ = esp_timer_get_time();
+        is_charging_simulation_active_ = true;
+        is_fully_charged_ = false;
+        
+        // 计算充满所需时间（小时）
+        // 需要充的电量百分比 = 100 - charge_start_level_
+        // 需要充的容量(mAh) = (100 - charge_start_level_) / 100 * BATTERY_CAPACITY_MAH
+        // 充满时间(小时) = 需要充的容量 / 充电电流
+        // 充满时间(秒) = 充满时间(小时) * 3600
+        uint32_t charge_percent_needed = 100 - charge_start_level_;
+        uint32_t charge_capacity_needed_mah = (charge_percent_needed * BATTERY_CAPACITY_MAH) / 100;
+        uint32_t charge_time_seconds = (charge_capacity_needed_mah * 3600) / CHARGE_CURRENT_MA;
+        
+        ESP_LOGI("PowerManager", "[充电模拟] 开始充电模拟 - 起始电量: %d%%, 需要充: %" PRIu32 "%%, 预计充满时间: %" PRIu32 "秒 (%.2f小时)", 
+                 charge_start_level_, charge_percent_needed, charge_time_seconds, charge_time_seconds / 3600.0f);
+        ESP_LOGI("PowerManager", "[充电模拟] 电池容量: %" PRIu32 "mAh, 充电电流: %" PRIu32 "mA", BATTERY_CAPACITY_MAH, CHARGE_CURRENT_MA);
+    }
+
+    // 停止充电模拟
+    void StopChargingSimulation() {
+        if (is_charging_simulation_active_) {
+            ESP_LOGI("PowerManager", "[充电模拟] 停止充电模拟 - 当前电量: %d%%", battery_level_);
+            is_charging_simulation_active_ = false;
+            is_fully_charged_ = false;
+        }
+    }
+
+    // 更新充电模拟
+    void UpdateChargingSimulation() {
+        if (is_fully_charged_) {
+            return;  // 已经充满，不需要更新
+        }
+        
+        int64_t current_time_us = esp_timer_get_time();
+        int64_t elapsed_time_us = current_time_us - charge_start_time_us_;
+        int64_t elapsed_time_seconds = elapsed_time_us / 1000000;
+        
+        // 计算已充入的电量(mAh)
+        // 已充入容量 = (充电电流 * 已充电时间(小时))
+        uint32_t charged_capacity_mah = (CHARGE_CURRENT_MA * elapsed_time_seconds) / 3600;
+        
+        // 计算当前电量百分比
+        // 已充入的百分比 = (已充入容量 / 电池容量) * 100
+        uint32_t charged_percent = (charged_capacity_mah * 100) / BATTERY_CAPACITY_MAH;
+        uint8_t simulated_level = charge_start_level_ + charged_percent;
+        
+        if (simulated_level > 100) {
+            simulated_level = 100;
+        }
+        
+        // 更新电池电量（在充电状态下使用模拟值）
+        battery_level_ = simulated_level;
+        
+        // 检查是否充满
+        if (simulated_level >= 100 && !is_fully_charged_) {
+            is_fully_charged_ = true;
+            int64_t total_charge_time_seconds = elapsed_time_seconds;
+            ESP_LOGI("PowerManager", "[充电模拟] 电池已充满! 充电时间: %lld秒 (%.2f小时), 从 %d%% 充到 100%%", 
+                     total_charge_time_seconds, total_charge_time_seconds / 3600.0f, charge_start_level_);
+        }
+        
+        // 每10秒打印一次充电进度
+        static int64_t last_log_time = 0;
+        if (elapsed_time_seconds - last_log_time >= 10) {
+            last_log_time = elapsed_time_seconds;
+            ESP_LOGI("PowerManager", "[充电模拟] 充电进度 - 电量: %d%%, 已充电时间: %lld秒, 已充入: %" PRIu32 "mAh", 
+                     simulated_level, elapsed_time_seconds, charged_capacity_mah);
+        }
+    }
+
+    // 非充电状态下定期记录电量
+    void RecordBatteryLevelWhenNotCharging() {
+        int64_t current_time_us = esp_timer_get_time();
+        
+        // 首次记录或间隔时间到达
+        if (last_battery_record_time_us_ == 0 || 
+            (current_time_us - last_battery_record_time_us_) >= (BATTERY_RECORD_INTERVAL_MS * 1000)) {
+            last_recorded_level_ = battery_level_;
+            last_battery_record_time_us_ = current_time_us;
+            ESP_LOGI("PowerManager", "[电量记录] 非充电状态 - 记录电量: %d%%", battery_level_);
+        }
     }
 
 public:
@@ -210,6 +347,8 @@ public:
 
     uint8_t GetBatteryLevel() { return battery_level_; }
     
+    bool IsFullyCharged() { return is_fully_charged_; }
+    
     // 立即检测一次电量
     void CheckBatteryStatusImmediately() {
         CheckBatteryStatus();
@@ -231,7 +370,7 @@ public:
         vb6824_shutdown();
         vTaskDelay(pdMS_TO_TICKS(200));
         // 配置唤醒源 只有电源域是VDD3P3_RTC的才能唤醒深睡
-        uint64_t wakeup_pins = (BIT(GPIO_NUM_1) | BIT(COLLISION_BUTTON_GPIO));
+        uint64_t wakeup_pins = (BIT(GPIO_NUM_1));
         esp_deep_sleep_enable_gpio_wakeup(wakeup_pins, ESP_GPIO_WAKEUP_GPIO_LOW);
         ESP_LOGI("PowerMgr", "ready to esp_deep_sleep_start");
         vTaskDelay(pdMS_TO_TICKS(10));
