@@ -19,7 +19,7 @@
 #define DISPLAY_WIDTH   320
 #define DISPLAY_HEIGHT  240
 #define DISPLAY_MIRROR_X true
-#define DISPLAY_MIRROR_Y true
+#define DISPLAY_MIRROR_Y false
 #define DISPLAY_SWAP_XY true
 #define DISPLAY_INVERT_COLOR    true
 #define DISPLAY_RGB_ORDER  LCD_RGB_ELEMENT_ORDER_RGB
@@ -55,6 +55,10 @@
 #define ML307_RX_PIN GPIO_NUM_21
 #define ML307_TX_PIN GPIO_NUM_14
 #define ML307_EN GPIO_NUM_17
+
+// 耳机检测相关GPIO
+#define HPR_SIGN_PIN GPIO_NUM_6   // 耳机插入检测信号
+#define MCU_MUTE_PIN GPIO_NUM_10  // MCU静音控制信号
 
 // 自动生成的螺旋图像数据
 

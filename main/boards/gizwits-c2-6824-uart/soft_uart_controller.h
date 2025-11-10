@@ -226,7 +226,10 @@ private:
                                 motion_code_a_ = 0x00;
                                 motion_code_b_ = 0x00;
                                 motion_ms_remaining_ = 0;
-                                // Send stop frame
+                                // Send stop frame with rhythm
+                                vTaskDelay(pdMS_TO_TICKS(100));  // Sleep to maintain sending rhythm
+                                sendFrame(0x00, 0x00, 0x00);
+                                vTaskDelay(pdMS_TO_TICKS(100));  // Sleep to maintain sending rhythm
                                 sendFrame(0x00, 0x00, 0x00);
                                 ESP_LOGI("SoftUart", "Motion completed, checking queue for next");
                             }
