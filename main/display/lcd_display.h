@@ -80,6 +80,14 @@ protected:
     int countdown_seconds_ = 0;
     bool countdown_active_ = false;
 
+    // Video playback related members
+    TaskHandle_t video_task_handle_ = nullptr;
+    bool video_playing_ = false;
+    int video_group_index_ = 0;
+    lv_obj_t* video_img_ = nullptr;
+    lv_img_dsc_t video_img_dsc_{};
+    static constexpr int kVideoFrameDelayMs = 150;
+
     void SetupUI();
     void StartIdleCountdown();
     void StopIdleCountdown();
@@ -89,6 +97,11 @@ protected:
     static void CountdownTimerCallback(void* arg);
     virtual bool Lock(int timeout_ms = 0) override;
     virtual void Unlock() override;
+    
+    // Video playback methods
+    static void VideoPlayTask(void* arg);
+    void StartVideoPlayback();
+    void StopVideoPlayback();
 
 protected:
     // 添加protected构造函数
@@ -108,12 +121,20 @@ public:
     
     // Override SetStatus to handle countdown
     virtual void SetStatus(const char* status) override;
+    virtual void ShowNotification(const char* notification, int duration_ms = 3000) override;
+    virtual void UpdateStatusBar(bool update_all = false) override;
     
     // Override SetSocketConnected to handle clock display
     virtual void SetSocketConnected(bool connected) override;
     
     // Override SetChatMessage to handle container visibility
     virtual void SetChatMessage(const char* role, const char* content) override;
+    
+    // Play video from flash partition by group index
+    void PlayVideoGroup(int index);
+    
+    // Show background image (bg1) in content area
+    void ShowBackgroundImage();
 };
 
 // RGB LCD显示器

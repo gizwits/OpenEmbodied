@@ -6,11 +6,17 @@
 #include <esp_log.h>
 #include <esp_err.h>
 #include <esp_lvgl_port.h>
+#include <esp_partition.h>
+#include <esp_heap_caps.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/timers.h>
 #include "assets/lang_config.h"
 #include <cstring>
 #include <ctime>
 #include <sys/time.h>
 #include "settings.h"
+#include "ntp.h"
 
 #include "board.h"
 
@@ -118,8 +124,8 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
         .io_handle = panel_io_,
         .panel_handle = panel_,
         .control_handle = nullptr,
-        .buffer_size = static_cast<uint32_t>(width_ * 20),
-        .double_buffer = false,
+        .buffer_size = static_cast<uint32_t>(width_ * 40),
+        .double_buffer = true,
         .trans_size = 0,
         .hres = static_cast<uint32_t>(width_),
         .vres = static_cast<uint32_t>(height_),
@@ -282,6 +288,9 @@ LcdDisplay::~LcdDisplay() {
     // Clean up countdown timer first
     StopCountdown();
     
+    // Clean up video playback task
+    StopVideoPlayback();
+    
     // 然后再清理 LVGL 对象
     if (content_ != nullptr) {
         lv_obj_del(content_);
@@ -389,16 +398,19 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_align(notification_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(notification_label_, current_theme_.text, 0);
     lv_label_set_text(notification_label_, "");
+    lv_obj_set_style_pad_left(notification_label_, 20, 0);
+    lv_obj_set_style_pad_right(notification_label_, 20, 0);
     lv_obj_add_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_style_translate_y(notification_label_, 10, 0);
+    lv_obj_set_style_translate_y(notification_label_, 15, 0);  // 与 status_label_ 保持一致
 
     status_label_ = lv_label_create(status_bar_);
     lv_obj_set_flex_grow(status_label_, 1);
-    lv_label_set_long_mode(status_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    // 使用省略号模式，文字过长时显示省略号而不是被顶上去
+    lv_label_set_long_mode(status_label_, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_align(status_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(status_label_, current_theme_.text, 0);
     lv_label_set_text(status_label_, Lang::Strings::INITIALIZING);
-    lv_obj_set_style_translate_y(status_label_, 10, 0);
+    lv_obj_set_style_translate_y(status_label_, 15, 0);
     
     mute_label_ = lv_label_create(status_bar_);
     lv_label_set_text(mute_label_, "");
@@ -668,7 +680,8 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_radius(time_container, 15, 0);  // 圆角
     lv_obj_set_style_pad_all(time_container, 20, 0);  // 内边距
     lv_obj_set_style_border_width(time_container, 0, 0);  // 无边框
-    lv_obj_align(time_container, LV_ALIGN_CENTER, 0, 0);  // Align after setting size
+    lv_obj_add_flag(time_container, LV_OBJ_FLAG_FLOATING);  // 不受 flex 布局影响
+    lv_obj_align(time_container, LV_ALIGN_BOTTOM_MID, 0, -10);  // 底部居中，距离底部10px
     lv_obj_add_flag(time_container, LV_OBJ_FLAG_HIDDEN);  // 默认隐藏
     lv_obj_move_foreground(time_container);  // Ensure it's on top of background
     
@@ -691,7 +704,8 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_radius(chat_container_, 10, 0);  // 圆角
     lv_obj_set_style_pad_all(chat_container_, 15, 0);  // 内边距
     lv_obj_set_style_border_width(chat_container_, 0, 0);  // 无边框
-    lv_obj_align(chat_container_, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_add_flag(chat_container_, LV_OBJ_FLAG_FLOATING);  // 不受 flex 布局影响
+    lv_obj_align(chat_container_, LV_ALIGN_BOTTOM_MID, 0, -10);  // 底部居中，距离底部10px
     lv_obj_add_flag(chat_container_, LV_OBJ_FLAG_HIDDEN);  // 默认隐藏，只有有内容时才显示
     
     chat_message_label_ = lv_label_create(chat_container_);
@@ -714,28 +728,31 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_color(network_label_, current_theme_.text, 0);
     // Move network icon inward to avoid left rounded corner
     lv_obj_set_style_translate_x(network_label_, 25, 0);  // Move 5px to the right
-    lv_obj_set_style_translate_y(network_label_, 10, 0);
+    lv_obj_set_style_translate_y(network_label_, 14, 0);
 
     notification_label_ = lv_label_create(status_bar_);
     lv_obj_set_flex_grow(notification_label_, 1);
     lv_obj_set_style_text_align(notification_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(notification_label_, current_theme_.text, 0);
     lv_label_set_text(notification_label_, "");
+    lv_obj_set_style_pad_left(notification_label_, 20, 0);
+    lv_obj_set_style_pad_right(notification_label_, 20, 0);
     lv_obj_add_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_style_translate_y(notification_label_, 10, 0);
+    lv_obj_set_style_translate_y(notification_label_, 15, 0);  // 与 status_label_ 保持一致
 
     status_label_ = lv_label_create(status_bar_);
     lv_obj_set_flex_grow(status_label_, 1);
-    lv_label_set_long_mode(status_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    // 使用省略号模式，文字过长时显示省略号而不是被顶上去
+    lv_label_set_long_mode(status_label_, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_align(status_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(status_label_, current_theme_.text, 0);
     lv_label_set_text(status_label_, Lang::Strings::INITIALIZING);
-    lv_obj_set_style_translate_y(status_label_, 10, 0);
+    lv_obj_set_style_translate_y(status_label_, 15, 0);
     mute_label_ = lv_label_create(status_bar_);
     lv_label_set_text(mute_label_, "");
     lv_obj_set_style_text_font(mute_label_, fonts_.icon_font, 0);
     lv_obj_set_style_text_color(mute_label_, current_theme_.text, 0);
-    lv_obj_set_style_translate_y(mute_label_, 10, 0);
+    lv_obj_set_style_translate_y(mute_label_, 15, 0);
 
     battery_label_ = lv_label_create(status_bar_);
     lv_label_set_text(battery_label_, "");
@@ -1036,6 +1053,36 @@ void LcdDisplay::SetStatus(const char* status) {
     // No longer handle clock display here - now handled by SetSocketConnected
 }
 
+void LcdDisplay::ShowNotification(const char* notification, int duration_ms) {
+    DisplayLockGuard lock(this);
+    
+    // 调用父类方法显示通知
+    Display::ShowNotification(notification, duration_ms);
+    
+    // 当显示通知时，隐藏时间容器
+    if (emotion_label_ != nullptr && countdown_active_) {
+        lv_obj_t* time_container = lv_obj_get_parent(emotion_label_);
+        if (time_container != nullptr) {
+            lv_obj_add_flag(time_container, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
+void LcdDisplay::UpdateStatusBar(bool update_all) {
+    // 调用父类方法更新状态栏
+    Display::UpdateStatusBar(update_all);
+    
+    // 检查低电量弹窗是否显示，如果显示则隐藏时间容器
+    if (emotion_label_ != nullptr && countdown_active_) {
+        if (low_battery_popup_ != nullptr && !lv_obj_has_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN)) {
+            lv_obj_t* time_container = lv_obj_get_parent(emotion_label_);
+            if (time_container != nullptr) {
+                lv_obj_add_flag(time_container, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+    }
+}
+
 void LcdDisplay::SetChatMessage(const char* role, const char* content) {
     DisplayLockGuard lock(this);
     if (chat_message_label_ == nullptr || chat_container_ == nullptr) {
@@ -1058,29 +1105,18 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
 void LcdDisplay::SetSocketConnected(bool connected) {
     ESP_LOGI(TAG, "SetSocketConnected: %s", connected ? "connected" : "disconnected");
     
-    DisplayLockGuard lock(this);
-    
-    // Switch background image
-    if (background_image_ != nullptr) {
-        if (connected) {
-            // Socket connected - show bg_2_img
-            lv_image_set_src(background_image_, &bg_2_img);
-        } else {
-            // Socket disconnected - show bg_1_img
-            lv_image_set_src(background_image_, &bg_1_img);
-        }
-        // Ensure background stays in background
-        lv_obj_move_background(background_image_);
-    }
-    
     if (!connected) {
         // Show clock when socket is not connected
         ESP_LOGI(TAG, "Socket disconnected, showing clock");
         StartIdleCountdown();
+        ShowBackgroundImage();
+
     } else {
         // Hide clock when socket is connected
         ESP_LOGI(TAG, "Socket connected, hiding clock");
         StopIdleCountdown();
+        PlayVideoGroup(0);  // 播放第0组视频
+
     }
 }
 
@@ -1101,15 +1137,21 @@ void LcdDisplay::StartIdleCountdown() {
             lv_obj_set_style_text_font(emotion_label_, fonts_.text_font, 0);
         }
         
-        // 显示时间容器（包含 emotion_label_）
+        // 只有在 NTP 同步成功时才显示时间容器（包括框框）
         lv_obj_t* time_container = lv_obj_get_parent(emotion_label_);
         if (time_container != nullptr) {
-            lv_obj_clear_flag(time_container, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_move_foreground(time_container);  // Move to front when showing
+            if (NtpClient::GetInstance().IsSynced()) {
+                lv_obj_clear_flag(time_container, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_move_foreground(time_container);  // Move to front when showing
+            } else {
+                // NTP 未同步，隐藏时间容器（包括框框）
+                lv_obj_add_flag(time_container, LV_OBJ_FLAG_HIDDEN);
+            }
         }
         
-        UpdateCountdownDisplay();  // Update immediately to show current time
-        ESP_LOGI(TAG, "Clock display initialized on emotion_label_, font: %p", fonts_.text_font);
+        UpdateCountdownDisplay();  // Update immediately to show current time or placeholder
+        ESP_LOGI(TAG, "Clock display initialized on emotion_label_, font: %p, NTP synced: %d", 
+                 fonts_.text_font, NtpClient::GetInstance().IsSynced());
         
         // Debug: check if label is visible
         bool is_hidden = lv_obj_has_flag(emotion_label_, LV_OBJ_FLAG_HIDDEN);
@@ -1200,6 +1242,39 @@ void LcdDisplay::UpdateCountdownDisplay() {
         return;
     }
     
+    // 检查是否有通知或错误显示（低电量弹窗）
+    bool has_notification = false;
+    if (notification_label_ != nullptr && !lv_obj_has_flag(notification_label_, LV_OBJ_FLAG_HIDDEN)) {
+        has_notification = true;
+    }
+    if (low_battery_popup_ != nullptr && !lv_obj_has_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN)) {
+        has_notification = true;
+    }
+    
+    // 如果有通知或错误，隐藏时间容器
+    lv_obj_t* time_container = lv_obj_get_parent(emotion_label_);
+    if (time_container != nullptr) {
+        if (has_notification) {
+            lv_obj_add_flag(time_container, LV_OBJ_FLAG_HIDDEN);
+            return;
+        }
+    }
+    
+    // 检查 NTP 是否已同步，只有同步成功才显示时间
+    if (!NtpClient::GetInstance().IsSynced()) {
+        // NTP 未同步，隐藏时间容器（包括框框）
+        if (time_container != nullptr) {
+            lv_obj_add_flag(time_container, LV_OBJ_FLAG_HIDDEN);
+        }
+        ESP_LOGD(TAG, "NTP not synced, hiding time container");
+        return;
+    }
+    
+    // NTP 已同步，显示时间容器
+    if (time_container != nullptr) {
+        lv_obj_clear_flag(time_container, LV_OBJ_FLAG_HIDDEN);
+    }
+    
     // Get current time
     time_t now;
     struct tm timeinfo;
@@ -1227,4 +1302,225 @@ void LcdDisplay::CountdownTimerCallback(void* arg) {
         display->UpdateCountdownDisplay();
         display->Unlock();
     }
+}
+
+void LcdDisplay::VideoPlayTask(void* arg) {
+    auto* self = static_cast<LcdDisplay*>(arg);
+    const esp_partition_t* part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "video");
+    if (!part) {
+        ESP_LOGE(TAG, "video partition not found");
+        self->video_playing_ = false;
+        vTaskDelete(nullptr);
+        return;
+    }
+    
+    // Read header: 1 byte count + N*4 bytes frame counts
+    uint8_t group_count = 0;
+    if (esp_partition_read(part, 0, &group_count, 1) != ESP_OK || group_count == 0) {
+        ESP_LOGE(TAG, "invalid video header");
+        self->video_playing_ = false;
+        vTaskDelete(nullptr);
+        return;
+    }
+    
+    std::vector<uint32_t> frame_counts(group_count, 0);
+    if (esp_partition_read(part, 1, frame_counts.data(), group_count * sizeof(uint32_t)) != ESP_OK) {
+        ESP_LOGE(TAG, "read frame counts failed");
+        self->video_playing_ = false;
+        vTaskDelete(nullptr);
+        return;
+    }
+    
+    // Compute offsets
+    const uint32_t frame_size = self->width_ * self->height_ * 2;
+    uint32_t data_offset = 1 + group_count * sizeof(uint32_t);
+    std::vector<uint32_t> group_base(group_count, 0);
+    uint32_t acc_frames = 0;
+    for (int i = 0; i < group_count; ++i) {
+        group_base[i] = data_offset + acc_frames * frame_size;
+        acc_frames += frame_counts[i];
+    }
+    
+    int g = self->video_group_index_;
+    if (g < 0 || g >= group_count) g = 0;
+    uint32_t frames = frame_counts[g];
+    ESP_LOGI(TAG, "Video header: groups=%u, frame_size=%u, data_offset=%u, play_group=%d, frames_in_group=%u, group_base=%u",
+             (unsigned)group_count, (unsigned)frame_size, (unsigned)data_offset, g, (unsigned)frames, (unsigned)group_base[g]);
+    
+    if (frames == 0) {
+        self->video_playing_ = false;
+        vTaskDelete(nullptr);
+        return;
+    }
+    
+    // Allocate frame buffer
+    // Prefer DMA-capable internal memory for SPI DMA
+    uint8_t* buf = (uint8_t*)heap_caps_malloc(frame_size, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    if (!buf) buf = (uint8_t*)heap_caps_malloc(frame_size, MALLOC_CAP_DMA);
+    if (!buf) buf = (uint8_t*)heap_caps_malloc(frame_size, MALLOC_CAP_INTERNAL);
+    if (!buf) buf = (uint8_t*)malloc(frame_size);
+    if (!buf) {
+        ESP_LOGE(TAG, "no memory for frame buffer");
+        self->video_playing_ = false;
+        vTaskDelete(nullptr);
+        return;
+    }
+    
+    // Read first frame and set to image, then display, to avoid black screen scan when switching groups
+    uint32_t idx = 0;
+    {
+        size_t off0 = group_base[g] + idx * frame_size;
+        if (esp_partition_read(part, off0, buf, frame_size) != ESP_OK) {
+            ESP_LOGE(TAG, "read first frame %u failed", (unsigned int)idx);
+            free(buf);
+            self->video_playing_ = false;
+            vTaskDelete(nullptr);
+            return;
+        }
+        
+        if (self->Lock(50)) {
+            if (self->video_img_ == nullptr) {
+                // Create video image in content area (replace background_image_)
+                if (self->content_ != nullptr) {
+                    self->video_img_ = lv_image_create(self->content_);
+                    lv_obj_set_size(self->video_img_, self->width_, self->height_);
+                    lv_obj_set_pos(self->video_img_, -5, -5);  // Adjust position to cover padding
+                    lv_obj_clear_flag(self->video_img_, LV_OBJ_FLAG_SCROLLABLE);
+                    lv_obj_add_flag(self->video_img_, LV_OBJ_FLAG_FLOATING);
+                    lv_obj_move_background(self->video_img_);  // Move to background layer
+                }
+            }
+            
+            self->video_img_dsc_.header.w = self->width_;
+            self->video_img_dsc_.header.h = self->height_;
+            self->video_img_dsc_.header.cf = LV_COLOR_FORMAT_RGB565;
+            self->video_img_dsc_.data = buf;
+            self->video_img_dsc_.data_size = frame_size;
+            lv_img_set_src(self->video_img_, &self->video_img_dsc_);
+            lv_obj_move_background(self->video_img_);
+            lv_obj_clear_flag(self->video_img_, LV_OBJ_FLAG_HIDDEN);
+            self->Unlock();
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(self->kVideoFrameDelayMs));
+        idx = (idx + 1) % frames;
+    }
+    
+    while (self->video_playing_) {
+        size_t off = group_base[g] + idx * frame_size;
+        if (esp_partition_read(part, off, buf, frame_size) != ESP_OK) {
+            ESP_LOGE(TAG, "read frame %u failed", (unsigned int)idx);
+            break;
+        }
+        
+        // Short lock per frame, update LVGL image (reduce lock time to avoid blocking audio task)
+        if (self->Lock(20)) {  // Reduced to 20ms for faster lock release
+            self->video_img_dsc_.header.w = self->width_;
+            self->video_img_dsc_.header.h = self->height_;
+            self->video_img_dsc_.header.cf = LV_COLOR_FORMAT_RGB565;
+            self->video_img_dsc_.data = buf;
+            self->video_img_dsc_.data_size = frame_size;
+            lv_img_set_src(self->video_img_, &self->video_img_dsc_);
+            self->Unlock();
+        }
+        
+        if ((idx % 10) == 0) {
+            ESP_LOGI(TAG, "Playing group=%d idx=%u/%u off=%u", g, (unsigned)idx, (unsigned)frames, (unsigned)off);
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(self->kVideoFrameDelayMs));
+        idx = (idx + 1) % frames; // Loop play current group until key switch
+    }
+    
+    free(buf);
+    self->video_playing_ = false;
+    // Clean up task handle, allow subsequent start of new playback task
+    self->video_task_handle_ = nullptr;
+    vTaskDelete(nullptr);
+}
+
+void LcdDisplay::StartVideoPlayback() {
+    // If there's already a task running, stop and wait for exit
+    if (video_task_handle_ != nullptr) {
+        video_playing_ = false;
+        for (int i = 0; i < 50 && video_task_handle_ != nullptr; ++i) { // Wait up to 500ms
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+        video_task_handle_ = nullptr;
+    }
+    
+    ESP_LOGI(TAG, "StartVideoPlayback group=%d", video_group_index_);
+    video_playing_ = true;
+    // Lower priority from 5 to 1, avoid blocking audio task (audio task usually priority 3-4)
+    xTaskCreate(VideoPlayTask, "video_play", 4096, this, 1, &video_task_handle_);
+}
+
+void LcdDisplay::StopVideoPlayback() {
+    if (!video_playing_ && video_task_handle_ == nullptr) return;
+    video_playing_ = false;
+    // Wait for task to self-delete and clean up handle
+    for (int i = 0; i < 50 && video_task_handle_ != nullptr; ++i) { // Wait up to 500ms
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    video_task_handle_ = nullptr;
+}
+
+void LcdDisplay::ShowBackgroundImage() {
+    ESP_LOGI(TAG, "ShowBackgroundImage called");
+    
+    // Stop video playback if playing (outside lock to avoid deadlock)
+    if (video_playing_) {
+        StopVideoPlayback();
+    }
+    
+    DisplayLockGuard lock(this);
+    
+    // Hide video image if exists
+    if (video_img_ != nullptr) {
+        lv_obj_add_flag(video_img_, LV_OBJ_FLAG_HIDDEN);
+    }
+    
+    // Show background image (bg1)
+    if (background_image_ != nullptr) {
+        lv_image_set_src(background_image_, &bg_1_img);
+        lv_obj_clear_flag(background_image_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_background(background_image_);
+    }
+}
+
+void LcdDisplay::PlayVideoGroup(int index) {
+    ESP_LOGI(TAG, "PlayVideoGroup called with index=%d", index);
+    
+    // Validate index by reading partition
+    const esp_partition_t* part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "video");
+    if (!part) {
+        ESP_LOGE(TAG, "video partition not found");
+        return;
+    }
+    
+    uint8_t group_count = 0;
+    if (esp_partition_read(part, 0, &group_count, 1) != ESP_OK || group_count == 0) {
+        ESP_LOGE(TAG, "invalid video header or no groups");
+        return;
+    }
+    
+    if (index < 0 || index >= group_count) {
+        ESP_LOGE(TAG, "Invalid video group index %d, valid range: 0-%d", index, group_count - 1);
+        return;
+    }
+    
+    // Hide background image when starting video playback
+    {
+        DisplayLockGuard lock(this);
+        if (background_image_ != nullptr) {
+            lv_obj_add_flag(background_image_, LV_OBJ_FLAG_HIDDEN);
+        }
+    }  // Lock released here
+    
+    // Set group index and start playback
+    video_group_index_ = index;
+    if (video_playing_) {
+        StopVideoPlayback();
+    }
+    StartVideoPlayback();
 }
