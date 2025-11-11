@@ -296,16 +296,17 @@ private:
     // 设备关机方法
     // 关机行为与 xingbao 项目保持一致：拉低保持脚；若在充电，则重启以进入静默/充电逻辑
     virtual void PowerOff() override {
-        ESP_LOGI(TAG, "PowerOff called, setting POWER_HOLD_GPIO low");
+        ESP_LOGI(TAG, "PowerOff called");
+        
+        // 等待电量不足播报完成（如果正在播报）
+        ESP_LOGI(TAG, "等待电量不足播报完成...");
+        vTaskDelay(pdMS_TO_TICKS(3000));  // 等待3秒让电量不足播报完成
         
         // 关闭所有功能
         StopRgbLightEffect();
         motor_control_.Stop();
         motor_on_ = false;
         device_powered_on_ = false;
-        
-        // 先拉低电源保持引脚
-        gpio_set_level(POWER_HOLD_GPIO, 0);
         
         // 检查充电状态，如果在充电则重启（silent_next已在长按时保存）
         bool is_charging = PowerManager::GetInstance().IsCharging();
@@ -316,7 +317,26 @@ private:
             esp_restart();
             return;
         }
-        // 电池模式下，直接拉低保持脚即可真正关机
+        
+        // 电池模式下，关机前播报休眠提示音
+        {
+            auto codec = GetAudioCodec();
+            if (codec) {
+                codec->EnableOutput(true);
+            }
+            Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
+            vTaskDelay(pdMS_TO_TICKS(1500));
+        }
+        
+        // 拉低电源保持引脚，关闭电池供电
+        gpio_set_level(POWER_HOLD_GPIO, 0);
+        ESP_LOGI(TAG, "🔋 电源保持引脚已拉低，设备关机 (GPIO%d)", POWER_HOLD_GPIO);
+        
+        // 延时3秒
+        vTaskDelay(pdMS_TO_TICKS(3000));
+
+        // 进入深度睡眠
+        run_sleep_mode(false);
     }
     
     // 返回是否需要在充电时静默启动
