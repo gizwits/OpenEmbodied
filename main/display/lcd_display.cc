@@ -713,7 +713,7 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_font(network_label_, fonts_.icon_font, 0);
     lv_obj_set_style_text_color(network_label_, current_theme_.text, 0);
     // Move network icon inward to avoid left rounded corner
-    lv_obj_set_style_translate_x(network_label_, 30, 0);  // Move 5px to the right
+    lv_obj_set_style_translate_x(network_label_, 25, 0);  // Move 5px to the right
     lv_obj_set_style_translate_y(network_label_, 10, 0);
 
     notification_label_ = lv_label_create(status_bar_);
