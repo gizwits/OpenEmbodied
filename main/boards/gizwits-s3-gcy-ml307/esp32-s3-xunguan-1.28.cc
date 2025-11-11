@@ -40,6 +40,10 @@ LV_FONT_DECLARE(font_awesome_20_4);
 class MovecallMojiESP32S3 : public DualNetworkBoard {
 private:
     Button boot_button_;
+    Button volume_up_button_;
+    Button volume_down_button_;
+    Button reset_button_;
+    Button break_button_;
     SpiLcdDisplay* display_;
 
     bool need_power_off_ = false;
@@ -226,7 +230,7 @@ private:
     }
 
     int MaxBacklightBrightness() {
-        return 50;
+        return 100;
     }
 
     void InitializeChargingGpio() {
@@ -284,7 +288,7 @@ private:
         int hpr_level = gpio_get_level(HPR_SIGN_PIN);
         // HPR-SIGN为高时，有耳机插入，输出MCU MUTE为高
         // HPR-SIGN为低时，无耳机插入，输出MCU MUTE为低
-        gpio_set_level(MCU_MUTE_PIN, hpr_level);
+        gpio_set_level(MCU_MUTE_PIN, 0);
         ESP_LOGI(TAG, "HPR-SIGN: %d, MCU MUTE: %d", hpr_level, hpr_level);
     }
 
@@ -327,9 +331,6 @@ private:
                 return;
             }
             auto& app = Application::GetInstance();
-            // if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
-            //     InnerResetWifiConfiguration();
-            // }
             app.ToggleChatState();
             // display_->TestNextEmotion();
         });
@@ -357,8 +358,6 @@ private:
             }
         });
         boot_button_.OnPressUp([this]() {
-            // InnerResetWifiConfiguration();
-
             first_level = 1;
             ESP_LOGI(TAG, "boot_button_.OnPressUp");
             if (need_power_off_) {
@@ -382,9 +381,36 @@ private:
             }
         });
 
-        boot_button_.OnMultipleClick([this]() {
+        reset_button_.OnLongPress([this]() {
+            ESP_LOGI(TAG, "reset_button_.OnLongPress");
             InnerResetWifiConfiguration();
-        }, 3);
+        });
+
+        break_button_.OnPressDown([this]() {
+            Application::GetInstance().ToggleChatState();
+        });
+        
+        // Volume up button - short press to increase volume
+        volume_up_button_.OnClick([this]() {
+            auto codec = GetAudioCodec();
+            auto volume = codec->output_volume() + 10;
+            if (volume > 100) {
+                volume = 100;
+            }
+            codec->SetOutputVolume(volume);
+            ESP_LOGI(TAG, "Volume up: %d", volume);
+        });
+        
+        // Volume down button - short press to decrease volume
+        volume_down_button_.OnClick([this]() {
+            auto codec = GetAudioCodec();
+            auto volume = codec->output_volume() - 10;
+            if (volume < 0) {
+                volume = 0;
+            }
+            codec->SetOutputVolume(volume);
+            ESP_LOGI(TAG, "Volume down: %d", volume);
+        });
     }
 
     // 物联网初始化，添加对 AI 可见设备
@@ -470,7 +496,13 @@ private:
         return std::find(command_list.begin(), command_list.end(), command) != command_list.end();
     }
 public:
-    MovecallMojiESP32S3() : DualNetworkBoard(ML307_TX_PIN, ML307_RX_PIN, GPIO_NUM_NC, 1, UART_NUM_2),boot_button_(BOOT_BUTTON_GPIO),audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO) { 
+    MovecallMojiESP32S3() : DualNetworkBoard(ML307_TX_PIN, ML307_RX_PIN, GPIO_NUM_NC, 1, UART_NUM_2),
+        boot_button_(BOOT_BUTTON_GPIO),
+        volume_up_button_(VOLUME_UP_BUTTON_GPIO),
+        volume_down_button_(VOLUME_DOWN_BUTTON_GPIO),
+        reset_button_(RESET_BUTTON_GPIO),
+        break_button_(BREAK_BUTTON_GPIO),
+        audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO) { 
         // 记录上电时间
         power_on_time_ = esp_timer_get_time() / 1000; // 转换为毫秒
         ESP_LOGI(TAG, "设备启动，上电时间戳: %lld ms", power_on_time_);
@@ -619,6 +651,15 @@ public:
         static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
         return &backlight;
     }
+
+    virtual int GetPeriod() override { 
+        return 1; 
+    }
+    
+    virtual int GetMaxFrameNum() override { 
+        return 17;
+    }
+
 
     virtual bool IsCharging() override {
         int chrg = gpio_get_level(CHARGING_PIN);

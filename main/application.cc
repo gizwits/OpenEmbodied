@@ -476,6 +476,7 @@ void Application::Start() {
     // auto& ntp_client = NtpClient::GetInstance();
     // esp_err_t ntp_ret = ntp_client.Init();
     // if (ntp_ret == ESP_OK) {
+    //     ESP_LOGI(TAG, "Waiting for network to be fully ready before NTP sync...");
     //     ntp_client.StartSync();
     //     ESP_LOGI(TAG, "NTP client initialized and started");
     // } else {
@@ -483,6 +484,9 @@ void Application::Start() {
     // }
     // Update the status bar immediately to show the network state
     display->UpdateStatusBar(true);
+    
+    // Initially socket is not connected, show clock
+    display->SetSocketConnected(false);
     
     // 先创建protocol_，确保MQTT回调中能安全访问
 
@@ -511,16 +515,18 @@ void Application::Start() {
             audio_service_.PushPacketToDecodeQueue(std::move(packet_ptr));
         }
     });
-    protocol_->OnAudioChannelOpened([this, codec, &board]() {
+    protocol_->OnAudioChannelOpened([this, codec, &board, display]() {
         board.SetPowerSaveMode(false);
         if (protocol_->server_sample_rate() != codec->output_sample_rate()) {
             ESP_LOGW(TAG, "Server sample rate %d does not match device output sample rate %d, resampling may cause distortion",
                 protocol_->server_sample_rate(), codec->output_sample_rate());
         }
         MqttClient::getInstance().sendTraceLog("info", "socket 通道打开");
-
+        
+        // Notify display that socket is connected
+        display->SetSocketConnected(true);
     });
-    protocol_->OnAudioChannelClosed([this, &board](bool is_clean) {
+    protocol_->OnAudioChannelClosed([this, &board, display](bool is_clean) {
         ESP_LOGW("OnAudioChannelClosed", "is_clean: %d", is_clean);
         if (!is_clean) {
             ESP_LOGW(TAG, "Audio channel closed unexpectedly");
@@ -535,6 +541,9 @@ void Application::Start() {
 
         const char* msg = is_clean ? "socket 通道正常关闭" : "socket 通道异常断开";
         MqttClient::getInstance().sendTraceLog("info", msg);
+        
+        // Notify display that socket is disconnected
+        display->SetSocketConnected(false);
     });
     protocol_->OnIncomingJson([this, display](const cJSON* root) {
         // Parse JSON data
@@ -596,10 +605,12 @@ void Application::Start() {
                     return;
                 }
                 if (cJSON_IsString(text)) {
-                    // ESP_LOGI(TAG, "<< %s", text->valuestring);
-                    // Schedule([this, display, message = std::string(text->valuestring)]() {
-                    //     display->SetChatMessage("assistant", message.c_str());
-                    // }, "OnIncomingJson_TTS_SentenceStart");
+#ifndef CONFIG_IDF_TARGET_ESP32C2
+                    ESP_LOGI(TAG, "<< %s", text->valuestring);
+                    Schedule([this, display, message = std::string(text->valuestring)]() {
+                        display->SetChatMessage("assistant", message.c_str());
+                    }, "OnIncomingJson_TTS_SentenceStart");
+#endif
                 }
             }
         } else if (strcmp(type->valuestring, "stt") == 0) {
@@ -775,8 +786,8 @@ void Application::MainEventLoop() {
 
         // Process NTP sync - 每10次循环执行一次
         if (loop_counter % 10 == 0) {
-            auto& ntp_client = NtpClient::GetInstance();
-            ntp_client.ProcessSync();
+            // auto& ntp_client = NtpClient::GetInstance();
+            // ntp_client.ProcessSync();
         }
 
         

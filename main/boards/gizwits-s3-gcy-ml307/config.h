@@ -6,13 +6,13 @@
 #include <driver/gpio.h>
 #include <lvgl.h>
 
-#define AUDIO_INPUT_SAMPLE_RATE  24000
-#define AUDIO_OUTPUT_SAMPLE_RATE 24000
-#define AUDIO_INPUT_REFERENCE    true
-
-
-#define BOOT_BUTTON_GPIO        GPIO_NUM_41
+#define BOOT_BUTTON_GPIO        GPIO_NUM_41 // k1
 #define POWER_GPIO        GPIO_NUM_42
+#define RESET_BUTTON_GPIO        GPIO_NUM_2 // k2
+#define VOLUME_UP_BUTTON_GPIO   GPIO_NUM_7 // k3
+#define VOLUME_DOWN_BUTTON_GPIO   GPIO_NUM_0 // k4
+#define BREAK_BUTTON_GPIO   GPIO_NUM_16 // k5
+
 
 // ST7789W3 240x296 配置
 #define LCD_TYPE_ST7789_SERIAL
@@ -43,9 +43,9 @@
 #define TOUCH_BUTTON_GPIO GPIO_NUM_46
 
 #define CHARGING_PIN     GPIO_NUM_11   // CHRG pin
-#define STANDBY_PIN      GPIO_NUM_3    // STDBY pin
+#define STANDBY_PIN      GPIO_NUM_12    // STDBY pin
 
-#define BAT_ADC_CHANNEL  ADC_CHANNEL_1  // Battery voltage ADC channel
+#define BAT_ADC_CHANNEL  ADC_CHANNEL_2  // Battery voltage ADC channel
 #define BAT_ADC_ATTEN    ADC_ATTEN_DB_11 // ADC attenuation
 #define BAT_ADC_UNIT     ADC_UNIT_2
 #define POWER_CHARGE_LED_PIN GPIO_NUM_NC

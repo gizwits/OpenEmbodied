@@ -275,7 +275,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     std::string url = std::string("ws://") + room_params_.api_domain + std::string("/v1/chat") + std::string("?bot_id=") + std::string(room_params_.bot_id);
     std::string token = "Bearer " + std::string(room_params_.access_token);
 
-    message_cache_ = "";
+    // message_cache_ = "";
     auto network = Board::GetInstance().GetNetwork();
     websocket_ = network->CreateWebSocket(1);
     websocket_->SetHeader("Authorization", token.c_str());
@@ -511,7 +511,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 }
 
                 // 清理消息缓存，防止内存泄漏
-                message_cache_.clear();
+                // message_cache_.clear();
 
             } else if (event_type == "input_audio_buffer.speech_started") {
 
@@ -527,13 +527,13 @@ bool WebsocketProtocol::OpenAudioChannel() {
             } else if (event_type == "input_audio_buffer.speech_stopped") {
                 MqttClient::getInstance().sendTraceLog("info", "input_audio_buffer.speech_stopped");
                 ESP_LOGI(TAG, "input_audio_buffer.speech_stopped");
-            } else if (event_type == "conversation.message.delta") {
+            } else if (event_type == "conversation.audio.sentence_start") {
                 auto data_json = cJSON_GetObjectItem(root, "data");
-                auto content_json = cJSON_GetObjectItem(data_json, "content");
+                auto content_json = cJSON_GetObjectItem(data_json, "text");
+                auto content_text = std::string(content_json->valuestring);
 
-                message_cache_ += std::string(content_json->valuestring);
                 snprintf(message_buffer_, sizeof(message_buffer_), 
-                    "{\"type\":\"tts\",\"state\":\"sentence_start\",\"text\":\"%s\"}", message_cache_.c_str());
+                    "{\"type\":\"tts\",\"state\":\"sentence_start\",\"text\":\"%s\"}", content_text.c_str());
                 
                 auto message_json = cJSON_Parse(message_buffer_);
                 if (message_json) {
@@ -541,9 +541,9 @@ bool WebsocketProtocol::OpenAudioChannel() {
                     cJSON_Delete(message_json);
                 }
                 if (is_detect_emotion_ == false) {
-                    // 查找 message_cache_ 是否包含 emotions
+                    // 查找 content_text 是否包含 emotions
                     for (const auto& emotion : emotions) {
-                        if (message_cache_.find(emotion.icon) != std::string::npos) {
+                        if (content_text.find(emotion.icon) != std::string::npos) {
                             is_detect_emotion_ = true;
                             snprintf(message_buffer_, sizeof(message_buffer_), 
                                 "{\"type\":\"llm\",\"emotion\":\"%s\"}", emotion.text);
@@ -714,6 +714,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
 #ifndef CONFIG_IDF_TARGET_ESP32C2
     // C2 处理不过来
     message += "\"conversation.message.delta\",";
+    message += "\"conversation.audio.sentence_start\",";
+    message += "\"conversation.audio_transcript.update\",";
 #endif
     message += "\"input_audio_buffer.speech_stopped\"";
     message += "],";
@@ -799,7 +801,7 @@ void WebsocketProtocol::ParseServerHello(const cJSON* root) {
 
 void WebsocketProtocol::SwitchToSpeaking() {
     
-    message_cache_.clear();
+    // message_cache_.clear();
     snprintf(message_buffer_, sizeof(message_buffer_), 
         "{\"type\":\"tts\",\"state\":\"pre_start\"}");
     

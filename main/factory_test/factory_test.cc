@@ -19,6 +19,7 @@
 #include <string>
 #include <wifi_station.h>
 #include "config.h"
+#include "esp_wifi.h"
 
 static const char *TAG = "factory_test";
 

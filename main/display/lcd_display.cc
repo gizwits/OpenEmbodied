@@ -8,11 +8,17 @@
 #include <esp_lvgl_port.h>
 #include "assets/lang_config.h"
 #include <cstring>
+#include <ctime>
+#include <sys/time.h>
 #include "settings.h"
 
 #include "board.h"
 
 #define TAG "LcdDisplay"
+
+// External background images
+extern const lv_image_dsc_t bg_1_img;
+extern const lv_image_dsc_t bg_2_img;
 
 // Color definitions for dark theme
 #define DARK_BACKGROUND_COLOR       lv_color_hex(0x121212)     // Dark background
@@ -268,7 +274,14 @@ MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel
     SetupUI();
 }
 
+// Add background_image_ and chat_container_ as member variables (temporary storage)
+static lv_obj_t* background_image_ = nullptr;
+static lv_obj_t* chat_container_ = nullptr;
+
 LcdDisplay::~LcdDisplay() {
+    // Clean up countdown timer first
+    StopCountdown();
+    
     // 然后再清理 LVGL 对象
     if (content_ != nullptr) {
         lv_obj_del(content_);
@@ -608,65 +621,92 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_color(screen, current_theme_.text, 0);
     lv_obj_set_style_bg_color(screen, current_theme_.background, 0);
 
-    /* Container */
-    container_ = lv_obj_create(screen);
-    lv_obj_set_size(container_, LV_HOR_RES, LV_VER_RES);
-    lv_obj_set_flex_flow(container_, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(container_, 0, 0);
-    lv_obj_set_style_border_width(container_, 0, 0);
-    lv_obj_set_style_pad_row(container_, 0, 0);
-    lv_obj_set_style_bg_color(container_, current_theme_.background, 0);
-    lv_obj_set_style_border_color(container_, current_theme_.border, 0);
-
-    /* Status bar */
-    status_bar_ = lv_obj_create(container_);
-    lv_obj_set_size(status_bar_, LV_HOR_RES, fonts_.text_font->line_height);
-    lv_obj_set_style_radius(status_bar_, 0, 0);
-    lv_obj_set_style_bg_color(status_bar_, current_theme_.background, 0);
-    lv_obj_set_style_text_color(status_bar_, current_theme_.text, 0);
-    
-    /* Content */
-    content_ = lv_obj_create(container_);
+    /* Content - make it full screen */
+    content_ = lv_obj_create(screen);
     lv_obj_set_scrollbar_mode(content_, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_style_radius(content_, 0, 0);
-    lv_obj_set_width(content_, LV_HOR_RES);
-    lv_obj_set_flex_grow(content_, 1);
+    lv_obj_set_size(content_, LV_HOR_RES, LV_VER_RES);
+    lv_obj_set_pos(content_, 0, 0);
     lv_obj_set_style_pad_all(content_, 5, 0);
     lv_obj_set_style_bg_color(content_, current_theme_.chat_background, 0);
-    lv_obj_set_style_border_color(content_, current_theme_.border, 0); // Border color for content
+    lv_obj_set_style_border_width(content_, 0, 0);
+    
+    /* Background image - initially show bg_1_img (disconnected) */
+    background_image_ = lv_image_create(content_);
+    lv_image_set_src(background_image_, &bg_1_img);
+    lv_obj_set_size(background_image_, LV_HOR_RES, LV_VER_RES);
+    lv_obj_set_pos(background_image_, -5, -5);  // Adjust position to cover padding
+    lv_obj_clear_flag(background_image_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(background_image_, LV_OBJ_FLAG_FLOATING);  // Make it floating, not part of flex layout
+    lv_obj_move_background(background_image_);  // Move to background layer
+
+    /* Status bar - floating on top */
+    status_bar_ = lv_obj_create(screen);
+    lv_obj_set_size(status_bar_, LV_HOR_RES, fonts_.text_font->line_height);
+    lv_obj_set_pos(status_bar_, 0, 0);  // Position at top
+    lv_obj_set_style_radius(status_bar_, 0, 0);
+    lv_obj_set_style_bg_opa(status_bar_, LV_OPA_90, 0); 
+    lv_obj_set_style_bg_color(status_bar_, lv_color_white(), 0);  // White background
+    lv_obj_set_style_text_color(status_bar_, current_theme_.text, 0);
+    lv_obj_set_style_border_width(status_bar_, 0, 0);
 
     lv_obj_set_flex_flow(content_, LV_FLEX_FLOW_COLUMN); // 垂直布局（从上到下）
     lv_obj_set_flex_align(content_, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_SPACE_EVENLY); // 子对象居中对齐，等距分布
 
-    emotion_label_ = lv_label_create(content_);
-    lv_obj_set_style_text_font(emotion_label_, &font_awesome_30_4, 0);
+    // 创建时间显示容器（带白色透明背景和圆角）
+    lv_obj_t* time_container = lv_obj_create(content_);
+    lv_obj_set_size(time_container, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_color(time_container, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(time_container, LV_OPA_90, 0);  // 白色半透明，增加不透明度
+    lv_obj_set_style_radius(time_container, 15, 0);  // 圆角
+    lv_obj_set_style_pad_all(time_container, 20, 0);  // 内边距
+    lv_obj_set_style_border_width(time_container, 0, 0);  // 无边框
+    lv_obj_align(time_container, LV_ALIGN_CENTER, 0, 0);  // Align after setting size
+    lv_obj_add_flag(time_container, LV_OBJ_FLAG_HIDDEN);  // 默认隐藏
+    lv_obj_move_foreground(time_container);  // Ensure it's on top of background
+    
+    emotion_label_ = lv_label_create(time_container);
+    lv_obj_set_style_text_font(emotion_label_, fonts_.text_font, 0);
     lv_obj_set_style_text_color(emotion_label_, current_theme_.text, 0);
-    lv_label_set_text(emotion_label_, FONT_AWESOME_AI_CHIP);
+    lv_label_set_text(emotion_label_, "00:00:00");  // Initial countdown text
+    lv_obj_center(emotion_label_);  // 在容器中居中
 
     preview_image_ = lv_image_create(content_);
     lv_obj_set_size(preview_image_, width_ * 0.5, height_ * 0.5);
     lv_obj_align(preview_image_, LV_ALIGN_CENTER, 0, 0);
     lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
 
-    chat_message_label_ = lv_label_create(content_);
+    // 创建字幕容器（带白色透明背景和圆角）
+    chat_container_ = lv_obj_create(content_);
+    lv_obj_set_size(chat_container_, LV_HOR_RES * 0.9, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_color(chat_container_, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(chat_container_, LV_OPA_90, 0);  // 白色半透明
+    lv_obj_set_style_radius(chat_container_, 10, 0);  // 圆角
+    lv_obj_set_style_pad_all(chat_container_, 15, 0);  // 内边距
+    lv_obj_set_style_border_width(chat_container_, 0, 0);  // 无边框
+    lv_obj_align(chat_container_, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_add_flag(chat_container_, LV_OBJ_FLAG_HIDDEN);  // 默认隐藏，只有有内容时才显示
+    
+    chat_message_label_ = lv_label_create(chat_container_);
     lv_label_set_text(chat_message_label_, "");
-    lv_obj_set_width(chat_message_label_, LV_HOR_RES * 0.9); // 限制宽度为屏幕宽度的 90%
+    lv_obj_set_width(chat_message_label_, LV_PCT(100)); // 使用容器的全部宽度
     lv_label_set_long_mode(chat_message_label_, LV_LABEL_LONG_WRAP); // 设置为自动换行模式
     lv_obj_set_style_text_align(chat_message_label_, LV_TEXT_ALIGN_CENTER, 0); // 设置文本居中对齐
     lv_obj_set_style_text_color(chat_message_label_, current_theme_.text, 0);
 
-    /* Status bar */
+    /* Status bar layout */
     lv_obj_set_flex_flow(status_bar_, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_all(status_bar_, 0, 0);
-    lv_obj_set_style_border_width(status_bar_, 0, 0);
-    lv_obj_set_style_pad_column(status_bar_, 0, 0);
-    lv_obj_set_style_pad_left(status_bar_, 2, 0);
-    lv_obj_set_style_pad_right(status_bar_, 2, 0);
+    lv_obj_set_style_pad_column(status_bar_, 5, 0);
+    lv_obj_set_style_pad_left(status_bar_, 5, 0);  // Less padding needed with translate
+    lv_obj_set_style_pad_right(status_bar_, 5, 0); // Less padding needed with translate
 
     network_label_ = lv_label_create(status_bar_);
     lv_label_set_text(network_label_, "");
     lv_obj_set_style_text_font(network_label_, fonts_.icon_font, 0);
     lv_obj_set_style_text_color(network_label_, current_theme_.text, 0);
+    // Move network icon inward to avoid left rounded corner
+    lv_obj_set_style_translate_x(network_label_, 35, 0);  // Move 5px to the right
 
     notification_label_ = lv_label_create(status_bar_);
     lv_obj_set_flex_grow(notification_label_, 1);
@@ -690,6 +730,8 @@ void LcdDisplay::SetupUI() {
     lv_label_set_text(battery_label_, "");
     lv_obj_set_style_text_font(battery_label_, fonts_.icon_font, 0);
     lv_obj_set_style_text_color(battery_label_, current_theme_.text, 0);
+    // Move battery icon inward to avoid right rounded corner
+    lv_obj_set_style_translate_x(battery_label_, -40, 0);  // Move 5px to the left
 
     low_battery_popup_ = lv_obj_create(screen);
     lv_obj_set_scrollbar_mode(low_battery_popup_, LV_SCROLLBAR_MODE_OFF);
@@ -706,70 +748,44 @@ void LcdDisplay::SetupUI() {
 #endif
 
 void LcdDisplay::SetEmotion(const char* emotion) {
-    struct Emotion {
-        const char* icon;
-        const char* text;
-    };
-
-    static const std::vector<Emotion> emotions = {
-        {"😶", "neutral"},
-        {"🙂", "happy"},
-        {"😆", "laughing"},
-        {"😂", "funny"},
-        {"😔", "sad"},
-        {"😠", "angry"},
-        {"😭", "crying"},
-        {"😍", "loving"},
-        {"😳", "embarrassed"},
-        {"😯", "surprised"},
-        {"😱", "shocked"},
-        {"🤔", "thinking"},
-        {"😉", "winking"},
-        {"😎", "cool"},
-        {"😌", "relaxed"},
-        {"🤤", "delicious"},
-        {"😘", "kissy"},
-        {"😏", "confident"},
-        {"😴", "sleepy"},
-        {"😜", "silly"},
-        {"🙄", "confused"}
-    };
+    // Don't hide if countdown is active
+    if (countdown_active_) {
+        ESP_LOGD(TAG, "SetEmotion called but countdown is active, ignoring");
+        return;
+    }
     
-    // 查找匹配的表情
-    std::string_view emotion_view(emotion);
-    auto it = std::find_if(emotions.begin(), emotions.end(),
-        [&emotion_view](const Emotion& e) { return e.text == emotion_view; });
-
     DisplayLockGuard lock(this);
     if (emotion_label_ == nullptr) {
         return;
     }
-
-    // 如果找到匹配的表情就显示对应图标，否则显示默认的neutral表情
-    lv_obj_set_style_text_font(emotion_label_, fonts_.emoji_font, 0);
-    if (it != emotions.end()) {
-        lv_label_set_text(emotion_label_, it->icon);
-    } else {
-        lv_label_set_text(emotion_label_, "😶");
-    }
     
-    // 显示emotion_label_，隐藏preview_image_
-    lv_obj_clear_flag(emotion_label_, LV_OBJ_FLAG_HIDDEN);
+    // Hide time container (which contains emotion_label_) and preview_image_ only if countdown is not active
+    lv_obj_t* time_container = lv_obj_get_parent(emotion_label_);
+    if (time_container != nullptr) {
+        lv_obj_add_flag(time_container, LV_OBJ_FLAG_HIDDEN);
+    }
     if (preview_image_ != nullptr) {
         lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
 void LcdDisplay::SetIcon(const char* icon) {
+    // Don't hide if countdown is active
+    if (countdown_active_) {
+        ESP_LOGD(TAG, "SetIcon called but countdown is active, ignoring");
+        return;
+    }
+    
     DisplayLockGuard lock(this);
     if (emotion_label_ == nullptr) {
         return;
     }
-    lv_obj_set_style_text_font(emotion_label_, &font_awesome_30_4, 0);
-    lv_label_set_text(emotion_label_, icon);
     
-    // 显示emotion_label_，隐藏preview_image_
-    lv_obj_clear_flag(emotion_label_, LV_OBJ_FLAG_HIDDEN);
+    // Hide time container (which contains emotion_label_) and preview_image_ only if countdown is not active
+    lv_obj_t* time_container = lv_obj_get_parent(emotion_label_);
+    if (time_container != nullptr) {
+        lv_obj_add_flag(time_container, LV_OBJ_FLAG_HIDDEN);
+    }
     if (preview_image_ != nullptr) {
         lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
     }
@@ -787,15 +803,21 @@ void LcdDisplay::SetPreviewImage(const lv_img_dsc_t* img_dsc) {
         // 设置图片源并显示预览图片
         lv_img_set_src(preview_image_, img_dsc);
         lv_obj_clear_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
-        // 隐藏emotion_label_
+        // 隐藏时间容器（包含 emotion_label_）
         if (emotion_label_ != nullptr) {
-            lv_obj_add_flag(emotion_label_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_t* time_container = lv_obj_get_parent(emotion_label_);
+            if (time_container != nullptr) {
+                lv_obj_add_flag(time_container, LV_OBJ_FLAG_HIDDEN);
+            }
         }
     } else {
-        // 隐藏预览图片并显示emotion_label_
+        // 隐藏预览图片并显示时间容器（包含 emotion_label_）
         lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
         if (emotion_label_ != nullptr) {
-            lv_obj_clear_flag(emotion_label_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_t* time_container = lv_obj_get_parent(emotion_label_);
+            if (time_container != nullptr) {
+                lv_obj_clear_flag(time_container, LV_OBJ_FLAG_HIDDEN);
+            }
         }
     }
 }
@@ -991,4 +1013,206 @@ void LcdDisplay::SetTheme(const std::string& theme_name) {
 
     // No errors occurred. Save theme to settings
     Display::SetTheme(theme_name);
+}
+
+void LcdDisplay::SetStatus(const char* status) {
+    ESP_LOGI(TAG, "SetStatus called with: %s", status);
+    
+    // Call parent implementation
+    Display::SetStatus(status);
+    
+    // No longer handle clock display here - now handled by SetSocketConnected
+}
+
+void LcdDisplay::SetChatMessage(const char* role, const char* content) {
+    DisplayLockGuard lock(this);
+    if (chat_message_label_ == nullptr || chat_container_ == nullptr) {
+        return;
+    }
+    
+    // Set the message text
+    lv_label_set_text(chat_message_label_, content);
+    
+    // Show/hide container based on whether content is empty
+    if (content != nullptr && strlen(content) > 0) {
+        // Show container when there's content
+        lv_obj_clear_flag(chat_container_, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        // Hide container when content is empty
+        lv_obj_add_flag(chat_container_, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+void LcdDisplay::SetSocketConnected(bool connected) {
+    ESP_LOGI(TAG, "SetSocketConnected: %s", connected ? "connected" : "disconnected");
+    
+    DisplayLockGuard lock(this);
+    
+    // Switch background image
+    if (background_image_ != nullptr) {
+        if (connected) {
+            // Socket connected - show bg_2_img
+            lv_image_set_src(background_image_, &bg_2_img);
+        } else {
+            // Socket disconnected - show bg_1_img
+            lv_image_set_src(background_image_, &bg_1_img);
+        }
+        // Ensure background stays in background
+        lv_obj_move_background(background_image_);
+    }
+    
+    if (!connected) {
+        // Show clock when socket is not connected
+        ESP_LOGI(TAG, "Socket disconnected, showing clock");
+        StartIdleCountdown();
+    } else {
+        // Hide clock when socket is connected
+        ESP_LOGI(TAG, "Socket connected, hiding clock");
+        StopIdleCountdown();
+    }
+}
+
+void LcdDisplay::StartIdleCountdown() {
+    ESP_LOGI(TAG, "Starting clock display");
+    DisplayLockGuard lock(this);
+    
+    if (countdown_active_) {
+        StopCountdown();
+    }
+    
+    countdown_active_ = true;
+    
+    // Show emotion_label_ for clock display
+    if (emotion_label_ != nullptr) {
+        // Make sure we have a valid font
+        if (fonts_.text_font != nullptr) {
+            lv_obj_set_style_text_font(emotion_label_, fonts_.text_font, 0);
+        }
+        
+        // 显示时间容器（包含 emotion_label_）
+        lv_obj_t* time_container = lv_obj_get_parent(emotion_label_);
+        if (time_container != nullptr) {
+            lv_obj_clear_flag(time_container, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(time_container);  // Move to front when showing
+        }
+        
+        UpdateCountdownDisplay();  // Update immediately to show current time
+        ESP_LOGI(TAG, "Clock display initialized on emotion_label_, font: %p", fonts_.text_font);
+        
+        // Debug: check if label is visible
+        bool is_hidden = lv_obj_has_flag(emotion_label_, LV_OBJ_FLAG_HIDDEN);
+        ESP_LOGI(TAG, "emotion_label_ hidden flag: %d", is_hidden);
+    } else {
+        ESP_LOGW(TAG, "emotion_label_ is null!");
+    }
+    
+    // Hide preview image and chat message
+    if (preview_image_ != nullptr) {
+        lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (chat_message_label_ != nullptr) {
+        // 隐藏字幕容器（包含 chat_message_label_）
+        lv_obj_t* chat_container = lv_obj_get_parent(chat_message_label_);
+        if (chat_container != nullptr) {
+            lv_obj_add_flag(chat_container, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    
+    StartCountdown();  // Start timer to update clock every second
+}
+
+void LcdDisplay::StopIdleCountdown() {
+    ESP_LOGI(TAG, "Stopping clock display");
+    StopCountdown();
+    
+    // Hide the clock display and show chat message
+    DisplayLockGuard lock(this);
+    if (emotion_label_ != nullptr) {
+        // 隐藏时间容器（包含 emotion_label_）
+        lv_obj_t* time_container = lv_obj_get_parent(emotion_label_);
+        if (time_container != nullptr) {
+            lv_obj_add_flag(time_container, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    if (chat_message_label_ != nullptr) {
+        // 显示字幕容器（包含 chat_message_label_）
+        lv_obj_t* chat_container = lv_obj_get_parent(chat_message_label_);
+        if (chat_container != nullptr) {
+            lv_obj_clear_flag(chat_container, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
+void LcdDisplay::StartCountdown() {
+    if (countdown_timer_ != nullptr) {
+        esp_timer_stop(countdown_timer_);
+        esp_timer_delete(countdown_timer_);
+        countdown_timer_ = nullptr;
+    }
+    
+    esp_timer_create_args_t timer_args = {
+        .callback = CountdownTimerCallback,
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "countdown_timer",
+        .skip_unhandled_events = true,
+    };
+    
+    esp_err_t err = esp_timer_create(&timer_args, &countdown_timer_);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create countdown timer: %s", esp_err_to_name(err));
+        return;
+    }
+    
+    // Start timer with 1 second period
+    err = esp_timer_start_periodic(countdown_timer_, 1000000); // 1 second = 1,000,000 microseconds
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start countdown timer: %s", esp_err_to_name(err));
+        esp_timer_delete(countdown_timer_);
+        countdown_timer_ = nullptr;
+    }
+}
+
+void LcdDisplay::StopCountdown() {
+    countdown_active_ = false;
+    
+    if (countdown_timer_ != nullptr) {
+        esp_timer_stop(countdown_timer_);
+        esp_timer_delete(countdown_timer_);
+        countdown_timer_ = nullptr;
+    }
+}
+
+void LcdDisplay::UpdateCountdownDisplay() {
+    if (emotion_label_ == nullptr || !countdown_active_) {
+        return;
+    }
+    
+    // Get current time
+    time_t now;
+    struct tm timeinfo;
+    time(&now);
+    localtime_r(&now, &timeinfo);
+    
+    // Format time as HH:MM:SS
+    char time_str[16];
+    snprintf(time_str, sizeof(time_str), "%02d:%02d:%02d", 
+             timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+    
+    lv_label_set_text(emotion_label_, time_str);
+    ESP_LOGD(TAG, "Clock updated: %s", time_str);
+}
+
+void LcdDisplay::CountdownTimerCallback(void* arg) {
+    LcdDisplay* display = static_cast<LcdDisplay*>(arg);
+    
+    if (!display->countdown_active_) {
+        return;
+    }
+    
+    // Update clock display in LVGL context
+    if (display->Lock(100)) {
+        display->UpdateCountdownDisplay();
+        display->Unlock();
+    }
 }
