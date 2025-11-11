@@ -35,7 +35,7 @@
 
 
 #define RESET_WIFI_CONFIGURATION_COUNT 3
-#define SLEEP_TIME_SEC 10 * 1
+#define SLEEP_TIME_SEC 60 * 3
 
 // #define SLEEP_TIME_SEC 30
 class CustomBoard : public WifiBoard {
