@@ -54,7 +54,6 @@ void WifiBoard::EnterWifiConfigMode() {
     // 初始化 WiFi模块
 
     std::string hint = Lang::Strings::OPEN_MINI_APP;
-    hint += "\n\n";
     application.Alert(Lang::Strings::WIFI_CONFIG_MODE, hint.c_str(), "", Lang::Sounds::P3_WIFICONFIG);
 
 
