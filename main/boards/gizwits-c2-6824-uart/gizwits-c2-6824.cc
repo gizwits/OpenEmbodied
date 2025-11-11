@@ -343,6 +343,7 @@ public:
                     wifi_station.SetPowerSaveMode(false);
                     Application::GetInstance().ToggleChatState();
                     Application::GetInstance().PlaySound(Lang::Sounds::P3_SUCCESS);
+                  
                 });
             } else {
                 ESP_LOGI(TAG, "U0RXD=HIGH -> AI模块休眠");
@@ -351,6 +352,8 @@ public:
                     // 休眠模式：开启省电，降低功耗（保留连接）
                     Application::GetInstance().QuitTalking();
                     wifi_station.SetPowerSaveMode(true);
+                    // 关闭 6824
+                    vb6824_shutdown();
                 });
             }
         }, nullptr);

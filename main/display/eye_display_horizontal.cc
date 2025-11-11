@@ -154,6 +154,11 @@ void EyeDisplayHorizontal::SetEmotion(const char* emotion) {
         return;
     }
 
+    // 检查是否禁用表情切换
+    if (emotion_disabled_) {
+        ESP_LOGI(TAG, "Emotion disabled, ignore: %s", emotion);
+        return;
+    }
     // 将表情字符串复制到队列中
     char* emotion_copy = static_cast<char*>(pvPortMalloc(MAX_EMOTION_LENGTH));
     if (emotion_copy == nullptr) {
@@ -706,19 +711,22 @@ void EyeDisplayHorizontal::StartLovingAnimation() {
     left_heart_ = nullptr;
     right_heart_ = nullptr;
     
+    // 根据屏幕宽度计算眼距（使用屏幕宽度的25%作为每边偏移量）
+    int eye_spacing = width_ / 4;  // 屏幕宽度的25%，总眼距为屏幕宽度的50%
+    
     // 创建左眼爱心图片
     lv_obj_t* left_heart = lv_img_create(lv_screen_active());
     lv_img_set_src(left_heart, &hart_img);
     lv_obj_set_style_img_recolor(left_heart, lv_color_hex(EYE_COLOR), 0);  // 设置为白色
     lv_obj_set_style_img_recolor_opa(left_heart, LV_OPA_COVER, 0);  // 完全不透明
-    lv_obj_align(left_heart, LV_ALIGN_LEFT_MID, -20, -DISPLAY_VERTICAL_OFFSET);  // 左眼位置，向左偏移18像素增加间距
+    lv_obj_align(left_heart, LV_ALIGN_CENTER, -eye_spacing, -DISPLAY_VERTICAL_OFFSET);  // 从中心向左偏移，根据屏幕大小动态调整
  
     // 创建右眼爱心图片
     lv_obj_t* right_heart = lv_img_create(lv_screen_active());
     lv_img_set_src(right_heart, &hart_img);
     lv_obj_set_style_img_recolor(right_heart, lv_color_hex(EYE_COLOR), 0);  // 设置为白色
     lv_obj_set_style_img_recolor_opa(right_heart, LV_OPA_COVER, 0);  // 完全不透明
-    lv_obj_align(right_heart, LV_ALIGN_RIGHT_MID, 20, -DISPLAY_VERTICAL_OFFSET);  // 右眼位置，向右偏移18像素增加间距
+    lv_obj_align(right_heart, LV_ALIGN_CENTER, eye_spacing, -DISPLAY_VERTICAL_OFFSET);  // 从中心向右偏移，根据屏幕大小动态调整
  
     // 保存爱心对象指针，以便在状态切换时清理
     left_heart_ = left_heart;
@@ -1160,6 +1168,8 @@ void EyeDisplayHorizontal::TestNextEmotion() {
 } 
 
 void EyeDisplayHorizontal::EnterWifiConfig() {
+    // 禁用表情切换
+    emotion_disabled_ = true;
     ESP_LOGI(TAG, "EnterWifiConfig");
     if (qrcode_img_) {
         ESP_LOGI(TAG, "EnterWifiConfig qrcode_img_ is not null");
@@ -1181,7 +1191,9 @@ void EyeDisplayHorizontal::EnterWifiConfig() {
 
 void EyeDisplayHorizontal::EnterOTAMode() {
     ESP_LOGI(TAG, "EnterOTAMode");
-    
+
+    // 禁用表情切换
+    emotion_disabled_ = true;
     DisplayLockGuard lock(this);
     
     // 清空屏幕

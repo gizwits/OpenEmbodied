@@ -59,7 +59,7 @@
 #define CHARGING_PIN     GPIO_NUM_11   // CHRG pin
 #define STANDBY_PIN      GPIO_NUM_3    // STDBY pin
 
-#define BAT_ADC_CHANNEL  ADC_CHANNEL_1  // Battery voltage ADC channel
+#define BAT_ADC_CHANNEL  ADC_CHANNEL_2  // Battery voltage ADC channel
 #define BAT_ADC_ATTEN    ADC_ATTEN_DB_11 // ADC attenuation
 #define BAT_ADC_UNIT     ADC_UNIT_2
 #define POWER_CHARGE_LED_PIN GPIO_NUM_NC
