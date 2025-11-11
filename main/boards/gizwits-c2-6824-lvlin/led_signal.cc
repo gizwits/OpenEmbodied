@@ -5,6 +5,7 @@
 #include "driver/ledc.h"
 #include "power_manager.h"
 #include <wifi_station.h>
+#include "power_save_timer.h"
 
 #define TAG "LedSignal"
 
@@ -240,6 +241,15 @@ void LedSignal::MonitorAndUpdateLedState_timer() {
     ESP_ERROR_CHECK(esp_timer_start_periodic(timer_handle, 100 * 1000)); // 每100ms更新一次LED状态
 }
 
+// 辅助函数：检查定时器是否进入休眠模式
+static bool CheckPowerSaveTimerSleepMode() {
+    auto* power_save_timer = Board::GetInstance().GetPowerSaveTimer();
+    if (power_save_timer) {
+        return power_save_timer->IsInSleepMode();
+    }
+    return false;
+}
+
 void LedSignal::UpdateLedState() {
     bool was_working = false;
     bool was_charging = false;
@@ -249,6 +259,8 @@ void LedSignal::UpdateLedState() {
     static uint8_t last_red = 0;
     static uint8_t last_green = 0;
     static uint8_t last_blue = 0;
+    static auto wifi_config_start_time = std::chrono::steady_clock::now();
+    static bool was_in_wifi_config_mode = false;
 
     bool is_working = CheckIfWorking();
     bool is_charging = CheckIfCharging();
@@ -265,8 +277,39 @@ void LedSignal::UpdateLedState() {
     auto is_wifi_config_mode = Board::GetInstance().IsWifiConfigMode();
     WifiStation::GetInstance().IsConnected();
     bool wifi_connected = WifiStation::GetInstance().IsConnected();
-    // 配网模式下，一直闪烁
-    if ((!wifi_connected) || is_wifi_config_mode) {
+    
+    // 记录配网模式开始时间
+    if (is_wifi_config_mode && !was_in_wifi_config_mode) {
+        wifi_config_start_time = std::chrono::steady_clock::now();
+        was_in_wifi_config_mode = true;
+    } else if (!is_wifi_config_mode) {
+        was_in_wifi_config_mode = false;
+    }
+    
+    // 配网模式下，检查定时器是否已进入休眠模式
+    if (is_wifi_config_mode) {
+        // 检查定时器是否已进入休眠模式（使用辅助函数）
+        bool timer_in_sleep = CheckPowerSaveTimerSleepMode();
+        
+        // 如果定时器已进入休眠，显示充电状态灯（按照正常充电逻辑）
+        if (timer_in_sleep) {
+            // 超过30秒后，按照充电状态显示LED
+            if (is_fully_charged) {
+                green = rgb_value; // 绿色代表充满电
+            } else if (is_battery_low) {
+                red = rgb_value; // 红色代表电量低
+                need_blink = true; // 低电量需要闪烁
+            } else if (is_charging) {
+                red = rgb_value; // 红色代表充电中
+            } else {
+                red = green = blue = 0; // 关闭所有LED
+            }
+        } else {
+            // 30秒内，显示蓝灯闪烁
+            blue = rgb_value; // 蓝色闪烁代表非工作状态
+            need_blink = true;
+        }
+    } else if ((!wifi_connected)) {
         blue = rgb_value; // 蓝色闪烁代表非工作状态
         need_blink = true;
     } else if (is_working) {

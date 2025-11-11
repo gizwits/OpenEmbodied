@@ -184,6 +184,12 @@ private:
                     }
                     ESP_LOGI(TAG, "音频播放完成，准备关机");
                     Application::GetInstance().SetDeviceState(kDeviceStateIdle);
+                } else {
+                    // 充电模式下，禁用定时器，避免定时器再次触发休眠
+                    if (power_save_timer_) {
+                        power_save_timer_->SetEnabled(false);
+                        ESP_LOGI(TAG, "充电模式下长按关机，禁用PowerSaveTimer");
+                    }
                 }
                 PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
             }
@@ -204,6 +210,12 @@ private:
                     }
                     ESP_LOGI(TAG, "音频播放完成，准备关机");
                     Application::GetInstance().SetDeviceState(kDeviceStateIdle);
+                } else {
+                    // 充电模式下，禁用定时器，避免定时器再次触发休眠
+                    if (power_save_timer_) {
+                        power_save_timer_->SetEnabled(false);
+                        ESP_LOGI(TAG, "充电模式下长按关机，禁用PowerSaveTimer");
+                    }
                 }
                 PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
             }
@@ -324,7 +336,10 @@ public:
     virtual void WakeUpPowerSaveTimer() {
         sleep_flag_ = false;
         if (power_save_timer_) {
+            // 检测定时器是否已启用，如果没有开启就打开
+            power_save_timer_->SetEnabled(true);
             power_save_timer_->WakeUp();
+            ESP_LOGI(TAG, "唤醒定时器：确保定时器已启用并唤醒");
         }
     };
 
@@ -333,6 +348,11 @@ public:
 
     virtual bool NeedSilentStartup() override {
         return false;
+    }
+
+    // 低电量是否阻止启动（低电量时直接关机）
+    bool NeedBlockLowBattery() override {
+        return true;
     }
 
     virtual bool GetBatteryLevel(int &level, bool& charging, bool& discharging) override {
@@ -359,12 +379,36 @@ public:
         PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
     }
 
+    // 设备关机方法（低电量时调用）
+    virtual void PowerOff() override {
+        ESP_LOGI(TAG, "PowerOff called (低电量关机)");
+        
+        // 停止所有功能
+        Application::GetInstance().QuitTalking();
+        
+        // 检查充电状态
+        bool is_charging = PowerManager::GetInstance().IsCharging();
+        if (is_charging) {
+            // 充电中，只断开 socket，不进入深度睡眠
+            ESP_LOGI(TAG, "充电中，只断开连接");
+            return;
+        }
+        
+        // 电池模式下，进入深度睡眠
+        ESP_LOGI(TAG, "电池模式下低电量，进入深度睡眠");
+        PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
+    }
+
     virtual AudioCodec* GetAudioCodec() override {
         return &audio_codec;
     }
 
     void SetPowerSaveTimer(bool enable) {
         power_save_timer_->SetEnabled(enable);
+    }
+
+    PowerSaveTimer* GetPowerSaveTimer() override {
+        return power_save_timer_;
     }
 
     uint8_t GetBrightness() {
