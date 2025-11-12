@@ -386,7 +386,7 @@ void Application::Start() {
     Settings settings("wifi", true);
 
 #ifdef CONFIG_DEFAULT_CHAT_MODE
-    int default_chat_mode = std::stoi(CONFIG_DEFAULT_CHAT_MODE);
+    int default_chat_mode = CONFIG_DEFAULT_CHAT_MODE;
     chat_mode_ = settings.GetInt("chat_mode", default_chat_mode); // 0=按键说话, 1=唤醒词, 2=自然对话
 #else
     chat_mode_ = settings.GetInt("chat_mode", 1); // 0=按键说话, 1=唤醒词, 2=自然对话
@@ -562,6 +562,7 @@ void Application::Start() {
         if (strcmp(type->valuestring, "tts") == 0) {
             auto state = cJSON_GetObjectItem(root, "state");
             if (strcmp(state->valuestring, "start") == 0) {
+               
                 if (!has_emotion_) {
                     Schedule([this]() {
                         auto display = Board::GetInstance().GetDisplay();
@@ -575,6 +576,7 @@ void Application::Start() {
                 if (device_state_ == kDeviceStateIdle || device_state_ == kDeviceStateListening) {
                     SetDeviceState(kDeviceStateSpeaking);
                 }
+               
                 Schedule([this]() {
                     auto& board = Board::GetInstance();
                     if (board.NeedPlayProcessVoice() && chat_mode_ != 2) {
@@ -603,6 +605,7 @@ void Application::Start() {
                     }
                 }, "OnIncomingJson_TTS_Stop");
             } else if (strcmp(state->valuestring, "sentence_start") == 0) {
+
                 auto text = cJSON_GetObjectItem(root, "text");
                 if (!text || !cJSON_IsString(text)) {
                     ESP_LOGW(TAG, "Invalid JSON: missing or invalid 'text' field in tts sentence_start");
@@ -619,6 +622,15 @@ void Application::Start() {
             }
         } else if (strcmp(type->valuestring, "stt") == 0) {
             auto text = cJSON_GetObjectItem(root, "text");
+
+
+            Schedule([this]() {
+                if (device_state_ != kDeviceStateListening) {
+                    SetDeviceState(kDeviceStateListening);
+                }
+            }, "OnIncomingJson_STT_SentenceStart_SetListening");
+
+
             if (cJSON_IsString(text)) {
                 // ESP_LOGI(TAG, ">> %s", text->valuestring);
                 Schedule([this, display, message = std::string(text->valuestring)]() {

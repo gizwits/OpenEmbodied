@@ -8,10 +8,10 @@
 
 #define BOOT_BUTTON_GPIO        GPIO_NUM_41 // k1
 #define POWER_GPIO        GPIO_NUM_42
-#define RESET_BUTTON_GPIO        GPIO_NUM_2 // k2
+#define RESET_BUTTON_GPIO        GPIO_NUM_16 // k2
 #define VOLUME_UP_BUTTON_GPIO   GPIO_NUM_7 // k3
 #define VOLUME_DOWN_BUTTON_GPIO   GPIO_NUM_0 // k4
-#define BREAK_BUTTON_GPIO   GPIO_NUM_16 // k5
+#define BREAK_BUTTON_GPIO   GPIO_NUM_2 // k5
 
 
 // ST7789W3 240x296 配置

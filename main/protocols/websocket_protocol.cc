@@ -522,7 +522,10 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 // 自然对话才要打断
                 int chat_mode = app.GetChatMode();
                 if (chat_mode == 2) {
-                    app.AbortSpeaking(kAbortReasonNone);
+                    app.Schedule([this]() {
+                        auto& app = Application::GetInstance();
+                        app.AbortSpeaking(kAbortReasonNone);
+                    }, "input_audio_buffer.speech_started_AbortSpeaking");
                 }
             } else if (event_type == "input_audio_buffer.speech_stopped") {
                 MqttClient::getInstance().sendTraceLog("info", "input_audio_buffer.speech_stopped");

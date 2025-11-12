@@ -86,6 +86,7 @@ protected:
     int video_group_index_ = 0;
     lv_obj_t* video_img_ = nullptr;
     lv_img_dsc_t video_img_dsc_{};
+    uint8_t* first_frame_buf_ = nullptr;  // Buffer for first frame to avoid flicker
     static constexpr int kVideoFrameDelayMs = 150;
 
     void SetupUI();
@@ -102,6 +103,9 @@ protected:
     static void VideoPlayTask(void* arg);
     void StartVideoPlayback();
     void StopVideoPlayback();
+    
+    // Device state callback
+    void RegisterDeviceStateCallback();
 
 protected:
     // 添加protected构造函数

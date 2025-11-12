@@ -512,6 +512,10 @@ int MqttClient::getPublishedId() {
 
 void MqttClient::sendTraceLog(const char* level, const char* message) {
 
+    // 4G 模式不上报
+    if (Board::GetInstance().GetNetworkType() == NetworkType::ML307) {
+        return;
+    }
     // C2 先不上报
 #ifndef CONFIG_IDF_TARGET_ESP32C2
     // ESP_LOGI(TAG, "sendTraceLog: %s", message);

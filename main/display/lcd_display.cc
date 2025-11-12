@@ -17,6 +17,7 @@
 #include <sys/time.h>
 #include "settings.h"
 #include "ntp.h"
+#include "device_state_event.h"
 
 #include "board.h"
 
@@ -157,6 +158,7 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
     }
 
     SetupUI();
+    RegisterDeviceStateCallback();
 }
 
 // RGB LCD实现
@@ -220,6 +222,7 @@ RgbLcdDisplay::RgbLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
     }
 
     SetupUI();
+    RegisterDeviceStateCallback();
 }
 
 MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
@@ -278,6 +281,7 @@ MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel
     }
 
     SetupUI();
+    RegisterDeviceStateCallback();
 }
 
 // Add background_image_ and chat_container_ as member variables (temporary storage)
@@ -1109,13 +1113,13 @@ void LcdDisplay::SetSocketConnected(bool connected) {
         // Show clock when socket is not connected
         ESP_LOGI(TAG, "Socket disconnected, showing clock");
         StartIdleCountdown();
-        ShowBackgroundImage();
+        // ShowBackgroundImage();
 
     } else {
         // Hide clock when socket is connected
         ESP_LOGI(TAG, "Socket connected, hiding clock");
         StopIdleCountdown();
-        PlayVideoGroup(0);  // 播放第0组视频
+        // PlayVideoGroup(0);  // 播放第0组视频
 
     }
 }
@@ -1355,20 +1359,29 @@ void LcdDisplay::VideoPlayTask(void* arg) {
     
     // Allocate frame buffer
     // Prefer DMA-capable internal memory for SPI DMA
-    uint8_t* buf = (uint8_t*)heap_caps_malloc(frame_size, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-    if (!buf) buf = (uint8_t*)heap_caps_malloc(frame_size, MALLOC_CAP_DMA);
-    if (!buf) buf = (uint8_t*)heap_caps_malloc(frame_size, MALLOC_CAP_INTERNAL);
-    if (!buf) buf = (uint8_t*)malloc(frame_size);
-    if (!buf) {
-        ESP_LOGE(TAG, "no memory for frame buffer");
-        self->video_playing_ = false;
-        vTaskDelete(nullptr);
-        return;
-    }
+    uint8_t* buf = nullptr;
     
-    // Read first frame and set to image, then display, to avoid black screen scan when switching groups
-    uint32_t idx = 0;
-    {
+    // Check if first frame buffer was provided by PlayVideoGroup (to avoid flicker)
+    if (self->first_frame_buf_ != nullptr) {
+        // Use the pre-loaded first frame buffer
+        buf = self->first_frame_buf_;
+        self->first_frame_buf_ = nullptr;  // Clear the pointer, task now owns it
+        ESP_LOGI(TAG, "Using pre-loaded first frame buffer");
+    } else {
+        // Allocate new buffer
+        buf = (uint8_t*)heap_caps_malloc(frame_size, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+        if (!buf) buf = (uint8_t*)heap_caps_malloc(frame_size, MALLOC_CAP_DMA);
+        if (!buf) buf = (uint8_t*)heap_caps_malloc(frame_size, MALLOC_CAP_INTERNAL);
+        if (!buf) buf = (uint8_t*)malloc(frame_size);
+        if (!buf) {
+            ESP_LOGE(TAG, "no memory for frame buffer");
+            self->video_playing_ = false;
+            vTaskDelete(nullptr);
+            return;
+        }
+        
+        // Read first frame
+        uint32_t idx = 0;
         size_t off0 = group_base[g] + idx * frame_size;
         if (esp_partition_read(part, off0, buf, frame_size) != ESP_OK) {
             ESP_LOGE(TAG, "read first frame %u failed", (unsigned int)idx);
@@ -1377,7 +1390,12 @@ void LcdDisplay::VideoPlayTask(void* arg) {
             vTaskDelete(nullptr);
             return;
         }
-        
+    }
+    
+    // First frame is already displayed (either pre-loaded or just read)
+    // Update the image descriptor to use our buffer if needed
+    uint32_t idx = 0;
+    {
         if (self->Lock(50)) {
             if (self->video_img_ == nullptr) {
                 // Create video image in content area (replace background_image_)
@@ -1391,14 +1409,17 @@ void LcdDisplay::VideoPlayTask(void* arg) {
                 }
             }
             
-            self->video_img_dsc_.header.w = self->width_;
-            self->video_img_dsc_.header.h = self->height_;
-            self->video_img_dsc_.header.cf = LV_COLOR_FORMAT_RGB565;
-            self->video_img_dsc_.data = buf;
-            self->video_img_dsc_.data_size = frame_size;
-            lv_img_set_src(self->video_img_, &self->video_img_dsc_);
-            lv_obj_move_background(self->video_img_);
-            lv_obj_clear_flag(self->video_img_, LV_OBJ_FLAG_HIDDEN);
+            // Update image descriptor with current buffer (only if not already set)
+            if (self->video_img_dsc_.data != buf) {
+                self->video_img_dsc_.header.w = self->width_;
+                self->video_img_dsc_.header.h = self->height_;
+                self->video_img_dsc_.header.cf = LV_COLOR_FORMAT_RGB565;
+                self->video_img_dsc_.data = buf;
+                self->video_img_dsc_.data_size = frame_size;
+                lv_img_set_src(self->video_img_, &self->video_img_dsc_);
+                lv_obj_move_background(self->video_img_);
+                lv_obj_clear_flag(self->video_img_, LV_OBJ_FLAG_HIDDEN);
+            }
             self->Unlock();
         }
         
@@ -1509,18 +1530,113 @@ void LcdDisplay::PlayVideoGroup(int index) {
         return;
     }
     
-    // Hide background image when starting video playback
-    {
-        DisplayLockGuard lock(this);
-        if (background_image_ != nullptr) {
-            lv_obj_add_flag(background_image_, LV_OBJ_FLAG_HIDDEN);
-        }
-    }  // Lock released here
-    
-    // Set group index and start playback
-    video_group_index_ = index;
+    // Stop any existing playback first
     if (video_playing_) {
         StopVideoPlayback();
     }
+    
+    // Set group index
+    video_group_index_ = index;
+    
+    // Read frame counts to calculate first frame offset
+    std::vector<uint32_t> frame_counts(group_count, 0);
+    if (esp_partition_read(part, 1, frame_counts.data(), group_count * sizeof(uint32_t)) != ESP_OK) {
+        ESP_LOGE(TAG, "read frame counts failed");
+        return;
+    }
+    
+    // Compute offsets
+    const uint32_t frame_size = width_ * height_ * 2;
+    uint32_t data_offset = 1 + group_count * sizeof(uint32_t);
+    std::vector<uint32_t> group_base(group_count, 0);
+    uint32_t acc_frames = 0;
+    for (int i = 0; i < group_count; ++i) {
+        group_base[i] = data_offset + acc_frames * frame_size;
+        acc_frames += frame_counts[i];
+    }
+    
+    int g = index;
+    if (g < 0 || g >= group_count) g = 0;
+    uint32_t frames = frame_counts[g];
+    
+    if (frames == 0) {
+        ESP_LOGE(TAG, "No frames in group %d", g);
+        return;
+    }
+    
+    // Allocate temporary buffer for first frame
+    uint8_t* first_frame_buf = (uint8_t*)heap_caps_malloc(frame_size, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    if (!first_frame_buf) first_frame_buf = (uint8_t*)heap_caps_malloc(frame_size, MALLOC_CAP_DMA);
+    if (!first_frame_buf) first_frame_buf = (uint8_t*)heap_caps_malloc(frame_size, MALLOC_CAP_INTERNAL);
+    if (!first_frame_buf) first_frame_buf = (uint8_t*)malloc(frame_size);
+    if (!first_frame_buf) {
+        ESP_LOGE(TAG, "no memory for first frame buffer");
+        return;
+    }
+    
+    // Read first frame
+    size_t first_frame_offset = group_base[g];
+    if (esp_partition_read(part, first_frame_offset, first_frame_buf, frame_size) != ESP_OK) {
+        ESP_LOGE(TAG, "read first frame failed");
+        free(first_frame_buf);
+        return;
+    }
+    
+    // Display first frame immediately to avoid flicker
+    {
+        DisplayLockGuard lock(this);
+        
+        // Create video image if not exists
+        if (video_img_ == nullptr) {
+            if (content_ != nullptr) {
+                video_img_ = lv_image_create(content_);
+                lv_obj_set_size(video_img_, width_, height_);
+                lv_obj_set_pos(video_img_, -5, -5);
+                lv_obj_clear_flag(video_img_, LV_OBJ_FLAG_SCROLLABLE);
+                lv_obj_add_flag(video_img_, LV_OBJ_FLAG_FLOATING);
+                lv_obj_move_background(video_img_);
+            }
+        }
+        
+        if (video_img_ != nullptr) {
+            // Set first frame to video image
+            video_img_dsc_.header.w = width_;
+            video_img_dsc_.header.h = height_;
+            video_img_dsc_.header.cf = LV_COLOR_FORMAT_RGB565;
+            video_img_dsc_.data = first_frame_buf;
+            video_img_dsc_.data_size = frame_size;
+            lv_img_set_src(video_img_, &video_img_dsc_);
+            lv_obj_move_background(video_img_);
+            lv_obj_clear_flag(video_img_, LV_OBJ_FLAG_HIDDEN);
+            
+            // Hide background image after first frame is displayed
+            if (background_image_ != nullptr) {
+                lv_obj_add_flag(background_image_, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+    }  // Lock released here
+    
+    // Save first frame buffer to member variable - video task will free it after taking over
+    first_frame_buf_ = first_frame_buf;
+    
+    // Start playback task (it will use first_frame_buf_ if available, then free it)
     StartVideoPlayback();
+}
+
+void LcdDisplay::RegisterDeviceStateCallback() {
+    DeviceStateEventManager::GetInstance().RegisterStateChangeCallback(
+        [this](DeviceState previous_state, DeviceState current_state) {
+            ESP_LOGI(TAG, "Device state changed: %d -> %d", previous_state, current_state);
+            
+            if (current_state == kDeviceStateSpeaking) {
+                // 说话中播放视频
+                ESP_LOGI(TAG, "Speaking state detected, starting video playback");
+                PlayVideoGroup(0);  // 播放第0组视频
+            } else {
+                // 其他状态显示桌面
+                ESP_LOGI(TAG, "Non-speaking state detected, showing background image");
+                ShowBackgroundImage();
+            }
+        }
+    );
 }
