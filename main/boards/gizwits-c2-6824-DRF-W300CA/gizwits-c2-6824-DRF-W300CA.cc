@@ -288,8 +288,6 @@ private:
         // 进入休眠时，关闭状态灯
         SetBlueLed(false);
 
-		// 统一休眠策略：无论充电或未充电，都不进入深度休眠
-		// 目的：保持 RGB 与电机运行，避免被关断
 		ESP_LOGI(TAG, "🔋 统一休眠策略：不进入深度休眠（充电/未充电一致处理）");
     }
     
@@ -297,10 +295,6 @@ private:
     // 关机行为与 xingbao 项目保持一致：拉低保持脚；若在充电，则重启以进入静默/充电逻辑
     virtual void PowerOff() override {
         ESP_LOGI(TAG, "PowerOff called");
-        
-        // 等待电量不足播报完成（如果正在播报）
-        ESP_LOGI(TAG, "等待电量不足播报完成...");
-        vTaskDelay(pdMS_TO_TICKS(3000));  // 等待3秒让电量不足播报完成
         
         // 关闭所有功能
         StopRgbLightEffect();
@@ -316,16 +310,6 @@ private:
             vTaskDelay(pdMS_TO_TICKS(1000));
             esp_restart();
             return;
-        }
-        
-        // 电池模式下，关机前播报休眠提示音
-        {
-            auto codec = GetAudioCodec();
-            if (codec) {
-                codec->EnableOutput(true);
-            }
-            Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
-            vTaskDelay(pdMS_TO_TICKS(1500));
         }
         
         // 拉低电源保持引脚，关闭电池供电
@@ -712,7 +696,7 @@ private:
                     ESP_LOGI(TAG, "🔌 设备开机(冷启动)");
                     esp_restart();
                     vTaskDelete(NULL);
-                }, "power_on_task", 4028, this, 10, NULL);
+                }, "power_on_task", 1536, this, 10, NULL);  // 减小栈大小：1.5KB足够（只调用esp_restart）
             }
         });
         
@@ -735,7 +719,7 @@ private:
                     app.SetDeviceState(kDeviceStateIdle);
                     board->PowerOff();
                     vTaskDelete(NULL);
-                }, "power_off_task", 4028, this, 10, NULL);
+                }, "power_off_task", 2048, this, 10, NULL);  // 减小栈大小：2KB足够（等待音频+调用PowerOff）
             }
         });
         
@@ -1065,6 +1049,47 @@ public:
         
         // 立即检测一次充电状态
         PowerManager::GetInstance().CheckBatteryStatusImmediately();
+        
+        // 注册充电状态变化回调（用于检测静默启动时拔掉USB的情况）
+        PowerManager::GetInstance().SetChargingStateChangeCallback(
+            [this](bool was_charging, bool is_charging) {
+                // 只在静默启动状态下检查
+                if (!silent_startup_from_board_) {
+                    return;
+                }
+                
+                // 如果从充电变为非充电，且处于静默启动状态，则自动关机
+                if (was_charging && !is_charging) {
+                    ESP_LOGI(TAG, "🔋 静默启动状态下检测到USB已拔掉（从充电变为非充电），自动关机以节省功耗");
+                    // 保存标志位：电池模式下关机，保存silent_next=0
+                    {
+                        Settings settings("system", true);
+                        settings.SetInt("silent_next", 0);
+                        ESP_LOGI(TAG, "电池模式下关机，保存silent_next=0");
+                    }
+                    // 延迟一小段时间再关机，避免误判
+                    xTaskCreate([](void* arg) {
+                        vTaskDelay(pdMS_TO_TICKS(2000));  // 等待2秒确认
+                        CustomBoard* board = static_cast<CustomBoard*>(arg);
+                        if (!PowerManager::GetInstance().IsCharging() && board->silent_startup_from_board_) {
+                            ESP_LOGI(TAG, "确认USB已拔掉，执行静默关机（不播放音频）");
+                            // 静默启动状态下直接关机，不播放任何音频
+                            board->StopRgbLightEffect();
+                            board->motor_control_.Stop();
+                            board->motor_on_ = false;
+                            board->device_powered_on_ = false;
+                            // 拉低电源保持引脚，关闭电池供电
+                            gpio_set_level(POWER_HOLD_GPIO, 0);
+                            ESP_LOGI(TAG, "🔋 电源保持引脚已拉低，设备关机 (GPIO%d)", POWER_HOLD_GPIO);
+                            // 延时3秒后进入深度睡眠
+                            vTaskDelay(pdMS_TO_TICKS(3000));
+                            board->run_sleep_mode(false);
+                        }
+                        vTaskDelete(NULL);
+                    }, "auto_poweroff_task", 2048, this, 5, NULL);  // 减小栈大小：2KB足够（等待+关机操作）
+                }
+            }
+        );
         
         // 检查开机复位原因与充电状态，决定是否静默启动
         auto reset_reason = esp_reset_reason();
