@@ -26,6 +26,8 @@ import json
 import zipfile
 import subprocess
 import re
+import platform
+import shutil
 import boto3
 from botocore.exceptions import ClientError
 
@@ -162,9 +164,18 @@ def create_all_bin():
     print(f"检测到芯片类型: {chip_type}")
     
     # 使用 esptool 合并固件
-    merge_cmd = [
-        "esptool.py", "--chip", chip_type, "merge_bin"
-    ]
+    # Windows 环境：使用系统 Python 环境，避免 ESP-IDF Python 环境缺少 esptool 的问题
+    # 其他环境：使用系统默认的 python 或 python3
+    is_windows = platform.system() == 'Windows'
+    
+    if is_windows:
+        # Windows 环境：使用硬编码的 Python 路径
+        system_python = "C:\\Users\\edy\\AppData\\Local\\Programs\\Python\\Python313\\python.exe"
+        merge_cmd = [system_python, "-m", "esptool", "--chip", chip_type, "merge_bin", "-o", "build/merged-binary.bin"]
+    else:
+        # 其他环境：使用系统默认的 python 或 python3
+        python_cmd = shutil.which("python3") or shutil.which("python") or "python3"
+        merge_cmd = [python_cmd, "-m", "esptool", "--chip", chip_type, "merge_bin", "-o", "build/merged-binary.bin"]
     
     # 添加可选的 ota_data_initial.bin 文件
     if os.path.exists("build/ota_data_initial.bin"):
@@ -278,18 +289,74 @@ def upload_to_cos(file_path, object_name=None):
             print(f"Error: 文件已存在于 COS 中: {object_name}")
             return False
         except ClientError as e:
-            print(f"Error: {e}")
+            # 404 错误是正常的，说明文件不存在，可以上传
+            error_code = e.response.get('Error', {}).get('Code', '')
+            if error_code != '404':
+                print(f"检查文件时发生错误: {e}")
+                return False
+            # 404 表示文件不存在，继续上传
+        
+        # 获取文件大小
+        file_size = os.path.getsize(file_path)
+        print(f"文件大小: {file_size / (1024*1024):.2f} MB")
         
         # 上传文件
         print(f"正在上传 {file_path} 到 COS...")
         print(f"目标路径: {object_name}")
         
-        # 设置额外的请求头，包括必需的 Appid 头部
-        extra_args = {
-            'Metadata': {'Appid': app_id}
-        }
+        # 检测操作系统：Windows 环境使用 put_object 避免分片上传问题，其他环境使用原来的方式
+        is_windows = platform.system() == 'Windows'
         
-        cos_client.upload_file(file_path, full_bucket_name, object_name, ExtraArgs=extra_args)
+        if is_windows:
+            # Windows 环境：对于小于 20MB 的文件，使用 put_object 直接上传（避免分片上传的 Content-Length 问题）
+            # 对于大于 20MB 的文件，使用分片上传
+            MULTIPART_THRESHOLD = 20 * 1024 * 1024  # 20MB
+            
+            if file_size < MULTIPART_THRESHOLD:
+                # 小文件：直接使用 put_object 上传
+                print("使用 put_object 直接上传（Windows 环境，小文件）")
+                with open(file_path, 'rb') as f:
+                    cos_client.put_object(
+                        Bucket=full_bucket_name,
+                        Key=object_name,
+                        Body=f,
+                        ContentType='application/zip',
+                        Metadata={'Appid': app_id}
+                    )
+            else:
+                # 大文件：使用分片上传
+                print("使用分片上传（Windows 环境，大文件）")
+                # 设置额外的请求头
+                extra_args = {
+                    'Metadata': {'Appid': app_id},
+                    'ContentType': 'application/zip'
+                }
+                
+                # 使用 Config 对象配置分片上传
+                from boto3.s3.transfer import TransferConfig
+                config = TransferConfig(
+                    multipart_threshold=MULTIPART_THRESHOLD,
+                    max_concurrency=10,
+                    multipart_chunksize=10 * 1024 * 1024,  # 每个分片 10MB
+                    use_threads=True
+                )
+                
+                cos_client.upload_file(
+                    file_path, 
+                    full_bucket_name, 
+                    object_name, 
+                    ExtraArgs=extra_args,
+                    Config=config
+                )
+        else:
+            # 其他环境（Linux/macOS）：使用原来的简单方式
+            print("使用 upload_file 上传（非 Windows 环境）")
+            # 设置额外的请求头，包括必需的 Appid 头部
+            extra_args = {
+                'Metadata': {'Appid': app_id}
+            }
+            
+            cos_client.upload_file(file_path, full_bucket_name, object_name, ExtraArgs=extra_args)
         
         # 生成访问 URL
         url = f"https://{full_bucket_name}.cos.{region}.myqcloud.com/{object_name}"
