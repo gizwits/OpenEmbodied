@@ -58,6 +58,8 @@ private:
     int64_t last_battery_record_time_us_ = 0;    // 上次记录电量的时间（微秒）
     int64_t last_charge_save_time_us_ = 0;       // 上次保存充电模拟电量的时间（微秒）
     uint8_t last_recorded_level_ = 0;             // 上次记录的电量
+    uint32_t last_non_charging_average_adc_ = 0;  // 最近一次非充电状态下的 average_adc
+    int64_t non_charging_stable_time_us_ = 0;     // 进入非充电状态的稳定时间（微秒），用于防止电压抖动
 
     // 电压-电量对照表
     static constexpr struct VoltageSocPair {
@@ -65,9 +67,9 @@ private:
         uint8_t soc;       // State of Charge (percentage of battery capacity)
     } dischargeCurve[] = {
         {4140, 100}, // 100%
-        {4104, 100},  // 下降36mV
-        {4068, 100},  // 下降36mV
-        {4032, 100},  // 下降36mV
+        {4104, 95},  // 下降36mV
+        {4068, 90},  // 下降36mV
+        {4032, 85},  // 下降36mV
         {3996, 80},  // 下降36mV
         {3960, 75},  // 下降36mV
         {3924, 70},  // 下降36mV
@@ -83,7 +85,7 @@ private:
         {3672, 20},  // 下降31mV
         {3570, 15},  // 下降102mV
         {3520, 10},
-        {3450, 1},
+        {3420, 1},
         // {3420, 10},  // 下降150mV（低电量段开始）
         // {3220, 5},   // 下降200mV
         // {3000, 0}    // 下降220mV
@@ -175,9 +177,11 @@ private:
         // 因为充电时ADC读取的是充电器电压（5V），不是电池电压，电量不准确
         // 充电状态下的电量由 UpdateChargingSimulation() 根据模拟计算更新
         // 只有在非充电状态，或者充电模拟未激活时，才根据ADC值更新电量
-        // 当电压超过4.4V时，说明正在充电，不更新电量（避免错误更新为100%）
-        if ((!is_charging_ || !is_charging_simulation_active_) && current_voltage <= 4400) {
+        // 当电压超过约4.3V时，多为充电器影响，不更新电量（避免错误更新为100%）
+        if ((!is_charging_ || !is_charging_simulation_active_) && current_voltage <= 4300) {
             CalculateBatteryLevel(current_voltage);
+            // 保存非充电状态下的 average_adc，用于关机前保存
+            last_non_charging_average_adc_ = average_adc;
         }
         // if(times++ % 50 == 0){
         //     ESP_LOGI("PowerManager", "adc: %d adc_avg: %ld, VBAT: %ld, battery_level_: %u%%", 
@@ -198,6 +202,8 @@ private:
         } else if (!is_charging_ && was_charging_) {
             // 退出充电状态
             StopChargingSimulation();
+            // 记录进入非充电状态的稳定时间，用于防止电压抖动
+            non_charging_stable_time_us_ = esp_timer_get_time();
         }
         
         // 更新上一次的充电状态
@@ -310,24 +316,35 @@ private:
     // 非充电状态下定期记录电量
     void RecordBatteryLevelWhenNotCharging() {
         int64_t current_time_us = esp_timer_get_time();
-        #define BATTERY_CHARGING_THRESHOLD_FOR_RECORD 4400
+        #define BATTERY_CHARGING_THRESHOLD_FOR_RECORD 4300
+        #define NON_CHARGING_STABLE_TIME_SECONDS 10  // 非充电状态稳定时间（秒），防止电压抖动
         if (average_adc*2 < BATTERY_CHARGING_THRESHOLD_FOR_RECORD) {
-            // 检查是否满足保存条件：间隔30秒 且 电量有变化
+            // 检查是否满足保存条件：间隔20秒 且 电量有变化 且 非充电状态稳定≥10秒
             bool should_save = false;
             
-            // 检查时间间隔（30秒 = 30000000微秒）
+            // 检查时间间隔（20秒 = 20000000微秒）
             int64_t time_since_last_record = current_time_us - last_battery_record_time_us_;
             bool time_interval_ok = (last_battery_record_time_us_ == 0) || 
-                                    (time_since_last_record >= 30000000);
+                                    (time_since_last_record >= 20000000);
             
             // 检查电量是否有变化
             bool level_changed = (last_recorded_level_ != battery_level_);
             
-            if (time_interval_ok && level_changed) {
+            // 检查非充电状态是否稳定≥10秒（防止刚拔充电器时电压抖动）
+            // 如果 non_charging_stable_time_us_ 为0，说明一直是非充电状态，可以允许保存
+            bool stable_enough = (non_charging_stable_time_us_ == 0) || 
+                                 ((current_time_us - non_charging_stable_time_us_) >= (NON_CHARGING_STABLE_TIME_SECONDS * 1000000));
+            
+            if (time_interval_ok && level_changed && stable_enough) {
                 should_save = true;
             }
             
             if (should_save) {
+                // 若电压仍偏高导致估算为100%，避免误把“充电器电压”写入为100%
+                if ((average_adc*2) > 4300 && battery_level_ >= 100) {
+                    ESP_LOGI("PowerManager", "[电量记录] 跳过保存：电压仍高于4200mV且估算为100%%，避免误记");
+                    return;
+                }
                 last_recorded_level_ = battery_level_;
                 last_battery_record_time_us_ = current_time_us;
                 // 保存到本地存储
@@ -451,6 +468,21 @@ public:
             // 充电中，只断开 socket
             Application::GetInstance().QuitTalking();
             return;
+        }
+        // 使用电池（非充电）关机前，使用最近一次非充电状态下的 average_adc 保存电量
+        if (last_non_charging_average_adc_ > 0) {
+            uint32_t voltage_before_sleep = last_non_charging_average_adc_ * 2;
+            if (voltage_before_sleep <= BATTERY_CHARGING_THRESHOLD_FOR_RECORD) {
+                CalculateBatteryLevel(voltage_before_sleep);
+                last_recorded_level_ = battery_level_;
+                last_battery_record_time_us_ = esp_timer_get_time();
+                SaveBatteryLevelToStorage(battery_level_);
+                ESP_LOGI("PowerManager", "[关机保存] 非充电状态 - 保存电量: %d%%", battery_level_);
+            } else {
+                ESP_LOGI("PowerManager", "[关机保存] 最近非充电电压(>%dmV)，跳过保存", 4300);
+            }
+        } else {
+            ESP_LOGI("PowerManager", "[关机保存] 没有非充电状态下的 average_adc 记录，跳过保存");
         }
         vb6824_shutdown();
         vTaskDelay(pdMS_TO_TICKS(200));

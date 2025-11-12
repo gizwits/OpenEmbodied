@@ -12,6 +12,7 @@
 #include "config.h"
 #include <esp_adc/adc_cali.h>
 #include <esp_adc/adc_cali_scheme.h>
+#include <functional>
 
 // Battery ADC configuration
 #define BAT_ADC_CHANNEL  ADC_CHANNEL_3  // Battery voltage ADC channel
@@ -47,6 +48,9 @@ private:
     uint8_t battery_level_ = 100;
     uint32_t average_adc = 0;
     bool is_charging_ = false;
+    
+    // 充电状态变化回调
+    std::function<void(bool was_charging, bool is_charging)> charging_state_change_callback_ = nullptr;
 
     adc_oneshot_unit_handle_t adc_handle_;
     adc_cali_handle_t cali_handle_ = nullptr;
@@ -257,6 +261,10 @@ private:
                      previous_charging ? "充电中" : "未充电", 
                      is_charging_ ? "充电中" : "未充电", 
                      voltage);
+            // 触发回调
+            if (charging_state_change_callback_) {
+                charging_state_change_callback_(previous_charging, is_charging_);
+            }
         }
     }
 
@@ -442,6 +450,11 @@ public:
     bool IsCharging() { return is_charging_; }
 
     uint8_t GetBatteryLevel() { return battery_level_; }
+    
+    // 设置充电状态变化回调
+    void SetChargingStateChangeCallback(std::function<void(bool was_charging, bool is_charging)> callback) {
+        charging_state_change_callback_ = callback;
+    }
     
     // 立即检测一次电量
     void CheckBatteryStatusImmediately() {

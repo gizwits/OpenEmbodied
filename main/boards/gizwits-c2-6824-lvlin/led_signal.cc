@@ -296,11 +296,13 @@ void LedSignal::UpdateLedState() {
             // 超过30秒后，按照充电状态显示LED
             if (is_fully_charged) {
                 green = rgb_value; // 绿色代表充满电
+            } else if (is_charging) {
+                // 充电状态下，即使低电量也显示红色常亮（不闪烁）
+                red = rgb_value; // 红色代表充电中
             } else if (is_battery_low) {
+                // 未充电且低电量时，红色闪烁
                 red = rgb_value; // 红色代表电量低
                 need_blink = true; // 低电量需要闪烁
-            } else if (is_charging) {
-                red = rgb_value; // 红色代表充电中
             } else {
                 red = green = blue = 0; // 关闭所有LED
             }
@@ -320,11 +322,13 @@ void LedSignal::UpdateLedState() {
         if (is_fully_charged) {
             green = rgb_value; // 绿色代表充满电
             // ESP_LOGI(TAG, "[LED状态] 电池已充满，亮绿灯");
+        } else if (is_charging) {
+            // 充电状态下，即使低电量也显示红色常亮（不闪烁）
+            red = rgb_value; // 红色代表充电中
         } else if (is_battery_low) {
+            // 未充电且低电量时，红色闪烁
             red = rgb_value; // 红色代表电量低
             need_blink = true; // 低电量需要闪烁
-        } else if (is_charging) {
-            red = rgb_value; // 红色代表充电中
         } else {
             red = green = blue = 0; // 关闭所有LED
         }

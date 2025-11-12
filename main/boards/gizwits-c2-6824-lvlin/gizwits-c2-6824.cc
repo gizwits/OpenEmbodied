@@ -383,16 +383,35 @@ public:
     virtual void PowerOff() override {
         ESP_LOGI(TAG, "PowerOff called (低电量关机)");
         
-        // 停止所有功能
-        Application::GetInstance().QuitTalking();
-        
         // 检查充电状态
         bool is_charging = PowerManager::GetInstance().IsCharging();
         if (is_charging) {
             // 充电中，只断开 socket，不进入深度睡眠
             ESP_LOGI(TAG, "充电中，只断开连接");
+            Application::GetInstance().QuitTalking();
             return;
         }
+        
+        // 电池模式下，确保音频输出已启用，然后等待低电量提示音播放完成后再关机
+        auto codec = GetAudioCodec();
+        if (codec) {
+            codec->EnableOutput(true);
+            ESP_LOGI(TAG, "已启用音频输出，等待低电量提示音播放完成");
+        }
+        
+        // 给一点时间让音频包放入队列并开始播放
+        vTaskDelay(pdMS_TO_TICKS(100));
+        
+        // 等待音频播放完成（队列为空）
+        int wait_count = 0;
+        while (!Application::GetInstance().GetAudioService().IsIdle() && wait_count < 60) {
+            vTaskDelay(pdMS_TO_TICKS(50));  // 50ms检查一次，最多等待3秒
+            wait_count++;
+        }
+        ESP_LOGI(TAG, "低电量提示音播放完成，准备关机");
+        
+        // 停止所有功能
+        Application::GetInstance().QuitTalking();
         
         // 电池模式下，进入深度睡眠
         ESP_LOGI(TAG, "电池模式下低电量，进入深度睡眠");
