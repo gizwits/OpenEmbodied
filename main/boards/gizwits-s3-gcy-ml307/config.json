@@ -5,7 +5,7 @@
             "name": "gizwits-s3-gcy-ml307",
             "sdkconfig_append": [
                 "CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y",
-                "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions.csv\"",
+                "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions_assets.csv\"",
                 "CONFIG_LV_FONT_MONTSERRAT_22=y",
                 "CONFIG_USE_EYE_STYLE_VB6824=y",
                 "CONFIG_VB6824_UART_TASK_STACK_SIZE=8192",

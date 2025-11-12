@@ -473,15 +473,19 @@ void Application::Start() {
     vTaskDelay(pdMS_TO_TICKS(500));
 
     // Initialize NTP client
-    // auto& ntp_client = NtpClient::GetInstance();
-    // esp_err_t ntp_ret = ntp_client.Init();
-    // if (ntp_ret == ESP_OK) {
-    //     ESP_LOGI(TAG, "Waiting for network to be fully ready before NTP sync...");
-    //     ntp_client.StartSync();
-    //     ESP_LOGI(TAG, "NTP client initialized and started");
-    // } else {
-    //     ESP_LOGE(TAG, "Failed to initialize NTP client: %s", esp_err_to_name(ntp_ret));
-    // }
+    auto& ntp_client = NtpClient::GetInstance();
+    esp_err_t ntp_ret = ntp_client.Init();
+    if (ntp_ret == ESP_OK) {
+        ESP_LOGI(TAG, "Waiting for network to be fully ready before NTP sync...");
+        ntp_client.StartSync();
+        Schedule([]() {
+            auto& ntp_client = NtpClient::GetInstance();
+            ntp_client.ProcessSync();
+        }, "NTP_ProcessSync");
+        ESP_LOGI(TAG, "NTP client initialized and started");
+    } else {
+        ESP_LOGE(TAG, "Failed to initialize NTP client: %s", esp_err_to_name(ntp_ret));
+    }
     // Update the status bar immediately to show the network state
     display->UpdateStatusBar(true);
     
@@ -786,8 +790,8 @@ void Application::MainEventLoop() {
 
         // Process NTP sync - 每10次循环执行一次
         if (loop_counter % 10 == 0) {
-            // auto& ntp_client = NtpClient::GetInstance();
-            // ntp_client.ProcessSync();
+            auto& ntp_client = NtpClient::GetInstance();
+            ntp_client.ProcessSync();
         }
 
         
@@ -1079,13 +1083,15 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     if (device_state_ == kDeviceStateIdle) {
         Schedule([this, wake_word]() {
             audio_service_.ResetDecoder();
-            audio_service_.PlaySound(Lang::Sounds::P3_WAKE_WORD);
+            auto& board = Board::GetInstance();
+            if (board.GetNeedPlayWakeWordSound()) {
+                audio_service_.PlaySound(Lang::Sounds::P3_WAKE_WORD);
+            }
 
             ToggleChatState();
             if (protocol_) {
                 protocol_->SendWakeWordDetected(wake_word); 
             }
-            auto& board = Board::GetInstance();
             auto backlight = board.GetBacklight();
             if (backlight) {
                 backlight->RestoreBrightness();
@@ -1370,10 +1376,12 @@ void Application::EnterSleepMode() {
         vTaskDelay(pdMS_TO_TICKS(1000));
 
         // 关闭 wifi
-        auto& wifi_station = WifiStation::GetInstance();
-        wifi_station.Stop();
+        // wifi 模式才关闭
+        if (Board::GetInstance().GetNetworkType() == NetworkType::WIFI) {
+            auto& wifi_station = WifiStation::GetInstance();
+            wifi_station.Stop();
+        }
         SetDeviceState(kDeviceStateSleeping);
-
     
         display->SetStatus(Lang::Strings::STANDBY);
         display->SetEmotion("sleepy");

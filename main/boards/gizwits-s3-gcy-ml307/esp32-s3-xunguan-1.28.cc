@@ -386,7 +386,16 @@ private:
             InnerResetWifiConfiguration();
         });
 
-        break_button_.OnPressDown([this]() {
+        reset_button_.OnPressRepeaDone([this](uint16_t count) {
+            ESP_LOGI(TAG, "reset_button_.OnPressRepeaDone, count: %d", count);
+            if(count == 5){
+                SwitchNetworkType();
+                return;
+            }
+        });
+
+        break_button_.OnClick([this]() {
+            ESP_LOGI(TAG, "break_button_.OnClick");
             Application::GetInstance().ToggleChatState();
         });
         
@@ -610,6 +619,9 @@ public:
         }
     }
 
+    virtual bool GetNeedPlayWakeWordSound() override {
+        return false;
+    }
     virtual void PowerOff() override {
         gpio_set_level(POWER_GPIO, 0);
     }
