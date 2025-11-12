@@ -21,6 +21,7 @@
 #include "processors/audio_debugger.h"
 #include "wake_word.h"
 #include "protocol.h"
+#include "audio/codecs/es8311_audio_codec.h"
 
 
 /*
@@ -39,8 +40,8 @@
 #define MAX_PLAYBACK_TASKS_IN_QUEUE 2
 
 #ifdef CONFIG_IDF_TARGET_ESP32S3
-#define MAX_DECODE_PACKETS_IN_QUEUE (40000 / OPUS_FRAME_DURATION_MS)
-#define MAX_SEND_PACKETS_IN_QUEUE (10000 / OPUS_FRAME_DURATION_MS)
+#define MAX_DECODE_PACKETS_IN_QUEUE (20000 / OPUS_FRAME_DURATION_MS)  
+#define MAX_SEND_PACKETS_IN_QUEUE (5000 / OPUS_FRAME_DURATION_MS)    
 #else
 #define MAX_DECODE_PACKETS_IN_QUEUE (3600 / OPUS_FRAME_DURATION_MS)
 #define MAX_SEND_PACKETS_IN_QUEUE (600 / OPUS_FRAME_DURATION_MS)  
@@ -115,6 +116,7 @@ public:
     void SetCallbacks(AudioServiceCallbacks& callbacks);
 
     bool PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> packet, bool wait = false);
+    size_t GetDecodeQueueSize() const;  // 获取解码队列当前大小
     std::unique_ptr<AudioStreamPacket> PopPacketFromSendQueue();
     void ResetSendQueue();
     void PlaySound(const std::string_view& sound);
@@ -146,8 +148,8 @@ private:
     OpusResampler input_resampler_;
     OpusResampler reference_resampler_;
     OpusResampler output_resampler_;
+    OpusResampler playback_ref_resampler_;
 #endif
-
 
     DebugStatistics debug_statistics_;
 
@@ -157,7 +159,7 @@ private:
     TaskHandle_t audio_input_task_handle_ = nullptr;
     TaskHandle_t audio_output_task_handle_ = nullptr;
     TaskHandle_t opus_codec_task_handle_ = nullptr;
-    std::mutex audio_queue_mutex_;
+    mutable std::mutex audio_queue_mutex_;  // mutable 允许在 const 方法中锁定
     std::condition_variable audio_queue_cv_;
     std::deque<std::unique_ptr<AudioStreamPacket>> audio_decode_queue_;
     std::deque<std::unique_ptr<AudioStreamPacket>> audio_send_queue_;
@@ -166,9 +168,16 @@ private:
 #ifndef CONFIG_USE_EYE_STYLE_VB6824
     std::deque<std::unique_ptr<AudioTask>> audio_encode_queue_;
 #endif
-    // std::deque<std::unique_ptr<AudioTask>> audio_playback_queue_;
+    std::deque<std::unique_ptr<AudioTask>> audio_playback_queue_;
     // For server AEC
     std::deque<uint32_t> timestamp_queue_;
+
+#ifndef CONFIG_USE_EYE_STYLE_VB6824
+    // Software AEC reference buffer (only for Es8311)
+    std::deque<int16_t> reference_ring_;
+    bool enable_software_aec_ = false;
+    size_t reference_ring_max_samples_ = 16000 * 2; // ~2 seconds @16k mono
+#endif
 
     bool wake_word_initialized_ = false;
     bool audio_processor_initialized_ = false;
@@ -187,7 +196,11 @@ private:
     void PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t>&& pcm);
     void SetDecodeSampleRate(int sample_rate, int frame_duration);
     void CheckAndUpdateAudioPowerState();
-    
+
+#ifndef CONFIG_USE_EYE_STYLE_VB6824
+    void PushReferenceSamples(const int16_t* data, size_t samples);
+    void PopReferenceSamples(size_t samples, std::vector<int16_t>& out);
+#endif
 };
 
 #endif

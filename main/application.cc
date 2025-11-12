@@ -808,16 +808,16 @@ void Application::MainEventLoop() {
 
         
 #if CONFIG_IDF_TARGET_ESP32C2
-// 处理 MQTT 消息队列（替代独立任务）
-// 这样做的好处：
-// 1. 减少内存占用 - 不需要为每个任务分配独立的栈空间
-// 2. 简化任务管理 - 减少任务切换的开销
-// 3. 更好的控制 - 在主循环中可以更好地控制执行频率
-auto& mqtt_client = MqttClient::getInstance();
-if (mqtt_client.isInitialized()) {
-    mqtt_client.processMessageQueue();  // 处理接收到的消息
-    mqtt_client.processSendQueue();     // 处理待发送的消息
-}
+    // 处理 MQTT 消息队列（替代独立任务）
+    // 这样做的好处：
+    // 1. 减少内存占用 - 不需要为每个任务分配独立的栈空间
+    // 2. 简化任务管理 - 减少任务切换的开销
+    // 3. 更好的控制 - 在主循环中可以更好地控制执行频率
+    auto& mqtt_client = MqttClient::getInstance();
+    if (mqtt_client.isInitialized()) {
+        mqtt_client.processMessageQueue();  // 处理接收到的消息
+        mqtt_client.processSendQueue();     // 处理待发送的消息
+    }
 #endif
         
         // 每30秒检查一次电量
@@ -1495,12 +1495,18 @@ void Application::PlayMusic(const char* url) {
     }
     QuitTalking();
 
-    player_.setPacketCallback([this](const std::vector<uint8_t>& data) {
+    // 设置数据包回调：快速发送数据，不阻塞
+    player_.setPacketCallback([this](std::vector<uint8_t>&& data) {
         auto packet = std::make_unique<AudioStreamPacket>();
-        packet->payload = data;
+        packet->payload = std::move(data);  // 使用move避免复制
         packet->sample_rate = 16000;
-        packet->frame_duration = OPUS_FRAME_DURATION_MS;
-        audio_service_.PushPacketToDecodeQueue(std::move(packet));
+        packet->frame_duration = 60;  // OPUS_FRAME_DURATION_MS
+        audio_service_.PushPacketToDecodeQueue(std::move(packet), false);
+    });
+    
+    // 设置队列状态查询回调：用于player内部控制下载速度
+    player_.setQueueSizeCallback([this]() {
+        return audio_service_.GetDecodeQueueSize();
     });
     auto display = Board::GetInstance().GetDisplay();
     display->SetStatus(Lang::Strings::SPEAKING);
@@ -1516,7 +1522,7 @@ void Application::PlayMusic(const char* url) {
         args->app->player_.processMP3Stream(args->url.c_str());
         delete args;
         vTaskDelete(NULL);
-    }, "process_mp3_stream", 4096, args, 4, nullptr);
+    }, "process_mp3_stream", 2048, args, 5, nullptr);
 
 }
 

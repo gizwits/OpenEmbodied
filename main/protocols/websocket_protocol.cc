@@ -243,12 +243,25 @@ void WebsocketProtocol::CloseAudioChannelTask(void* param) {
         self->websocket_->Close();
     }
     
-    // 5. 清理资源
+    // 4. 清理内存资源
+    // 清理缓存的音频包
+    self->packet_cache_.clear();
+    self->cached_packet_count_ = 0;
+    
+    // 清理音频数据缓冲区（释放预分配的内存）
+    self->audio_data_buffer_.clear();
+    self->audio_data_buffer_.shrink_to_fit();
+    
+    // 清理 base64 编码缓冲区
+    self->base64_buffer_.reset();
+    self->base64_buffer_size_ = 0;
+    
+    // 5. 清理 websocket
     if (self->websocket_) {
         self->websocket_.reset();
     }
     
-    ESP_LOGI(TAG, "Audio channel closed successfully");
+    ESP_LOGI(TAG, "Audio channel closed successfully, memory cleaned");
     
     // 6. 清理任务句柄
     self->close_task_handle_ = nullptr;
@@ -261,6 +274,15 @@ bool WebsocketProtocol::OpenAudioChannel() {
     if (websocket_) {
         websocket_.reset();
     }
+    
+    // 清理旧的缓存和缓冲区，释放内存
+    packet_cache_.clear();
+    cached_packet_count_ = 0;
+    audio_data_buffer_.clear();
+    audio_data_buffer_.shrink_to_fit();
+    base64_buffer_.reset();
+    base64_buffer_size_ = 0;
+    
     if (room_params_.bot_id.empty() || room_params_.access_token.empty() || room_params_.voice_id.empty()) {
         ESP_LOGE(TAG, "Bot ID or access token or voice id is empty");
         return false;
@@ -583,6 +605,14 @@ bool WebsocketProtocol::OpenAudioChannel() {
             ESP_LOGI(TAG, "Websocket disconnected cleanly");
             reconnect_attempts_ = 0;   // 正常断开，重置重连计数
             should_reconnect_ = false; // 正常断开不需要重连
+            
+            // 正常断开时清理内存资源
+            packet_cache_.clear();
+            cached_packet_count_ = 0;
+            audio_data_buffer_.clear();
+            audio_data_buffer_.shrink_to_fit();
+            base64_buffer_.reset();
+            base64_buffer_size_ = 0;
         } else {
             ESP_LOGI(TAG, "Websocket disconnected unexpectedly");
             // 异常断开，尝试重连
