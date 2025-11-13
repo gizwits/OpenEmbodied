@@ -174,7 +174,7 @@ def create_all_bin():
         merge_cmd = [system_python, "-m", "esptool", "--chip", chip_type, "merge_bin", "-o", "build/merged-binary.bin"]
     else:
         # 其他环境：使用系统默认的 python 或 python3
-        python_cmd = shutil.which("python3") or shutil.which("python") or "python3"
+        python_cmd = shutil.which("python3.7") or shutil.which("python") or "python3"
         merge_cmd = [python_cmd, "-m", "esptool", "--chip", chip_type, "merge_bin", "-o", "build/merged-binary.bin"]
     
     # 添加可选的 ota_data_initial.bin 文件
