@@ -203,10 +203,29 @@ void LedSignal::MonitorAndUpdateLedState() {
 }
 
 bool LedSignal::CheckIfWorking() {
+    auto& app = Application::GetInstance();
+    
+    // 检查设备状态：如果正在说话（包括播放音乐），认为是工作状态
+    auto device_state = app.GetDeviceState();
+    if (device_state == kDeviceStateSpeaking) {
+        return true;
+    }
+    
+    // 检查 Player：如果正在下载/播放音乐，认为是工作状态
+    if (app.player_.IsDownloading()) {
+        return true;
+    }
+    
+    // 检查音频服务：如果正在播放音频（音乐、AI说话等），认为是工作状态
+    auto& audio_service = app.GetAudioService();
+    if (!audio_service.IsIdle()) {
+        return true;
+    }
+    
     // 按wifi状态判断，如果ws连不上报非工作状态
-    bool error_occurred = Application::GetInstance().HasWebsocketError();
+    bool error_occurred = app.HasWebsocketError();
     bool wifi_connected = WifiStation::GetInstance().IsConnected();
-    bool protocol_opened = Application::GetInstance().IsWebsocketWorking();
+    bool protocol_opened = app.IsWebsocketWorking();
     // ESP_LOGI(TAG, "error_occurred: %d, WiFi connected: %s ret %d", 
     //     error_occurred, wifi_connected ? "true" : "false", error_occurred && wifi_connected);
     return !error_occurred && wifi_connected && protocol_opened;
@@ -266,6 +285,11 @@ void LedSignal::UpdateLedState() {
     bool is_charging = CheckIfCharging();
     bool is_battery_low = CheckIfBatteryLow();
     bool is_fully_charged = PowerManager::GetInstance().IsFullyCharged();
+    
+    // 更新最后工作状态时间
+    if (is_working) {
+        last_non_working_time = std::chrono::steady_clock::now();
+    }
 
     // ESP_LOGI(TAG, "is_working: %d, is_charging: %d, is_battery_low: %d, is_fully_charged: %d", 
     //          is_working, is_charging, is_battery_low, is_fully_charged);
