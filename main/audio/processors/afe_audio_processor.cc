@@ -37,7 +37,8 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms) {
     }
 
     srmodel_list_t *models = esp_srmodel_init("model");
-    char* ns_model_name = esp_srmodel_filter(models, ESP_NSNET_PREFIX, NULL);
+    // ns_model_name 暂时未使用（相关代码已注释）
+    // char* ns_model_name = esp_srmodel_filter(models, ESP_NSNET_PREFIX, NULL);
     char* vad_model_name = esp_srmodel_filter(models, ESP_VADN_PREFIX, NULL);
     
     afe_config_t* afe_config = afe_config_init(input_format.c_str(), NULL, AFE_TYPE_VC, AFE_MODE_HIGH_PERF);

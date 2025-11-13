@@ -57,7 +57,6 @@ private:
 
             // 如果状态有变化
             if (new_is_charging != is_charging_) {
-                bool old_charging_status = is_charging_;
                 is_charging_ = new_is_charging;
                 change_count_++;  // 增加变化次数
                 last_change_time_ = current_time;  // 更新最后变化时间
