@@ -28,6 +28,7 @@ public:
     virtual void ShowNotification(const char* notification, int duration_ms = 3000);
     virtual void ShowNotification(const std::string &notification, int duration_ms = 3000);
     virtual void SetEmotion(const char* emotion);
+    virtual void PlayVideoGroup(const char* emotion);
     virtual void SetChatMessage(const char* role, const char* content);
     virtual void SetIcon(const char* icon);
     virtual void SetPreviewImage(const lv_img_dsc_t* image);

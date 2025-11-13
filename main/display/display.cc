@@ -248,3 +248,8 @@ void Display::SetTheme(const std::string& theme_name) {
     Settings settings("display", true);
     settings.SetString("theme", theme_name);
 }
+
+void Display::PlayVideoGroup(const char* emotion) {
+
+    Board::GetInstance().PlayVideoGroup(emotion);
+}
