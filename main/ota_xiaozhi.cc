@@ -50,7 +50,8 @@ const std::string& Ota::GetCheckVersionUrl() const {
     //     url = "http://192.168.68.10:8002/xiaozhi/ota/";
     // }
     // url = "http://192.168.68.235:8002/xiaozhi/ota/";
-    url = "http://xiaozhi.gizwits.com/xiaozhi/ota/";
+    url = "http://xiaozhi.iotsdk.com/xiaozhi/ota/";
+    // url = "http://xiaozhi.gizwits.com/xiaozhi/ota/";
     return url;
 }
 
@@ -194,6 +195,17 @@ bool Ota::CheckVersion() {
         has_websocket_config_ = true;
     } else {
         ESP_LOGI(TAG, "No websocket section found!");
+    }
+
+    // 解析 isBound 字段
+    is_bound_ = false;
+    cJSON *is_bound = cJSON_GetObjectItem(root, "isBound");
+    if (cJSON_IsBool(is_bound)) {
+        is_bound_ = cJSON_IsTrue(is_bound);
+        ESP_LOGI(TAG, "isBound: %s", is_bound_ ? "true" : "false");
+    } else if (cJSON_IsNumber(is_bound)) {
+        is_bound_ = (is_bound->valueint != 0);
+        ESP_LOGI(TAG, "isBound: %d", is_bound->valueint);
     }
 
     has_server_time_ = false;

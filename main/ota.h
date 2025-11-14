@@ -23,6 +23,7 @@ public:
     bool HasWebsocketConfig() { return false; }
     bool HasActivationCode() { return false; }
     bool HasServerTime() { return false; }
+    bool IsBound() const { return is_bound_; }
     bool StartUpgrade(std::function<void(int progress, size_t speed)> callback);
     void MarkCurrentVersionValid();
 
@@ -43,6 +44,7 @@ private:
     bool has_activation_code_ = false;
     bool has_serial_number_ = false;
     bool has_activation_challenge_ = false;
+    bool is_bound_ = false;
     std::string current_version_;
     std::string firmware_version_;
     std::string firmware_url_;

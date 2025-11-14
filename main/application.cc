@@ -1,5 +1,6 @@
 #include "application.h"
 #include "board.h"
+#include "boards/common/wifi_board.h"
 #include "display.h"
 #include "system_info.h"
 #include "audio_codec.h"
@@ -157,34 +158,25 @@ void Application::CheckNewVersion(Ota& ota) {
 
         // No new version, mark the current version as valid
         ota.MarkCurrentVersionValid();
-        if (!ota.HasActivationCode() && !ota.HasActivationChallenge()) {
+
+        // 检查是否有绑定关系
+
+        if (!ota.IsBound()) {
+            // 进入配网模式
+            if (Board::GetInstance().GetNetworkType() == NetworkType::WIFI) {
+                // 强转成WifiBoard（已通过GetNetworkType确认是WIFI类型）
+                auto& wifi_board = static_cast<WifiBoard&>(Board::GetInstance());
+                wifi_board.ResetWifiConfiguration();
+            } else {
+                // 播报扫码提示 TODO
+                break;
+            }
+        } else {
             xEventGroupSetBits(event_group_, MAIN_EVENT_CHECK_NEW_VERSION_DONE);
-            // Exit the loop if done checking new version
             break;
         }
 
-        display->SetStatus(Lang::Strings::ACTIVATION);
-        // Activation code is shown to the user and waiting for the user to input
-        if (ota.HasActivationCode()) {
-            ShowActivationCode(ota.GetActivationCode(), ota.GetActivationMessage());
-        }
 
-        // This will block the loop until the activation is done or timeout
-        for (int i = 0; i < 10; ++i) {
-            ESP_LOGI(TAG, "Activating... %d/%d", i + 1, 10);
-            esp_err_t err = ota.Activate();
-            if (err == ESP_OK) {
-                xEventGroupSetBits(event_group_, MAIN_EVENT_CHECK_NEW_VERSION_DONE);
-                break;
-            } else if (err == ESP_ERR_TIMEOUT) {
-                vTaskDelay(pdMS_TO_TICKS(3000));
-            } else {
-                vTaskDelay(pdMS_TO_TICKS(10000));
-            }
-            if (device_state_ == kDeviceStateIdle) {
-                break;
-            }
-        }
     }
 }
 
