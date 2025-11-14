@@ -79,6 +79,9 @@ protected:
     esp_timer_handle_t notification_timer_ = nullptr;
 
     friend class DisplayLockGuard;
+    // 前向声明，允许 DisplayWrapper 访问 protected 成员
+    class DisplayWrapper;
+    friend class DisplayWrapper;
     virtual bool Lock(int timeout_ms = 0) = 0;
     virtual void Unlock() = 0;
 };

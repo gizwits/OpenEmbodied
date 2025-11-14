@@ -14,6 +14,7 @@
 // #include "xunguan_display.h"
 #include "display/eye_display.h"
 #include "display/display.h"
+#include "display/video_player.h"
 
 #include "w25q64_flash.h"
 
@@ -27,6 +28,7 @@
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_gc9a01.h>
 #include <esp_partition.h>
+#include <freertos/timers.h>
 #include <esp_lvgl_port.h>
 #include <lvgl.h>
 
@@ -44,11 +46,112 @@ LV_FONT_DECLARE(font_awesome_20_4);
 #define LIS2HH12_I2C_ADDR 0x1D  // SDO接GND为0x1D，接VDD为0x1E
 #define LIS2HH12_INT1_PIN GPIO_NUM_42
 
+// 播放模式枚举
+enum class PlaybackMode {
+    DISPLAY_ANIMATION,  // Display动画模式（默认）
+    VIDEO_PLAYBACK      // 视频播放模式
+};
+
+// 前向声明
+class MovecallMojiESP32S3;
+
+// Display包装类：拦截SetEmotion调用并路由到Board的TriggerEmotion
+class DisplayWrapper : public Display {
+private:
+    Display* wrapped_display_;
+    MovecallMojiESP32S3* board_;
+
+public:
+    DisplayWrapper(Display* display, MovecallMojiESP32S3* board) 
+        : wrapped_display_(display), board_(board) {
+        // 复制基本属性
+        width_ = display->width();
+        height_ = display->height();
+    }
+
+    // 实现纯虚函数
+    // 直接使用底层 LVGL 锁定机制，与 EyeDisplay 保持一致
+    virtual bool Lock(int timeout_ms = 0) override {
+        if (wrapped_display_) {
+            // 由于 DisplayWrapper 是 Display 的 friend，可以直接调用 protected 方法
+            // 但为了安全，我们使用底层锁定机制
+            return lvgl_port_lock(timeout_ms);
+        }
+        return true;
+    }
+
+    virtual void Unlock() override {
+        if (wrapped_display_) {
+            // 使用底层解锁机制
+            lvgl_port_unlock();
+        }
+    }
+
+    virtual void SetEmotion(const char* emotion) override;
+
+    // 转发其他方法到wrapped_display_
+    virtual void SetStatus(const char* status) override {
+        if (wrapped_display_) wrapped_display_->SetStatus(status);
+    }
+    virtual void ShowNotification(const char* notification, int duration_ms = 3000) override {
+        if (wrapped_display_) wrapped_display_->ShowNotification(notification, duration_ms);
+    }
+    virtual void ShowNotification(const std::string &notification, int duration_ms = 3000) override {
+        if (wrapped_display_) wrapped_display_->ShowNotification(notification, duration_ms);
+    }
+    virtual void SetChatMessage(const char* role, const char* content) override {
+        if (wrapped_display_) wrapped_display_->SetChatMessage(role, content);
+    }
+    virtual void SetIcon(const char* icon) override {
+        if (wrapped_display_) wrapped_display_->SetIcon(icon);
+    }
+    virtual void SetPreviewImage(const lv_img_dsc_t* image) override {
+        if (wrapped_display_) wrapped_display_->SetPreviewImage(image);
+    }
+    virtual void SetTheme(const std::string& theme_name) override {
+        if (wrapped_display_) wrapped_display_->SetTheme(theme_name);
+    }
+    virtual void UpdateStatusBar(bool update_all = false) override {
+        if (wrapped_display_) wrapped_display_->UpdateStatusBar(update_all);
+    }
+    virtual void EnterWifiConfig() override {
+        if (wrapped_display_) wrapped_display_->EnterWifiConfig();
+    }
+    virtual void EnterOTAMode() override {
+        if (wrapped_display_) wrapped_display_->EnterOTAMode();
+    }
+    virtual void ClearScreen() override {
+        if (wrapped_display_) wrapped_display_->ClearScreen();
+    }
+    virtual void SetOTAProgress(int progress) override {
+        if (wrapped_display_) wrapped_display_->SetOTAProgress(progress);
+    }
+    virtual void EnterTestMode() override {
+        if (wrapped_display_) wrapped_display_->EnterTestMode();
+    }
+    virtual void SetTestItems(const std::vector<TestItem>& test_items) override {
+        if (wrapped_display_) wrapped_display_->SetTestItems(test_items);
+    }
+    virtual void UpdateTestItem(const std::string& id, bool pass) override {
+        if (wrapped_display_) wrapped_display_->UpdateTestItem(id, pass);
+    }
+    virtual void UpdateTestItemStatus(const std::string& id, int status) override {
+        if (wrapped_display_) wrapped_display_->UpdateTestItemStatus(id, status);
+    }
+    virtual void StartRGBTest() override {
+        if (wrapped_display_) wrapped_display_->StartRGBTest();
+    }
+    virtual void StopRGBTest() override {
+        if (wrapped_display_) wrapped_display_->StopRGBTest();
+    }
+};
+
 class MovecallMojiESP32S3 : public WifiBoard {
 private:
     Button boot_button_;
     Button touch_button_;
     EyeDisplay* display_;
+    DisplayWrapper* display_wrapper_ = nullptr;  // Display包装器
     // LCD handles for direct frame blitting
     esp_lcd_panel_io_handle_t panel_io_handle_ = nullptr;
     esp_lcd_panel_handle_t panel_handle_ = nullptr;
@@ -63,16 +166,18 @@ private:
     PowerSaveTimer* power_save_timer_;
     bool is_charging_sleep_ = false;
 
-    // Simple video playback state
-    TaskHandle_t video_task_handle_ = nullptr;
-    bool video_playing_ = false;
-    int video_group_index_ = 0; // use group 0 by default
-    static constexpr int kVideoFrameDelayMs = 100; // ~5 FPS，降低播放速度和CPU占用，避免影响音频
-    lv_obj_t* video_img_ = nullptr;
-    lv_img_dsc_t video_img_dsc_{};
+    // 视频播放器（使用封装的 VideoPlayer 类）
+    VideoPlayer* video_player_ = nullptr;
     TickType_t allow_switch_after_tick_ = 0;
-    int last_started_group_ = -1;
-    TickType_t last_start_tick_ = 0;
+    
+    // 播放模式：默认使用Display动画模式
+    PlaybackMode playback_mode_ = PlaybackMode::DISPLAY_ANIMATION;
+    
+    // 双击检测相关变量
+    uint8_t boot_button_click_count_ = 0;
+    int64_t boot_button_last_click_ms_ = 0;
+    esp_timer_handle_t boot_button_timer_ = nullptr;
+    static constexpr uint32_t kDoubleClickWindowMs = 500;  // 双击检测窗口：500ms
 
     std::vector<TestItem> test_items = {
         {"lcd", "LCD测试", 1},
@@ -162,15 +267,18 @@ private:
                         last_shake_time = current_time; // 更新上次触发时间
                         shake_count = 0; // 触发后清零
 
-                        board->CycleVideoGroup();
+                        // 根据当前模式触发表情
+                        if (board->playback_mode_ == PlaybackMode::VIDEO_PLAYBACK) {
+                            board->CycleVideoGroup();
+                        } else {
+                            board->TriggerEmotion("vertigo");
+                        }
 
                         if (Application::GetInstance().IsTmpFactoryTestMode()) {
                             board->display_->UpdateTestItem("sensor", 1);
                         } else {
                             // 这里可以触发你的摇晃事件
                             if (board->ChannelIsOpen()) {
-                                // 注释掉旧的表情动画，改用视频播放，节省内存
-                                // board->display_->SetEmotion("vertigo");
                                 #ifdef CONFIG_LANGUAGE_ZH_CN
                                 Application::GetInstance().SendTextToAI("用户正在摇晃你");
                                 #else
@@ -300,185 +408,176 @@ private:
                 .icon_font = &font_awesome_20_4,
                 .emoji_font = font_emoji_64_init(),
             });
+        
+        // 创建视频播放器实例
+        video_player_ = new VideoPlayer(DISPLAY_WIDTH, DISPLAY_HEIGHT);
     }
 
-    static void VideoPlayTask(void* arg) {
-        auto* self = static_cast<MovecallMojiESP32S3*>(arg);
-        
-        // 使用外置 Flash
-        auto& flash = W25Q64Flash::GetInstance();
-        if (!flash.IsInitialized()) {
-            ESP_LOGE(TAG, "External flash not initialized");
-            self->video_playing_ = false;
-            vTaskDelete(nullptr);
+    // 重写 Board 基类的 PlayVideoGroup 方法，使用 VideoPlayer 类（和 SetEmotion 一样的调用方式）
+    void PlayVideoGroup(const char* emotion) override {
+        if (emotion == nullptr || video_player_ == nullptr) {
+            ESP_LOGE(TAG, "PlayVideoGroup: emotion is nullptr or video_player_ is nullptr");
+            return;
+        }
+        // 使用 VideoPlayer 类播放视频
+        video_player_->PlayVideoGroup(emotion);
+        ESP_LOGI(TAG, "PlayVideoGroup: emotion=%s", emotion);
+    }
+
+public:
+    // 统一的表情触发函数：根据当前模式选择使用display动画或视频播放
+    void TriggerEmotion(const char* emotion) {
+        if (emotion == nullptr) {
             return;
         }
         
-        // Read header: 1 byte count + N*4 bytes frame counts
-        uint8_t group_count = 0;
-        if (flash.Read(0, &group_count, 1) != ESP_OK || group_count == 0) {
-            ESP_LOGE(TAG, "invalid video header");
-            self->video_playing_ = false;
-            vTaskDelete(nullptr);
-            return;
-        }
-        
-        std::vector<uint32_t> frame_counts(group_count, 0);
-        if (flash.Read(1, (uint8_t*)frame_counts.data(), group_count * sizeof(uint32_t)) != ESP_OK) {
-            ESP_LOGE(TAG, "read frame counts failed");
-            self->video_playing_ = false;
-            vTaskDelete(nullptr);
-            return;
-        }
-        // compute offsets
-        const uint32_t frame_size = DISPLAY_WIDTH * DISPLAY_HEIGHT * 2;
-        uint32_t data_offset = 1 + group_count * sizeof(uint32_t);
-        std::vector<uint32_t> group_base(group_count, 0);
-        uint32_t acc_frames = 0;
-        for (int i = 0; i < group_count; ++i) {
-            group_base[i] = data_offset + acc_frames * frame_size;
-            acc_frames += frame_counts[i];
-        }
-        int g = self->video_group_index_;
-        if (g < 0 || g >= group_count) g = 0;
-        uint32_t frames = frame_counts[g];
-        ESP_LOGI(TAG, "Video header: groups=%u, frame_size=%u, data_offset=%u, play_group=%d, frames_in_group=%u, group_base=%u",
-                 (unsigned)group_count, (unsigned)frame_size, (unsigned)data_offset, g, (unsigned)frames, (unsigned)group_base[g]);
-        if (frames == 0) {
-            self->video_playing_ = false;
-            vTaskDelete(nullptr);
-            return;
-        }
-        // allocate frame buffer
-        // Prefer DMA-capable internal memory for SPI DMA
-        uint8_t* buf = (uint8_t*)heap_caps_malloc(frame_size, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-        if (!buf) buf = (uint8_t*)heap_caps_malloc(frame_size, MALLOC_CAP_DMA);
-        if (!buf) buf = (uint8_t*)heap_caps_malloc(frame_size, MALLOC_CAP_INTERNAL);
-        if (!buf) buf = (uint8_t*)malloc(frame_size);
-        if (!buf) {
-            ESP_LOGE(TAG, "no memory for frame buffer");
-            self->video_playing_ = false;
-            vTaskDelete(nullptr);
-            return;
-        }
-        // 先读取首帧并设置到图像，再显示，避免切组时先显示空白导致黑屏扫描
-        uint32_t idx = 0;
-        {
-            size_t off0 = group_base[g] + idx * frame_size;
-            if (flash.Read(off0, buf, frame_size) != ESP_OK) {
-                ESP_LOGE(TAG, "read first frame %u failed", (unsigned int)idx);
-                free(buf);
-                self->video_playing_ = false;
-                vTaskDelete(nullptr);
-                return;
+        if (playback_mode_ == PlaybackMode::DISPLAY_ANIMATION) {
+            // Display动画模式：使用EyeDisplay的SetEmotion
+            if (display_ != nullptr) {
+                display_->SetEmotion(emotion);
+                ESP_LOGI(TAG, "TriggerEmotion (Display): %s", emotion);
             }
-            if (lvgl_port_lock(1000)) {
-                if (self->video_img_ == nullptr) {
-                    self->video_img_ = lv_image_create(lv_screen_active());
-                    lv_obj_set_size(self->video_img_, DISPLAY_WIDTH, DISPLAY_HEIGHT);
-                    // 使用顶部对齐并向上偏移15像素
-                    lv_obj_align(self->video_img_, LV_ALIGN_TOP_MID, 0, -15);
+            // 确保视频播放停止并隐藏视频图像
+            if (video_player_ != nullptr) {
+                video_player_->StopPlayback();
+            }
+        } else {
+            // 视频播放模式：使用VideoPlayer播放
+            if (video_player_ != nullptr) {
+                PlayVideoGroup(emotion);
+                ESP_LOGI(TAG, "TriggerEmotion (Video): %s", emotion);
+            }
+            // 确保眼睛动画隐藏（EyeDisplay在视频模式下会自动隐藏眼睛）
+            // 视频播放时，VideoPlayer会显示在最前面，覆盖眼睛动画
+        }
+    }
+
+    // 切换播放模式
+    void SwitchPlaybackMode() {
+        if (playback_mode_ == PlaybackMode::DISPLAY_ANIMATION) {
+            playback_mode_ = PlaybackMode::VIDEO_PLAYBACK;
+            ESP_LOGI(TAG, "切换到视频播放模式");
+            // 停止display动画，隐藏所有Display对象
+            if (display_ != nullptr) {
+                // 使用Lock/Unlock来保护LVGL操作
+                if (display_->Lock(1000)) {
+                    // 隐藏整个屏幕的所有子对象
+                    lv_obj_t* screen = lv_screen_active();
+                    if (screen != nullptr) {
+                        // 隐藏屏幕的所有子对象（包括眼睛、zzz等）
+                        uint32_t child_cnt = lv_obj_get_child_cnt(screen);
+                        for (uint32_t i = 0; i < child_cnt; i++) {
+                            lv_obj_t* child = lv_obj_get_child(screen, i);
+                            if (child != nullptr) {
+                                lv_obj_add_flag(child, LV_OBJ_FLAG_HIDDEN);
+                            }
+                        }
+                    }
+                    display_->Unlock();
                 }
-                self->video_img_dsc_.header.w = DISPLAY_WIDTH;
-                self->video_img_dsc_.header.h = DISPLAY_HEIGHT;
-                self->video_img_dsc_.header.cf = LV_COLOR_FORMAT_RGB565;
-                self->video_img_dsc_.data = buf;
-                self->video_img_dsc_.data_size = frame_size;
-                lv_img_set_src(self->video_img_, &self->video_img_dsc_);
-                lv_obj_move_foreground(self->video_img_);
-                lv_obj_clear_flag(self->video_img_, LV_OBJ_FLAG_HIDDEN);
-                lvgl_port_unlock();
             }
-            vTaskDelay(pdMS_TO_TICKS(kVideoFrameDelayMs));
-            idx = (idx + 1) % frames;
+            // 启动视频播放
+            if (video_player_ != nullptr) {
+                video_player_->PlayVideoGroup("neutral");
+            }
+        } else {
+            playback_mode_ = PlaybackMode::DISPLAY_ANIMATION;
+            ESP_LOGI(TAG, "切换到Display动画模式");
+            // 停止视频播放，显示display动画
+            if (video_player_ != nullptr) {
+                video_player_->StopPlayback();
+                // 等待一下确保视频任务完全退出
+                vTaskDelay(pdMS_TO_TICKS(100));
+            }
+            if (display_ != nullptr) {
+                // 显示Display对象（取消隐藏）
+                if (display_->Lock(1000)) {
+                    lv_obj_t* screen = lv_screen_active();
+                    if (screen != nullptr) {
+                        // 显示屏幕的所有子对象
+                        uint32_t child_cnt = lv_obj_get_child_cnt(screen);
+                        for (uint32_t i = 0; i < child_cnt; i++) {
+                            lv_obj_t* child = lv_obj_get_child(screen, i);
+                            if (child != nullptr) {
+                                lv_obj_clear_flag(child, LV_OBJ_FLAG_HIDDEN);
+                                // 确保Display对象显示在最前面（除了视频图像）
+                                // 视频图像应该已经在StopPlayback中被移到后面了
+                                if (video_player_ != nullptr && video_player_->IsPlaying() == false) {
+                                    // 如果视频没有播放，将Display对象移到前面
+                                    lv_obj_move_foreground(child);
+                                }
+                            }
+                        }
+                    }
+                    display_->Unlock();
+                }
+                // 立即设置表情，确保Display动画显示
+                display_->SetEmotion("neutral");
+            }
         }
-        while (self->video_playing_) {
-            size_t off = group_base[g] + idx * frame_size;
-            if (flash.Read(off, buf, frame_size) != ESP_OK) {
-                ESP_LOGE(TAG, "read frame %u failed", (unsigned int)idx);
-                break;
-            }
-            // 每帧短锁，更新 LVGL 图像（减少锁定时间，避免阻塞音频任务）
-            if (lvgl_port_lock(20)) {  // 从50ms减少到20ms，更快释放锁
-                self->video_img_dsc_.header.w = DISPLAY_WIDTH;
-                self->video_img_dsc_.header.h = DISPLAY_HEIGHT;
-                self->video_img_dsc_.header.cf = LV_COLOR_FORMAT_RGB565;
-                self->video_img_dsc_.data = buf;
-                self->video_img_dsc_.data_size = frame_size;
-                lv_img_set_src(self->video_img_, &self->video_img_dsc_);
-                lvgl_port_unlock();
-            }
-            if ((idx % 10) == 0) {
-                ESP_LOGI(TAG, "Playing group=%d idx=%u/%u off=%u", g, (unsigned)idx, (unsigned)frames, (unsigned)off);
-            }
-            vTaskDelay(pdMS_TO_TICKS(kVideoFrameDelayMs));
-            idx = (idx + 1) % frames; // 当前分组循环播放，直到按键切换
-        }
-        free(buf);
-        self->video_playing_ = false;
-        // 清理任务句柄，允许后续启动新的播放任务
-        self->video_task_handle_ = nullptr;
-        vTaskDelete(nullptr);
     }
 
-    void StartVideoPlayback() {
-        // 重入保护：同一组1秒内的重复启动忽略
-        TickType_t now = xTaskGetTickCount();
-        if (last_started_group_ == video_group_index_ &&
-            (now - last_start_tick_) < pdMS_TO_TICKS(1000)) {
+    // 循环切换Display表情
+    void CycleDisplayEmotion() {
+        ESP_LOGI(TAG, "CycleDisplayEmotion");
+        // 开机后一段时间内禁止切换，避免上电抖动
+        if (xTaskGetTickCount() < allow_switch_after_tick_) {
             return;
         }
-        // 若已有任务在跑，先停止并等待退出
-        if (video_task_handle_ != nullptr) {
-            video_playing_ = false;
-            for (int i = 0; i < 50 && video_task_handle_ != nullptr; ++i) { // 最多等 500ms
-                vTaskDelay(pdMS_TO_TICKS(10));
-            }
-            video_task_handle_ = nullptr;
+
+        // 简单防抖：1200ms 内忽略重复触发
+        static uint32_t last_switch_tick = 0;
+        uint32_t now = xTaskGetTickCount();
+        if (last_switch_tick != 0 && (now - last_switch_tick) < pdMS_TO_TICKS(1200)) {
+            return;
         }
-        ESP_LOGI(TAG, "StartVideoPlayback group=%d", video_group_index_);
-        video_playing_ = true;
-        // 降低优先级从5到2，避免阻塞音频任务（音频任务通常是3-4优先级）
-        xTaskCreate(VideoPlayTask, "video_play", 4096, this, 1, &video_task_handle_);
-        last_started_group_ = video_group_index_;
-        last_start_tick_ = now;
-    }
 
-    void StopVideoPlayback() {
-        if (!video_playing_ && video_task_handle_ == nullptr) return;
-        video_playing_ = false;
-        // 等待任务自删除清理句柄
-        for (int i = 0; i < 50 && video_task_handle_ != nullptr; ++i) { // 最多等 500ms
-            vTaskDelay(pdMS_TO_TICKS(10));
+        last_switch_tick = now;
+
+        if (display_ == nullptr) {
+            ESP_LOGE(TAG, "CycleDisplayEmotion: display_ is nullptr");
+            return;
         }
-        video_task_handle_ = nullptr;
-    }
 
-    int EmotionToGroup(const std::string& name) {
-        if (name == "happy")   return 0;
-        if (name == "neutral") return 1;
-        if (name == "sad")     return 2;
-        if (name == "surprise") return 3;
-        if (name == "listen") return 4;
-        return 0;
-    }
-
-    void PlayEmotion(const std::string& name) {
-        int g = EmotionToGroup(name);
-        video_group_index_ = g;
-        if (video_playing_) StopVideoPlayback();
-        StartVideoPlayback();
-    }
-
-    int ReadVideoGroupCount() {
-        auto& flash = W25Q64Flash::GetInstance();
-        if (!flash.IsInitialized()) {
-            ESP_LOGE(TAG, "External flash not initialized in ReadVideoGroupCount");
-            return 0;
-        }
-        uint8_t cnt = 0;
-        if (flash.Read(0, &cnt, 1) != ESP_OK) return 0;
-        return (int)cnt;
+        // 定义所有可用的Display表情列表
+        static const char* emotion_list[] = {
+            "neutral",      // 中性
+            "happy",        // 开心
+            "laughing",     // 大笑
+            "sad",          // 悲伤
+            "angry",        // 愤怒
+            "crying",       // 哭泣
+            "loving",       // 喜爱
+            "embarrassed",  // 尴尬
+            "surprised",    // 惊讶
+            "shocked",      // 震惊
+            "thinking",     // 思考
+            "winking",      // 眨眼
+            "cool",         // 酷
+            "relaxed",      // 放松
+            "delicious",    // 美味
+            "kissy",        // 亲吻
+            "confident",    // 自信
+            "sleepy",       // 困倦
+            "silly",        // 傻笑
+            "confused",     // 困惑
+            "vertigo"       // 眩晕
+        };
+        const int emotion_list_size = sizeof(emotion_list) / sizeof(emotion_list[0]);
+        
+        // 使用静态变量记录当前表情索引
+        static int current_emotion_index = 0;
+        
+        // 切换到下一个表情（循环）
+        current_emotion_index = (current_emotion_index + 1) % emotion_list_size;
+        const char* next_emotion = emotion_list[current_emotion_index];
+        
+        ESP_LOGI(TAG, "Switch display emotion: %d -> %d (%s)", 
+                 (current_emotion_index - 1 + emotion_list_size) % emotion_list_size,
+                 current_emotion_index, next_emotion);
+        
+        // 触发表情切换
+        TriggerEmotion(next_emotion);
     }
 
     void CycleVideoGroup() {
@@ -487,7 +586,6 @@ private:
         if (xTaskGetTickCount() < allow_switch_after_tick_) {
             return;
         }
-        ESP_LOGI(TAG, "CycleVideoGroup 1");
 
         // 简单防抖：1200ms 内忽略重复触发
         static uint32_t last_switch_tick = 0;
@@ -495,36 +593,53 @@ private:
         if (last_switch_tick != 0 && (now - last_switch_tick) < pdMS_TO_TICKS(1200)) {
             return;
         }
-        ESP_LOGI(TAG, "CycleVideoGroup 2");
 
         last_switch_tick = now;
 
-        int cnt = ReadVideoGroupCount();
-        ESP_LOGI(TAG, "CycleVideoGroup 3");
-
-        if (cnt <= 0) return;
-        // 不再先全屏黑清屏，直接切组并启动，减少可见的自上而下扫描
-        ESP_LOGI(TAG, "CycleVideoGroup 4");
-
-        if (lvgl_port_lock(100)) {
-            ESP_LOGI(TAG, "CycleVideoGroup 5");
-
-            if (video_img_ == nullptr) {
-                video_img_ = lv_image_create(lv_screen_active());
-                lv_obj_set_size(video_img_, DISPLAY_WIDTH, DISPLAY_HEIGHT);
-                // 使用顶部对齐并向上偏移20像素
-                lv_obj_align(video_img_, LV_ALIGN_TOP_MID, 0, -20);
-            }
-            lv_obj_move_foreground(video_img_);
-            lvgl_port_unlock();
-            ESP_LOGI(TAG, "CycleVideoGroup 6");
+        if (video_player_ == nullptr) {
+            ESP_LOGE(TAG, "CycleVideoGroup: video_player_ is nullptr");
+            return;
         }
-        video_group_index_ = (video_group_index_ + 1) % cnt;
-        if (video_playing_) StopVideoPlayback();
-        ESP_LOGI(TAG, "CycleVideoGroup 7");
 
-        StartVideoPlayback();
-        ESP_LOGI(TAG, "Switch video group to %d / %d", video_group_index_, cnt);
+        int cnt = video_player_->ReadVideoGroupCount();
+        if (cnt <= 0) {
+            ESP_LOGE(TAG, "CycleVideoGroup: No video groups available");
+            return;
+        }
+
+        // 使用新的封装方式：基于 emotion 状态名称循环切换
+        // 定义每个组对应的代表性 emotion（按照组索引顺序）
+        static const char* emotion_list[] = {
+            "happy",      // 组 0: 开心
+            "neutral",    // 组 1: 中性
+            "sad",       // 组 2: 悲伤
+            "surprised", // 组 3: 惊讶
+            "angry",     // 组 4: 愤怒
+            "loving",    // 组 5: 爱心
+            "thinking",  // 组 6: 思考
+            "winking",   // 组 7: 眨眼
+            "sleepy",    // 组 8: 睡眠
+            "silly",     // 组 9: 傻笑
+            "vertigo",   // 组 10: 眩晕
+            "listen"     // 组 11: 聆听
+        };
+        const int emotion_list_size = sizeof(emotion_list) / sizeof(emotion_list[0]);
+        
+        // 获取当前播放的组索引
+        int current_group = video_player_->GetCurrentGroupIndex();
+        
+        // 切换到下一个组（循环）
+        int next_group = (current_group + 1) % cnt;
+        
+        // 确保 next_group 在 emotion_list 范围内
+        if (next_group >= emotion_list_size) {
+            next_group = 0;  // 超出范围则回到第一个
+        }
+        
+        // 使用新的封装方式：通过 emotion 状态名称播放
+        const char* next_emotion = emotion_list[next_group];
+        video_player_->PlayVideoGroup(next_emotion);
+        ESP_LOGI(TAG, "Switch video group: %d -> %d (%s)", current_group, next_group, next_emotion);
     }
 
     int MaxBacklightBrightness() {
@@ -572,9 +687,12 @@ private:
                     ESP_LOGI(TAG, "触摸唤醒");
                     return;
                 }
-                // 注释掉旧的表情动画，改用视频播放，节省内存
-                // display_->SetEmotion("loving");
-                this->CycleVideoGroup();
+                // 根据当前模式触发表情
+                if (playback_mode_ == PlaybackMode::VIDEO_PLAYBACK) {
+                    this->CycleVideoGroup();
+                } else {
+                    TriggerEmotion("loving");
+                }
 
                 if (ChannelIsOpen()) {
                     #ifdef CONFIG_LANGUAGE_ZH_CN
@@ -591,10 +709,37 @@ private:
             }
         });
 
-        boot_button_.OnClick([this]() {
-            // 单击：切换到下一个表情组
-            CycleVideoGroup();
-        });
+        // 创建双击检测定时器（使用esp_timer，避免栈溢出）
+        if (!boot_button_timer_) {
+            esp_timer_create_args_t timer_args = {
+                .callback = [](void* arg) {
+                    MovecallMojiESP32S3* board = static_cast<MovecallMojiESP32S3*>(arg);
+                    // 定时器超时，执行操作
+                    if (board->boot_button_click_count_ == 1) {
+                        // 单击：500ms内只有一次点击
+                        ESP_LOGI("MovecallMojiESP32S3", "单击检测 - 当前模式: %s", 
+                                 board->playback_mode_ == PlaybackMode::VIDEO_PLAYBACK ? "VIDEO" : "DISPLAY");
+                        // 单击：根据当前模式执行不同操作
+                        if (board->playback_mode_ == PlaybackMode::VIDEO_PLAYBACK) {
+                            // 视频模式下，单击切换视频组
+                            board->CycleVideoGroup();
+                        } else {
+                            // Display模式下，单击切换表情
+                            board->CycleDisplayEmotion();
+                        }
+                    } else if (board->boot_button_click_count_ == 2) {
+                        // 双击：500ms内检测到第二次点击，且没有第三次点击
+                        ESP_LOGI("MovecallMojiESP32S3", "双击检测 - 切换播放模式");
+                        board->SwitchPlaybackMode();
+                    }
+                    board->boot_button_click_count_ = 0;
+                },
+                .arg = this,
+                .name = "boot_btn_timer"
+            };
+            esp_timer_create(&timer_args, &boot_button_timer_);
+        }
+        
         boot_button_.OnLongPress([this]() {
             ESP_LOGI(TAG, "boot_button_.OnLongPress");
             // 计算设备运行时间
@@ -622,6 +767,10 @@ private:
 
             first_level = 1;
             ESP_LOGI(TAG, "boot_button_.OnPressUp");
+            
+            // 双击检测：使用 OnClick 来检测（参考 gizwits-c2-6824-DRF-W300CA 的实现）
+            // 注意：三击配网由按钮库的 OnMultipleClick 处理，这里只处理单击和双击
+            
             if (need_power_off_) {
                 need_power_off_ = false;
                 // 使用静态函数来避免lambda捕获问题
@@ -644,14 +793,46 @@ private:
             }
         });
 
+        // 单击和双击检测：使用 OnClick 来检测（参考 gizwits-c2-6824-DRF-W300CA 的实现）
+        boot_button_.OnClick([this]() {
+            int64_t now_ms = esp_timer_get_time() / 1000;
+            // 如果距离上次点击超过500ms，重置计数器
+            if (now_ms - boot_button_last_click_ms_ > kDoubleClickWindowMs) {
+                boot_button_click_count_ = 0;
+            }
+            boot_button_last_click_ms_ = now_ms;
+            
+            boot_button_click_count_++;
+            ESP_LOGI(TAG, "boot_button_.OnClick - 点击次数: %d", boot_button_click_count_);
+            
+            // 停止之前的定时器（如果有）
+            if (boot_button_timer_ != nullptr) {
+                esp_timer_stop(boot_button_timer_);
+            }
+            
+            if (boot_button_click_count_ == 1) {
+                // 第一次点击，启动定时器（500ms后执行单击操作）
+                esp_timer_start_once(boot_button_timer_, kDoubleClickWindowMs * 1000);
+            } else if (boot_button_click_count_ == 2) {
+                // 第二次点击，停止定时器，启动更短的定时器（200ms后执行双击操作）
+                esp_timer_stop(boot_button_timer_);
+                esp_timer_start_once(boot_button_timer_, 200 * 1000);
+            } else if (boot_button_click_count_ >= 3) {
+                // 第三次或更多次点击，停止定时器，重置计数器
+                // 让按钮库的 OnMultipleClick 来处理三击配网
+                ESP_LOGI(TAG, "检测到第三次点击，停止定时器，让 OnMultipleClick 处理");
+                esp_timer_stop(boot_button_timer_);
+                boot_button_click_count_ = 0;
+            }
+        });
+        
+        // 短按三下：重置WiFi配置（保留此功能）
         boot_button_.OnMultipleClick([this]() {
             InnerResetWifiConfiguration();
         }, 3);
 
-        // 单击：切到下一组并持续播放该组
-        boot_button_.OnClick([this]() {
-            CycleVideoGroup();
-        });
+        // 注意：OnClick 已经在上面注册过了，这里不需要重复注册
+        // 如果重复注册会覆盖之前的处理
     }
 
     // 物联网初始化，添加对 AI 可见设备
@@ -856,18 +1037,18 @@ public:
         // InitializeGpio(DISPLAY_BACKLIGHT_PIN, false);
         InitializeSpi();
         InitializeGc9a01Display();
-        InitializeLis2hh12I2c(); // 新增LIS2HH12专用I2C
-        InitializeLis2hh12();    // 初始化LIS2HH12
+        // InitializeLis2hh12I2c(); // 新增LIS2HH12专用I2C - 已注释，不初始化陀螺仪
+        // InitializeLis2hh12();    // 初始化LIS2HH12 - 已注释，不初始化陀螺仪
         
         // 检查I2C设备是否正常
-        if (lis2hh12_dev_ == nullptr) {
-            ESP_LOGE(TAG, "LIS2HH12 device not initialized, skipping sensor task");
-        } else {
-            ESP_LOGI(TAG, "LIS2HH12 device initialized successfully");
-        }
+        // if (lis2hh12_dev_ == nullptr) {
+        //     ESP_LOGE(TAG, "LIS2HH12 device not initialized, skipping sensor task");
+        // } else {
+        //     ESP_LOGI(TAG, "LIS2HH12 device initialized successfully");
+        // }
         InitializeButtons();
         InitializeIot();
-        xTaskCreatePinnedToCore(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 1024 * 3, this, 1, NULL, 0); // 启动检测任务
+        // xTaskCreatePinnedToCore(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 1024 * 3, this, 1, NULL, 0); // 启动检测任务 - 已注释，不启动陀螺仪任务
         InitializePowerManager();
         InitializePowerSaveTimer();
         // ESP_LOGI(TAG, "ReadADC2_CH1_Oneshot");
@@ -888,10 +1069,12 @@ public:
             NULL                       // 任务句柄
         );
 
-        // 开机：固定从组0开始播放，并在2秒后才允许切组，避免上电抖动
-        video_group_index_ = 0;
-        StartVideoPlayback();
+        // 开机：根据当前模式决定是否启动视频播放
+        // 默认是 DISPLAY_ANIMATION 模式，不启动视频播放
         allow_switch_after_tick_ = xTaskGetTickCount() + pdMS_TO_TICKS(2000);
+        
+        // 如果默认模式是视频模式，才启动视频播放（但默认是 DISPLAY_ANIMATION，所以不会启动）
+        // 这里保持为空，让用户通过短按两下切换到视频模式
 
         if (Application::GetInstance().IsTmpFactoryTestMode()) {
             display_->EnterTestMode();
@@ -981,7 +1164,11 @@ public:
     }
 
     virtual Display* GetDisplay() override {
-        return display_;
+        // 返回包装器，以便拦截SetEmotion调用
+        if (display_wrapper_ == nullptr && display_ != nullptr) {
+            display_wrapper_ = new DisplayWrapper(display_, this);
+        }
+        return display_wrapper_ != nullptr ? static_cast<Display*>(display_wrapper_) : display_;
     }
     
     virtual Backlight* GetBacklight() override {
@@ -1025,5 +1212,14 @@ public:
     // 公开I2C读寄存器方法供任务调用
     uint8_t lis2hh12_read_reg_pub(uint8_t reg) { return this->lis2hh12_read_reg(reg); }
 };
+
+// DisplayWrapper::SetEmotion 的实现（需要在 MovecallMojiESP32S3 类定义之后）
+void DisplayWrapper::SetEmotion(const char* emotion) {
+    if (board_ != nullptr) {
+        board_->TriggerEmotion(emotion);
+    } else if (wrapped_display_ != nullptr) {
+        wrapped_display_->SetEmotion(emotion);
+    }
+}
 
 DECLARE_BOARD(MovecallMojiESP32S3);

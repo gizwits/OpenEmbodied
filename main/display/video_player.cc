@@ -158,6 +158,20 @@ void VideoPlayer::StopVideoPlayback() {
 
 void VideoPlayer::StopPlayback() {
     StopVideoPlayback();
+    // 隐藏视频图像，避免与Display动画重叠
+    if (video_img_ != nullptr) {
+        if (lvgl_port_lock(1000)) {
+            // 隐藏视频图像
+            lv_obj_add_flag(video_img_, LV_OBJ_FLAG_HIDDEN);
+            // 将视频图像移到后面，确保Display对象显示在最前面
+            lv_obj_move_background(video_img_);
+            // 清空图像数据，避免显示最后一帧
+            video_img_dsc_.data = nullptr;
+            video_img_dsc_.data_size = 0;
+            lv_img_set_src(video_img_, &video_img_dsc_);
+            lvgl_port_unlock();
+        }
+    }
 }
 
 void VideoPlayer::VideoPlayTask(void* arg) {

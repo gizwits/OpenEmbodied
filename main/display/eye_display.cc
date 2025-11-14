@@ -313,10 +313,6 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
         right_hand_ = nullptr;
     }
 
-    // 隐藏眼睛对象，改用视频播放，节省内存
-    lv_obj_add_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
-    
     // 重置眼睛旋转角度（特别是从生气状态切换出来时）
     lv_obj_set_style_transform_angle(left_eye_, 0, 0);
     lv_obj_set_style_transform_angle(right_eye_, 0, 0);
@@ -335,8 +331,7 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
     lv_anim_del(left_eye_, nullptr);
     lv_anim_del(right_eye_, nullptr);
 
-    // 禁用所有表情动画，改用视频播放，节省内存（注释掉所有动画启动）
-    /*
+    // 启动对应状态的表情动画
     switch (current_state_) {
         case EyeState::SURPRISED:
         case EyeState::IDLE:
@@ -380,7 +375,6 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
             StartVertigoAnimation();
             break;
     }
-    */
 
     if (current_state_ == EyeState::VERTIGO || current_state_ == EyeState::LOVING) {
         // 眩晕动画需要锁定
