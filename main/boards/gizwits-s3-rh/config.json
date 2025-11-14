@@ -6,6 +6,7 @@
             "sdkconfig_append": [
                 "CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y",
                 "CONFIG_USE_AUDIO_PROCESSOR=y",
+                "CONFIG_USE_DEVICE_AEC=y",
                 "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions.csv\"",
                 "CONFIG_LV_FONT_MONTSERRAT_22=y",
                 "CONFIG_SR_WN_WN9_NIHAOXIAOXIN_TTS=y",

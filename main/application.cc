@@ -290,6 +290,7 @@ void Application::ToggleChatState() {
             AbortSpeaking(kAbortReasonNone);
             ESP_LOGI(TAG, "ToggleChatState(kDeviceStateSpeaking)");
             SetDeviceState(kDeviceStateListening);
+            ResetDecoder();
         }, "ToggleChatState_AbortSpeaking");
     } else if (device_state_ == kDeviceStateListening) {
         // Schedule([this]() {
@@ -908,12 +909,12 @@ void Application::MainEventLoop() {
 }
 
 void Application::OnWakeWordDetected() {
+    ESP_LOGI(TAG, "OnWakeWordDetected");
     if (chat_mode_ == 0) {
         ESP_LOGI(TAG, "OnWakeWordDetected: chat_mode_ == 0");
         return;
     }
     Board::GetInstance().WakeUpPowerSaveTimer();
-    ESP_LOGI(TAG, "OnWakeWordDetected");
     if (!protocol_) {
         return;
     }
