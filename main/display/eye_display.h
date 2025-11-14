@@ -177,6 +177,9 @@ public:
     virtual void EnterOTAMode() override;
     virtual void SetOTAProgress(int progress) override;
     
+    // 删除zzz对象（用于切换到视频模式时）
+    void DeleteZzzObjects();
+    
     // 产测模式相关方法
     virtual void EnterTestMode() override;
     virtual void SetTestItems(const std::vector<TestItem>& test_items) override;

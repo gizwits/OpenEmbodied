@@ -28,6 +28,7 @@
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_gc9a01.h>
 #include <esp_partition.h>
+#include <functional>
 #include <freertos/timers.h>
 #include <esp_lvgl_port.h>
 #include <lvgl.h>
@@ -457,19 +458,35 @@ public:
         if (playback_mode_ == PlaybackMode::DISPLAY_ANIMATION) {
             playback_mode_ = PlaybackMode::VIDEO_PLAYBACK;
             ESP_LOGI(TAG, "切换到视频播放模式");
-            // 停止display动画，隐藏所有Display对象
+            // 停止display动画，隐藏所有Display对象（包括zzz等递归隐藏）
             if (display_ != nullptr) {
                 // 使用Lock/Unlock来保护LVGL操作
                 if (display_->Lock(1000)) {
-                    // 隐藏整个屏幕的所有子对象
+                    // 先删除zzz对象，避免显示在视频上（在锁内删除确保线程安全）
+                    display_->DeleteZzzObjects();
+                    
                     lv_obj_t* screen = lv_screen_active();
                     if (screen != nullptr) {
-                        // 隐藏屏幕的所有子对象（包括眼睛、zzz等）
+                        // 递归函数：隐藏对象及其所有子对象（包括zzz）
+                        std::function<void(lv_obj_t*)> add_hidden_recursive;
+                        add_hidden_recursive = [&add_hidden_recursive](lv_obj_t* obj) -> void {
+                            if (obj == nullptr) return;
+                            lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+                            uint32_t child_cnt = lv_obj_get_child_cnt(obj);
+                            for (uint32_t i = 0; i < child_cnt; i++) {
+                                lv_obj_t* child = lv_obj_get_child(obj, i);
+                                if (child != nullptr) {
+                                    add_hidden_recursive(child);
+                                }
+                            }
+                        };
+                        
+                        // 隐藏屏幕的所有子对象（递归隐藏，包括zzz）
                         uint32_t child_cnt = lv_obj_get_child_cnt(screen);
                         for (uint32_t i = 0; i < child_cnt; i++) {
                             lv_obj_t* child = lv_obj_get_child(screen, i);
                             if (child != nullptr) {
-                                lv_obj_add_flag(child, LV_OBJ_FLAG_HIDDEN);
+                                add_hidden_recursive(child);
                             }
                         }
                     }
@@ -490,29 +507,79 @@ public:
                 vTaskDelay(pdMS_TO_TICKS(100));
             }
             if (display_ != nullptr) {
+                ESP_LOGI(TAG, "Switching back to Display mode: clearing hidden flags and resetting emotion");
+                // 先停止视频播放并隐藏视频图像
+                if (video_player_ != nullptr) {
+                    video_player_->StopPlayback();
+                    // 额外确保视频图像被隐藏（在Display锁内操作）
+                    if (display_->Lock(1000)) {
+                        // 查找并隐藏视频图像对象
+                        lv_obj_t* screen = lv_screen_active();
+                        if (screen != nullptr) {
+                            uint32_t child_cnt = lv_obj_get_child_cnt(screen);
+                            for (uint32_t i = 0; i < child_cnt; i++) {
+                                lv_obj_t* child = lv_obj_get_child(screen, i);
+                                if (child != nullptr && lv_obj_check_type(child, &lv_image_class)) {
+                                    // 找到图像对象，可能是视频图像
+                                    lv_obj_add_flag(child, LV_OBJ_FLAG_HIDDEN);
+                                    lv_obj_move_background(child);
+                                    ESP_LOGI(TAG, "Hidden and moved background for potential video image object");
+                                }
+                            }
+                        }
+                        display_->Unlock();
+                    }
+                    // 等待一下确保视频任务完全退出
+                    vTaskDelay(pdMS_TO_TICKS(100));
+                }
+                
                 // 显示Display对象（取消隐藏）
                 if (display_->Lock(1000)) {
                     lv_obj_t* screen = lv_screen_active();
                     if (screen != nullptr) {
-                        // 显示屏幕的所有子对象
+                        // 递归函数：取消隐藏对象及其所有子对象
+                        std::function<void(lv_obj_t*)> clear_hidden_recursive;
+                        clear_hidden_recursive = [&clear_hidden_recursive](lv_obj_t* obj) -> void {
+                            if (obj == nullptr) return;
+                            lv_obj_clear_flag(obj, LV_OBJ_FLAG_HIDDEN);
+                            uint32_t child_cnt = lv_obj_get_child_cnt(obj);
+                            for (uint32_t i = 0; i < child_cnt; i++) {
+                                lv_obj_t* child = lv_obj_get_child(obj, i);
+                                if (child != nullptr) {
+                                    clear_hidden_recursive(child);
+                                }
+                            }
+                        };
+                        
+                        // 显示屏幕的所有子对象（递归取消隐藏）
                         uint32_t child_cnt = lv_obj_get_child_cnt(screen);
+                        ESP_LOGI(TAG, "Screen has %u children, clearing HIDDEN flags and moving to foreground", child_cnt);
                         for (uint32_t i = 0; i < child_cnt; i++) {
                             lv_obj_t* child = lv_obj_get_child(screen, i);
                             if (child != nullptr) {
-                                lv_obj_clear_flag(child, LV_OBJ_FLAG_HIDDEN);
-                                // 确保Display对象显示在最前面（除了视频图像）
-                                // 视频图像应该已经在StopPlayback中被移到后面了
-                                if (video_player_ != nullptr && video_player_->IsPlaying() == false) {
-                                    // 如果视频没有播放，将Display对象移到前面
-                                    lv_obj_move_foreground(child);
+                                // 跳过视频图像对象（图像类型）
+                                if (lv_obj_check_type(child, &lv_image_class)) {
+                                    ESP_LOGI(TAG, "Skipping image object (likely video image)");
+                                    continue;
                                 }
+                                clear_hidden_recursive(child);
+                                // 确保Display对象显示在最前面
+                                lv_obj_move_foreground(child);
+                                ESP_LOGI(TAG, "Moved child %u to foreground", i);
                             }
                         }
+                    } else {
+                        ESP_LOGW(TAG, "Screen is nullptr");
                     }
                     display_->Unlock();
+                } else {
+                    ESP_LOGW(TAG, "Failed to lock display");
                 }
                 // 立即设置表情，确保Display动画显示
+                ESP_LOGI(TAG, "Setting emotion to neutral after switching back from video mode");
                 display_->SetEmotion("neutral");
+            } else {
+                ESP_LOGW(TAG, "Display is nullptr");
             }
         }
     }

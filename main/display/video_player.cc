@@ -118,7 +118,11 @@ void VideoPlayer::PlayVideoGroupByIndex(int group_index) {
         return;
     }
     video_group_index_ = group_index;
-    if (video_playing_) StopPlayback();
+    if (video_playing_) {
+        StopPlayback();
+        // 等待一下确保视频任务完全退出
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
     StartVideoPlayback();
     ESP_LOGI(TAG, "PlayVideoGroupByIndex: group_index=%d", group_index);
 }

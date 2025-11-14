@@ -194,8 +194,12 @@ void EyeDisplay::EmotionTask(void* arg) {
 
 void EyeDisplay::ProcessEmotionChange(const char* emotion) {
     if (emotion == nullptr) {
+        ESP_LOGW(TAG, "ProcessEmotionChange: emotion is nullptr");
         return;
     }
+    
+    ESP_LOGI(TAG, "ProcessEmotionChange: emotion=%s, current_state=%d, vertigo_locked=%d", 
+             emotion, (int)current_state_, vertigo_locked_);
     
     // 测试模式或RGB测试激活时忽略表情切换
     if (test_mode_active_ || rgb_test_active_) {
@@ -205,8 +209,17 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
     
     // VERTIGO锁定：如果正在锁定且不是VERTIGO请求，直接忽略
     if (vertigo_locked_ && strcmp(emotion, "vertigo") != 0) {
-        ESP_LOGI(TAG, "VERTIGO locked, ignore emotion: %s", emotion);
-        return;
+        ESP_LOGW(TAG, "VERTIGO locked, ignore emotion: %s (current_state=%d)", emotion, (int)current_state_);
+        // 如果是从视频模式切换回来，强制清除锁定状态
+        if (strcmp(emotion, "neutral") == 0) {
+            ESP_LOGI(TAG, "Force clear vertigo_locked for neutral emotion");
+            vertigo_locked_ = false;
+            if (vertigo_timer_) {
+                esp_timer_stop(vertigo_timer_);
+            }
+        } else {
+            return;
+        }
     }
     EyeState new_state = current_state_;
     
@@ -254,15 +267,218 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
         new_state = EyeState::VERTIGO;
     }
 
+    // 使用锁保护状态切换
+    DisplayLockGuard lock(this);
+    
+    // 如果状态相同，仍然需要确保眼睛可见并重新初始化（用于从视频模式切换回来时）
     if (new_state == current_state_) {
+        ESP_LOGI(TAG, "ProcessEmotionChange: same state (%d), reinitializing components", (int)new_state);
+        // 确保眼睛对象和容器可见
+        if (left_eye_ != nullptr && right_eye_ != nullptr) {
+            lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_clear_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
+            ESP_LOGI(TAG, "Cleared HIDDEN flag for eyes");
+            // 确保容器的父对象也可见
+            lv_obj_t* container = lv_obj_get_parent(left_eye_);
+            if (container != nullptr) {
+                lv_obj_clear_flag(container, LV_OBJ_FLAG_HIDDEN);
+                // 确保容器移到前景
+                lv_obj_move_foreground(container);
+                ESP_LOGI(TAG, "Cleared HIDDEN flag for container and moved to foreground");
+                
+                // 确保容器的父对象（屏幕）也可见
+                lv_obj_t* screen = lv_obj_get_parent(container);
+                if (screen != nullptr) {
+                    lv_obj_clear_flag(screen, LV_OBJ_FLAG_HIDDEN);
+                    ESP_LOGI(TAG, "Cleared HIDDEN flag for screen");
+                }
+            } else {
+                ESP_LOGW(TAG, "Container is nullptr");
+            }
+        } else {
+            ESP_LOGW(TAG, "Eyes are nullptr: left=%p, right=%p", left_eye_, right_eye_);
+        }
+        
+        // 清理可能存在的组件（无论当前状态是什么），确保重新创建
+        if (left_heart_) {
+            lv_anim_del(left_heart_, nullptr);
+            lv_obj_del(left_heart_);
+            left_heart_ = nullptr;
+        }
+        if (right_heart_) {
+            lv_anim_del(right_heart_, nullptr);
+            lv_obj_del(right_heart_);
+            right_heart_ = nullptr;
+        }
+        if (mouth_) {
+            lv_anim_del(mouth_, nullptr);
+            lv_obj_del(mouth_);
+            mouth_ = nullptr;
+        }
+        if (right_tear_) {
+            lv_obj_del(right_tear_);
+            right_tear_ = nullptr;
+        }
+        if (left_hand_) {
+            lv_anim_del(left_hand_, nullptr);
+            lv_obj_del(left_hand_);
+            left_hand_ = nullptr;
+        }
+        if (right_hand_) {
+            lv_anim_del(right_hand_, nullptr);
+            lv_obj_del(right_hand_);
+            right_hand_ = nullptr;
+        }
+        if (zzz1_) {
+            lv_obj_del(zzz1_);
+            zzz1_ = nullptr;
+        }
+        if (zzz2_) {
+            lv_obj_del(zzz2_);
+            zzz2_ = nullptr;
+        }
+        if (zzz3_) {
+            lv_obj_del(zzz3_);
+            zzz3_ = nullptr;
+        }
+        
+        // 重置眼睛状态
+        if (left_eye_ != nullptr) {
+            lv_obj_set_style_transform_angle(left_eye_, 0, 0);
+        }
+        if (right_eye_ != nullptr) {
+            lv_obj_set_style_transform_angle(right_eye_, 0, 0);
+        }
+        if (new_state != EyeState::SLEEPING) {
+            if (left_eye_ != nullptr) {
+                lv_obj_set_size(left_eye_, 40, 80);
+                lv_obj_set_style_radius(left_eye_, LV_RADIUS_CIRCLE, 0);
+            }
+            if (right_eye_ != nullptr) {
+                lv_obj_set_size(right_eye_, 40, 80);
+                lv_obj_set_style_radius(right_eye_, LV_RADIUS_CIRCLE, 0);
+            }
+        }
+        
+        // 停止当前动画
+        lv_anim_del(left_eye_, nullptr);
+        lv_anim_del(right_eye_, nullptr);
+        
+        // 对于所有状态，都需要重新初始化动画和组件（从视频模式切换回来时）
+        ESP_LOGI(TAG, "Reinitializing animation for state %d", (int)new_state);
+        switch (new_state) {
+            case EyeState::SURPRISED:
+            case EyeState::IDLE:
+                ESP_LOGI(TAG, "Starting IDLE animation");
+                StartIdleAnimation();
+                break;
+            case EyeState::RELAXED:
+            case EyeState::CONFIDENT:
+            case EyeState::COOL:
+            case EyeState::WINKING:
+            case EyeState::HAPPY:
+                ESP_LOGI(TAG, "Starting HAPPY animation");
+                StartHappyAnimation();
+                break;
+            case EyeState::ANGRY:
+                ESP_LOGI(TAG, "Starting ANGRY animation");
+                StartAngryAnimation();
+                break;
+            case EyeState::CRYING:
+            case EyeState::SAD:
+                ESP_LOGI(TAG, "Starting SAD animation");
+                StartSadAnimation();
+                break;
+            case EyeState::KISSY:
+            case EyeState::LAUGHING:
+            case EyeState::LOVING:
+                ESP_LOGI(TAG, "Starting LOVING animation");
+                StartLovingAnimation();
+                break;
+            case EyeState::CONFUSED:
+            case EyeState::DELICIOUS:
+            case EyeState::EMBARRASSED:
+            case EyeState::THINKING:
+                ESP_LOGI(TAG, "Starting THINKING animation");
+                StartThinkingAnimation();
+                break;
+            case EyeState::SHOCKED:
+                ESP_LOGI(TAG, "Starting SHOCKED animation");
+                StartShockedAnimation();
+                break;
+            case EyeState::SLEEPING:
+                ESP_LOGI(TAG, "Starting SLEEPING animation");
+                StartSleepingAnimation();
+                break;
+            case EyeState::SILLY:
+                ESP_LOGI(TAG, "Starting SILLY animation");
+                StartSillyAnimation();
+                break;
+            case EyeState::VERTIGO:
+                ESP_LOGI(TAG, "Starting VERTIGO animation");
+                StartVertigoAnimation();
+                break;
+        }
+        ESP_LOGI(TAG, "Animation reinitialization completed for state %d", (int)new_state);
+        
+        // 处理VERTIGO和LOVING的锁定逻辑
+        // 注意：从视频模式切换回来时，不应该重新锁定（除非是VERTIGO状态）
+        if (new_state == EyeState::VERTIGO) {
+            vertigo_locked_ = true;
+            ESP_LOGI(TAG, "VERTIGO state: setting vertigo_locked=true");
+        } else if (new_state == EyeState::LOVING) {
+            // LOVING状态也需要锁定，但只在非视频模式切换时
+            vertigo_locked_ = true;
+            ESP_LOGI(TAG, "LOVING state: setting vertigo_locked=true");
+        } else {
+            // 其他状态清除锁定
+            vertigo_locked_ = false;
+            ESP_LOGI(TAG, "Non-locking state: clearing vertigo_locked");
+        }
+        if (new_state == EyeState::VERTIGO || new_state == EyeState::LOVING || new_state == EyeState::THINKING) {
+            if (new_state == EyeState::THINKING) {
+                vertigo_unlock_time_ = esp_timer_get_time() + 2000000LL; // 2秒后解锁
+            } else {
+                vertigo_unlock_time_ = esp_timer_get_time() + 5000000LL; // 5秒后解锁
+            }
+            if (vertigo_timer_ == nullptr) {
+                esp_timer_create_args_t timer_args = {
+                    .callback = [](void* arg) {
+                        EyeDisplay* self = static_cast<EyeDisplay*>(arg);
+                        self->vertigo_locked_ = false;
+                        ESP_LOGI(TAG, "VERTIGO unlock, auto switch to idle");
+                        self->SetEmotion("neutral");
+                        if (Application::GetInstance().GetDeviceState() == DeviceState::kDeviceStateIdle) {
+                            self->SetEmotion("sleepy");
+                        } else {
+                            self->SetEmotion("neutral");
+                        }
+                    },
+                    .arg = this,
+                    .dispatch_method = ESP_TIMER_TASK,
+                    .name = "vertigo_timer"
+                };
+                esp_timer_create(&timer_args, &vertigo_timer_);
+            }
+            esp_timer_stop(vertigo_timer_);
+            if (new_state == EyeState::THINKING) {
+                esp_timer_start_once(vertigo_timer_, 2000000); // 2秒
+            } else {
+                esp_timer_start_once(vertigo_timer_, 5000000); // 5秒
+            }
+        } else {
+            vertigo_locked_ = false;
+            if (vertigo_timer_) esp_timer_stop(vertigo_timer_);
+        }
+        
         return;
     }
 
-    // 使用锁保护状态切换
-    DisplayLockGuard lock(this);
-
-    // 如果不是睡眠状态，删除 zzz 标签
-    if (current_state_ == EyeState::SLEEPING && new_state != EyeState::SLEEPING) {
+    ESP_LOGI(TAG, "ProcessEmotionChange: different state (%d -> %d), cleaning up and reinitializing", 
+             (int)current_state_, (int)new_state);
+    
+    // 如果新状态不是睡眠状态，删除 zzz 标签（无论当前状态是什么）
+    if (new_state != EyeState::SLEEPING) {
         if (zzz1_) {
             lv_obj_del(zzz1_);
             zzz1_ = nullptr;
@@ -313,16 +529,46 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
         right_hand_ = nullptr;
     }
 
+    // 确保眼睛对象可见（如果它们存在）
+    if (left_eye_ != nullptr) {
+        lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
+        ESP_LOGI(TAG, "Cleared HIDDEN flag for left_eye");
+    }
+    if (right_eye_ != nullptr) {
+        lv_obj_clear_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
+        ESP_LOGI(TAG, "Cleared HIDDEN flag for right_eye");
+    }
+    
+    // 确保容器可见并移到前景
+    if (left_eye_ != nullptr) {
+        lv_obj_t* container = lv_obj_get_parent(left_eye_);
+        if (container != nullptr) {
+            lv_obj_clear_flag(container, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(container);
+            ESP_LOGI(TAG, "Cleared HIDDEN flag for container and moved to foreground");
+        } else {
+            ESP_LOGW(TAG, "Container is nullptr when ensuring visibility");
+        }
+    }
+    
     // 重置眼睛旋转角度（特别是从生气状态切换出来时）
-    lv_obj_set_style_transform_angle(left_eye_, 0, 0);
-    lv_obj_set_style_transform_angle(right_eye_, 0, 0);
+    if (left_eye_ != nullptr) {
+        lv_obj_set_style_transform_angle(left_eye_, 0, 0);
+    }
+    if (right_eye_ != nullptr) {
+        lv_obj_set_style_transform_angle(right_eye_, 0, 0);
+    }
     
     // 重置眼睛尺寸为默认值（除了睡眠状态）
     if (new_state != EyeState::SLEEPING) {
-        lv_obj_set_size(left_eye_, 40, 80);
-        lv_obj_set_size(right_eye_, 40, 80);
-        lv_obj_set_style_radius(left_eye_, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_radius(right_eye_, LV_RADIUS_CIRCLE, 0);
+        if (left_eye_ != nullptr) {
+            lv_obj_set_size(left_eye_, 40, 80);
+            lv_obj_set_style_radius(left_eye_, LV_RADIUS_CIRCLE, 0);
+        }
+        if (right_eye_ != nullptr) {
+            lv_obj_set_size(right_eye_, 40, 80);
+            lv_obj_set_style_radius(right_eye_, LV_RADIUS_CIRCLE, 0);
+        }
     }
 
     current_state_ = new_state;
@@ -332,9 +578,11 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
     lv_anim_del(right_eye_, nullptr);
 
     // 启动对应状态的表情动画
+    ESP_LOGI(TAG, "Starting animation for new state %d", (int)current_state_);
     switch (current_state_) {
         case EyeState::SURPRISED:
         case EyeState::IDLE:
+            ESP_LOGI(TAG, "Calling StartIdleAnimation()");
             StartIdleAnimation();
             break;
         case EyeState::RELAXED:
@@ -342,39 +590,52 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
         case EyeState::COOL:
         case EyeState::WINKING:
         case EyeState::HAPPY:
+            ESP_LOGI(TAG, "Calling StartHappyAnimation()");
             StartHappyAnimation();
             break;
         case EyeState::ANGRY:
+            ESP_LOGI(TAG, "Calling StartAngryAnimation()");
             StartAngryAnimation();
             break;
         case EyeState::CRYING:
         case EyeState::SAD:
+            ESP_LOGI(TAG, "Calling StartSadAnimation()");
             StartSadAnimation();
             break;
         case EyeState::KISSY:
         case EyeState::LAUGHING:
         case EyeState::LOVING:
+            ESP_LOGI(TAG, "Calling StartLovingAnimation()");
             StartLovingAnimation();
             break;
         case EyeState::CONFUSED:
         case EyeState::DELICIOUS:
         case EyeState::EMBARRASSED:
         case EyeState::THINKING:
+            ESP_LOGI(TAG, "Calling StartThinkingAnimation()");
              StartThinkingAnimation();
              break;
         case EyeState::SHOCKED:
+            ESP_LOGI(TAG, "Calling StartShockedAnimation()");
             StartShockedAnimation();
             break;
         case EyeState::SLEEPING:
+            ESP_LOGI(TAG, "Calling StartSleepingAnimation()");
             StartSleepingAnimation();
             break;
         case EyeState::SILLY:
+            ESP_LOGI(TAG, "Calling StartSillyAnimation()");
             StartSillyAnimation();
             break;
         case EyeState::VERTIGO:
+            ESP_LOGI(TAG, "Calling StartVertigoAnimation()");
             StartVertigoAnimation();
             break;
+        default:
+            ESP_LOGW(TAG, "Unknown state %d, no animation started", (int)current_state_);
+            break;
     }
+    ESP_LOGI(TAG, "Animation start completed for state %d", (int)current_state_);
 
     if (current_state_ == EyeState::VERTIGO || current_state_ == EyeState::LOVING) {
         // 眩晕动画需要锁定
@@ -421,9 +682,16 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
 }
 
 void EyeDisplay::StartIdleAnimation() {
+    ESP_LOGI(TAG, "StartIdleAnimation: entry, left_eye=%p, right_eye=%p", left_eye_, right_eye_);
+    // 检查眼睛对象是否存在
+    if (left_eye_ == nullptr || right_eye_ == nullptr) {
+        ESP_LOGW(TAG, "StartIdleAnimation: eyes not initialized");
+        return;
+    }
     // 确保眼睛可见
     lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
+    ESP_LOGI(TAG, "StartIdleAnimation: cleared HIDDEN flags");
     
     lv_anim_init(&left_anim_);
     lv_anim_set_var(&left_anim_, left_eye_);
@@ -501,9 +769,11 @@ void EyeDisplay::StartHappyAnimation() {
 }
 
 void EyeDisplay::StartSadAnimation() {
+    ESP_LOGI(TAG, "StartSadAnimation: entry, left_eye=%p, right_eye=%p", left_eye_, right_eye_);
     // 确保眼睛可见
     lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
+    ESP_LOGI(TAG, "StartSadAnimation: cleared HIDDEN flags");
     
     // 设置眼睛为水平长条
     lv_obj_set_size(left_eye_, 60, 20);
@@ -672,6 +942,20 @@ void EyeDisplay::StartSleepingAnimation() {
     lv_obj_set_style_radius(left_eye_, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_radius(right_eye_, LV_RADIUS_CIRCLE, 0);
 
+    // 先清理可能存在的旧zzz对象，避免重复创建
+    if (zzz1_) {
+        lv_obj_del(zzz1_);
+        zzz1_ = nullptr;
+    }
+    if (zzz2_) {
+        lv_obj_del(zzz2_);
+        zzz2_ = nullptr;
+    }
+    if (zzz3_) {
+        lv_obj_del(zzz3_);
+        zzz3_ = nullptr;
+    }
+
     // 创建三个 z 标签
     zzz1_ = lv_label_create(lv_screen_active());
     lv_obj_set_style_text_font(zzz1_, fonts_.text_font, 0);  // 使用文本字体
@@ -693,6 +977,38 @@ void EyeDisplay::StartSleepingAnimation() {
     lv_label_set_text(zzz3_, "z");
     lv_obj_align(zzz3_, LV_ALIGN_TOP_MID, 40, 30 - DISPLAY_VERTICAL_OFFSET);  // 调整垂直位置到 30
     lv_obj_set_style_text_letter_space(zzz3_, 2, 0);  // 增加字间距
+}
+
+void EyeDisplay::DeleteZzzObjects() {
+    // 删除已知的zzz对象
+    if (zzz1_) {
+        lv_obj_del(zzz1_);
+        zzz1_ = nullptr;
+    }
+    if (zzz2_) {
+        lv_obj_del(zzz2_);
+        zzz2_ = nullptr;
+    }
+    if (zzz3_) {
+        lv_obj_del(zzz3_);
+        zzz3_ = nullptr;
+    }
+    
+    // 额外检查：遍历屏幕的所有子对象，查找并删除所有包含"z"文本的label对象
+    // 这可以确保即使zzz对象指针丢失，也能删除它们
+    lv_obj_t* screen = lv_screen_active();
+    if (screen != nullptr) {
+        uint32_t child_cnt = lv_obj_get_child_cnt(screen);
+        for (int32_t i = child_cnt - 1; i >= 0; i--) {
+            lv_obj_t* child = lv_obj_get_child(screen, i);
+            if (child != nullptr && lv_obj_check_type(child, &lv_label_class)) {
+                const char* text = lv_label_get_text(child);
+                if (text != nullptr && strcmp(text, "z") == 0) {
+                    lv_obj_del(child);
+                }
+            }
+        }
+    }
 }
 
 void EyeDisplay::StartShockedAnimation() {
@@ -783,9 +1099,11 @@ void EyeDisplay::StartSillyAnimation() {
 }
 
 void EyeDisplay::StartAngryAnimation() {
+    ESP_LOGI(TAG, "StartAngryAnimation: entry, left_eye=%p, right_eye=%p", left_eye_, right_eye_);
     // 确保眼睛可见
     lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
+    ESP_LOGI(TAG, "StartAngryAnimation: cleared HIDDEN flags");
     
     // 设置眼睛为倾斜的形状（内高外低）
     // 左眼：右高左低
@@ -968,7 +1286,7 @@ void EyeDisplay::SetupUI() {
     lv_obj_set_style_outline_width(right_eye_, 0, 0);
 
     // 禁用默认的待机动画，改用视频播放，节省内存
-    // StartIdleAnimation();
+    StartIdleAnimation();
 }
 
 void EyeDisplay::TestNextEmotion() {
