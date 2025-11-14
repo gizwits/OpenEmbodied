@@ -1453,7 +1453,7 @@ void Application::HandleNetError() {
     PlaySound(Lang::Sounds::P3_NET_ERR);
 }
 void Application::SendTextToAI(const std::string& text) {
-    if (protocol_) {
+    if (protocol_ && protocol_->IsAudioChannelOpened()) {
         protocol_->SendTextToAI(text);
     }
 }
