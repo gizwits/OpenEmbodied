@@ -296,6 +296,11 @@ void Application::ToggleChatState() {
         // Schedule([this]() {
         //     protocol_->CloseAudioChannel();
         // });
+        if (Board::GetInstance().NeedToogleIdle()) {
+            Schedule([this]() {
+                protocol_->CloseAudioChannel();
+            });
+        }
     }
 }
 

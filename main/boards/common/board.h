@@ -56,6 +56,7 @@ public:
     virtual NetworkType GetNetworkType() { return NetworkType::WIFI; }
 
     virtual bool GetNeedPlayWakeWordSound() { return true; }
+    virtual bool NeedToogleIdle() { return false; }
     virtual ~Board() = default;
     virtual std::string GetBoardType() = 0;
     virtual std::string GetUuid() { return uuid_; }
