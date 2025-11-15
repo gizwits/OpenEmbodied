@@ -159,13 +159,13 @@ public:
             if (!event) return;
             switch (event->type) {
                 case WX433_EVENT_LEG_TOUCH:
-                    Application::GetInstance().SendCustomMessage("用户正在摸你大腿");
+                    Application::GetInstance().SendTextToAI("用户正在摸你大腿");
                     break;
                 case WX433_EVENT_CHEST_TOUCH:
-                    Application::GetInstance().SendCustomMessage("用户在摸你的奶头");
+                    Application::GetInstance().SendTextToAI("用户在摸你的奶头");
                     break;
                 case WX433_EVENT_NONE:
-                    Application::GetInstance().SendCustomMessage("用户在摸你");
+                    Application::GetInstance().SendTextToAI("用户在摸你");
                     break;
                 default:
                     break;

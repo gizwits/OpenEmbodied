@@ -55,6 +55,7 @@ public:
 
     virtual NetworkType GetNetworkType() { return NetworkType::WIFI; }
 
+    virtual bool NeedForceConnect() { return false; }
     virtual ~Board() = default;
     virtual std::string GetBoardType() = 0;
     virtual std::string GetUuid() { return uuid_; }
