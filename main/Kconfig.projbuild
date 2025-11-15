@@ -106,6 +106,8 @@ choice BOARD_TYPE
         bool "机智云ESP32-S3 Gokit5"
     config BOARD_TYPE_GIZWITS_LOTTIE
         bool "机智云ESP32-S3 Lottie"
+    config BOARD_TYPE_GIZWITS_YOUQU
+        bool "机智云ESP32-S3 Youqu"
     config BOARD_TYPE_GIZWITS_4KEY
         bool "机智云ESP32-S3 4键"
     config BOARD_TYPE_GIZWITS_4KEY_ML307
