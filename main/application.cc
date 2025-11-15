@@ -663,6 +663,15 @@ void Application::Start() {
 
     if (protocol_started) {
         display->SetEmotion("sleepy");
+
+        if (Board::GetInstance().NeedForceConnect()) {
+            Schedule([this]() {
+                // audio_service_.EnableAudioTesting(true);
+                // SetDeviceState(kDeviceStateAudioTesting);
+                // 立即连接
+                ToggleChatState();
+            }); 
+        }
     }
 
     // Print heap stats
