@@ -619,14 +619,20 @@ void Application::Start() {
                 }
                 if (cJSON_IsString(text)) {
 #ifndef CONFIG_IDF_TARGET_ESP32C2
-                    ESP_LOGI(TAG, "<< %s", text->valuestring);
+                    // ESP_LOGI(TAG, "<< %s", text->valuestring);
                     Schedule([this, display, message = std::string(text->valuestring)]() {
                         display->SetChatMessage("assistant", message.c_str());
-                    }, "OnIncomingJson_TTS_SentenceStart");
+                    });
 #endif
                 }
             }
-        } else if (strcmp(type->valuestring, "stt") == 0) {
+        }  else if (strcmp(type->valuestring, "firstaudio") == 0) {
+            ESP_LOGI(TAG, "firstaudio");
+            Schedule([this]() {
+                // 音画同步，这个事件才是最准确的
+                DeviceStateEventManager::GetInstance().PostStateChangeEvent(device_state_, kDeviceStateRealSpeaking);
+            }, "OnIncomingJson_FirstAudio");
+        }  else if (strcmp(type->valuestring, "stt") == 0) {
             auto text = cJSON_GetObjectItem(root, "text");
 
 

@@ -305,8 +305,10 @@ private:
         };
         ESP_ERROR_CHECK(gpio_config(&mute_conf));
 
+        gpio_set_level(MCU_MUTE_PIN, 1);
+
         // 初始化时读取一次状态并设置MCU MUTE
-        UpdateMuteSignal();
+        // UpdateMuteSignal();
 
         ESP_LOGI(TAG, "Headphone detection GPIO initialized");
     }
@@ -699,11 +701,11 @@ public:
     }
 
     virtual int GetPeriod() override { 
-        return 1; 
+        return 3; 
     }
     
     virtual int GetMaxFrameNum() override { 
-        return 17;
+        return 55;
     }
 
 
@@ -718,7 +720,7 @@ public:
         charging = IsCharging();
         discharging = !charging;
         level = power_manager_->GetBatteryLevel();
-        ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
+        // ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
         return true;
     }
 

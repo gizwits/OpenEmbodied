@@ -88,6 +88,16 @@ protected:
     lv_img_dsc_t video_img_dsc_{};
     uint8_t* first_frame_buf_ = nullptr;  // Buffer for first frame to avoid flicker
     static constexpr int kVideoFrameDelayMs = 150;
+    
+    // Subtitle scroll related members
+    esp_timer_handle_t subtitle_scroll_timer_ = nullptr;
+    esp_timer_handle_t subtitle_scroll_delay_timer_ = nullptr;  // Delay timer before starting scroll
+    std::string subtitle_text_;
+    std::string subtitle_role_;  // Current role (user/assistant) for append detection
+    size_t subtitle_scroll_pos_ = 0;
+    bool subtitle_scrolling_ = false;
+    static constexpr int kSubtitleScrollPeriodMs = 75;  // Scroll period in milliseconds (configurable, smaller = faster)
+    static constexpr int kSubtitleScrollDelayMs = 2000;  // Delay before starting scroll in milliseconds (2 seconds)
 
     void SetupUI();
     void StartIdleCountdown();
@@ -103,6 +113,14 @@ protected:
     static void VideoPlayTask(void* arg);
     void StartVideoPlayback();
     void StopVideoPlayback();
+    
+    // Subtitle scroll methods
+    void UpdateSubtitleDisplay();
+    void StartSubtitleScroll();
+    void StartSubtitleScrollDelayed();
+    void StopSubtitleScroll();
+    static void SubtitleScrollTimerCallback(void* arg);
+    static void SubtitleScrollDelayTimerCallback(void* arg);
     
     // Device state callback
     void RegisterDeviceStateCallback();
