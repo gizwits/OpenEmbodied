@@ -246,6 +246,16 @@ bool WebsocketProtocol::OpenAudioChannel() {
                             cached_packet_count_ = 0;
                             packet_cache_.clear();
                             ESP_LOGD(TAG, "Caching state reset");
+
+                            // 同时发送多一个pre_start 事件 兼容coze 逻辑
+                            char message_buffer[256];
+                            snprintf(message_buffer, sizeof(message_buffer), 
+                                "{\"type\":\"tts\",\"state\":\"pre_start\"}");
+                            auto message_json = cJSON_Parse(message_buffer);
+                            if (message_json) {
+                                on_incoming_json_(message_json);
+                                cJSON_Delete(message_json);
+                            }
                         } else if (strcmp(state->valuestring, "stop") == 0) {
                             ESP_LOGI(TAG, "TTS stop event detected");
                         }
