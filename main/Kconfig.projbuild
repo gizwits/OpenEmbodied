@@ -340,6 +340,11 @@ config USE_AUDIO_DEBUGGER
     help
         启用音频调试功能，通过UDP发送音频数据
 
+config DEFAULT_CHAT_MODE
+    int "Default Chat Mode"
+    default 1
+    help
+        Default chat mode
 
 config AUDIO_DEBUG_UDP_SERVER
     string "Audio Debug UDP Server Address"

@@ -376,13 +376,11 @@ void Application::Start() {
     Settings settings("wifi", true);
 
 #ifdef CONFIG_DEFAULT_CHAT_MODE
-    int default_chat_mode = std::stoi(CONFIG_DEFAULT_CHAT_MODE);
+    int default_chat_mode = CONFIG_DEFAULT_CHAT_MODE;
     chat_mode_ = settings.GetInt("chat_mode", default_chat_mode); // 0=按键说话, 1=唤醒词, 2=自然对话
 #else
     chat_mode_ = settings.GetInt("chat_mode", 1); // 0=按键说话, 1=唤醒词, 2=自然对话
 #endif
-
-
     auto& board = Board::GetInstance();
 
     ESP_LOGI(TAG, "chat_mode_: %d", chat_mode_);
