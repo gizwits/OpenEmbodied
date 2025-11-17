@@ -1874,24 +1874,24 @@ void EyeDisplay::ShowBatteryIndicator() {
     lv_arc_set_range(battery_arc_, 0, 100);  // 设置范围
     lv_arc_set_bg_angles(battery_arc_, 0, 360);  // 设置背景弧角度（完整圆）
     lv_arc_set_rotation(battery_arc_, 270);  // 设置旋转角度，从顶部开始
-    // 设置value为100，让整个圆环（360度）都显示前景颜色，不按电量分段
-    lv_arc_set_value(battery_arc_, 100);  // 设置为100，显示完整圆环
+    // 根据电量设置value，显示对应角度的圆环（电量百分比对应360度）
+    lv_arc_set_value(battery_arc_, battery_level);  // 设置为电量值，显示对应角度
     lv_obj_remove_style(battery_arc_, NULL, LV_PART_KNOB);  // 去除旋钮
     lv_obj_clear_flag(battery_arc_, LV_OBJ_FLAG_CLICKABLE);  // 去除可点击属性
     
-    // 整个圆环统一颜色，不按电量分段：电量>25%显示绿色，<=25%显示红色
+    // 前景弧颜色根据电量变化：电量>25%显示绿色，<=25%显示红色
     uint32_t arc_color = (battery_level > 25) ? 0x00FF00 : 0xFF0000;  // 绿色或红色
     
-    // 设置背景弧（与前景弧相同颜色，确保整个圆环360度统一颜色）
-    lv_obj_set_style_arc_width(battery_arc_, 8, LV_PART_MAIN);  // 圆环宽度8像素
-    lv_obj_set_style_arc_color(battery_arc_, lv_color_hex(arc_color), LV_PART_MAIN);  // 背景弧与前景弧同色
+    // 隐藏背景弧，只显示电量对应的那一段
+    lv_obj_set_style_arc_width(battery_arc_, 0, LV_PART_MAIN);  // 背景弧宽度设为0，隐藏背景
+    lv_obj_set_style_arc_opa(battery_arc_, LV_OPA_TRANSP, LV_PART_MAIN);  // 背景弧完全透明
     
-    // 设置前景弧（整个圆环360度统一颜色：>25%绿色，<=25%红色）
+    // 设置前景弧（根据电量显示对应角度：>25%绿色，<=25%红色）
     lv_obj_set_style_arc_width(battery_arc_, 8, LV_PART_INDICATOR);  // 圆环宽度8像素
     lv_obj_set_style_arc_color(battery_arc_, lv_color_hex(arc_color), LV_PART_INDICATOR);  // 前景弧颜色
     lv_obj_invalidate(battery_arc_);  // 强制刷新样式
-    ESP_LOGI(TAG, "ShowBatteryIndicator: 创建圆环，电量: %d%%, 颜色: 0x%06X (%s)", 
-             battery_level, arc_color, (battery_level > 25) ? "绿色" : "红色");
+    ESP_LOGI(TAG, "ShowBatteryIndicator: 创建圆环，电量: %d%%, 角度: %d度, 颜色: 0x%06X (%s)", 
+             battery_level, (battery_level * 360) / 100, arc_color, (battery_level > 25) ? "绿色" : "红色");
     
     // 将圆环移到最前面
     lv_obj_move_foreground(battery_arc_);
@@ -2111,19 +2111,20 @@ void EyeDisplay::ShowBatteryIndicatorForCharging(int battery_level_param) {
             if (need_update) {
                 ESP_LOGI(TAG, "ShowBatteryIndicatorForCharging: 需要更新 (battery_level: %d->%d, color: 0x%06X->0x%06X)", 
                          last_charging_battery_level_, battery_level, last_charging_arc_color_, arc_color);
-                // 保持value为100，让整个圆环都显示前景颜色
-                lv_arc_set_value(charging_battery_arc_, 100);  // 设置为100，显示完整圆环
-                // 同时更新背景弧和前景弧颜色，确保整个圆环360度统一颜色
-                lv_obj_set_style_arc_color(charging_battery_arc_, lv_color_hex(arc_color), LV_PART_MAIN);
-                lv_obj_set_style_arc_color(charging_battery_arc_, lv_color_hex(arc_color), LV_PART_INDICATOR);
+                // 根据电量设置value，显示对应角度的圆环（电量百分比对应360度）
+                lv_arc_set_value(charging_battery_arc_, battery_level);  // 设置为电量值，显示对应角度
+                // 隐藏背景弧，只显示电量对应的那一段
+                lv_obj_set_style_arc_width(charging_battery_arc_, 0, LV_PART_MAIN);  // 背景弧宽度设为0，隐藏背景
+                lv_obj_set_style_arc_opa(charging_battery_arc_, LV_OPA_TRANSP, LV_PART_MAIN);  // 背景弧完全透明
+                lv_obj_set_style_arc_color(charging_battery_arc_, lv_color_hex(arc_color), LV_PART_INDICATOR);  // 前景弧颜色
                 lv_obj_invalidate(charging_battery_arc_);  // 只在变化时强制刷新样式
                 
                 // 更新记录的值
                 last_charging_battery_level_ = battery_level;
                 last_charging_arc_color_ = arc_color;
                 
-                ESP_LOGI(TAG, "ShowBatteryIndicatorForCharging: 已存在，更新电量: %d%%, 颜色: 0x%06X (%s)", 
-                         battery_level, arc_color, (battery_level > 25) ? "绿色" : "红色");
+                ESP_LOGI(TAG, "ShowBatteryIndicatorForCharging: 已存在，更新电量: %d%%, 角度: %d度, 颜色: 0x%06X (%s)", 
+                         battery_level, (battery_level * 360) / 100, arc_color, (battery_level > 25) ? "绿色" : "红色");
             } else {
                 ESP_LOGI(TAG, "ShowBatteryIndicatorForCharging: 电量未变化，跳过更新 (battery_level=%d, color=0x%06X)", 
                          battery_level, arc_color);
@@ -2171,24 +2172,24 @@ void EyeDisplay::ShowBatteryIndicatorForCharging(int battery_level_param) {
     lv_arc_set_range(charging_battery_arc_, 0, 100);  // 设置范围
     lv_arc_set_bg_angles(charging_battery_arc_, 0, 360);  // 设置背景弧角度（完整圆）
     lv_arc_set_rotation(charging_battery_arc_, 270);  // 设置旋转角度，从顶部开始
-    // 设置value为100，让整个圆环（360度）都显示前景颜色，不按电量分段
-    lv_arc_set_value(charging_battery_arc_, 100);  // 设置为100，显示完整圆环
+    // 根据电量设置value，显示对应角度的圆环（电量百分比对应360度）
+    lv_arc_set_value(charging_battery_arc_, battery_level);  // 设置为电量值，显示对应角度
     lv_obj_remove_style(charging_battery_arc_, NULL, LV_PART_KNOB);  // 去除旋钮
     lv_obj_clear_flag(charging_battery_arc_, LV_OBJ_FLAG_CLICKABLE);  // 去除可点击属性
     
-    // 整个圆环统一颜色，不按电量分段：电量>25%显示绿色，<=25%显示红色
+    // 前景弧颜色根据电量变化：电量>25%显示绿色，<=25%显示红色
     uint32_t arc_color = (battery_level > 25) ? 0x00FF00 : 0xFF0000;  // 绿色或红色
     
-    // 设置背景弧（与前景弧相同颜色，确保整个圆环360度统一颜色）
-    lv_obj_set_style_arc_width(charging_battery_arc_, 8, LV_PART_MAIN);  // 圆环宽度8像素
-    lv_obj_set_style_arc_color(charging_battery_arc_, lv_color_hex(arc_color), LV_PART_MAIN);  // 背景弧与前景弧同色
+    // 隐藏背景弧，只显示电量对应的那一段
+    lv_obj_set_style_arc_width(charging_battery_arc_, 0, LV_PART_MAIN);  // 背景弧宽度设为0，隐藏背景
+    lv_obj_set_style_arc_opa(charging_battery_arc_, LV_OPA_TRANSP, LV_PART_MAIN);  // 背景弧完全透明
     
-    // 设置前景弧（整个圆环360度统一颜色：>25%绿色，<=25%红色）
+    // 设置前景弧（根据电量显示对应角度：>25%绿色，<=25%红色）
     lv_obj_set_style_arc_width(charging_battery_arc_, 8, LV_PART_INDICATOR);  // 圆环宽度8像素
     lv_obj_set_style_arc_color(charging_battery_arc_, lv_color_hex(arc_color), LV_PART_INDICATOR);  // 前景弧颜色
     lv_obj_invalidate(charging_battery_arc_);  // 强制刷新样式
-    ESP_LOGI(TAG, "ShowBatteryIndicatorForCharging: 创建圆环，电量: %d%%, 颜色: 0x%06X (%s)", 
-             battery_level, arc_color, (battery_level > 25) ? "绿色" : "红色");
+    ESP_LOGI(TAG, "ShowBatteryIndicatorForCharging: 创建圆环，电量: %d%%, 角度: %d度, 颜色: 0x%06X (%s)", 
+             battery_level, (battery_level * 360) / 100, arc_color, (battery_level > 25) ? "绿色" : "红色");
     
     // 将圆环移到最前面（确保在所有内容之上，包括视频图像）
     lv_obj_move_foreground(charging_battery_arc_);
@@ -2236,11 +2237,12 @@ void EyeDisplay::ShowBatteryIndicatorForCharging(int battery_level_param) {
                                               (arc_color != display->last_charging_arc_color_);
                             
                             if (need_update) {
-                                // 保持value为100，让整个圆环都显示前景颜色
-                                lv_arc_set_value(display->charging_battery_arc_, 100);  // 设置为100，显示完整圆环
-                                // 同时更新背景弧和前景弧颜色，确保整个圆环360度统一颜色
-                                lv_obj_set_style_arc_color(display->charging_battery_arc_, lv_color_hex(arc_color), LV_PART_MAIN);
-                                lv_obj_set_style_arc_color(display->charging_battery_arc_, lv_color_hex(arc_color), LV_PART_INDICATOR);
+                                // 根据电量设置value，显示对应角度的圆环（电量百分比对应360度）
+                                lv_arc_set_value(display->charging_battery_arc_, battery_level);  // 设置为电量值，显示对应角度
+                                // 隐藏背景弧，只显示电量对应的那一段
+                                lv_obj_set_style_arc_width(display->charging_battery_arc_, 0, LV_PART_MAIN);  // 背景弧宽度设为0，隐藏背景
+                                lv_obj_set_style_arc_opa(display->charging_battery_arc_, LV_OPA_TRANSP, LV_PART_MAIN);  // 背景弧完全透明
+                                lv_obj_set_style_arc_color(display->charging_battery_arc_, lv_color_hex(arc_color), LV_PART_INDICATOR);  // 前景弧颜色
                                 lv_obj_invalidate(display->charging_battery_arc_);  // 只在变化时强制刷新样式
                                 
                                 // 更新记录的值

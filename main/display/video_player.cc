@@ -276,8 +276,8 @@ void VideoPlayer::VideoPlayTask(void* arg) {
                     return;
                 }
                 lv_obj_set_size(self->video_img_, self->display_width_, self->display_height_);
-                // 使用顶部对齐并向上偏移15像素
-                lv_obj_align(self->video_img_, LV_ALIGN_TOP_MID, 0, -15);
+                // 完全居中显示
+                lv_obj_align(self->video_img_, LV_ALIGN_CENTER, 0, 0);
             }
             self->video_img_dsc_.header.w = self->display_width_;
             self->video_img_dsc_.header.h = self->display_height_;
