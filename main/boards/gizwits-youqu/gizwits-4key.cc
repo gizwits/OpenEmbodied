@@ -263,13 +263,13 @@ public:
         }
     }
 
-    virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
-        charging = isCharging();
-        discharging = !charging;
-        level = power_manager_->GetBatteryLevel();
-        ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
-        return true;
-    }
+    // virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
+    //     charging = isCharging();
+    //     discharging = !charging;
+    //     level = power_manager_->GetBatteryLevel();
+    //     ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
+    //     return true;
+    // }
 
     virtual Led* GetLed() override {
         static CircularStrip led(BUILTIN_LED_GPIO, 4);

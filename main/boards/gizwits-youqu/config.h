@@ -30,7 +30,7 @@
 #define VOLUME_DOWN_BUTTON_GPIO GPIO_NUM_38
 
 #define CHARGING_PIN     GPIO_NUM_18   // CHRG pin
-#define STANDBY_PIN      GPIO_NUM_3    // STDBY pin
+#define STANDBY_PIN      GPIO_NUM_15    // STDBY pin
 
 // Battery ADC configuration
 #define BAT_ADC_CHANNEL  ADC_CHANNEL_2  // Battery voltage ADC channel
