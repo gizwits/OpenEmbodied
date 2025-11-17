@@ -65,6 +65,7 @@ private:
     bool is_first_packet_ = false;
     bool is_start_progress_ = false;
     bool is_detect_emotion_ = false;
+    bool tts_start_received_ = false;  // 标记是否已收到 TTS start，用于过滤重复的 start 事件
 
     void ParseServerHello(const cJSON* root);
     bool SendText(const std::string& text) override;

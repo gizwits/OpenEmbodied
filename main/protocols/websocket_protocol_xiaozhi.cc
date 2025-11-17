@@ -91,6 +91,7 @@ void WebsocketProtocol::CloseAudioChannel() {
     cached_packet_count_ = 0;
     is_first_packet_ = false;
     is_start_progress_ = false;
+    tts_start_received_ = false;  // 重置 TTS start 状态
     ESP_LOGD(TAG, "Packet cache cleared");
     
     websocket_.reset();
@@ -239,7 +240,16 @@ bool WebsocketProtocol::OpenAudioChannel() {
                     auto state = cJSON_GetObjectItem(root, "state");
                     if (cJSON_IsString(state)) {
                         if (strcmp(state->valuestring, "start") == 0) {
+                            // 过滤重复的 start 事件：如果已经收到 start，必须等到 stop 后才能处理下一次 start
+                            if (tts_start_received_) {
+                                ESP_LOGW(TAG, "TTS start event ignored: already in start state, waiting for stop");
+                                cJSON_Delete(root);
+                                return;
+                            }
+                            
                             ESP_LOGI(TAG, "TTS start event detected");
+                            tts_start_received_ = true;  // 标记已收到 start
+                            
                             // Reset caching state (inlined logic)
                             is_first_packet_ = true;
                             is_start_progress_ = false;
@@ -258,6 +268,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
                             }
                         } else if (strcmp(state->valuestring, "stop") == 0) {
                             ESP_LOGI(TAG, "TTS stop event detected");
+                            tts_start_received_ = false;  // 重置状态，允许下一次 start
                         }
                     }
                     if (on_incoming_json_ != nullptr) {
