@@ -513,11 +513,14 @@ esp_err_t W25Q64Flash::DownloadToFlash(const char* url, uint32_t flash_address,
     // HTTP 客户端配置
     esp_http_client_config_t config = {};
     config.url = url;
-    config.timeout_ms = 30000;  // 30秒超时
-    config.buffer_size = 4096;  // 接收缓冲区大小
+    config.timeout_ms = 600000;  // 10分钟超时（15MB文件需要更长时间）
+    config.buffer_size = 8192;   // 增加接收缓冲区大小到8KB
     config.buffer_size_tx = 1024;
     config.disable_auto_redirect = false;
     config.max_redirection_count = 5;
+    config.keep_alive_idle = 5;   // Keep-alive空闲时间（秒）
+    config.keep_alive_interval = 5;  // Keep-alive间隔（秒）
+    config.keep_alive_count = 3;     // Keep-alive探测次数
     
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (!client) {
@@ -553,9 +556,26 @@ esp_err_t W25Q64Flash::DownloadToFlash(const char* url, uint32_t flash_address,
     ESP_LOGI(TAG, "Content length: %d bytes", content_length);
     
     // 检查文件大小是否超过 Flash 容量
+    size_t available_space = chip_size_ - flash_address;
+    ESP_LOGI(TAG, "Flash capacity: %" PRIu32 " MB (%" PRIu32 " bytes)", 
+             chip_size_ / (1024 * 1024), chip_size_);
+    ESP_LOGI(TAG, "Available space at 0x%06" PRIX32 ": %zu bytes (%.2f MB)", 
+             flash_address, available_space, available_space / (1024.0f * 1024.0f));
+    ESP_LOGI(TAG, "File size: %d bytes (%.2f MB)", 
+             content_length, content_length / (1024.0f * 1024.0f));
+    
     if (flash_address + content_length > chip_size_) {
-        ESP_LOGE(TAG, "File size (%d bytes) exceeds available flash space at 0x%06" PRIX32, 
-                 content_length, flash_address);
+        ESP_LOGE(TAG, "❌ File size (%d bytes, %.2f MB) exceeds available flash space!", 
+                 content_length, content_length / (1024.0f * 1024.0f));
+        ESP_LOGE(TAG, "   Flash capacity: %" PRIu32 " MB (%" PRIu32 " bytes)", 
+                 chip_size_ / (1024 * 1024), chip_size_);
+        ESP_LOGE(TAG, "   Available space: %zu bytes (%.2f MB)", 
+                 available_space, available_space / (1024.0f * 1024.0f));
+        ESP_LOGE(TAG, "   Required space: %d bytes (%.2f MB)", 
+                 content_length, content_length / (1024.0f * 1024.0f));
+        ESP_LOGE(TAG, "   Shortage: %zu bytes (%.2f MB)", 
+                 (flash_address + content_length) - chip_size_,
+                 ((flash_address + content_length) - chip_size_) / (1024.0f * 1024.0f));
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
         return ESP_ERR_INVALID_SIZE;
@@ -614,8 +634,8 @@ esp_err_t W25Q64Flash::DownloadToFlash(const char* url, uint32_t flash_address,
     
     ESP_LOGI(TAG, "Erase complete, starting download...");
     
-    // 分配缓冲区
-    const size_t buffer_size = 4096;
+    // 分配缓冲区（增加缓冲区大小以提高下载稳定性）
+    const size_t buffer_size = 8192;  // 增加到8KB
     uint8_t* buffer = (uint8_t*)heap_caps_malloc(buffer_size, MALLOC_CAP_DMA);
     if (!buffer) {
         ESP_LOGE(TAG, "Failed to allocate buffer");
@@ -626,17 +646,100 @@ esp_err_t W25Q64Flash::DownloadToFlash(const char* url, uint32_t flash_address,
     
     size_t total_downloaded = 0;
     uint32_t write_address = flash_address;
+    const int MAX_RECONNECT_RETRIES = 5;  // 最大重连次数
     
-    // 下载并写入 Flash
+    // 下载并写入 Flash（带断点续传功能）
     while (total_downloaded < content_length) {
         int data_read = esp_http_client_read(client, (char*)buffer, buffer_size);
+        
         if (data_read < 0) {
-            ESP_LOGE(TAG, "Error reading data from HTTP stream");
-            free(buffer);
+            // 连接断开，需要重新建立连接并断点续传
+            ESP_LOGW(TAG, "Connection lost at %zu/%d bytes (%.2f%%), attempting resume...", 
+                     total_downloaded, content_length, 
+                     (total_downloaded * 100.0f) / content_length);
+            
+            // 关闭旧连接
             esp_http_client_close(client);
             esp_http_client_cleanup(client);
-            return ESP_FAIL;
-        } else if (data_read > 0) {
+            
+            // 重新建立连接（使用Range请求实现断点续传）
+            bool reconnect_success = false;
+            for (int retry = 0; retry < MAX_RECONNECT_RETRIES; retry++) {
+                vTaskDelay(pdMS_TO_TICKS(2000));  // 等待2秒后重试
+                
+                ESP_LOGI(TAG, "Reconnecting with Range request (attempt %d/%d)...", retry + 1, MAX_RECONNECT_RETRIES);
+                
+                // 重新初始化客户端
+                client = esp_http_client_init(&config);
+                if (!client) {
+                    ESP_LOGE(TAG, "Failed to reinitialize HTTP client");
+                    continue;
+                }
+                
+                // 设置Range请求头，从断点继续下载
+                char range_header[64];
+                snprintf(range_header, sizeof(range_header), "bytes=%zu-%d", 
+                         total_downloaded, content_length - 1);
+                esp_http_client_set_header(client, "Range", range_header);
+                
+                // 打开连接
+                err = esp_http_client_open(client, 0);
+                if (err != ESP_OK) {
+                    ESP_LOGW(TAG, "Failed to reopen connection: %s", esp_err_to_name(err));
+                    esp_http_client_cleanup(client);
+                    continue;
+                }
+                
+                // 获取响应头
+                int resume_length = esp_http_client_fetch_headers(client);
+                int resume_status = esp_http_client_get_status_code(client);
+                
+                // 206 Partial Content 表示服务器支持断点续传
+                if (resume_status == 206 && resume_length > 0) {
+                    ESP_LOGI(TAG, "✅ Resume successful! Server supports Range, continuing from byte %zu", total_downloaded);
+                    reconnect_success = true;
+                    break;
+                } else if (resume_status == 200) {
+                    // 服务器不支持Range，返回完整文件（需要跳过已下载部分）
+                    ESP_LOGW(TAG, "⚠️ Server doesn't support Range (status 200), will skip %zu bytes", total_downloaded);
+                    reconnect_success = true;
+                    // 跳过已下载的部分
+                    size_t skip_bytes = total_downloaded;
+                    while (skip_bytes > 0) {
+                        size_t skip = (skip_bytes > buffer_size) ? buffer_size : skip_bytes;
+                        int skipped = esp_http_client_read(client, (char*)buffer, skip);
+                        if (skipped <= 0) {
+                            ESP_LOGE(TAG, "Failed to skip bytes");
+                            reconnect_success = false;
+                            break;
+                        }
+                        skip_bytes -= skipped;
+                    }
+                    if (reconnect_success) {
+                        ESP_LOGI(TAG, "✅ Skipped %zu bytes, resuming download", total_downloaded);
+                        break;
+                    }
+                } else {
+                    ESP_LOGW(TAG, "Unexpected status code: %d, retrying...", resume_status);
+                    esp_http_client_close(client);
+                    esp_http_client_cleanup(client);
+                    continue;
+                }
+            }
+            
+            if (!reconnect_success) {
+                ESP_LOGE(TAG, "❌ Failed to reconnect after %d attempts. Downloaded: %zu/%d bytes (%.2f%%)", 
+                         MAX_RECONNECT_RETRIES, total_downloaded, content_length,
+                         (total_downloaded * 100.0f) / content_length);
+                free(buffer);
+                return ESP_FAIL;
+            }
+            
+            // 重新尝试读取
+            continue;
+        }
+        
+        if (data_read > 0) {
             // 写入 Flash
             err = Write(write_address, buffer, data_read);
             if (err != ESP_OK) {

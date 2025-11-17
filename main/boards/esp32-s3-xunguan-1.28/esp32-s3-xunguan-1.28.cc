@@ -1057,6 +1057,17 @@ public:
         });
 
         // 单击、双击和三击检测
+        // 优化：使用 OnPressRepeaDone 来快速响应连续按键
+        boot_button_.OnPressRepeaDone([this](uint16_t repeat_count) {
+            ESP_LOGI(TAG, "boot_button_.OnPressRepeaDone - 重复次数: %d", repeat_count);
+            // 快速连续按键时立即响应，提高响应速度
+            if (repeat_count >= 4) {
+                // 快速四击：直接切换模式
+                ESP_LOGI(TAG, "快速四击检测 - 直接切换模式");
+                SwitchPlaybackMode();
+            }
+        });
+        
         boot_button_.OnClick([this]() {
             int64_t now_ms = esp_timer_get_time() / 1000;
             const int64_t TRIPLE_CLICK_WINDOW_MS = 1000;  // 三击时间窗口1000ms（增加时间窗口）
@@ -1553,7 +1564,7 @@ public:
         // }
         InitializeButtons();
         InitializeIot();
-        // xTaskCreatePinnedToCore(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 1024 * 3, this, 1, NULL, 0); // 启动检测任务 - 已注释，不启动陀螺仪任务
+        xTaskCreatePinnedToCore(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 1024 * 3, this, 1, NULL, 0); // 启动陀螺仪检测任务
         InitializePowerManager();
         InitializePowerSaveTimer();
         // ESP_LOGI(TAG, "ReadADC2_CH1_Oneshot");

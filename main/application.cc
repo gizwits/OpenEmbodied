@@ -42,10 +42,10 @@ static const char* const STATE_STRINGS[] = {
 
 
 // 带进度回调的使用
-void download_progress(size_t downloaded, size_t total) {
-    int percent = (downloaded * 100) / total;
-    printf("Progress: %d%% (%zu/%zu bytes)\n", percent, downloaded, total);
-}
+// void download_progress(size_t downloaded, size_t total) {
+//     int percent = (downloaded * 100) / total;
+//     printf("Progress: %d%% (%zu/%zu bytes)\n", percent, downloaded, total);
+// }
 
 
 Application::Application() {
@@ -462,33 +462,33 @@ void Application::Start() {
     /* Wait for the network to be ready */
     board.StartNetwork();
 
-    // 等待网络连接稳定（减少到30秒，确保WiFi已连接）
-    ESP_LOGI(TAG, "等待网络连接稳定，准备下载表情包...");
-    vTaskDelay(pdMS_TO_TICKS(30000));  // 30秒延时，等待WiFi连接稳定
+    // // 等待网络连接稳定（减少到30秒，确保WiFi已连接）
+    // ESP_LOGI(TAG, "等待网络连接稳定，准备下载表情包...");
+    // vTaskDelay(pdMS_TO_TICKS(30000));  // 30秒延时，等待WiFi连接稳定
 
-    // 下载表情包到 Flash
-    ESP_LOGI(TAG, "开始下载表情包到外置Flash...");
-    auto& flash = W25Q64Flash::GetInstance();
+    // // 下载表情包到 Flash
+    // ESP_LOGI(TAG, "开始下载表情包到外置Flash...");
+    // auto& flash = W25Q64Flash::GetInstance();
     
-    if (!flash.IsInitialized()) {
-        ESP_LOGE(TAG, "外置Flash未初始化，无法下载表情包");
-    } else {
-        ESP_LOGI(TAG, "外置Flash已初始化，开始下载...");
-        esp_err_t download_ret = flash.DownloadToFlash(
-            "http://xbgroup-1251025085.cos.ap-guangzhou.myqcloud.com/firmwares/emotions_15.bin",
-            0x000000,
-            download_progress
-        );
+    // if (!flash.IsInitialized()) {
+    //     ESP_LOGE(TAG, "外置Flash未初始化，无法下载表情包");
+    // } else {
+    //     ESP_LOGI(TAG, "外置Flash已初始化，开始下载...");
+    //     esp_err_t download_ret = flash.DownloadToFlash(
+    //         "http://xbgroup-1251025085.cos.ap-guangzhou.myqcloud.com/firmwares/emotions_15.bin",
+    //         0x000000,
+    //         download_progress
+    //     );
         
-        if (download_ret == ESP_OK) {
-            ESP_LOGI(TAG, "✅ 表情包下载成功！");
-        } else {
-            ESP_LOGE(TAG, "❌ 表情包下载失败: %s", esp_err_to_name(download_ret));
-        }
-    }
+    //     if (download_ret == ESP_OK) {
+    //         ESP_LOGI(TAG, "✅ 表情包下载成功！");
+    //     } else {
+    //         ESP_LOGE(TAG, "❌ 表情包下载失败: %s", esp_err_to_name(download_ret));
+    //     }
+    // }
 
-    auto json = board.GetJson();
-    ESP_LOGI(TAG, "json: %s", json.c_str());
+    // auto json = board.GetJson();
+    // ESP_LOGI(TAG, "json: %s", json.c_str());
 
     bool battery_ok = CheckBatteryLevel();
     if (!battery_ok && Board::GetInstance().NeedBlockLowBattery()) {
