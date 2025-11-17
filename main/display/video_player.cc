@@ -1,5 +1,7 @@
 #include "video_player.h"
 #include "w25q64_flash.h"
+#include "board.h"
+#include "eye_display.h"
 #include <esp_log.h>
 #include <esp_heap_caps.h>
 #include <esp_lvgl_port.h>
@@ -254,8 +256,25 @@ void VideoPlayer::VideoPlayTask(void* arg) {
             return;
         }
         if (lvgl_port_lock(1000)) {
+            lv_obj_t* screen = lv_screen_active();
+            if (screen == nullptr) {
+                ESP_LOGE(TAG, "lv_screen_active() returned nullptr, cannot create video image");
+                free(buf);
+                self->video_playing_ = false;
+                lvgl_port_unlock();
+                vTaskDelete(nullptr);
+                return;
+            }
             if (self->video_img_ == nullptr) {
-                self->video_img_ = lv_image_create(lv_screen_active());
+                self->video_img_ = lv_image_create(screen);
+                if (self->video_img_ == nullptr) {
+                    ESP_LOGE(TAG, "Failed to create video image");
+                    free(buf);
+                    self->video_playing_ = false;
+                    lvgl_port_unlock();
+                    vTaskDelete(nullptr);
+                    return;
+                }
                 lv_obj_set_size(self->video_img_, self->display_width_, self->display_height_);
                 // 使用顶部对齐并向上偏移15像素
                 lv_obj_align(self->video_img_, LV_ALIGN_TOP_MID, 0, -15);
@@ -268,7 +287,29 @@ void VideoPlayer::VideoPlayTask(void* arg) {
             lv_img_set_src(self->video_img_, &self->video_img_dsc_);
             lv_obj_move_foreground(self->video_img_);
             lv_obj_clear_flag(self->video_img_, LV_OBJ_FLAG_HIDDEN);
+            
+            // 确保充电圆环始终显示在视频图像之上
+            // 通过屏幕对象查找充电圆环（arc类型对象）
+            if (screen != nullptr) {
+                uint32_t child_cnt = lv_obj_get_child_cnt(screen);
+                for (uint32_t i = 0; i < child_cnt; i++) {
+                    lv_obj_t* child = lv_obj_get_child(screen, i);
+                    if (child != nullptr && lv_obj_check_type(child, &lv_arc_class)) {
+                        // 找到arc对象，可能是充电圆环，将其移到最前面
+                        lv_obj_move_foreground(child);
+                        lv_obj_clear_flag(child, LV_OBJ_FLAG_HIDDEN);
+                        break;  // 只处理第一个arc对象（充电圆环）
+                    }
+                }
+            }
+            
             lvgl_port_unlock();
+        } else {
+            ESP_LOGE(TAG, "Failed to lock LVGL port");
+            free(buf);
+            self->video_playing_ = false;
+            vTaskDelete(nullptr);
+            return;
         }
         vTaskDelay(pdMS_TO_TICKS(self->frame_delay_ms_));
         idx = (idx + 1) % frames;
@@ -288,6 +329,23 @@ void VideoPlayer::VideoPlayTask(void* arg) {
             self->video_img_dsc_.data = buf;
             self->video_img_dsc_.data_size = frame_size;
             lv_img_set_src(self->video_img_, &self->video_img_dsc_);
+            
+            // 确保充电圆环始终显示在视频图像之上
+            // 通过屏幕对象查找充电圆环（arc类型对象）
+            lv_obj_t* screen = lv_screen_active();
+            if (screen != nullptr) {
+                uint32_t child_cnt = lv_obj_get_child_cnt(screen);
+                for (uint32_t i = 0; i < child_cnt; i++) {
+                    lv_obj_t* child = lv_obj_get_child(screen, i);
+                    if (child != nullptr && lv_obj_check_type(child, &lv_arc_class)) {
+                        // 找到arc对象，可能是充电圆环，将其移到最前面
+                        lv_obj_move_foreground(child);
+                        lv_obj_clear_flag(child, LV_OBJ_FLAG_HIDDEN);
+                        break;  // 只处理第一个arc对象（充电圆环）
+                    }
+                }
+            }
+            
             lvgl_port_unlock();
         }
         if ((idx % 10) == 0) {

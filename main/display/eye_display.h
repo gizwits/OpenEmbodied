@@ -190,6 +190,22 @@ public:
     virtual void StartRGBTest() override;
     virtual void StopRGBTest() override;
 
+    // 电量圆环指示器
+    void ShowBatteryIndicator();
+    void HideBatteryIndicator();
+    
+    // 充电时显示电量圆环（不清空表情，不显示信号，一直显示）
+    // battery_level: 可选的电量值，如果为-1则使用缓存值或默认值
+    void ShowBatteryIndicatorForCharging(int battery_level = -1);
+    void HideBatteryIndicatorForCharging();  // 隐藏充电时的电量圆环
+    void EnsureChargingBatteryArcOnTop(bool already_locked = false);  // 确保充电时的电量圆环在最前面（供VideoPlayer调用）
+    lv_obj_t* GetChargingBatteryArc() const { return charging_battery_arc_; }  // 获取充电圆环对象指针（用于在隐藏时排除）
+    
+    // 设置视频模式信息（用于恢复视频播放）
+    void SetVideoModeInfo(bool was_video_mode, int video_group_index) {
+        was_video_mode_before_battery_ = was_video_mode;
+        saved_video_group_index_ = video_group_index;
+    }
 
     // 测试方法：按序号切换表情
     void TestNextEmotion();
@@ -278,6 +294,22 @@ private:
     
     // OTA和配网模式禁用表情切换
     bool emotion_disabled_ = false;
+    
+    // 双击显示的电量信号UI（5秒后自动隐藏）
+    lv_obj_t* battery_arc_ = nullptr;  // 电量圆环
+    lv_obj_t* battery_label_ = nullptr;  // 电量百分比标签
+    lv_obj_t* signal_img_ = nullptr;  // 信号图标图片（显示在圆环中心）
+    esp_timer_handle_t battery_display_timer_ = nullptr;  // 电量显示定时器（5秒后自动隐藏）
+    std::string saved_emotion_before_battery_ = "";  // 显示电量UI之前保存的表情
+    bool was_video_mode_before_battery_ = false;  // 显示电量UI之前是否在视频模式
+    int saved_video_group_index_ = -1;  // 显示电量UI之前保存的视频组索引
+    
+    // 充电时显示的电量圆环（一直显示，直到停止充电）
+    lv_obj_t* charging_battery_arc_ = nullptr;  // 充电时的电量圆环（独立对象）
+    esp_timer_handle_t battery_charging_update_timer_ = nullptr;  // 充电时电量更新定时器
+    bool charging_indicator_showing_ = false;  // 是否正在显示充电时的电量圆环
+    int last_charging_battery_level_ = -1;  // 上次充电时的电量（用于避免不必要的刷新）
+    uint32_t last_charging_arc_color_ = 0;  // 上次充电圆环的颜色（用于避免不必要的刷新）
 };
 
 #endif // EYE_DISPLAY_H 

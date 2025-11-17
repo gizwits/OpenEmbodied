@@ -8,6 +8,7 @@
 #include "assets/lang_config.h"
 #include "font_awesome_symbols.h"
 #include "wifi_connection_manager.h"
+#include "device_state_event.h"
 
 
 #include "led/single_led.h"
@@ -27,6 +28,7 @@
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_gc9a01.h>
+#include <esp_adc/adc_oneshot.h>
 #include <esp_partition.h>
 #include <functional>
 #include <freertos/timers.h>
@@ -174,11 +176,24 @@ private:
     // 播放模式：默认使用Display动画模式
     PlaybackMode playback_mode_ = PlaybackMode::DISPLAY_ANIMATION;
     
+    // 电量显示时保存的视频组索引（用于恢复视频播放）
+    int saved_video_group_index_for_battery_ = -1;
+    
     // 双击检测相关变量
     uint8_t boot_button_click_count_ = 0;
     int64_t boot_button_last_click_ms_ = 0;
     esp_timer_handle_t boot_button_timer_ = nullptr;
-    static constexpr uint32_t kDoubleClickWindowMs = 500;  // 双击检测窗口：500ms
+    static constexpr uint32_t kDoubleClickWindowMs = 800;  // 双击检测窗口：800ms（增加时间窗口，提高双击检测成功率）
+    
+    // 快速四击检测相关变量
+    uint8_t quick_click_count_ = 0;
+    int64_t quick_click_first_time_ms_ = 0;
+    static constexpr uint32_t kQuickClickWindowMs = 450;  // 快速四击检测窗口：400ms
+    
+    
+    // 二维码显示状态
+    bool qrcode_displaying_ = false;  // 是否正在显示二维码
+    esp_timer_handle_t qrcode_timer_ = nullptr;  // 二维码显示后的定时器（用于自动进入配网模式）
 
     std::vector<TestItem> test_items = {
         {"lcd", "LCD测试", 1},
@@ -270,23 +285,25 @@ private:
 
                         // 根据当前模式触发表情
                         if (board->playback_mode_ == PlaybackMode::VIDEO_PLAYBACK) {
+                            // 视频模式：只切换视频组，不触发AI对话
                             board->CycleVideoGroup();
                         } else {
+                            // Display模式：显示表情并触发AI对话
                             board->TriggerEmotion("vertigo");
-                        }
-
-                        if (Application::GetInstance().IsTmpFactoryTestMode()) {
-                            board->display_->UpdateTestItem("sensor", 1);
-                        } else {
-                            // 这里可以触发你的摇晃事件
-                            if (board->ChannelIsOpen()) {
-                                #ifdef CONFIG_LANGUAGE_ZH_CN
-                                Application::GetInstance().SendTextToAI("用户正在摇晃你");
-                                #else
-                                Application::GetInstance().SendTextToAI("User is shaking you");
-                                #endif
+                            
+                            if (Application::GetInstance().IsTmpFactoryTestMode()) {
+                                board->display_->UpdateTestItem("sensor", 1);
                             } else {
-                                ESP_LOGI("LIS2HH12", "Channel is not open");
+                                // 这里可以触发你的摇晃事件
+                                if (board->ChannelIsOpen()) {
+                                    #ifdef CONFIG_LANGUAGE_ZH_CN
+                                    Application::GetInstance().SendTextToAI("用户正在摇晃你");
+                                    #else
+                                    Application::GetInstance().SendTextToAI("User is shaking you");
+                                    #endif
+                                } else {
+                                    ESP_LOGI("LIS2HH12", "Channel is not open");
+                                }
                             }
                         }
 
@@ -455,10 +472,19 @@ public:
 
     // 切换播放模式
     void SwitchPlaybackMode() {
+        auto& app = Application::GetInstance();
+        
         if (playback_mode_ == PlaybackMode::DISPLAY_ANIMATION) {
             playback_mode_ = PlaybackMode::VIDEO_PLAYBACK;
             ESP_LOGI(TAG, "切换到视频播放模式");
+            
+            // 先停止AI对话和音乐播放
+            app.QuitTalking();  // 停止AI对话，关闭音频通道
+            app.CancelPlayMusic();  // 停止音乐播放
+            ESP_LOGI(TAG, "已停止AI对话和音乐播放");
+            
             // 停止display动画，隐藏所有Display对象（包括zzz等递归隐藏）
+            // 注意：充电圆环不会被隐藏，因为它是在屏幕级别创建的独立对象
             if (display_ != nullptr) {
                 // 使用Lock/Unlock来保护LVGL操作
                 if (display_->Lock(1000)) {
@@ -467,10 +493,20 @@ public:
                     
                     lv_obj_t* screen = lv_screen_active();
                     if (screen != nullptr) {
+                        // 获取充电圆环对象指针，在隐藏时排除它
+                        EyeDisplay* eye_display = static_cast<EyeDisplay*>(display_);
+                        lv_obj_t* charging_arc = (eye_display != nullptr) ? eye_display->GetChargingBatteryArc() : nullptr;
+                        
                         // 递归函数：隐藏对象及其所有子对象（包括zzz）
+                        // 注意：排除充电圆环，确保它一直显示
                         std::function<void(lv_obj_t*)> add_hidden_recursive;
-                        add_hidden_recursive = [&add_hidden_recursive](lv_obj_t* obj) -> void {
+                        add_hidden_recursive = [&add_hidden_recursive, charging_arc](lv_obj_t* obj) -> void {
                             if (obj == nullptr) return;
+                            // 如果是充电圆环，跳过隐藏
+                            if (obj == charging_arc) {
+                                ESP_LOGI("MovecallMojiESP32S3", "跳过隐藏充电圆环");
+                                return;
+                            }
                             lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
                             uint32_t child_cnt = lv_obj_get_child_cnt(obj);
                             for (uint32_t i = 0; i < child_cnt; i++) {
@@ -482,24 +518,93 @@ public:
                         };
                         
                         // 隐藏屏幕的所有子对象（递归隐藏，包括zzz）
+                        // 注意：排除充电圆环，确保它一直显示
                         uint32_t child_cnt = lv_obj_get_child_cnt(screen);
                         for (uint32_t i = 0; i < child_cnt; i++) {
                             lv_obj_t* child = lv_obj_get_child(screen, i);
-                            if (child != nullptr) {
+                            if (child != nullptr && child != charging_arc) {  // 排除充电圆环
                                 add_hidden_recursive(child);
+                            } else if (child == charging_arc) {
+                                ESP_LOGI("MovecallMojiESP32S3", "跳过隐藏充电圆环（顶层检查）");
                             }
+                        }
+                        
+                        // 如果充电圆环存在，确保它在最前面且可见
+                        if (charging_arc != nullptr && lv_obj_is_valid(charging_arc)) {
+                            lv_obj_move_foreground(charging_arc);
+                            lv_obj_clear_flag(charging_arc, LV_OBJ_FLAG_HIDDEN);
+                            ESP_LOGI("MovecallMojiESP32S3", "确保充电圆环在最前面且可见");
                         }
                     }
                     display_->Unlock();
                 }
             }
+            
+            // 检查充电状态，如果正在充电，显示电量圆环（因为状态改变回调可能不会触发）
+            // 在隐藏Display对象之后检查，确保圆环显示在最前面
+            if (IsCharging()) {
+                ESP_LOGI(TAG, "切换到视频模式时检测到正在充电，显示电量圆环");
+                auto device_state = app.GetDeviceState();
+                if (device_state != kDeviceStateWifiConfiguring && display_ != nullptr) {
+                    int battery_level = 0;
+                    bool charging = false;
+                    bool discharging = false;
+                    if (GetBatteryLevel(battery_level, charging, discharging)) {
+                        display_->ShowBatteryIndicatorForCharging(battery_level);
+                    } else {
+                        display_->ShowBatteryIndicatorForCharging();
+                    }
+                }
+            }
+            
             // 启动视频播放
             if (video_player_ != nullptr) {
                 video_player_->PlayVideoGroup("neutral");
             }
+            
+            // 视频模式下禁用唤醒词检测和语音处理（离线模式）
+            app.GetAudioService().EnableWakeWordDetection(false);
+            app.GetAudioService().EnableVoiceProcessing(false);
+            ESP_LOGI(TAG, "视频模式：已禁用唤醒词检测和语音处理");
         } else {
             playback_mode_ = PlaybackMode::DISPLAY_ANIMATION;
             ESP_LOGI(TAG, "切换到Display动画模式");
+            
+            // Display模式下恢复唤醒词检测（根据设备状态）
+            auto device_state = app.GetDeviceState();
+            ESP_LOGI(TAG, "切换回Display模式，当前设备状态: %d", device_state);
+            
+            // 延迟一下，确保所有状态更新完成后再恢复唤醒词检测
+            vTaskDelay(pdMS_TO_TICKS(100));
+            
+            // 重新获取设备状态（可能已经改变）
+            device_state = app.GetDeviceState();
+            ESP_LOGI(TAG, "切换回Display模式，延迟后设备状态: %d", device_state);
+            
+            // 如果设备状态是idle或sleeping，恢复唤醒词检测
+            if (device_state == kDeviceStateIdle || device_state == kDeviceStateSleeping) {
+                app.GetAudioService().EnableWakeWordDetection(true);
+                app.GetAudioService().EnableVoiceProcessing(false);
+                ESP_LOGI(TAG, "Display模式：已恢复唤醒词检测（idle/sleeping状态）");
+            } else if (device_state == kDeviceStateListening || device_state == kDeviceStateSpeaking) {
+                // 在listening或speaking状态下，也需要启用唤醒词检测（可以在speaking时打断）
+                #if CONFIG_USE_AFE_WAKE_WORD
+                app.GetAudioService().EnableWakeWordDetection(true);
+                ESP_LOGI(TAG, "Display模式：已恢复唤醒词检测（listening/speaking状态，AFE唤醒词）");
+                #else
+                // 非AFE唤醒词，在speaking状态下不启用唤醒词检测
+                if (device_state == kDeviceStateListening) {
+                    app.GetAudioService().EnableWakeWordDetection(true);
+                    ESP_LOGI(TAG, "Display模式：已恢复唤醒词检测（listening状态）");
+                } else {
+                    ESP_LOGW(TAG, "Display模式：speaking状态下非AFE唤醒词不启用唤醒词检测");
+                }
+                #endif
+            } else {
+                // 其他状态，也尝试启用唤醒词检测（如果设备允许）
+                app.GetAudioService().EnableWakeWordDetection(true);
+                ESP_LOGI(TAG, "Display模式：已恢复唤醒词检测（其他状态）");
+            }
             // 停止视频播放，显示display动画
             if (video_player_ != nullptr) {
                 video_player_->StopPlayback();
@@ -713,6 +818,53 @@ public:
         return 8;
     }
 
+    // 显示电量圆环指示器（委托给EyeDisplay）
+    void ShowBatteryIndicator() {
+        if (display_ != nullptr) {
+            // 如果在视频模式，停止视频播放并保存状态
+            if (playback_mode_ == PlaybackMode::VIDEO_PLAYBACK && video_player_ != nullptr) {
+                int current_group_index = video_player_->GetCurrentGroupIndex();
+                ESP_LOGI(TAG, "ShowBatteryIndicator: 视频模式，停止播放，保存组索引: %d", current_group_index);
+                // 在停止播放之前保存组索引
+                saved_video_group_index_for_battery_ = current_group_index;
+                video_player_->StopPlayback();
+                // 延迟一下确保视频已停止
+                vTaskDelay(pdMS_TO_TICKS(100));
+                // 设置视频模式信息，以便5秒后恢复
+                display_->SetVideoModeInfo(true, current_group_index);
+            } else {
+                // 非视频模式，清除视频模式信息
+                saved_video_group_index_for_battery_ = -1;
+                display_->SetVideoModeInfo(false, -1);
+            }
+            display_->ShowBatteryIndicator();
+        }
+    }
+    
+    // 隐藏电量圆环指示器（委托给EyeDisplay）
+    void HideBatteryIndicator() {
+        if (display_ != nullptr) {
+            // 使用之前保存的视频组索引
+            int saved_video_group_index = saved_video_group_index_for_battery_;
+            ESP_LOGI(TAG, "HideBatteryIndicator: 开始，playback_mode_=%d, video_player_=%p, saved_video_group_index=%d", 
+                     (int)playback_mode_, video_player_, saved_video_group_index);
+            
+            display_->HideBatteryIndicator();
+            
+            // 如果之前在视频模式，恢复视频播放
+            if (playback_mode_ == PlaybackMode::VIDEO_PLAYBACK && video_player_ != nullptr && saved_video_group_index >= 0) {
+                ESP_LOGI(TAG, "HideBatteryIndicator: 恢复视频播放，组索引: %d", saved_video_group_index);
+                vTaskDelay(pdMS_TO_TICKS(100));  // 延迟一下确保UI已更新
+                video_player_->PlayVideoGroupByIndex(saved_video_group_index);
+                // 清除保存的索引
+                saved_video_group_index_for_battery_ = -1;
+            } else {
+                ESP_LOGW(TAG, "HideBatteryIndicator: 不恢复视频播放 - playback_mode_=%d, video_player_=%p, saved_video_group_index=%d", 
+                         (int)playback_mode_, video_player_, saved_video_group_index);
+            }
+        }
+    }
+
     void InitializeChargingGpio() {
         gpio_config_t io_conf = {
             .pin_bit_mask = (1ULL << STANDBY_PIN),
@@ -737,6 +889,8 @@ public:
         static int first_level = gpio_get_level(BOOT_BUTTON_GPIO);
         ESP_LOGI(TAG, "first_level: %d", first_level);
 
+        // 触摸按钮功能已屏蔽
+        /*
         touch_button_.OnPressDown([this]() {
           
             ESP_LOGI(TAG, "touch_button_.OnPressDown");
@@ -756,25 +910,28 @@ public:
                 }
                 // 根据当前模式触发表情
                 if (playback_mode_ == PlaybackMode::VIDEO_PLAYBACK) {
+                    // 视频模式：只切换视频组，不触发AI对话
                     this->CycleVideoGroup();
                 } else {
+                    // Display模式：显示表情并触发AI对话
                     TriggerEmotion("loving");
-                }
 
-                if (ChannelIsOpen()) {
-                    #ifdef CONFIG_LANGUAGE_ZH_CN
-                    Application::GetInstance().SendTextToAI("用户正在抚摸你");
-                    #else
-                    Application::GetInstance().SendTextToAI("User is touching you");
-                    #endif
-                } else {
-                    ESP_LOGI("touch", "Channel is not open");
-                    Application::GetInstance().ToggleChatState();
+                    if (ChannelIsOpen()) {
+                        #ifdef CONFIG_LANGUAGE_ZH_CN
+                        Application::GetInstance().SendTextToAI("用户正在抚摸你");
+                        #else
+                        Application::GetInstance().SendTextToAI("User is touching you");
+                        #endif
+                    } else {
+                        ESP_LOGI("touch", "Channel is not open");
+                        Application::GetInstance().ToggleChatState();
+                    }
                 }
             } else {
                 ESP_LOGI("touch", "Touch detected but in cooldown period");
             }
         });
+        */
 
         // 创建双击检测定时器（使用esp_timer，避免栈溢出）
         if (!boot_button_timer_) {
@@ -783,28 +940,67 @@ public:
                     MovecallMojiESP32S3* board = static_cast<MovecallMojiESP32S3*>(arg);
                     // 定时器超时，执行操作
                     if (board->boot_button_click_count_ == 1) {
-                        // 单击：500ms内只有一次点击
-                        ESP_LOGI("MovecallMojiESP32S3", "单击检测 - 当前模式: %s", 
-                                 board->playback_mode_ == PlaybackMode::VIDEO_PLAYBACK ? "VIDEO" : "DISPLAY");
-                        // 单击：根据当前模式执行不同操作
-                        if (board->playback_mode_ == PlaybackMode::VIDEO_PLAYBACK) {
+                        // 单击：检查是否在显示二维码状态
+                        if (board->qrcode_displaying_) {
+                            // 如果正在显示二维码，根据当前模式决定操作
+                            if (board->playback_mode_ == PlaybackMode::VIDEO_PLAYBACK) {
+                                // 视频模式下，取消二维码并切换回Display模式
+                                ESP_LOGI("MovecallMojiESP32S3", "单击检测 - 取消二维码，切换回Display模式");
+                                board->ExitQrcodeAndEnterDisplayMode();
+                            } else {
+                                // Display模式下，取消二维码并切换到视频模式
+                                ESP_LOGI("MovecallMojiESP32S3", "单击检测 - 取消二维码，进入视频模式");
+                                board->ExitQrcodeAndEnterVideoMode();
+                            }
+                        } else if (board->playback_mode_ == PlaybackMode::VIDEO_PLAYBACK) {
                             // 视频模式下，单击切换视频组
+                            ESP_LOGI("MovecallMojiESP32S3", "单击检测 - 视频模式下切换视频组");
                             board->CycleVideoGroup();
                         } else {
-                            // Display模式下，单击切换表情
-                            board->CycleDisplayEmotion();
+                            // Display模式下，单击：强制打断讲话，进入聆听模式（参考 gizwits-c2-6824-DRF-W300CA）
+                            ESP_LOGI("MovecallMojiESP32S3", "单击检测 - 强制打断讲话，进入聆听模式");
+                            auto& app = Application::GetInstance();
+                            
+                            // 强制打断：无论当前状态，都发送中止消息并重置解码器
+                            app.AbortSpeaking(kAbortReasonNone);
+                            app.ResetDecoder();
+                            
+                            // 调用 StartListening 进入聆听模式（它会处理所有状态）
+                            app.StartListening();
                         }
                     } else if (board->boot_button_click_count_ == 2) {
-                        // 双击：500ms内检测到第二次点击，且没有第三次点击
-                        ESP_LOGI("MovecallMojiESP32S3", "双击检测 - 切换播放模式");
-                        board->SwitchPlaybackMode();
+                        // 双击：600ms内检测到第二次点击，且没有第三次点击（定时器超时）
+                        // 显示电量圆环
+                        ESP_LOGI("MovecallMojiESP32S3", "双击检测 - 显示电量");
+                        board->ShowBatteryIndicator();
+                    } else if (board->boot_button_click_count_ == 3) {
+                        // 三击：600ms内检测到第三次点击，且没有第四次点击（定时器超时）
+                        // 直接进入配网模式（重启），不显示二维码
+                        ESP_LOGI("MovecallMojiESP32S3", "三击检测 - 直接进入配网模式");
+                        board->InnerResetWifiConfiguration();
                     }
+                    // 注意：四击在 OnClick 回调中立即处理，不会到达这里
                     board->boot_button_click_count_ = 0;
                 },
                 .arg = this,
                 .name = "boot_btn_timer"
             };
             esp_timer_create(&timer_args, &boot_button_timer_);
+        }
+        
+        // 创建二维码定时器（用于自动进入配网模式）
+        if (!qrcode_timer_) {
+            esp_timer_create_args_t qrcode_timer_args = {
+                .callback = [](void* arg) {
+                    MovecallMojiESP32S3* board = static_cast<MovecallMojiESP32S3*>(arg);
+                    ESP_LOGI("MovecallMojiESP32S3", "二维码显示超时，进入配网模式");
+                    board->qrcode_displaying_ = false;
+                    board->InnerResetWifiConfiguration();
+                },
+                .arg = this,
+                .name = "qrcode_timer"
+            };
+            esp_timer_create(&qrcode_timer_args, &qrcode_timer_);
         }
         
         boot_button_.OnLongPress([this]() {
@@ -860,17 +1056,23 @@ public:
             }
         });
 
-        // 单击和双击检测：使用 OnClick 来检测（参考 gizwits-c2-6824-DRF-W300CA 的实现）
+        // 单击、双击和三击检测
         boot_button_.OnClick([this]() {
             int64_t now_ms = esp_timer_get_time() / 1000;
-            // 如果距离上次点击超过500ms，重置计数器
-            if (now_ms - boot_button_last_click_ms_ > kDoubleClickWindowMs) {
+            const int64_t TRIPLE_CLICK_WINDOW_MS = 1000;  // 三击时间窗口1000ms（增加时间窗口）
+            const int64_t DOUBLE_CLICK_WINDOW_MS = kDoubleClickWindowMs;  // 使用成员变量的双击窗口时间（800ms）
+            
+            // 如果距离上次点击超过三击窗口，重置计数器
+            if (now_ms - boot_button_last_click_ms_ > TRIPLE_CLICK_WINDOW_MS) {
                 boot_button_click_count_ = 0;
+                ESP_LOGI(TAG, "boot_button_.OnClick - 重置计数器（超过时间窗口）");
             }
             boot_button_last_click_ms_ = now_ms;
             
+            int64_t time_since_last_click = (boot_button_click_count_ > 0) ? (now_ms - boot_button_last_click_ms_) : 0;
             boot_button_click_count_++;
-            ESP_LOGI(TAG, "boot_button_.OnClick - 点击次数: %d", boot_button_click_count_);
+            ESP_LOGI(TAG, "boot_button_.OnClick - 点击次数: %d, 距离上次点击: %lld ms", 
+                     boot_button_click_count_, time_since_last_click);
             
             // 停止之前的定时器（如果有）
             if (boot_button_timer_ != nullptr) {
@@ -878,25 +1080,27 @@ public:
             }
             
             if (boot_button_click_count_ == 1) {
-                // 第一次点击，启动定时器（500ms后执行单击操作）
-                esp_timer_start_once(boot_button_timer_, kDoubleClickWindowMs * 1000);
+                // 第一次点击，启动定时器（800ms后执行单击操作）
+                ESP_LOGI(TAG, "第一次点击，启动定时器 %d ms", DOUBLE_CLICK_WINDOW_MS);
+                esp_timer_start_once(boot_button_timer_, DOUBLE_CLICK_WINDOW_MS * 1000);
             } else if (boot_button_click_count_ == 2) {
-                // 第二次点击，停止定时器，启动更短的定时器（200ms后执行双击操作）
+                // 第二次点击，停止定时器，启动更短的定时器（1000ms后执行双击操作 - 显示电量，给三击留时间）
+                ESP_LOGI(TAG, "第二次点击，停止定时器，启动三击窗口定时器 %d ms", TRIPLE_CLICK_WINDOW_MS);
                 esp_timer_stop(boot_button_timer_);
-                esp_timer_start_once(boot_button_timer_, 200 * 1000);
-            } else if (boot_button_click_count_ >= 3) {
-                // 第三次或更多次点击，停止定时器，重置计数器
-                // 让按钮库的 OnMultipleClick 来处理三击配网
-                ESP_LOGI(TAG, "检测到第三次点击，停止定时器，让 OnMultipleClick 处理");
+                esp_timer_start_once(boot_button_timer_, TRIPLE_CLICK_WINDOW_MS * 1000);  // 使用三击窗口时间
+            } else if (boot_button_click_count_ == 3) {
+                // 第三次点击，停止定时器，启动更短的定时器（1000ms后执行三击操作，给四击留时间）
+                ESP_LOGI(TAG, "第三次点击，停止定时器，启动三击窗口定时器 %d ms", TRIPLE_CLICK_WINDOW_MS);
+                esp_timer_stop(boot_button_timer_);
+                esp_timer_start_once(boot_button_timer_, TRIPLE_CLICK_WINDOW_MS * 1000);  // 使用三击窗口时间
+            } else if (boot_button_click_count_ >= 4) {
+                // 第四次或更多次点击，立即停止定时器并执行四击操作（直接切换模式，不显示二维码）
+                ESP_LOGI(TAG, "四击检测 - 直接切换模式");
                 esp_timer_stop(boot_button_timer_);
                 boot_button_click_count_ = 0;
+                SwitchPlaybackMode();
             }
         });
-        
-        // 短按三下：重置WiFi配置（保留此功能）
-        boot_button_.OnMultipleClick([this]() {
-            InnerResetWifiConfiguration();
-        }, 3);
 
         // 注意：OnClick 已经在上面注册过了，这里不需要重复注册
         // 如果重复注册会覆盖之前的处理
@@ -932,6 +1136,194 @@ public:
         // gpio_set_level(DISPLAY_BACKLIGHT_PIN, 0);
         // vTaskDelay(pdMS_TO_TICKS(10));
         ResetWifiConfiguration();
+    }
+    
+    // 显示二维码（不重启，直接显示）
+    void ShowQrcode() {
+        ESP_LOGI(TAG, "ShowQrcode: 显示二维码");
+        
+        // 先停止视频播放（如果正在播放），避免访问已删除的对象
+        if (video_player_ != nullptr && playback_mode_ == PlaybackMode::VIDEO_PLAYBACK) {
+            video_player_->StopPlayback();
+            vTaskDelay(pdMS_TO_TICKS(200));  // 等待视频任务完全退出
+        }
+        
+        if (display_ != nullptr) {
+            display_->EnterWifiConfig();
+            qrcode_displaying_ = true;
+        }
+    }
+    
+    // 取消二维码并切换回Display模式
+    void ExitQrcodeAndEnterDisplayMode() {
+        ESP_LOGI(TAG, "ExitQrcodeAndEnterDisplayMode: 取消二维码，切换回Display模式");
+        qrcode_displaying_ = false;
+        // 取消二维码定时器
+        if (qrcode_timer_ != nullptr) {
+            esp_timer_stop(qrcode_timer_);
+        }
+        
+        // 先停止视频播放（如果正在播放）
+        if (video_player_ != nullptr) {
+            video_player_->StopPlayback();
+            vTaskDelay(pdMS_TO_TICKS(200));  // 等待视频任务完全退出
+        }
+        
+        // 清空屏幕，恢复黑色背景
+        if (display_ != nullptr) {
+            if (display_->Lock(1000)) {
+                lv_obj_t* screen = lv_screen_active();
+                if (screen != nullptr) {
+                    // 先删除所有子对象，但保留屏幕对象本身
+                    uint32_t child_cnt = lv_obj_get_child_cnt(screen);
+                    for (int32_t i = child_cnt - 1; i >= 0; i--) {
+                        lv_obj_t* child = lv_obj_get_child(screen, i);
+                        if (child != nullptr) {
+                            lv_obj_del(child);
+                        }
+                    }
+                    lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
+                }
+                display_->Unlock();
+            }
+        }
+        
+        // 等待一下确保屏幕清理完成和LVGL稳定
+        vTaskDelay(pdMS_TO_TICKS(300));
+        
+        // 切换到Display模式
+        if (playback_mode_ != PlaybackMode::DISPLAY_ANIMATION) {
+            playback_mode_ = PlaybackMode::DISPLAY_ANIMATION;
+            ESP_LOGI(TAG, "切换到Display动画模式");
+            
+            // Display模式下恢复唤醒词检测（根据设备状态）
+            auto& app = Application::GetInstance();
+            auto device_state = app.GetDeviceState();
+            ESP_LOGI(TAG, "切换回Display模式，当前设备状态: %d", device_state);
+            
+            // 延迟一下，确保所有状态更新完成后再恢复唤醒词检测
+            vTaskDelay(pdMS_TO_TICKS(100));
+            
+            // 重新获取设备状态（可能已经改变）
+            device_state = app.GetDeviceState();
+            ESP_LOGI(TAG, "切换回Display模式，延迟后设备状态: %d", device_state);
+            
+            // 如果设备状态是idle或sleeping，恢复唤醒词检测
+            if (device_state == kDeviceStateIdle || device_state == kDeviceStateSleeping) {
+                app.GetAudioService().EnableWakeWordDetection(true);
+                app.GetAudioService().EnableVoiceProcessing(false);
+                ESP_LOGI(TAG, "Display模式：已恢复唤醒词检测（idle/sleeping状态）");
+            } else if (device_state == kDeviceStateListening || device_state == kDeviceStateSpeaking) {
+                // 在listening或speaking状态下，也需要启用唤醒词检测（可以在speaking时打断）
+                #if CONFIG_USE_AFE_WAKE_WORD
+                app.GetAudioService().EnableWakeWordDetection(true);
+                ESP_LOGI(TAG, "Display模式：已恢复唤醒词检测（listening/speaking状态，AFE唤醒词）");
+                #else
+                // 非AFE唤醒词，在speaking状态下不启用唤醒词检测
+                if (device_state == kDeviceStateListening) {
+                    app.GetAudioService().EnableWakeWordDetection(true);
+                    ESP_LOGI(TAG, "Display模式：已恢复唤醒词检测（listening状态）");
+                } else {
+                    ESP_LOGW(TAG, "Display模式：speaking状态下非AFE唤醒词不启用唤醒词检测");
+                }
+                #endif
+            } else {
+                // 其他状态，也尝试启用唤醒词检测（如果设备允许）
+                app.GetAudioService().EnableWakeWordDetection(true);
+                ESP_LOGI(TAG, "Display模式：已恢复唤醒词检测（其他状态）");
+            }
+            
+            // 再次等待，确保所有操作完成和屏幕稳定
+            vTaskDelay(pdMS_TO_TICKS(200));
+            
+            // 重新初始化显示动画（屏幕已经清空）
+            if (display_ != nullptr) {
+                display_->SetEmotion("neutral");
+            }
+        }
+    }
+    
+    // 取消二维码并进入视频模式
+    void ExitQrcodeAndEnterVideoMode() {
+        ESP_LOGI(TAG, "ExitQrcodeAndEnterVideoMode: 取消二维码，进入视频模式");
+        qrcode_displaying_ = false;
+        // 取消二维码定时器
+        if (qrcode_timer_ != nullptr) {
+            esp_timer_stop(qrcode_timer_);
+        }
+        
+        // 先停止AI对话和音乐播放
+        auto& app = Application::GetInstance();
+        app.QuitTalking();  // 停止AI对话，关闭音频通道
+        app.CancelPlayMusic();  // 停止音乐播放
+        ESP_LOGI(TAG, "已停止AI对话和音乐播放");
+        
+        // 等待一下确保音频操作完全停止
+        vTaskDelay(pdMS_TO_TICKS(100));
+        
+        // 先停止任何正在进行的视频播放
+        if (video_player_ != nullptr) {
+            video_player_->StopPlayback();
+            vTaskDelay(pdMS_TO_TICKS(200));  // 等待视频任务完全退出
+        }
+        
+        // 清空屏幕，恢复黑色背景
+        if (display_ != nullptr) {
+            if (display_->Lock(1000)) {
+                lv_obj_t* screen = lv_screen_active();
+                if (screen != nullptr) {
+                    // 先删除所有子对象，但保留屏幕对象本身
+                    uint32_t child_cnt = lv_obj_get_child_cnt(screen);
+                    for (int32_t i = child_cnt - 1; i >= 0; i--) {
+                        lv_obj_t* child = lv_obj_get_child(screen, i);
+                        if (child != nullptr) {
+                            lv_obj_del(child);
+                        }
+                    }
+                    lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
+                }
+                display_->Unlock();
+            }
+        }
+        
+        // 等待一下确保屏幕清理完成和LVGL稳定
+        vTaskDelay(pdMS_TO_TICKS(300));
+        
+        // 切换到视频模式（不调用SwitchPlaybackMode，直接设置状态和启动视频）
+        if (playback_mode_ != PlaybackMode::VIDEO_PLAYBACK) {
+            playback_mode_ = PlaybackMode::VIDEO_PLAYBACK;
+            ESP_LOGI(TAG, "切换到视频播放模式");
+            
+            // 视频模式下禁用唤醒词检测和语音处理（离线模式）
+            auto& app = Application::GetInstance();
+            app.GetAudioService().EnableWakeWordDetection(false);
+            app.GetAudioService().EnableVoiceProcessing(false);
+            ESP_LOGI(TAG, "视频模式：已禁用唤醒词检测和语音处理");
+            
+            // 检查充电状态，如果正在充电，显示电量圆环（因为状态改变回调可能不会触发）
+            if (IsCharging()) {
+                ESP_LOGI(TAG, "ExitQrcodeAndEnterVideoMode: 检测到正在充电，显示电量圆环");
+                auto device_state = app.GetDeviceState();
+                if (device_state != kDeviceStateWifiConfiguring && display_ != nullptr) {
+                    int battery_level = 0;
+                    bool charging = false;
+                    bool discharging = false;
+                    if (GetBatteryLevel(battery_level, charging, discharging)) {
+                        display_->ShowBatteryIndicatorForCharging(battery_level);
+                    } else {
+                        display_->ShowBatteryIndicatorForCharging();
+                    }
+                }
+            }
+            
+            // 再次等待，确保所有操作完成和屏幕稳定
+            vTaskDelay(pdMS_TO_TICKS(200));
+            
+            // 启动视频播放（屏幕已经清空，不需要隐藏对象）
+            if (video_player_ != nullptr) {
+                video_player_->PlayVideoGroup("neutral");
+            }
+        }
     }
 
     bool ChannelIsOpen() {
@@ -1030,34 +1422,36 @@ public:
                 // 降低发热                
                 GetBacklight()->SetBrightness(5, false);
                 
-                // 设置充电时的自定义帧率：100-125Hz (8-10ms延迟)
-                // 需要强制转换成 XunguanDisplay 类型
-                // if (xunguan_display) {
-                //     if (xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL)) {
-                //     // if (xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::POWER_SAVE)) {
-                //         ESP_LOGI(TAG, "充电帧率设置成功");
-                //     } else {
-                //         ESP_LOGE(TAG, "充电帧率设置失败");
-                //     }
-                // } else {
-                //     ESP_LOGE(TAG, "无法获取 XunguanDisplay 对象");
-                // }
+                // 检查设备状态，除了配网模式，其他状态都显示电量圆环
+                auto& app = Application::GetInstance();
+                auto device_state = app.GetDeviceState();
+                ESP_LOGI(TAG, "充电时设备状态: %d", device_state);
+                
+                // 只排除配网模式，其他所有状态都显示电量圆环
+                if (device_state != kDeviceStateWifiConfiguring) {
+                    ESP_LOGI(TAG, "显示充电电量圆环");
+                    if (display_ != nullptr) {
+                        // 在调用 ShowBatteryIndicatorForCharging() 之前，先获取电量
+                        // 这样 ShowBatteryIndicatorForCharging() 就可以使用传入的电量值，避免在定时器回调中调用 Board::GetInstance()
+                        int battery_level = 0;
+                        bool charging = false;
+                        bool discharging = false;
+                        if (GetBatteryLevel(battery_level, charging, discharging)) {
+                            display_->ShowBatteryIndicatorForCharging(battery_level);
+                        } else {
+                            display_->ShowBatteryIndicatorForCharging();
+                        }
+                        ESP_LOGI(TAG, "ShowBatteryIndicatorForCharging调用完成");
+                    }
+                }
             } else {
                 // 充电停止时的处理逻辑
                 ESP_LOGI(TAG, "检测到停止充电");
                 
-                // 恢复正常帧率模式
-                // 需要强制转换成 XunguanDisplay 类型
-                // if (xunguan_display) {
-                //     ESP_LOGI(TAG, "停止充电，恢复正常帧率模式");
-                //     if (xunguan_display->SetFrameRateMode(XunguanDisplay::FrameRateMode::NORMAL)) {
-                //         ESP_LOGI(TAG, "正常帧率模式恢复成功");
-                //     } else {
-                //         ESP_LOGE(TAG, "正常帧率模式恢复失败");
-                //     }
-                // } else {
-                //     ESP_LOGE(TAG, "无法获取 XunguanDisplay 对象");
-                // }
+                // 隐藏充电时的电量圆环
+                if (display_ != nullptr) {
+                    display_->HideBatteryIndicatorForCharging();
+                }
 
                 if (this->is_charging_sleep_) {
                     ESP_LOGI(TAG, "充电停止，关机");
@@ -1068,8 +1462,52 @@ public:
             // 通知 mqtt 
             auto& mqtt_client = MqttClient::getInstance();
             mqtt_client.ReportTimer();
-
         });
+        
+        // 注册设备状态改变回调，用于在充电时根据状态显示/隐藏电量圆环
+        DeviceStateEventManager::GetInstance().RegisterStateChangeCallback(
+            [this](DeviceState prev, DeviceState curr) {
+                ESP_LOGI(TAG, "DeviceStateEventManager回调: prev=%d, curr=%d", prev, curr);
+                
+                // 强制刷新一次充电状态检测，确保状态是最新的
+                if (power_manager_ != nullptr) {
+                    power_manager_->CheckBatteryStatusImmediately();
+                }
+                
+                // 如果正在充电，根据新状态决定是否显示电量圆环
+                bool is_charging = IsCharging();
+                ESP_LOGI(TAG, "DeviceStateEventManager回调: is_charging=%d (强制刷新后)", is_charging);
+                if (is_charging) {
+                    // 只排除配网模式，其他所有状态都显示电量圆环
+                    if (curr != kDeviceStateWifiConfiguring) {
+                        // 新状态允许显示电量圆环
+                        ESP_LOGI(TAG, "DeviceStateEventManager回调: 显示充电电量圆环 (device_state=%d, display_=%p)", 
+                                 curr, display_);
+                        if (display_ != nullptr) {
+                            int battery_level = 0;
+                            bool charging = false;
+                            bool discharging = false;
+                            if (GetBatteryLevel(battery_level, charging, discharging)) {
+                                display_->ShowBatteryIndicatorForCharging(battery_level);
+                            } else {
+                                display_->ShowBatteryIndicatorForCharging();
+                            }
+                            ESP_LOGI(TAG, "DeviceStateEventManager回调: ShowBatteryIndicatorForCharging调用完成");
+                        } else {
+                            ESP_LOGE(TAG, "DeviceStateEventManager回调: display_为nullptr，无法显示圆环");
+                        }
+                    } else {
+                        // 配网模式，隐藏充电时的电量圆环
+                        ESP_LOGI(TAG, "DeviceStateEventManager回调: 隐藏充电电量圆环（配网模式）");
+                        if (display_ != nullptr) {
+                            display_->HideBatteryIndicatorForCharging();
+                        }
+                    }
+                } else {
+                    ESP_LOGI(TAG, "DeviceStateEventManager回调: 未充电，不显示电量圆环");
+                }
+            }
+        );
     }
 
     void InitializeFlash() {
@@ -1086,7 +1524,7 @@ public:
     }
 
 public:
-    MovecallMojiESP32S3() : boot_button_(BOOT_BUTTON_GPIO), touch_button_(TOUCH_BUTTON_GPIO) { 
+    MovecallMojiESP32S3() : boot_button_(BOOT_BUTTON_GPIO), touch_button_(TOUCH_BUTTON_GPIO) {  // 触摸按钮已屏蔽（保留初始化，但回调已注释） 
         // 记录上电时间
         power_on_time_ = esp_timer_get_time() / 1000; // 转换为毫秒
         ESP_LOGI(TAG, "设备启动，上电时间戳: %lld ms", power_on_time_);
@@ -1104,8 +1542,8 @@ public:
         // InitializeGpio(DISPLAY_BACKLIGHT_PIN, false);
         InitializeSpi();
         InitializeGc9a01Display();
-        // InitializeLis2hh12I2c(); // 新增LIS2HH12专用I2C - 已注释，不初始化陀螺仪
-        // InitializeLis2hh12();    // 初始化LIS2HH12 - 已注释，不初始化陀螺仪
+        InitializeLis2hh12I2c(); // 初始化LIS2HH12专用I2C
+        InitializeLis2hh12();    // 初始化LIS2HH12陀螺仪
         
         // 检查I2C设备是否正常
         // if (lis2hh12_dev_ == nullptr) {
@@ -1123,6 +1561,34 @@ public:
         if (power_manager_) {
             power_manager_->CheckBatteryStatusImmediately();
             ESP_LOGI(TAG, "启动时立即检测电量: %d", power_manager_->GetBatteryLevel());
+            
+            // 延迟一下，等待ADC稳定，然后检查充电状态
+            // 如果启动时就在充电，状态改变回调不会触发，需要主动检查
+            vTaskDelay(pdMS_TO_TICKS(500));  // 延迟500ms等待ADC稳定
+            power_manager_->CheckBatteryStatusImmediately();  // 再次检测，确保状态更新
+            
+            // 检查充电状态，如果正在充电，显示电量圆环
+            if (IsCharging()) {
+                ESP_LOGI(TAG, "启动时检测到正在充电，显示电量圆环");
+                auto& app = Application::GetInstance();
+                auto device_state = app.GetDeviceState();
+                if (device_state != kDeviceStateWifiConfiguring && display_ != nullptr) {
+                    int battery_level = 0;
+                    bool charging = false;
+                    bool discharging = false;
+                    if (GetBatteryLevel(battery_level, charging, discharging)) {
+                        display_->ShowBatteryIndicatorForCharging(battery_level);
+                    } else {
+                        display_->ShowBatteryIndicatorForCharging();
+                    }
+                    ESP_LOGI(TAG, "启动时显示充电电量圆环完成");
+                } else {
+                    ESP_LOGI(TAG, "启动时不显示充电电量圆环 (device_state=%d, display_=%p)", 
+                             device_state, display_);
+                }
+            } else {
+                ESP_LOGI(TAG, "启动时未检测到充电状态");
+            }
         }
 
         InitializeFlash();
@@ -1193,6 +1659,12 @@ public:
     }
 
     virtual void WakeWordDetected() override {
+        // 视频模式下禁用唤醒词检测和AI对话
+        if (playback_mode_ == PlaybackMode::VIDEO_PLAYBACK) {
+            ESP_LOGI(TAG, "WakeWordDetected: 视频模式下忽略唤醒词");
+            return;
+        }
+        
         ESP_LOGI(TAG, "WakeWordDetected");
         display_->UpdateTestItemStatus("mic", 1);
 
@@ -1244,18 +1716,33 @@ public:
     }
 
     virtual bool IsCharging() override {
-        int chrg = gpio_get_level(CHARGING_PIN);
-        int standby = gpio_get_level(STANDBY_PIN);
-        // return false;
-        return chrg == 0 || standby == 0;
+        ESP_LOGI(TAG, "IsCharging: 开始, power_manager_=%p", power_manager_);
+        // 使用PowerManager检测充电状态（通过ADC2_CH2检测VDD电压）
+        if (power_manager_ != nullptr) {
+            bool result = power_manager_->IsChargingByVdd();
+            ESP_LOGI(TAG, "IsCharging: 返回 %d", result);
+            return result;
+        }
+        ESP_LOGW(TAG, "IsCharging: power_manager_为nullptr，返回false");
+        return false;
     }
 
     virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
+        ESP_LOGI(TAG, "GetBatteryLevel: 开始");
+        ESP_LOGI(TAG, "GetBatteryLevel: 调用IsCharging前");
         charging = IsCharging();
+        ESP_LOGI(TAG, "GetBatteryLevel: 调用IsCharging后, charging=%d", charging);
         discharging = !charging;
-        // level = power_manager_->GetBatteryLevel();
-        level = 100;
-        ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
+        // 使用PowerManager获取真实电量（基于ADC2_CH1的数据）
+        if (power_manager_ != nullptr) {
+            ESP_LOGI(TAG, "GetBatteryLevel: 调用power_manager_->GetBatteryLevel前");
+            level = power_manager_->GetBatteryLevel();
+            ESP_LOGI(TAG, "GetBatteryLevel: 调用power_manager_->GetBatteryLevel后, level=%d", level);
+        } else {
+            ESP_LOGW(TAG, "GetBatteryLevel: power_manager_为nullptr，使用默认值100");
+            level = 100;  // 如果PowerManager未初始化，返回默认值
+        }
+        ESP_LOGI(TAG, "GetBatteryLevel: 返回, level: %d, charging: %d, discharging: %d", level, charging, discharging);
         return true;
     }
 

@@ -120,6 +120,7 @@ public:
     virtual void ProcessDataPointValue(const std::string& name, int value) {}
     virtual void ProcessBinaryDataPointValue(const std::string& name, const uint8_t* data, size_t data_len) {}
     virtual void PlayVideoGroup(const char* emotion) {}
+    virtual void HideBatteryIndicator() {}  // 隐藏电量指示器（用于恢复视频播放等）
     virtual std::string GetSystemInfoJson();
 };
 
