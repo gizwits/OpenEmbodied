@@ -36,6 +36,11 @@ void Protocol::SetError(const std::string& message) {
 }
 
 void Protocol::SendAbortSpeaking(AbortReason reason) {
+    // 记录打断AI说话的时间戳
+    abort_speaking_timestamp_ = std::chrono::steady_clock::now();
+    abort_speaking_recorded_ = true;
+    ESP_LOGI(TAG, "Abort speaking timestamp recorded, will ignore server audio for 1s");
+    
     std::string message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"abort\"";
     if (reason == kAbortReasonWakeWordDetected) {
         message += ",\"reason\":\"wake_word_detected\"";
@@ -84,7 +89,7 @@ bool Protocol::IsAudioChannelBusy() const {
 }
 
 void Protocol::PreAbortSpeaking() {
-
+    SendAbortSpeaking(kAbortReasonNone);
 }
 
 

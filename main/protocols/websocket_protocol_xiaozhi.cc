@@ -118,6 +118,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     cached_packet_count_ = 0;
     is_first_packet_ = true;
     is_start_progress_ = false;
+    abort_speaking_recorded_ = false;  // 重置打断记录状态
 
     auto network = Board::GetInstance().GetNetwork();
     websocket_ = network->CreateWebSocket(1);
@@ -140,10 +141,21 @@ bool WebsocketProtocol::OpenAudioChannel() {
 
     websocket_->OnData([this](const char* data, size_t len, bool binary) {
         if (binary) {
-            // if (need_abort_speaking_) {
-            //     ESP_LOGI(TAG, "OnData: ignore audio");
-            //     return;
-            // }
+            // 检查是否在打断AI说话后的1秒内，如果是则忽略音频
+            if (abort_speaking_recorded_) {
+                auto now = std::chrono::steady_clock::now();
+                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - abort_speaking_timestamp_).count();
+                
+                if (elapsed < 1500) {
+                    ESP_LOGD(TAG, "Ignoring server audio, elapsed: %lld ms since abort speaking", elapsed);
+                    return;
+                } else {
+                    // 超过1秒后，清除记录
+                    abort_speaking_recorded_ = false;
+                    ESP_LOGD(TAG, "Audio ignore period ended, elapsed: %lld ms", elapsed);
+                }
+            }
+            
             if (on_incoming_audio_ != nullptr) {
                 AudioStreamPacket packet;
                 
@@ -269,6 +281,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
                         } else if (strcmp(state->valuestring, "stop") == 0) {
                             ESP_LOGI(TAG, "TTS stop event detected");
                             tts_start_received_ = false;  // 重置状态，允许下一次 start
+                            // 重置打断记录状态，因为对话已结束
+                            abort_speaking_recorded_ = false;
                         }
                     }
                     if (on_incoming_json_ != nullptr) {

@@ -1095,6 +1095,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
             // 打断AI
             ESP_LOGI(TAG, "WakeWordInvoke(kDeviceStateSpeaking)");
             protocol_->SendAbortSpeaking(kAbortReasonNone);
+            vTaskDelay(pdMS_TO_TICKS(50));
             audio_service_.ResetDecoder();
             audio_service_.PlaySound(Lang::Sounds::P3_WAKE_WORD);
             

@@ -12,8 +12,30 @@ private:
     static constexpr struct {
         uint16_t adc;
         uint8_t level;
-    } BATTERY_LEVELS[] = {{1980, 0}, {2519, 100}};
-    static constexpr size_t BATTERY_LEVELS_COUNT = 2;
+    } BATTERY_LEVELS[] = {
+        {4140, 100}, // 100%
+        {4104, 95},  // 下降36mV
+        {4068, 90},  // 下降36mV
+        {4032, 85},  // 下降36mV
+        {3996, 80},  // 下降36mV
+        {3960, 75},  // 下降36mV
+        {3924, 70},  // 下降36mV
+        {3888, 65},  // 下降36mV
+        {3852, 60},  // 下降36mV
+        {3829, 55},  // 下降23mV（过渡段开始）
+        {3808, 50},  // 下降21mV
+        {3787, 45},  // 下降21mV
+        {3766, 40},  // 下降21mV
+        {3745, 35},  // 下降21mV
+        {3724, 30},  // 下降21mV
+        {3703, 25},  // 下降21mV
+        {3672, 20},  // 下降31mV
+        {3570, 15},  // 下降102mV
+        {3420, 10},  // 下降150mV（低电量段开始）
+        {3220, 5},   // 下降200mV
+        {3000, 0}    // 下降220mV
+    };
+    static constexpr size_t BATTERY_LEVELS_COUNT = sizeof(BATTERY_LEVELS) / sizeof(BATTERY_LEVELS[0]);
     static constexpr size_t ADC_VALUES_COUNT = 10;
 
     esp_timer_handle_t timer_handle_ = nullptr;
@@ -77,22 +99,42 @@ private:
         }
         average_adc /= adc_values_count_;
 
-        CalculateBatteryLevel(average_adc);
+        // ADC 采样是 1/2 分压，需要乘以 2 得到实际电压值（mV）
+        uint32_t actual_voltage_mv = average_adc * 2;
+        CalculateBatteryLevel(actual_voltage_mv);
 
 
         // ESP_LOGI("PowerManager", "ADC值: %d 平均值: %ld 电量: %u%%", adc_value, average_adc,
         //          battery_level_);
     }
 
-    void CalculateBatteryLevel(uint32_t average_adc) {
-        if (average_adc <= BATTERY_LEVELS[0].adc) {
-            battery_level_ = 0;
-        } else if (average_adc >= BATTERY_LEVELS[BATTERY_LEVELS_COUNT - 1].adc) {
-            battery_level_ = 100;
+    void CalculateBatteryLevel(uint32_t voltage_mv) {
+        // BATTERY_LEVELS 数组按电压从高到低排列（100% 到 0%）
+        // 查找电压对应的电量等级
+        if (voltage_mv >= BATTERY_LEVELS[0].adc) {
+            // 电压高于或等于最高阈值，电量为 100%
+            battery_level_ = BATTERY_LEVELS[0].level;
+        } else if (voltage_mv <= BATTERY_LEVELS[BATTERY_LEVELS_COUNT - 1].adc) {
+            // 电压低于或等于最低阈值，电量为 0%
+            battery_level_ = BATTERY_LEVELS[BATTERY_LEVELS_COUNT - 1].level;
         } else {
-            float ratio = static_cast<float>(average_adc - BATTERY_LEVELS[0].adc) /
-                          (BATTERY_LEVELS[1].adc - BATTERY_LEVELS[0].adc);
-            battery_level_ = ratio * 100;
+            // 在中间范围，进行线性插值
+            // 数组从高到低排列，所以需要找到 voltage_mv 落在哪个区间
+            for (size_t i = 0; i < BATTERY_LEVELS_COUNT - 1; i++) {
+                // 因为数组从高到低，所以 BATTERY_LEVELS[i].adc > BATTERY_LEVELS[i+1].adc
+                if (voltage_mv <= BATTERY_LEVELS[i].adc && voltage_mv > BATTERY_LEVELS[i + 1].adc) {
+                    // 在两个相邻点之间进行线性插值
+                    float ratio = static_cast<float>(voltage_mv - BATTERY_LEVELS[i + 1].adc) /
+                                  static_cast<float>(BATTERY_LEVELS[i].adc - BATTERY_LEVELS[i + 1].adc);
+                    battery_level_ = static_cast<uint8_t>(
+                        BATTERY_LEVELS[i + 1].level + 
+                        ratio * (BATTERY_LEVELS[i].level - BATTERY_LEVELS[i + 1].level)
+                    );
+                    return;
+                }
+            }
+            // 如果没找到匹配区间，使用最后一个值（0%）
+            battery_level_ = BATTERY_LEVELS[BATTERY_LEVELS_COUNT - 1].level;
         }
     }
 
