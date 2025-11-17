@@ -19,10 +19,21 @@
 #include "settings.h"
 #include "ntp.h"
 #include "device_state_event.h"
+#include <esp_spiffs.h>
+#include <esp_vfs.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <lvgl.h>
 
 #include "board.h"
 
 #define TAG "LcdDisplay"
+
+// Background SPIFFS partition configuration
+#define BACKGROUND_PARTITION_LABEL "background"
+#define BACKGROUND_MOUNT_POINT "/background"
+#define BACKGROUND_DRIVE_LETTER 'B'
 
 // External background images
 extern const lv_image_dsc_t bg_1_img;
@@ -160,6 +171,9 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
 
     SetupUI();
     RegisterDeviceStateCallback();
+    
+    // Mount background SPIFFS partition and register LVGL file system driver
+    LoadBackgroundFromSPIFFS();
 }
 
 // RGB LCD实现
@@ -224,6 +238,9 @@ RgbLcdDisplay::RgbLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
 
     SetupUI();
     RegisterDeviceStateCallback();
+    
+    // Mount background SPIFFS partition and register LVGL file system driver
+    LoadBackgroundFromSPIFFS();
 }
 
 MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
@@ -283,6 +300,9 @@ MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel
 
     SetupUI();
     RegisterDeviceStateCallback();
+    
+    // Mount background SPIFFS partition and register LVGL file system driver
+    LoadBackgroundFromSPIFFS();
 }
 
 // Add background_image_ and chat_container_ as member variables (temporary storage)
@@ -658,14 +678,31 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_bg_color(content_, current_theme_.chat_background, 0);
     lv_obj_set_style_border_width(content_, 0, 0);
     
-    /* Background image - initially show bg_1_img (disconnected) */
+    /* Background image - try to load from SPIFFS first, fallback to embedded image */
     background_image_ = lv_image_create(content_);
-    lv_image_set_src(background_image_, &bg_1_img);
     lv_obj_set_size(background_image_, LV_HOR_RES, LV_VER_RES);
     lv_obj_set_pos(background_image_, -5, -5);  // Adjust position to cover padding
     lv_obj_clear_flag(background_image_, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(background_image_, LV_OBJ_FLAG_FLOATING);  // Make it floating, not part of flex layout
     lv_obj_move_background(background_image_);  // Move to background layer
+    
+    // Try to load from SPIFFS first
+    char bg_path[64];
+    snprintf(bg_path, sizeof(bg_path), "%c:/bg.jpg", BACKGROUND_DRIVE_LETTER);
+    // Check if file exists using SPIFFS path directly
+    char spiffs_path[128];
+    snprintf(spiffs_path, sizeof(spiffs_path), "%s/bg.jpg", BACKGROUND_MOUNT_POINT);
+    FILE* f = fopen(spiffs_path, "r");
+    if (f != nullptr) {
+        fclose(f);
+        // File exists, use LVGL path format
+        ESP_LOGI(TAG, "Loading background image from SPIFFS: %s", bg_path);
+        lv_image_set_src(background_image_, bg_path);
+    } else {
+        // Fallback to embedded image
+        ESP_LOGI(TAG, "SPIFFS background image not found, using embedded image");
+        lv_image_set_src(background_image_, &bg_1_img);
+    }
 
     /* Status bar - floating on top */
     status_bar_ = lv_obj_create(screen);
@@ -1633,11 +1670,30 @@ void LcdDisplay::ShowBackgroundImage() {
         lv_obj_add_flag(video_img_, LV_OBJ_FLAG_HIDDEN);
     }
     
-    // Show background image (bg1)
+    // Try to load background image from SPIFFS first
     if (background_image_ != nullptr) {
-        lv_image_set_src(background_image_, &bg_1_img);
-        lv_obj_clear_flag(background_image_, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_background(background_image_);
+        // Try to load from SPIFFS (JPG/PNG)
+        char bg_path[64];
+        snprintf(bg_path, sizeof(bg_path), "%c:/bg.jpg", BACKGROUND_DRIVE_LETTER);
+        
+        // Check if file exists using SPIFFS path directly
+        char spiffs_path[128];
+        snprintf(spiffs_path, sizeof(spiffs_path), "%s/bg.jpg", BACKGROUND_MOUNT_POINT);
+        FILE* f = fopen(spiffs_path, "r");
+        if (f != nullptr) {
+            fclose(f);
+            // File exists, use LVGL path format
+            ESP_LOGI(TAG, "Loading background image from SPIFFS: %s", bg_path);
+            lv_image_set_src(background_image_, bg_path);
+            lv_obj_clear_flag(background_image_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_background(background_image_);
+        } else {
+            // Fallback to embedded image
+            ESP_LOGI(TAG, "SPIFFS background image not found, using embedded image");
+            lv_image_set_src(background_image_, &bg_1_img);
+            lv_obj_clear_flag(background_image_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_background(background_image_);
+        }
     }
 }
 
@@ -2004,4 +2060,149 @@ void LcdDisplay::SubtitleScrollDelayTimerCallback(void* arg) {
     
     // Start actual scrolling after delay
     display->StartSubtitleScrollDelayed();
+}
+
+// LVGL file system driver callbacks for SPIFFS
+static void* fs_open(lv_fs_drv_t* drv, const char* path, lv_fs_mode_t mode) {
+    (void)drv;
+    const char* flags = "r";
+    if (mode == LV_FS_MODE_WR) flags = "wb";
+    else if (mode == (LV_FS_MODE_WR | LV_FS_MODE_RD)) flags = "rb+";
+    
+    // Convert LVGL path (e.g., "B:/bg.jpg") to SPIFFS path (e.g., "/background/bg.jpg")
+    char spiffs_path[128];
+    if (path[0] == BACKGROUND_DRIVE_LETTER && path[1] == ':') {
+        // Skip drive letter and colon (e.g., "B:")
+        snprintf(spiffs_path, sizeof(spiffs_path), "%s%s", BACKGROUND_MOUNT_POINT, path + 2);
+    } else {
+        // Fallback: assume path is already correct
+        strncpy(spiffs_path, path, sizeof(spiffs_path) - 1);
+        spiffs_path[sizeof(spiffs_path) - 1] = '\0';
+    }
+    
+    FILE* f = fopen(spiffs_path, flags);
+    return (void*)(uintptr_t)f;
+}
+
+static lv_fs_res_t fs_close(lv_fs_drv_t* drv, void* file_p) {
+    (void)drv;
+    FILE* f = (FILE*)(uintptr_t)file_p;
+    fclose(f);
+    return LV_FS_RES_OK;
+}
+
+static lv_fs_res_t fs_read(lv_fs_drv_t* drv, void* file_p, void* buf, uint32_t btr, uint32_t* br) {
+    (void)drv;
+    FILE* f = (FILE*)(uintptr_t)file_p;
+    *br = fread(buf, 1, btr, f);
+    return (*br == btr) ? LV_FS_RES_OK : LV_FS_RES_UNKNOWN;
+}
+
+static lv_fs_res_t fs_write(lv_fs_drv_t* drv, void* file_p, const void* buf, uint32_t btw, uint32_t* bw) {
+    (void)drv;
+    FILE* f = (FILE*)(uintptr_t)file_p;
+    *bw = fwrite(buf, 1, btw, f);
+    return (*bw == btw) ? LV_FS_RES_OK : LV_FS_RES_UNKNOWN;
+}
+
+static lv_fs_res_t fs_seek(lv_fs_drv_t* drv, void* file_p, uint32_t pos, lv_fs_whence_t whence) {
+    (void)drv;
+    FILE* f = (FILE*)(uintptr_t)file_p;
+    int w = SEEK_SET;
+    if (whence == LV_FS_SEEK_CUR) w = SEEK_CUR;
+    else if (whence == LV_FS_SEEK_END) w = SEEK_END;
+    fseek(f, pos, w);
+    return LV_FS_RES_OK;
+}
+
+static lv_fs_res_t fs_tell(lv_fs_drv_t* drv, void* file_p, uint32_t* pos_p) {
+    (void)drv;
+    FILE* f = (FILE*)(uintptr_t)file_p;
+    *pos_p = ftell(f);
+    return LV_FS_RES_OK;
+}
+
+static void* fs_dir_open(lv_fs_drv_t* drv, const char* path) {
+    (void)drv;
+    // Convert LVGL path to SPIFFS path
+    char spiffs_path[128];
+    if (path[0] == BACKGROUND_DRIVE_LETTER && path[1] == ':') {
+        snprintf(spiffs_path, sizeof(spiffs_path), "%s%s", BACKGROUND_MOUNT_POINT, path + 2);
+    } else {
+        strncpy(spiffs_path, path, sizeof(spiffs_path) - 1);
+        spiffs_path[sizeof(spiffs_path) - 1] = '\0';
+    }
+    return (void*)opendir(spiffs_path);
+}
+
+static lv_fs_res_t fs_dir_read(lv_fs_drv_t* drv, void* dir_p, char* fn, uint32_t fn_len) {
+    (void)drv;
+    DIR* d = (DIR*)dir_p;
+    struct dirent* entry = readdir(d);
+    if (entry == NULL) {
+        fn[0] = '\0';
+        return LV_FS_RES_OK;
+    }
+    // Copy filename with length limit
+    strncpy(fn, entry->d_name, fn_len - 1);
+    fn[fn_len - 1] = '\0';
+    return LV_FS_RES_OK;
+}
+
+static lv_fs_res_t fs_dir_close(lv_fs_drv_t* drv, void* dir_p) {
+    (void)drv;
+    DIR* d = (DIR*)dir_p;
+    closedir(d);
+    return LV_FS_RES_OK;
+}
+
+void LcdDisplay::LoadBackgroundFromSPIFFS() {
+    ESP_LOGI(TAG, "Attempting to mount background SPIFFS partition...");
+    
+    // Mount SPIFFS partition
+    esp_vfs_spiffs_conf_t conf = {
+        .base_path = BACKGROUND_MOUNT_POINT,
+        .partition_label = BACKGROUND_PARTITION_LABEL,
+        .max_files = 5,
+        .format_if_mount_failed = false
+    };
+    
+    esp_err_t ret = esp_vfs_spiffs_register(&conf);
+    if (ret != ESP_OK) {
+        if (ret == ESP_FAIL) {
+            ESP_LOGW(TAG, "Failed to mount background SPIFFS partition");
+        } else if (ret == ESP_ERR_NOT_FOUND) {
+            ESP_LOGW(TAG, "Background partition not found");
+        } else {
+            ESP_LOGW(TAG, "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
+        }
+        return;
+    }
+    
+    // Check SPIFFS info
+    size_t total = 0, used = 0;
+    ret = esp_spiffs_info(BACKGROUND_PARTITION_LABEL, &total, &used);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to get SPIFFS partition information (%s)", esp_err_to_name(ret));
+    } else {
+        ESP_LOGI(TAG, "Background partition: total %d KB, used %d KB", total / 1024, used / 1024);
+    }
+    
+    // Register LVGL file system driver
+    static lv_fs_drv_t fs_drv;
+    lv_fs_drv_init(&fs_drv);
+    fs_drv.letter = BACKGROUND_DRIVE_LETTER;
+    fs_drv.cache_size = 0;
+    fs_drv.open_cb = fs_open;
+    fs_drv.close_cb = fs_close;
+    fs_drv.read_cb = fs_read;
+    fs_drv.write_cb = fs_write;
+    fs_drv.seek_cb = fs_seek;
+    fs_drv.tell_cb = fs_tell;
+    fs_drv.dir_open_cb = fs_dir_open;
+    fs_drv.dir_read_cb = fs_dir_read;
+    fs_drv.dir_close_cb = fs_dir_close;
+    lv_fs_drv_register(&fs_drv);
+    
+    ESP_LOGI(TAG, "LVGL file system driver registered for background partition (drive: %c:)", BACKGROUND_DRIVE_LETTER);
 }

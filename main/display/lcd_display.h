@@ -124,6 +124,9 @@ protected:
     
     // Device state callback
     void RegisterDeviceStateCallback();
+    
+    // Load background image from SPIFFS partition
+    void LoadBackgroundFromSPIFFS();
 
 protected:
     // 添加protected构造函数
