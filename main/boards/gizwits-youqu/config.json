@@ -11,7 +11,7 @@
                 "CONFIG_LANGUAGE_EN_US=y",
                 "CONFIG_USE_AFE_WAKE_WORD=n",
                 "CONFIG_USE_DEVICE_AEC=y",
-                "CONFIG_CUSTOM_TENANT_ID=\"1985610999907569666\"",
+                "CONFIG_CUSTOM_TENANT_ID=\"1989623892056952834\"",
                 "CONFIG_PROTOCOL_TYPE_XIAOZHI=y"
             ]
         }
