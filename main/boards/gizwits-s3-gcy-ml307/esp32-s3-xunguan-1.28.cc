@@ -105,7 +105,7 @@ private:
     void InitializePowerSaveTimer() {
         // 20 分钟进休眠
         // 30 分钟 关机
-        power_save_timer_ = new PowerSaveTimer(-1, 60 * 20, 60 * 30);
+        power_save_timer_ = new PowerSaveTimer(-1, 60 * 5, 60 * 10);
         // power_save_timer_ = new PowerSaveTimer(-1, 20 * 1, 60 * 2);
         power_save_timer_->OnEnterSleepMode([this]() {
             ESP_LOGE(TAG, "Enabling sleep mode");
@@ -114,7 +114,7 @@ private:
                 is_charging_sleep_ = true;
                 Application::GetInstance().Schedule([this]() {
                     Application::GetInstance().QuitTalking();
-                    Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
+                    // Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
 
                     // 在这个场景里要切换成睡觉表情 
                     // display_->SetEmotion("sleepy");
@@ -122,7 +122,9 @@ private:
 
             } else {
                 // 关闭 wifi，进入待机模式
-                Application::GetInstance().EnterSleepMode();
+                // Application::GetInstance().EnterSleepMode();
+                // 直接关机
+                PowerOff();
             }
         });
         power_save_timer_->OnExitSleepMode([this]() {
@@ -146,6 +148,7 @@ private:
     };
 
     virtual void WakeUpPowerSaveTimer() {
+        is_charging_sleep_ = false;
         if (power_save_timer_) {
             power_save_timer_->SetEnabled(true);
             power_save_timer_->WakeUp();
@@ -427,11 +430,18 @@ private:
 
         break_button_.OnClick([this]() {
             ESP_LOGI(TAG, "break_button_.OnClick");
+            // 休眠模式只有开关可以启动
+            if (is_charging_sleep_) {
+                return;
+            }
             Application::GetInstance().ToggleChatState();
         });
         
         // Volume up button - short press to increase volume
         volume_up_button_.OnPressDown([this]() {
+            if (is_charging_sleep_) {
+                return;
+            }
             auto codec = GetAudioCodec();
             auto volume = codec->output_volume() + 10;
             if (volume > 100) {
@@ -443,6 +453,9 @@ private:
         
         // Volume down button - short press to decrease volume
         volume_down_button_.OnPressDown([this]() {
+            if (is_charging_sleep_) {
+                return;
+            }
             auto codec = GetAudioCodec();
             auto volume = codec->output_volume() - 10;
             if (volume < 0) {
@@ -701,11 +714,11 @@ public:
     }
 
     virtual int GetPeriod() override { 
-        return 3; 
+        return 1; 
     }
     
     virtual int GetMaxFrameNum() override { 
-        return 55;
+        return 25;
     }
 
 

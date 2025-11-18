@@ -27,6 +27,7 @@
 #include <lvgl.h>
 
 #include "board.h"
+#include "application.h"
 
 #define TAG "LcdDisplay"
 
@@ -37,7 +38,6 @@
 
 // External background images
 extern const lv_image_dsc_t bg_1_img;
-extern const lv_image_dsc_t bg_2_img;
 
 // Color definitions for dark theme
 #define DARK_BACKGROUND_COLOR       lv_color_hex(0x121212)     // Dark background
@@ -318,6 +318,9 @@ LcdDisplay::~LcdDisplay() {
     
     // Clean up video playback task
     StopVideoPlayback();
+    
+    // Clean up audio monitor task
+    StopAudioMonitor();
     
     // 然后再清理 LVGL 对象
     if (content_ != nullptr) {
@@ -733,7 +736,9 @@ void LcdDisplay::SetupUI() {
     emotion_label_ = lv_label_create(time_container);
     lv_obj_set_style_text_font(emotion_label_, fonts_.text_font, 0);
     lv_obj_set_style_text_color(emotion_label_, current_theme_.text, 0);
-    lv_label_set_text(emotion_label_, "00:00:00");  // Initial countdown text
+    lv_label_set_text(emotion_label_, "2024-01-01\n00:00:00");  // Initial text with date and time
+    lv_label_set_long_mode(emotion_label_, LV_LABEL_LONG_WRAP);  // 支持多行显示
+    lv_obj_set_style_text_align(emotion_label_, LV_TEXT_ALIGN_CENTER, 0);  // 文本居中对齐
     lv_obj_center(emotion_label_);  // 在容器中居中
 
     preview_image_ = lv_image_create(content_);
@@ -743,14 +748,14 @@ void LcdDisplay::SetupUI() {
 
     // 创建字幕容器（带白色透明背景和圆角）
     chat_container_ = lv_obj_create(content_);
-    lv_obj_set_size(chat_container_, LV_HOR_RES * 0.9, LV_SIZE_CONTENT);
+    lv_obj_set_size(chat_container_, LV_HOR_RES, LV_SIZE_CONTENT);  // 宽度100%
     lv_obj_set_style_bg_color(chat_container_, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(chat_container_, LV_OPA_90, 0);  // 白色半透明
-    lv_obj_set_style_radius(chat_container_, 10, 0);  // 圆角
+    lv_obj_set_style_radius(chat_container_, 0, 0);  // 无圆角
     lv_obj_set_style_pad_all(chat_container_, 15, 0);  // 内边距
     lv_obj_set_style_border_width(chat_container_, 0, 0);  // 无边框
     lv_obj_add_flag(chat_container_, LV_OBJ_FLAG_FLOATING);  // 不受 flex 布局影响
-    lv_obj_align(chat_container_, LV_ALIGN_BOTTOM_MID, 0, -10);  // 底部居中，距离底部10px
+    lv_obj_align(chat_container_, LV_ALIGN_BOTTOM_MID, 0, 0);  // 贴住底部
     lv_obj_add_flag(chat_container_, LV_OBJ_FLAG_HIDDEN);  // 默认隐藏，只有有内容时才显示
     
     chat_message_label_ = lv_label_create(chat_container_);
@@ -1221,7 +1226,7 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
     // Get container width to determine if scrolling is needed (subtract padding like UpdateSubtitleDisplay)
     lv_coord_t container_width = lv_obj_get_width(chat_container_);
     if (container_width <= 0) {
-        container_width = LV_HOR_RES * 0.9; // Use default width if not set
+        container_width = LV_HOR_RES; // Use default width if not set (100%)
     }
     // Subtract horizontal padding (left + right) to match UpdateSubtitleDisplay logic
     lv_coord_t pad_left = lv_obj_get_style_pad_left(chat_container_, 0);
@@ -1454,9 +1459,10 @@ void LcdDisplay::UpdateCountdownDisplay() {
     time(&now);
     localtime_r(&now, &timeinfo);
     
-    // Format time as HH:MM:SS
-    char time_str[16];
-    snprintf(time_str, sizeof(time_str), "%02d:%02d:%02d", 
+    // Format date and time with newline: YYYY-MM-DD on top, HH:MM:SS on bottom
+    char time_str[64];
+    snprintf(time_str, sizeof(time_str), "%04d-%02d-%02d\n%02d:%02d:%02d", 
+             timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
              timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
     
     lv_label_set_text(emotion_label_, time_str);
@@ -1655,6 +1661,79 @@ void LcdDisplay::StopVideoPlayback() {
     video_task_handle_ = nullptr;
 }
 
+void LcdDisplay::AudioMonitorTask(void* arg) {
+    LcdDisplay* display = static_cast<LcdDisplay*>(arg);
+    
+    ESP_LOGI(TAG, "Audio monitor task started");
+    
+    // 持续查询音频队列，直到队列为空
+    while (display->audio_monitor_active_) {
+        size_t queue_size = Application::GetInstance().GetDecodeQueueSize();
+        
+        if (queue_size == 0) {
+            // 音频队列为空，显示背景图片
+            ESP_LOGI(TAG, "Audio queue is empty, showing background image");
+            if (display->Lock(50)) {
+                display->ShowBackgroundImage();
+                display->Unlock();
+            }
+            // 停止监控 task
+            display->audio_monitor_active_ = false;
+            break;
+        } else {
+            ESP_LOGD(TAG, "Audio queue size: %zu, waiting for playback to complete", queue_size);
+        }
+        
+        // 每 100ms 检查一次
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    
+    ESP_LOGI(TAG, "Audio monitor task finished");
+    display->audio_monitor_task_handle_ = nullptr;
+    vTaskDelete(nullptr);
+}
+
+void LcdDisplay::StartAudioMonitor() {
+    // 如果已经有监控 task 在运行，先停止它
+    if (audio_monitor_task_handle_ != nullptr) {
+        StopAudioMonitor();
+    }
+    
+    ESP_LOGI(TAG, "Starting audio monitor task");
+    audio_monitor_active_ = true;
+    
+    // 创建音频监控 task，优先级较低，避免影响音频播放
+    BaseType_t ret = xTaskCreate(
+        AudioMonitorTask,
+        "audio_monitor",
+        4096,  // 增加栈大小以避免栈溢出
+        this,
+        1,  // 低优先级
+        &audio_monitor_task_handle_
+    );
+    
+    if (ret != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create audio monitor task");
+        audio_monitor_active_ = false;
+        audio_monitor_task_handle_ = nullptr;
+    }
+}
+
+void LcdDisplay::StopAudioMonitor() {
+    if (!audio_monitor_active_ && audio_monitor_task_handle_ == nullptr) {
+        return;
+    }
+    
+    ESP_LOGI(TAG, "Stopping audio monitor task");
+    audio_monitor_active_ = false;
+    
+    // 等待 task 完成
+    for (int i = 0; i < 50 && audio_monitor_task_handle_ != nullptr; ++i) { // Wait up to 500ms
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    audio_monitor_task_handle_ = nullptr;
+}
+
 void LcdDisplay::ShowBackgroundImage() {
     ESP_LOGI(TAG, "ShowBackgroundImage called");
     
@@ -1826,22 +1905,31 @@ void LcdDisplay::RegisterDeviceStateCallback() {
                 current_state == kDeviceStateFatalError ||
                 current_state == kDeviceStateSleeping
             ) {
-                // 听话中显示桌面
-                ShowBackgroundImage();
+                // 启动音频监控 task，等待音频播放完成后显示背景图片
+                ESP_LOGI(TAG, "Starting audio monitor task to wait for audio playback completion");
+                StartAudioMonitor();
             }
         }
     );
 }
 
 void LcdDisplay::UpdateSubtitleDisplay() {
-    if (chat_message_label_ == nullptr || subtitle_text_.empty()) {
+    if (chat_message_label_ == nullptr) {
+        return;
+    }
+    
+    // If text is empty, hide container and return
+    if (subtitle_text_.empty()) {
+        if (chat_container_ != nullptr) {
+            lv_obj_add_flag(chat_container_, LV_OBJ_FLAG_HIDDEN);
+        }
         return;
     }
     
     // Get container width (subtract padding)
     lv_coord_t container_width = lv_obj_get_width(chat_container_);
     if (container_width <= 0) {
-        container_width = LV_HOR_RES * 0.9;
+        container_width = LV_HOR_RES; // 100% width
     }
     // Subtract horizontal padding (left + right)
     lv_coord_t pad_left = lv_obj_get_style_pad_left(chat_container_, 0);
@@ -1897,6 +1985,14 @@ void LcdDisplay::UpdateSubtitleDisplay() {
         
         if (display_len < display_text.length()) {
             display_text = display_text.substr(0, display_len);
+        }
+        
+        // If display text is empty, hide container
+        if (display_text.empty()) {
+            if (chat_container_ != nullptr) {
+                lv_obj_add_flag(chat_container_, LV_OBJ_FLAG_HIDDEN);
+            }
+            return;
         }
         
         lv_label_set_text(chat_message_label_, display_text.c_str());
@@ -2036,6 +2132,13 @@ void LcdDisplay::SubtitleScrollTimerCallback(void* arg) {
     if (current_pos >= text_len) {
         // Stop scrolling when we reach the end
         display->StopSubtitleScroll();
+        // Hide container after scrolling ends
+        if (display->Lock(50)) {
+            if (chat_container_ != nullptr) {
+                lv_obj_add_flag(chat_container_, LV_OBJ_FLAG_HIDDEN);
+            }
+            display->Unlock();
+        }
         return;
     }
     

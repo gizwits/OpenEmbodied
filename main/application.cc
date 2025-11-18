@@ -640,14 +640,14 @@ void Application::Start() {
                 if (device_state_ != kDeviceStateListening) {
                     SetDeviceState(kDeviceStateListening);
                 }
-            }, "OnIncomingJson_STT_SentenceStart_SetListening");
+            });
 
 
             if (cJSON_IsString(text)) {
                 // ESP_LOGI(TAG, ">> %s", text->valuestring);
                 Schedule([this, display, message = std::string(text->valuestring)]() {
                     display->SetChatMessage("user", message.c_str());
-                }, "OnIncomingJson_STT_SentenceStart");
+                });
             }
         } else if (strcmp(type->valuestring, "llm") == 0) {
             auto emotion = cJSON_GetObjectItem(root, "emotion");
