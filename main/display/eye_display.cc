@@ -173,7 +173,6 @@ void EyeDisplay::SetEmotion(const char* emotion) {
 
     // 检查是否禁用表情切换
     if (emotion_disabled_) {
-        ESP_LOGI(TAG, "Emotion disabled, ignore: %s", emotion);
         return;
     }
 
@@ -215,12 +214,9 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
         return;
     }
     
-    ESP_LOGI(TAG, "ProcessEmotionChange: emotion=%s, current_state=%d, vertigo_locked=%d", 
-             emotion, (int)current_state_, vertigo_locked_);
     
     // 测试模式或RGB测试激活时忽略表情切换
     if (test_mode_active_ || rgb_test_active_) {
-        ESP_LOGI(TAG, "Test mode active, ignore emotion: %s", emotion);
         return;
     }
     
@@ -229,7 +225,6 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
         ESP_LOGW(TAG, "VERTIGO locked, ignore emotion: %s (current_state=%d)", emotion, (int)current_state_);
         // 如果是从视频模式切换回来，强制清除锁定状态
         if (strcmp(emotion, "neutral") == 0) {
-            ESP_LOGI(TAG, "Force clear vertigo_locked for neutral emotion");
             vertigo_locked_ = false;
             if (vertigo_timer_) {
                 esp_timer_stop(vertigo_timer_);
@@ -375,11 +370,9 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
         lv_anim_del(right_eye_, nullptr);
         
         // 对于所有状态，都需要重新初始化动画和组件（从视频模式切换回来时）
-        ESP_LOGI(TAG, "Reinitializing animation for state %d", (int)new_state);
         switch (new_state) {
             case EyeState::SURPRISED:
             case EyeState::IDLE:
-                ESP_LOGI(TAG, "Starting IDLE animation");
                 StartIdleAnimation();
                 break;
             case EyeState::RELAXED:
@@ -387,49 +380,39 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
             case EyeState::COOL:
             case EyeState::WINKING:
             case EyeState::HAPPY:
-                ESP_LOGI(TAG, "Starting HAPPY animation");
                 StartHappyAnimation();
                 break;
             case EyeState::ANGRY:
-                ESP_LOGI(TAG, "Starting ANGRY animation");
                 StartAngryAnimation();
                 break;
             case EyeState::CRYING:
             case EyeState::SAD:
-                ESP_LOGI(TAG, "Starting SAD animation");
                 StartSadAnimation();
                 break;
             case EyeState::KISSY:
             case EyeState::LAUGHING:
             case EyeState::LOVING:
-                ESP_LOGI(TAG, "Starting LOVING animation");
                 StartLovingAnimation();
                 break;
             case EyeState::CONFUSED:
             case EyeState::DELICIOUS:
             case EyeState::EMBARRASSED:
             case EyeState::THINKING:
-                ESP_LOGI(TAG, "Starting THINKING animation");
                 StartThinkingAnimation();
                 break;
             case EyeState::SHOCKED:
-                ESP_LOGI(TAG, "Starting SHOCKED animation");
                 StartShockedAnimation();
                 break;
             case EyeState::SLEEPING:
-                ESP_LOGI(TAG, "Starting SLEEPING animation");
                 StartSleepingAnimation();
                 break;
             case EyeState::SILLY:
-                ESP_LOGI(TAG, "Starting SILLY animation");
                 StartSillyAnimation();
                 break;
             case EyeState::VERTIGO:
-                ESP_LOGI(TAG, "Starting VERTIGO animation");
                 StartVertigoAnimation();
                 break;
         }
-        ESP_LOGI(TAG, "Animation reinitialization completed for state %d", (int)new_state);
         
         // 如果正在充电，确保充电时的电量圆环移到最前面（视频模式下也要保持显示）
         if (charging_indicator_showing_ && charging_battery_arc_ != nullptr) {
@@ -448,7 +431,7 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
                 bool discharging = false;
                 Board::GetInstance().GetBatteryLevel(battery_level, charging, discharging);
                 if (charging) {
-                    ShowBatteryIndicatorForCharging();
+                    ShowBatteryIndicatorForCharging(battery_level);  // 传递实际电量值
                 }
             }
         }
@@ -596,11 +579,9 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
     lv_anim_del(right_eye_, nullptr);
 
     // 启动对应状态的表情动画
-    ESP_LOGI(TAG, "Starting animation for new state %d", (int)current_state_);
     switch (current_state_) {
         case EyeState::SURPRISED:
         case EyeState::IDLE:
-            ESP_LOGI(TAG, "Calling StartIdleAnimation()");
             StartIdleAnimation();
             break;
         case EyeState::RELAXED:
@@ -608,52 +589,42 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
         case EyeState::COOL:
         case EyeState::WINKING:
         case EyeState::HAPPY:
-            ESP_LOGI(TAG, "Calling StartHappyAnimation()");
             StartHappyAnimation();
             break;
         case EyeState::ANGRY:
-            ESP_LOGI(TAG, "Calling StartAngryAnimation()");
             StartAngryAnimation();
             break;
         case EyeState::CRYING:
         case EyeState::SAD:
-            ESP_LOGI(TAG, "Calling StartSadAnimation()");
             StartSadAnimation();
             break;
         case EyeState::KISSY:
         case EyeState::LAUGHING:
         case EyeState::LOVING:
-            ESP_LOGI(TAG, "Calling StartLovingAnimation()");
             StartLovingAnimation();
             break;
         case EyeState::CONFUSED:
         case EyeState::DELICIOUS:
         case EyeState::EMBARRASSED:
         case EyeState::THINKING:
-            ESP_LOGI(TAG, "Calling StartThinkingAnimation()");
              StartThinkingAnimation();
              break;
         case EyeState::SHOCKED:
-            ESP_LOGI(TAG, "Calling StartShockedAnimation()");
             StartShockedAnimation();
             break;
         case EyeState::SLEEPING:
-            ESP_LOGI(TAG, "Calling StartSleepingAnimation()");
             StartSleepingAnimation();
             break;
         case EyeState::SILLY:
-            ESP_LOGI(TAG, "Calling StartSillyAnimation()");
             StartSillyAnimation();
             break;
         case EyeState::VERTIGO:
-            ESP_LOGI(TAG, "Calling StartVertigoAnimation()");
             StartVertigoAnimation();
             break;
         default:
             ESP_LOGW(TAG, "Unknown state %d, no animation started", (int)current_state_);
             break;
     }
-    ESP_LOGI(TAG, "Animation start completed for state %d", (int)current_state_);
 
     // 如果正在充电，确保充电时的电量圆环移到最前面（视频模式下也要保持显示）
     if (charging_indicator_showing_ && charging_battery_arc_ != nullptr) {
@@ -672,7 +643,7 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
             bool discharging = false;
             Board::GetInstance().GetBatteryLevel(battery_level, charging, discharging);
             if (charging) {
-                ShowBatteryIndicatorForCharging();
+                ShowBatteryIndicatorForCharging(battery_level);  // 传递实际电量值
             }
         }
     }
@@ -722,7 +693,6 @@ void EyeDisplay::ProcessEmotionChange(const char* emotion) {
 }
 
 void EyeDisplay::StartIdleAnimation() {
-    ESP_LOGI(TAG, "StartIdleAnimation: entry, left_eye=%p, right_eye=%p", left_eye_, right_eye_);
     // 检查眼睛对象是否存在
     if (left_eye_ == nullptr || right_eye_ == nullptr) {
         ESP_LOGW(TAG, "StartIdleAnimation: eyes not initialized");
@@ -731,7 +701,6 @@ void EyeDisplay::StartIdleAnimation() {
     // 确保眼睛可见
     lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
-    ESP_LOGI(TAG, "StartIdleAnimation: cleared HIDDEN flags");
     
     lv_anim_init(&left_anim_);
     lv_anim_set_var(&left_anim_, left_eye_);
@@ -809,11 +778,9 @@ void EyeDisplay::StartHappyAnimation() {
 }
 
 void EyeDisplay::StartSadAnimation() {
-    ESP_LOGI(TAG, "StartSadAnimation: entry, left_eye=%p, right_eye=%p", left_eye_, right_eye_);
     // 确保眼睛可见
     lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
-    ESP_LOGI(TAG, "StartSadAnimation: cleared HIDDEN flags");
     
     // 设置眼睛为水平长条
     lv_obj_set_size(left_eye_, 60, 20);
@@ -1139,11 +1106,9 @@ void EyeDisplay::StartSillyAnimation() {
 }
 
 void EyeDisplay::StartAngryAnimation() {
-    ESP_LOGI(TAG, "StartAngryAnimation: entry, left_eye=%p, right_eye=%p", left_eye_, right_eye_);
     // 确保眼睛可见
     lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
-    ESP_LOGI(TAG, "StartAngryAnimation: cleared HIDDEN flags");
     
     // 设置眼睛为倾斜的形状（内高外低）
     // 左眼：右高左低
@@ -2217,14 +2182,33 @@ void EyeDisplay::ShowBatteryIndicatorForCharging(int battery_level_param) {
                 EyeDisplay* display = static_cast<EyeDisplay*>(arg);
                 // 如果还在充电，更新电量显示
                 if (display->charging_indicator_showing_) {
-                    // 注意：不能在定时器回调中调用 Board::GetInstance()，可能导致死锁
-                    // 使用上次缓存的电量值，或者通过消息队列异步获取
-                    int battery_level = display->last_charging_battery_level_ > 0 ? 
-                                       display->last_charging_battery_level_ : 50;
-                    bool charging = true;  // 假设还在充电（因为 charging_indicator_showing_ 为 true）
+                    // 尝试获取最新电量（定时器在ESP_TIMER_TASK模式下运行，可以安全调用）
+                    int battery_level = 0;
+                    bool charging = false;
+                    bool discharging = false;
+                    bool got_battery_level = false;
                     
-                    // 尝试通过消息队列异步获取最新电量（避免阻塞）
-                    // 临时方案：使用缓存值，后续会通过其他方式更新
+                    // 尝试获取最新电量，如果失败则使用缓存值
+                    // 注意：定时器在ESP_TIMER_TASK模式下运行，可以安全调用Board::GetInstance()
+                    if (Board::GetInstance().GetBatteryLevel(battery_level, charging, discharging)) {
+                        got_battery_level = true;
+                        // 如果不再充电，停止更新
+                        if (!charging) {
+                            ESP_LOGI(TAG, "定时器更新: 检测到不再充电，停止更新");
+                            display->charging_indicator_showing_ = false;
+                            return;
+                        }
+                    } else {
+                        // 如果获取失败，使用缓存值
+                        ESP_LOGW(TAG, "定时器更新: 获取电量失败，使用缓存值");
+                    }
+                    
+                    // 如果获取失败，使用缓存值
+                    if (!got_battery_level) {
+                        battery_level = display->last_charging_battery_level_ > 0 ? 
+                                       display->last_charging_battery_level_ : 50;
+                    }
+                    
                     if (display->charging_battery_arc_ != nullptr) {
                         DisplayLockGuard lock(display);
                         // 检查对象是否仍然有效（可能已被删除）
@@ -2249,7 +2233,7 @@ void EyeDisplay::ShowBatteryIndicatorForCharging(int battery_level_param) {
                                 display->last_charging_battery_level_ = battery_level;
                                 display->last_charging_arc_color_ = arc_color;
                                 
-                                ESP_LOGD(TAG, "定时器更新电量: %d%%, 颜色: 0x%06X (%s)", 
+                                ESP_LOGI(TAG, "定时器更新电量: %d%%, 颜色: 0x%06X (%s)", 
                                          battery_level, arc_color, (battery_level > 25) ? "绿色" : "红色");
                             }
                             // 确保圆环在最前面（但不移动，避免刷新）

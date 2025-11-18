@@ -106,7 +106,6 @@ void VideoPlayer::PlayVideoGroup(const char* emotion) {
     }
     int group_index = emotion_to_group_func_(std::string(emotion));
     PlayVideoGroupByIndex(group_index);
-    ESP_LOGI(TAG, "PlayVideoGroup: emotion=%s -> group_index=%d", emotion, group_index);
 }
 
 void VideoPlayer::PlayVideoGroupByIndex(int group_index) {
@@ -126,7 +125,6 @@ void VideoPlayer::PlayVideoGroupByIndex(int group_index) {
         vTaskDelay(pdMS_TO_TICKS(50));
     }
     StartVideoPlayback();
-    ESP_LOGI(TAG, "PlayVideoGroupByIndex: group_index=%d", group_index);
 }
 
 void VideoPlayer::StartVideoPlayback() {
@@ -144,7 +142,6 @@ void VideoPlayer::StartVideoPlayback() {
         }
         video_task_handle_ = nullptr;
     }
-    ESP_LOGI(TAG, "StartVideoPlayback group=%d", video_group_index_);
     video_playing_ = true;
     // 降低优先级，避免阻塞音频任务
     xTaskCreate(VideoPlayTask, "video_play", 4096, this, 1, &video_task_handle_);

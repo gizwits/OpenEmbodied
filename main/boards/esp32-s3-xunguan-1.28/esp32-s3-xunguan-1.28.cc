@@ -46,7 +46,7 @@
 LV_FONT_DECLARE(font_puhui_20_4);
 LV_FONT_DECLARE(font_awesome_20_4);
 
-#define LIS2HH12_I2C_ADDR 0x1D  // SDO接GND为0x1D，接VDD为0x1E
+#define LIS2HH12_I2C_ADDR 0x1E  // SDO接GND为0x1D，接VDD为0x1E（实际硬件是0x1E）
 #define LIS2HH12_INT1_PIN GPIO_NUM_42
 
 // 播放模式枚举
@@ -258,28 +258,47 @@ private:
 
     static void lis2hh12_task(void* arg) {
         MovecallMojiESP32S3* board = static_cast<MovecallMojiESP32S3*>(arg);
-        float last_ax = 0, last_ay = 0, last_az = 0;
-        const float threshold = 0.5; // g-force
+        float last_total_accel = 0.0f;
+        const float threshold = 0.45f; // g-force
         int shake_count = 0;
-        const int shake_count_threshold = 10; // 连续3次才算shake
+        const int shake_count_threshold = 3; // 连续3次检测到变化才触发
         const int shake_count_decay = 1;     // 每次没检测到就-1
         TickType_t last_shake_time = 0;      // 上次摇晃触发时间
-        const TickType_t shake_cooldown = pdMS_TO_TICKS(5000); // 5秒冷却时间
+        const TickType_t shake_cooldown = pdMS_TO_TICKS(5000); // 5秒冷却时间（增加冷却时间，降低灵敏度）
+        int debug_counter = 0;  // 调试计数器，每50次打印一次数据
+        
+        ESP_LOGI("LIS2HH12", "陀螺仪检测任务启动");
+        
         while (1) {
-            // 读取X/Y/Z
-            int16_t x = (int16_t)((board->lis2hh12_read_reg_pub(0x29) << 8) | board->lis2hh12_read_reg_pub(0x28));
-            int16_t y = (int16_t)((board->lis2hh12_read_reg_pub(0x2B) << 8) | board->lis2hh12_read_reg_pub(0x2A));
-            int16_t z = (int16_t)((board->lis2hh12_read_reg_pub(0x2D) << 8) | board->lis2hh12_read_reg_pub(0x2C));
-            float ax = x * 0.061f / 1000.0f;
-            float ay = y * 0.061f / 1000.0f;
-            float az = z * 0.061f / 1000.0f;
-            if (fabs(ax - last_ax) > threshold || fabs(ay - last_ay) > threshold || fabs(az - last_az) > threshold) {
+            // 读取X/Y/Z加速度数据（LIS2HH12使用±2g量程，灵敏度为0.061 mg/LSB）
+            int16_t x_raw = (int16_t)((board->lis2hh12_read_reg_pub(0x29) << 8) | board->lis2hh12_read_reg_pub(0x28));
+            int16_t y_raw = (int16_t)((board->lis2hh12_read_reg_pub(0x2B) << 8) | board->lis2hh12_read_reg_pub(0x2A));
+            int16_t z_raw = (int16_t)((board->lis2hh12_read_reg_pub(0x2D) << 8) | board->lis2hh12_read_reg_pub(0x2C));
+            
+            // 转换为g值：±2g量程，16位数据，灵敏度0.061 mg/LSB = 0.000061 g/LSB
+            // 所以转换公式：g = raw * 0.000061 * 2 / 32768 = raw * 0.061 / 1000
+            float ax = x_raw * 0.061f / 1000.0f;
+            float ay = y_raw * 0.061f / 1000.0f;
+            float az = z_raw * 0.061f / 1000.0f;
+            
+            // 计算总加速度（向量长度）：sqrt(ax^2 + ay^2 + az^2)
+            float total_accel = sqrtf(ax * ax + ay * ay + az * az);
+            
+            // 计算总加速度的变化量（更准确反映摇晃）
+            float delta_total = fabs(total_accel - last_total_accel);
+            
+            // 调试计数器（已禁用频繁日志输出）
+            debug_counter++;
+            
+            // 检测是否有明显的总加速度变化（比单轴变化更准确）
+            if (delta_total > threshold) {
                 shake_count++;
+                
                 if (shake_count >= shake_count_threshold) {
                     TickType_t current_time = xTaskGetTickCount();
                     // 检查是否已经过了冷却时间
                     if (current_time - last_shake_time >= shake_cooldown) {
-                        ESP_LOGI("LIS2HH12", "Shake detected! ax=%.2f ay=%.2f az=%.2f", ax, ay, az);
+                        ESP_LOGI("LIS2HH12", "摇晃检测成功");
                         last_shake_time = current_time; // 更新上次触发时间
                         shake_count = 0; // 触发后清零
 
@@ -308,15 +327,18 @@ private:
                         }
 
                     } else {
-                        ESP_LOGI("LIS2HH12", "Shake detected but in cooldown period");
                         shake_count = 0; // 重置计数但不触发
                     }
                 }
             } else {
-                if (shake_count > 0) shake_count -= shake_count_decay;
+                // 没有检测到明显变化，减少计数
+                if (shake_count > 0) {
+                    shake_count -= shake_count_decay;
+                }
             }
-            last_ax = ax; last_ay = ay; last_az = az;
-            vTaskDelay(pdMS_TO_TICKS(100));
+            
+            last_total_accel = total_accel;
+            vTaskDelay(pdMS_TO_TICKS(100)); // 100ms采样间隔
         }
     }
 
@@ -439,7 +461,6 @@ private:
         }
         // 使用 VideoPlayer 类播放视频
         video_player_->PlayVideoGroup(emotion);
-        ESP_LOGI(TAG, "PlayVideoGroup: emotion=%s", emotion);
     }
 
 public:
@@ -453,7 +474,6 @@ public:
             // Display动画模式：使用EyeDisplay的SetEmotion
             if (display_ != nullptr) {
                 display_->SetEmotion(emotion);
-                ESP_LOGI(TAG, "TriggerEmotion (Display): %s", emotion);
             }
             // 确保视频播放停止并隐藏视频图像
             if (video_player_ != nullptr) {
@@ -463,7 +483,6 @@ public:
             // 视频播放模式：使用VideoPlayer播放
             if (video_player_ != nullptr) {
                 PlayVideoGroup(emotion);
-                ESP_LOGI(TAG, "TriggerEmotion (Video): %s", emotion);
             }
             // 确保眼睛动画隐藏（EyeDisplay在视频模式下会自动隐藏眼睛）
             // 视频播放时，VideoPlayer会显示在最前面，覆盖眼睛动画
@@ -543,7 +562,6 @@ public:
             // 检查充电状态，如果正在充电，显示电量圆环（因为状态改变回调可能不会触发）
             // 在隐藏Display对象之后检查，确保圆环显示在最前面
             if (IsCharging()) {
-                ESP_LOGI(TAG, "切换到视频模式时检测到正在充电，显示电量圆环");
                 auto device_state = app.GetDeviceState();
                 if (device_state != kDeviceStateWifiConfiguring && display_ != nullptr) {
                     int battery_level = 0;
@@ -565,21 +583,17 @@ public:
             // 视频模式下禁用唤醒词检测和语音处理（离线模式）
             app.GetAudioService().EnableWakeWordDetection(false);
             app.GetAudioService().EnableVoiceProcessing(false);
-            ESP_LOGI(TAG, "视频模式：已禁用唤醒词检测和语音处理");
         } else {
             playback_mode_ = PlaybackMode::DISPLAY_ANIMATION;
-            ESP_LOGI(TAG, "切换到Display动画模式");
             
             // Display模式下恢复唤醒词检测（根据设备状态）
             auto device_state = app.GetDeviceState();
-            ESP_LOGI(TAG, "切换回Display模式，当前设备状态: %d", device_state);
             
             // 延迟一下，确保所有状态更新完成后再恢复唤醒词检测
             vTaskDelay(pdMS_TO_TICKS(100));
             
             // 重新获取设备状态（可能已经改变）
             device_state = app.GetDeviceState();
-            ESP_LOGI(TAG, "切换回Display模式，延迟后设备状态: %d", device_state);
             
             // 如果设备状态是idle或sleeping，恢复唤醒词检测
             if (device_state == kDeviceStateIdle || device_state == kDeviceStateSleeping) {
@@ -612,7 +626,6 @@ public:
                 vTaskDelay(pdMS_TO_TICKS(100));
             }
             if (display_ != nullptr) {
-                ESP_LOGI(TAG, "Switching back to Display mode: clearing hidden flags and resetting emotion");
                 // 先停止视频播放并隐藏视频图像
                 if (video_player_ != nullptr) {
                     video_player_->StopPlayback();
@@ -628,7 +641,6 @@ public:
                                     // 找到图像对象，可能是视频图像
                                     lv_obj_add_flag(child, LV_OBJ_FLAG_HIDDEN);
                                     lv_obj_move_background(child);
-                                    ESP_LOGI(TAG, "Hidden and moved background for potential video image object");
                                 }
                             }
                         }
@@ -664,13 +676,11 @@ public:
                             if (child != nullptr) {
                                 // 跳过视频图像对象（图像类型）
                                 if (lv_obj_check_type(child, &lv_image_class)) {
-                                    ESP_LOGI(TAG, "Skipping image object (likely video image)");
                                     continue;
                                 }
                                 clear_hidden_recursive(child);
                                 // 确保Display对象显示在最前面
                                 lv_obj_move_foreground(child);
-                                ESP_LOGI(TAG, "Moved child %u to foreground", i);
                             }
                         }
                     } else {
@@ -681,7 +691,6 @@ public:
                     ESP_LOGW(TAG, "Failed to lock display");
                 }
                 // 立即设置表情，确保Display动画显示
-                ESP_LOGI(TAG, "Setting emotion to neutral after switching back from video mode");
                 display_->SetEmotion("neutral");
             } else {
                 ESP_LOGW(TAG, "Display is nullptr");
@@ -691,7 +700,6 @@ public:
 
     // 循环切换Display表情
     void CycleDisplayEmotion() {
-        ESP_LOGI(TAG, "CycleDisplayEmotion");
         // 开机后一段时间内禁止切换，避免上电抖动
         if (xTaskGetTickCount() < allow_switch_after_tick_) {
             return;
@@ -744,16 +752,12 @@ public:
         current_emotion_index = (current_emotion_index + 1) % emotion_list_size;
         const char* next_emotion = emotion_list[current_emotion_index];
         
-        ESP_LOGI(TAG, "Switch display emotion: %d -> %d (%s)", 
-                 (current_emotion_index - 1 + emotion_list_size) % emotion_list_size,
-                 current_emotion_index, next_emotion);
         
         // 触发表情切换
         TriggerEmotion(next_emotion);
     }
 
     void CycleVideoGroup() {
-        ESP_LOGI(TAG, "CycleVideoGroup");
         // 开机后一段时间内禁止切换，避免上电抖动
         if (xTaskGetTickCount() < allow_switch_after_tick_) {
             return;
@@ -811,7 +815,6 @@ public:
         // 使用新的封装方式：通过 emotion 状态名称播放
         const char* next_emotion = emotion_list[next_group];
         video_player_->PlayVideoGroup(next_emotion);
-        ESP_LOGI(TAG, "Switch video group: %d -> %d (%s)", current_group, next_group, next_emotion);
     }
 
     int MaxBacklightBrightness() {
@@ -824,7 +827,6 @@ public:
             // 如果在视频模式，停止视频播放并保存状态
             if (playback_mode_ == PlaybackMode::VIDEO_PLAYBACK && video_player_ != nullptr) {
                 int current_group_index = video_player_->GetCurrentGroupIndex();
-                ESP_LOGI(TAG, "ShowBatteryIndicator: 视频模式，停止播放，保存组索引: %d", current_group_index);
                 // 在停止播放之前保存组索引
                 saved_video_group_index_for_battery_ = current_group_index;
                 video_player_->StopPlayback();
@@ -846,14 +848,11 @@ public:
         if (display_ != nullptr) {
             // 使用之前保存的视频组索引
             int saved_video_group_index = saved_video_group_index_for_battery_;
-            ESP_LOGI(TAG, "HideBatteryIndicator: 开始，playback_mode_=%d, video_player_=%p, saved_video_group_index=%d", 
-                     (int)playback_mode_, video_player_, saved_video_group_index);
             
             display_->HideBatteryIndicator();
             
             // 如果之前在视频模式，恢复视频播放
             if (playback_mode_ == PlaybackMode::VIDEO_PLAYBACK && video_player_ != nullptr && saved_video_group_index >= 0) {
-                ESP_LOGI(TAG, "HideBatteryIndicator: 恢复视频播放，组索引: %d", saved_video_group_index);
                 vTaskDelay(pdMS_TO_TICKS(100));  // 延迟一下确保UI已更新
                 video_player_->PlayVideoGroupByIndex(saved_video_group_index);
                 // 清除保存的索引
@@ -889,25 +888,35 @@ public:
         static int first_level = gpio_get_level(BOOT_BUTTON_GPIO);
         ESP_LOGI(TAG, "first_level: %d", first_level);
 
-        // 触摸按钮功能已屏蔽
-        /*
+        // 触摸按钮功能已启用
         touch_button_.OnPressDown([this]() {
-          
+            ESP_LOGI(TAG, "=== 触摸按钮检测到按下 ===");
             ESP_LOGI(TAG, "touch_button_.OnPressDown");
 
             TickType_t current_time = xTaskGetTickCount();
             const TickType_t touch_cooldown = pdMS_TO_TICKS(5000); // 5秒冷却时间
+            TickType_t time_since_last_touch = current_time - last_touch_time_;
+            TickType_t remaining_cooldown = (time_since_last_touch < touch_cooldown) ? 
+                                            (touch_cooldown - time_since_last_touch) : 0;
+            
+            ESP_LOGI(TAG, "触摸时间: %lu ms, 上次触摸: %lu ms, 距离上次: %lu ms, 冷却剩余: %lu ms", 
+                     current_time * portTICK_PERIOD_MS, 
+                     last_touch_time_ * portTICK_PERIOD_MS,
+                     time_since_last_touch * portTICK_PERIOD_MS,
+                     remaining_cooldown * portTICK_PERIOD_MS);
             
             // 检查是否已经过了冷却时间
             if (current_time - last_touch_time_ >= touch_cooldown) {
                 last_touch_time_ = current_time; // 更新上次触发时间
+                ESP_LOGI(TAG, "✓ 冷却时间已过，处理触摸事件");
 
                 //切换表情
                 if (CheckAndHandleEnterSleepMode()) {
                     // 交给休眠逻辑托管
-                    ESP_LOGI(TAG, "触摸唤醒");
+                    ESP_LOGI(TAG, "触摸唤醒 - 设备从休眠中唤醒");
                     return;
                 }
+                
                 // 根据当前模式触发表情
                 if (playback_mode_ == PlaybackMode::VIDEO_PLAYBACK) {
                     // 视频模式：只切换视频组，不触发AI对话
@@ -923,38 +932,37 @@ public:
                         Application::GetInstance().SendTextToAI("User is touching you");
                         #endif
                     } else {
-                        ESP_LOGI("touch", "Channel is not open");
+                        ESP_LOGI(TAG, "Channel未打开，切换聊天状态");
                         Application::GetInstance().ToggleChatState();
                     }
                 }
+                ESP_LOGI(TAG, "=== 触摸事件处理完成 ===");
             } else {
-                ESP_LOGI("touch", "Touch detected but in cooldown period");
+                ESP_LOGI(TAG, "⚠ 触摸检测到但仍在冷却期，剩余 %lu ms，忽略本次触摸", 
+                         remaining_cooldown * portTICK_PERIOD_MS);
             }
         });
-        */
 
         // 创建双击检测定时器（使用esp_timer，避免栈溢出）
         if (!boot_button_timer_) {
             esp_timer_create_args_t timer_args = {
                 .callback = [](void* arg) {
                     MovecallMojiESP32S3* board = static_cast<MovecallMojiESP32S3*>(arg);
-                    // 定时器超时，执行操作
+                    // 定时器超时，执行单击操作
+                    // 注意：双击、三击、四击都在 OnPressRepeaDone 中立即处理，不会到达这里
                     if (board->boot_button_click_count_ == 1) {
                         // 单击：检查是否在显示二维码状态
                         if (board->qrcode_displaying_) {
                             // 如果正在显示二维码，根据当前模式决定操作
                             if (board->playback_mode_ == PlaybackMode::VIDEO_PLAYBACK) {
                                 // 视频模式下，取消二维码并切换回Display模式
-                                ESP_LOGI("MovecallMojiESP32S3", "单击检测 - 取消二维码，切换回Display模式");
                                 board->ExitQrcodeAndEnterDisplayMode();
                             } else {
                                 // Display模式下，取消二维码并切换到视频模式
-                                ESP_LOGI("MovecallMojiESP32S3", "单击检测 - 取消二维码，进入视频模式");
                                 board->ExitQrcodeAndEnterVideoMode();
                             }
                         } else if (board->playback_mode_ == PlaybackMode::VIDEO_PLAYBACK) {
                             // 视频模式下，单击切换视频组
-                            ESP_LOGI("MovecallMojiESP32S3", "单击检测 - 视频模式下切换视频组");
                             board->CycleVideoGroup();
                         } else {
                             // Display模式下，单击：强制打断讲话，进入聆听模式（参考 gizwits-c2-6824-DRF-W300CA）
@@ -968,18 +976,8 @@ public:
                             // 调用 StartListening 进入聆听模式（它会处理所有状态）
                             app.StartListening();
                         }
-                    } else if (board->boot_button_click_count_ == 2) {
-                        // 双击：600ms内检测到第二次点击，且没有第三次点击（定时器超时）
-                        // 显示电量圆环
-                        ESP_LOGI("MovecallMojiESP32S3", "双击检测 - 显示电量");
-                        board->ShowBatteryIndicator();
-                    } else if (board->boot_button_click_count_ == 3) {
-                        // 三击：600ms内检测到第三次点击，且没有第四次点击（定时器超时）
-                        // 直接进入配网模式（重启），不显示二维码
-                        ESP_LOGI("MovecallMojiESP32S3", "三击检测 - 直接进入配网模式");
-                        board->InnerResetWifiConfiguration();
                     }
-                    // 注意：四击在 OnClick 回调中立即处理，不会到达这里
+                    // 重置计数器
                     board->boot_button_click_count_ = 0;
                 },
                 .arg = this,
@@ -1056,60 +1054,57 @@ public:
             }
         });
 
-        // 单击、双击和三击检测
-        // 优化：使用 OnPressRepeaDone 来快速响应连续按键
+        // 所有多击操作都在 OnPressRepeaDone 中处理，实现立即响应，不需要等待定时器超时
         boot_button_.OnPressRepeaDone([this](uint16_t repeat_count) {
             ESP_LOGI(TAG, "boot_button_.OnPressRepeaDone - 重复次数: %d", repeat_count);
-            // 快速连续按键时立即响应，提高响应速度
-            if (repeat_count >= 4) {
-                // 快速四击：直接切换模式
-                ESP_LOGI(TAG, "快速四击检测 - 直接切换模式");
+            
+            // 根据重复次数立即执行对应操作，提高响应速度
+            if (repeat_count == 2) {
+                // 双击：显示电量
+                ESP_LOGI(TAG, "双击检测 - 显示电量");
+                ShowBatteryIndicator();
+            } else if (repeat_count == 3) {
+                // 三击：进入配网模式
+                ESP_LOGI(TAG, "三击检测 - 直接进入配网模式");
+                InnerResetWifiConfiguration();
+            } else if (repeat_count >= 4) {
+                // 四击：切换模式
+                ESP_LOGI(TAG, "四击检测 - 直接切换模式");
                 SwitchPlaybackMode();
             }
+            // 注意：单击（repeat_count == 1）仍然在定时器回调中处理，需要等待确认没有第二次点击
         });
         
+        // OnClick 只处理单击的情况（需要等待确认没有第二次点击）
+        // 双击、三击、四击都在 OnPressRepeaDone 中立即处理，提高响应速度
         boot_button_.OnClick([this]() {
             int64_t now_ms = esp_timer_get_time() / 1000;
-            const int64_t TRIPLE_CLICK_WINDOW_MS = 1000;  // 三击时间窗口1000ms（增加时间窗口）
             const int64_t DOUBLE_CLICK_WINDOW_MS = kDoubleClickWindowMs;  // 使用成员变量的双击窗口时间（800ms）
             
-            // 如果距离上次点击超过三击窗口，重置计数器
-            if (now_ms - boot_button_last_click_ms_ > TRIPLE_CLICK_WINDOW_MS) {
+            // 如果距离上次点击超过双击窗口，重置计数器
+            if (now_ms - boot_button_last_click_ms_ > DOUBLE_CLICK_WINDOW_MS) {
                 boot_button_click_count_ = 0;
                 ESP_LOGI(TAG, "boot_button_.OnClick - 重置计数器（超过时间窗口）");
             }
             boot_button_last_click_ms_ = now_ms;
-            
-            int64_t time_since_last_click = (boot_button_click_count_ > 0) ? (now_ms - boot_button_last_click_ms_) : 0;
             boot_button_click_count_++;
-            ESP_LOGI(TAG, "boot_button_.OnClick - 点击次数: %d, 距离上次点击: %lld ms", 
-                     boot_button_click_count_, time_since_last_click);
             
             // 停止之前的定时器（如果有）
             if (boot_button_timer_ != nullptr) {
                 esp_timer_stop(boot_button_timer_);
             }
             
+            // 只有第一次点击时启动定时器，等待确认没有第二次点击后执行单击操作
+            // 双击、三击、四击都在 OnPressRepeaDone 中立即处理，不会到达这里
             if (boot_button_click_count_ == 1) {
-                // 第一次点击，启动定时器（800ms后执行单击操作）
-                ESP_LOGI(TAG, "第一次点击，启动定时器 %d ms", DOUBLE_CLICK_WINDOW_MS);
+                ESP_LOGI(TAG, "第一次点击，启动定时器 %d ms 后执行单击操作", DOUBLE_CLICK_WINDOW_MS);
                 esp_timer_start_once(boot_button_timer_, DOUBLE_CLICK_WINDOW_MS * 1000);
-            } else if (boot_button_click_count_ == 2) {
-                // 第二次点击，停止定时器，启动更短的定时器（1000ms后执行双击操作 - 显示电量，给三击留时间）
-                ESP_LOGI(TAG, "第二次点击，停止定时器，启动三击窗口定时器 %d ms", TRIPLE_CLICK_WINDOW_MS);
+            } else {
+                // 如果检测到第二次或更多次点击，说明是多击操作，停止定时器
+                // 多击操作会在 OnPressRepeaDone 中处理
+                ESP_LOGI(TAG, "检测到多击操作（点击次数: %d），停止定时器，等待 OnPressRepeaDone 处理", boot_button_click_count_);
                 esp_timer_stop(boot_button_timer_);
-                esp_timer_start_once(boot_button_timer_, TRIPLE_CLICK_WINDOW_MS * 1000);  // 使用三击窗口时间
-            } else if (boot_button_click_count_ == 3) {
-                // 第三次点击，停止定时器，启动更短的定时器（1000ms后执行三击操作，给四击留时间）
-                ESP_LOGI(TAG, "第三次点击，停止定时器，启动三击窗口定时器 %d ms", TRIPLE_CLICK_WINDOW_MS);
-                esp_timer_stop(boot_button_timer_);
-                esp_timer_start_once(boot_button_timer_, TRIPLE_CLICK_WINDOW_MS * 1000);  // 使用三击窗口时间
-            } else if (boot_button_click_count_ >= 4) {
-                // 第四次或更多次点击，立即停止定时器并执行四击操作（直接切换模式，不显示二维码）
-                ESP_LOGI(TAG, "四击检测 - 直接切换模式");
-                esp_timer_stop(boot_button_timer_);
-                boot_button_click_count_ = 0;
-                SwitchPlaybackMode();
+                boot_button_click_count_ = 0;  // 重置计数器，因为多击操作已经在 OnPressRepeaDone 中处理
             }
         });
 
@@ -1167,7 +1162,6 @@ public:
     
     // 取消二维码并切换回Display模式
     void ExitQrcodeAndEnterDisplayMode() {
-        ESP_LOGI(TAG, "ExitQrcodeAndEnterDisplayMode: 取消二维码，切换回Display模式");
         qrcode_displaying_ = false;
         // 取消二维码定时器
         if (qrcode_timer_ != nullptr) {
@@ -1205,19 +1199,16 @@ public:
         // 切换到Display模式
         if (playback_mode_ != PlaybackMode::DISPLAY_ANIMATION) {
             playback_mode_ = PlaybackMode::DISPLAY_ANIMATION;
-            ESP_LOGI(TAG, "切换到Display动画模式");
             
             // Display模式下恢复唤醒词检测（根据设备状态）
             auto& app = Application::GetInstance();
             auto device_state = app.GetDeviceState();
-            ESP_LOGI(TAG, "切换回Display模式，当前设备状态: %d", device_state);
             
             // 延迟一下，确保所有状态更新完成后再恢复唤醒词检测
             vTaskDelay(pdMS_TO_TICKS(100));
             
             // 重新获取设备状态（可能已经改变）
             device_state = app.GetDeviceState();
-            ESP_LOGI(TAG, "切换回Display模式，延迟后设备状态: %d", device_state);
             
             // 如果设备状态是idle或sleeping，恢复唤醒词检测
             if (device_state == kDeviceStateIdle || device_state == kDeviceStateSleeping) {
@@ -1256,7 +1247,6 @@ public:
     
     // 取消二维码并进入视频模式
     void ExitQrcodeAndEnterVideoMode() {
-        ESP_LOGI(TAG, "ExitQrcodeAndEnterVideoMode: 取消二维码，进入视频模式");
         qrcode_displaying_ = false;
         // 取消二维码定时器
         if (qrcode_timer_ != nullptr) {
@@ -1309,11 +1299,9 @@ public:
             auto& app = Application::GetInstance();
             app.GetAudioService().EnableWakeWordDetection(false);
             app.GetAudioService().EnableVoiceProcessing(false);
-            ESP_LOGI(TAG, "视频模式：已禁用唤醒词检测和语音处理");
             
             // 检查充电状态，如果正在充电，显示电量圆环（因为状态改变回调可能不会触发）
             if (IsCharging()) {
-                ESP_LOGI(TAG, "ExitQrcodeAndEnterVideoMode: 检测到正在充电，显示电量圆环");
                 auto device_state = app.GetDeviceState();
                 if (device_state != kDeviceStateWifiConfiguring && display_ != nullptr) {
                     int battery_level = 0;
@@ -1360,18 +1348,61 @@ public:
             return;
         }
         
-        i2c_device_config_t dev_cfg = {
-            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-            .device_address = LIS2HH12_I2C_ADDR,
-            .scl_speed_hz = 50000,  // 降低到50kHz，提高稳定性
-        };
-        ret = i2c_master_bus_add_device(lis2hh12_i2c_bus_, &dev_cfg, &lis2hh12_dev_);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to add LIS2HH12 device: %s", esp_err_to_name(ret));
-            return;
+        // 自动检测设备地址（尝试 0x1D 和 0x1E）
+        uint8_t detected_addr = 0;
+        uint8_t addresses[] = {0x1D, 0x1E};  // SDO接GND为0x1D，接VDD为0x1E
+        
+        for (int i = 0; i < 2; i++) {
+            uint8_t addr = addresses[i];
+            ESP_LOGI(TAG, "尝试检测 LIS2HH12 地址: 0x%02X", addr);
+            
+            i2c_device_config_t dev_cfg = {
+                .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+                .device_address = addr,
+                .scl_speed_hz = 100000,  // 使用100kHz标准速度
+            };
+            
+            i2c_master_dev_handle_t test_dev = nullptr;
+            ret = i2c_master_bus_add_device(lis2hh12_i2c_bus_, &dev_cfg, &test_dev);
+            if (ret == ESP_OK && test_dev != nullptr) {
+                // 尝试读取 WHO_AM_I 寄存器验证
+                uint8_t who_am_i_reg = 0x0F;
+                uint8_t who_am_i_val = 0;
+                ret = i2c_master_transmit_receive(test_dev, &who_am_i_reg, 1, &who_am_i_val, 1, pdMS_TO_TICKS(500));
+                
+                if (ret == ESP_OK && who_am_i_val == 0x41) {
+                    // 找到正确的设备地址
+                    detected_addr = addr;
+                    lis2hh12_dev_ = test_dev;  // 使用这个设备句柄
+                    ESP_LOGI(TAG, "✓ LIS2HH12 检测成功！地址: 0x%02X, WHO_AM_I: 0x%02X", addr, who_am_i_val);
+                    break;
+                } else {
+                    // 不是 LIS2HH12，删除设备句柄
+                    i2c_master_bus_rm_device(test_dev);
+                    ESP_LOGD(TAG, "地址 0x%02X 不是 LIS2HH12 (WHO_AM_I: 0x%02X)", addr, who_am_i_val);
+                }
+            } else {
+                ESP_LOGD(TAG, "地址 0x%02X 无法创建设备: %s", addr, esp_err_to_name(ret));
+            }
         }
         
-        ESP_LOGI(TAG, "LIS2HH12 I2C initialized successfully");
+        if (detected_addr == 0) {
+            ESP_LOGW(TAG, "⚠ 未找到 LIS2HH12 设备，尝试使用默认地址 0x%02X", LIS2HH12_I2C_ADDR);
+            // 使用默认地址
+            i2c_device_config_t dev_cfg = {
+                .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+                .device_address = LIS2HH12_I2C_ADDR,
+                .scl_speed_hz = 100000,
+            };
+            ret = i2c_master_bus_add_device(lis2hh12_i2c_bus_, &dev_cfg, &lis2hh12_dev_);
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to add LIS2HH12 device with default address: %s", esp_err_to_name(ret));
+                return;
+            }
+            ESP_LOGI(TAG, "LIS2HH12 I2C initialized with default address 0x%02X (未验证)", LIS2HH12_I2C_ADDR);
+        } else {
+            ESP_LOGI(TAG, "LIS2HH12 I2C initialized successfully with auto-detected address 0x%02X", detected_addr);
+        }
     }
 
     void InitializeLis2hh12() {
@@ -1399,7 +1430,7 @@ public:
         uint8_t data = 0;
         esp_err_t ret = i2c_master_transmit_receive(lis2hh12_dev_, &reg, 1, &data, 1, pdMS_TO_TICKS(500));
         if (ret != ESP_OK) {
-            // ESP_LOGE(TAG, "LIS2HH12 read reg 0x%02X failed: %s", reg, esp_err_to_name(ret));
+            ESP_LOGE(TAG, "LIS2HH12 read reg 0x%02X failed: %s", reg, esp_err_to_name(ret));
             return 0;
         }
         return data;
@@ -1535,7 +1566,7 @@ public:
     }
 
 public:
-    MovecallMojiESP32S3() : boot_button_(BOOT_BUTTON_GPIO), touch_button_(TOUCH_BUTTON_GPIO) {  // 触摸按钮已屏蔽（保留初始化，但回调已注释） 
+    MovecallMojiESP32S3() : boot_button_(BOOT_BUTTON_GPIO), touch_button_(TOUCH_BUTTON_GPIO) {  // 触摸按钮已启用 
         // 记录上电时间
         power_on_time_ = esp_timer_get_time() / 1000; // 转换为毫秒
         ESP_LOGI(TAG, "设备启动，上电时间戳: %lld ms", power_on_time_);
@@ -1672,7 +1703,6 @@ public:
     virtual void WakeWordDetected() override {
         // 视频模式下禁用唤醒词检测和AI对话
         if (playback_mode_ == PlaybackMode::VIDEO_PLAYBACK) {
-            ESP_LOGI(TAG, "WakeWordDetected: 视频模式下忽略唤醒词");
             return;
         }
         
