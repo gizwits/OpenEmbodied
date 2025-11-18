@@ -114,6 +114,7 @@ private:
                 is_charging_sleep_ = true;
                 Application::GetInstance().Schedule([this]() {
                     Application::GetInstance().QuitTalking();
+                    this->GetBacklight()->SetBrightness(0, false);
                     // Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
 
                     // 在这个场景里要切换成睡觉表情 
@@ -383,10 +384,6 @@ private:
                 ESP_LOGI(TAG, "首次上电5秒内，忽略长按操作");
             } else {
                 ESP_LOGI(TAG, "执行关机操作");
-                // vTaskDelay(pdMS_TO_TICKS(200));
-                // auto codec = GetAudioCodec();
-                // codec->EnableOutput(true);
-                // Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
                 this->GetBacklight()->SetBrightness(0, false);
                 need_power_off_ = true;
             }
@@ -396,6 +393,9 @@ private:
             ESP_LOGI(TAG, "boot_button_.OnPressUp");
             if (need_power_off_) {
                 need_power_off_ = false;
+                is_charging_sleep_ = true;
+                ESP_LOGI(TAG, "设置休眠标志");
+
                 // 使用静态函数来避免lambda捕获问题
                 xTaskCreate([](void* arg) {
                     auto* board = static_cast<MovecallMojiESP32S3*>(arg);
@@ -404,7 +404,8 @@ private:
                     if (board->IsCharging()) {
                         // 充电中，只关闭背光
                         board->GetBacklight()->SetBrightness(0, false);
-                        board->is_charging_sleep_ = true;
+                        // is_charging_sleep_ 已经在创建Task之前设置了
+                        ESP_LOGI(TAG, "充电中，关机");
                         Application::GetInstance().QuitTalking();
                     } else {
                         // 没有充电，关机
@@ -565,7 +566,14 @@ public:
         InitializeHeadphoneDetection();
         InitializeChargingGpio();
         InitializeGpio(POWER_GPIO, true);
-        InitializeGpio(ML307_EN, true);
+        // 根据网络类型设置ML307_EN：Wi-Fi模式时禁用4G模块，4G模式时启用
+        if (GetNetworkType() == NetworkType::WIFI) {
+            InitializeGpio(ML307_EN, false);  // 禁用4G模块
+            ESP_LOGI(TAG, "Wi-Fi模式，禁用4G模块 (ML307_EN = LOW)");
+        } else {
+            InitializeGpio(ML307_EN, true);   // 启用4G模块
+            ESP_LOGI(TAG, "4G模式，启用4G模块 (ML307_EN = HIGH)");
+        }
         InitializeSpi();
         InitializeSt7789Display();
         
@@ -718,7 +726,7 @@ public:
     }
     
     virtual int GetMaxFrameNum() override { 
-        return 25;
+        return 20;
     }
 
 
@@ -732,6 +740,7 @@ public:
     virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
         charging = IsCharging();
         discharging = !charging;
+        // level = 1;
         level = power_manager_->GetBatteryLevel();
         // ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
         return true;

@@ -83,8 +83,9 @@ protected:
     std::string subtitle_role_;  // Current role (user/assistant) for append detection
     size_t subtitle_scroll_pos_ = 0;
     bool subtitle_scrolling_ = false;
-    static constexpr int kSubtitleScrollPeriodMs = 80;  // Scroll period in milliseconds (configurable, smaller = faster)
-    static constexpr int kSubtitleScrollDelayMs = 3500;  // Delay before starting scroll in milliseconds (2 seconds)
+    int64_t subtitle_first_char_time_ms_ = 0;  // Timestamp when first character was displayed (in milliseconds)
+    static constexpr int kSubtitleScrollPeriodMs = 85;  // Scroll period in milliseconds (configurable, smaller = faster)
+    static constexpr int kSubtitleScrollDelayMs = 2000;  // Delay before starting scroll in milliseconds (2 seconds)
 
     void SetupUI();
     void StartIdleCountdown();
@@ -109,6 +110,7 @@ protected:
     // Subtitle scroll methods
     void UpdateSubtitleDisplay();
     void StartSubtitleScroll();
+    void StartSubtitleScrollWithDelay(int delay_ms);  // Start scroll with custom delay
     void StartSubtitleScrollDelayed();
     void StopSubtitleScroll();
     static void SubtitleScrollTimerCallback(void* arg);

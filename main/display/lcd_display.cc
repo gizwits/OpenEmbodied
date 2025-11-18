@@ -465,14 +465,17 @@ void LcdDisplay::SetupUI() {
 
     low_battery_popup_ = lv_obj_create(screen);
     lv_obj_set_scrollbar_mode(low_battery_popup_, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_set_size(low_battery_popup_, LV_HOR_RES * 0.9, fonts_.text_font->line_height * 2);
+    lv_obj_set_size(low_battery_popup_, LV_PCT(100), fonts_.text_font->line_height * 2 + 5);  // 100% width, height + 5
     lv_obj_align(low_battery_popup_, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_style_bg_color(low_battery_popup_, current_theme_.low_battery, 0);
-    lv_obj_set_style_radius(low_battery_popup_, 10, 0);
+    lv_obj_set_style_bg_color(low_battery_popup_, lv_color_white(), 0);  // White background
+    lv_obj_set_style_bg_opa(low_battery_popup_, LV_OPA_COVER, 0);  // Make background opaque
+    lv_obj_set_style_border_width(low_battery_popup_, 0, 0);  // No border
+    lv_obj_set_style_radius(low_battery_popup_, 0, 0);  // No rounded corners
     low_battery_label_ = lv_label_create(low_battery_popup_);
     lv_label_set_text(low_battery_label_, Lang::Strings::BATTERY_NEED_CHARGE);
-    lv_obj_set_style_text_color(low_battery_label_, lv_color_white(), 0);
+    lv_obj_set_style_text_color(low_battery_label_, lv_color_black(), 0);  // Black text
     lv_obj_center(low_battery_label_);
+    lv_obj_set_style_translate_y(low_battery_label_, -3, 0);  // Move text up by 3 pixels
     lv_obj_add_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN);
 }
 #if CONFIG_IDF_TARGET_ESP32P4
@@ -814,14 +817,17 @@ void LcdDisplay::SetupUI() {
 
     low_battery_popup_ = lv_obj_create(screen);
     lv_obj_set_scrollbar_mode(low_battery_popup_, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_set_size(low_battery_popup_, LV_HOR_RES * 0.9, fonts_.text_font->line_height * 2);
+    lv_obj_set_size(low_battery_popup_, LV_PCT(100), fonts_.text_font->line_height * 2 + 5);  // 100% width, height + 5
     lv_obj_align(low_battery_popup_, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_style_bg_color(low_battery_popup_, current_theme_.low_battery, 0);
-    lv_obj_set_style_radius(low_battery_popup_, 10, 0);
+    lv_obj_set_style_bg_color(low_battery_popup_, lv_color_white(), 0);  // White background
+    lv_obj_set_style_bg_opa(low_battery_popup_, LV_OPA_COVER, 0);  // Make background opaque
+    lv_obj_set_style_border_width(low_battery_popup_, 0, 0);  // No border
+    lv_obj_set_style_radius(low_battery_popup_, 0, 0);  // No rounded corners
     low_battery_label_ = lv_label_create(low_battery_popup_);
     lv_label_set_text(low_battery_label_, Lang::Strings::BATTERY_NEED_CHARGE);
-    lv_obj_set_style_text_color(low_battery_label_, lv_color_white(), 0);
+    lv_obj_set_style_text_color(low_battery_label_, lv_color_black(), 0);  // Black text
     lv_obj_center(low_battery_label_);
+    lv_obj_set_style_translate_y(low_battery_label_, -3, 0);  // Move text up by 3 pixels
     lv_obj_add_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN);
 }
 #endif
@@ -1085,9 +1091,13 @@ void LcdDisplay::SetTheme(const std::string& theme_name) {
 #endif
     }
     
-    // Update low battery popup
+    // Update low battery popup - keep white background and black text regardless of theme
     if (low_battery_popup_ != nullptr) {
-        lv_obj_set_style_bg_color(low_battery_popup_, current_theme_.low_battery, 0);
+        lv_obj_set_style_bg_color(low_battery_popup_, lv_color_white(), 0);
+        lv_obj_set_style_bg_opa(low_battery_popup_, LV_OPA_COVER, 0);
+        if (low_battery_label_ != nullptr) {
+            lv_obj_set_style_text_color(low_battery_label_, lv_color_black(), 0);
+        }
     }
 
     // No errors occurred. Save theme to settings
@@ -1188,8 +1198,11 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
     // Check if role has changed - if so, reset scroll state
     bool role_changed = (current_role != old_role);
     if (role_changed) {
+        ESP_LOGI(TAG, "Role changed from '%s' to '%s', resetting scroll state and delay timer", 
+                 old_role.c_str(), current_role.c_str());
         StopSubtitleScroll();
         subtitle_scroll_pos_ = 0;
+        subtitle_first_char_time_ms_ = 0;  // Reset timestamp
     }
     
     // Check if this is an append operation (for user/assistant role with incremental text)
@@ -1244,10 +1257,34 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
             // Wasn't scrolling before, check if we need to start now
             if (text_width > container_width + 2) {
                 // Text grew and now needs scrolling
-                // For append operations, start scrolling immediately (no delay)
-                // Always start from old text end for append operations, so new content appears naturally
-                subtitle_scroll_pos_ = old_text.length();
-                StartSubtitleScrollDelayed(); // Start immediately without delay
+                // Check how long since first character was displayed
+                int64_t current_time_ms = esp_timer_get_time() / 1000;  // Convert to milliseconds
+                
+                // If this is the first time we see text (no timestamp recorded), record it now
+                if (subtitle_first_char_time_ms_ == 0) {
+                    subtitle_first_char_time_ms_ = current_time_ms;
+                    ESP_LOGI(TAG, "First character displayed, recording timestamp: %lld ms", subtitle_first_char_time_ms_);
+                }
+                
+                int64_t elapsed_ms = current_time_ms - subtitle_first_char_time_ms_;
+                int64_t remaining_delay_ms = kSubtitleScrollDelayMs - elapsed_ms;
+                
+                ESP_LOGI(TAG, "Append: text needs scrolling, elapsed=%lld ms, remaining_delay=%lld ms", 
+                         elapsed_ms, remaining_delay_ms);
+                
+                // For append operations, start scrolling from the beginning (position 0)
+                // This ensures the user sees the text from the start, not jumping to the end
+                subtitle_scroll_pos_ = 0;
+                
+                if (remaining_delay_ms <= 0) {
+                    // Delay time has passed, start scrolling immediately
+                    ESP_LOGI(TAG, "Delay time has passed, starting scroll immediately");
+                    StartSubtitleScrollDelayed();
+                } else {
+                    // Delay time hasn't passed yet, start delay timer with remaining time
+                    ESP_LOGI(TAG, "Starting delay timer with remaining time: %lld ms", remaining_delay_ms);
+                    StartSubtitleScrollWithDelay((int)remaining_delay_ms);
+                }
             }
             // If still fits, don't start scrolling
         } else {
@@ -1266,6 +1303,10 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
             StopSubtitleScroll();
             
             subtitle_scroll_pos_ = 0;
+            
+            // Record timestamp when first character is displayed (for new message)
+            subtitle_first_char_time_ms_ = esp_timer_get_time() / 1000;  // Convert to milliseconds
+            ESP_LOGI(TAG, "New message, recording first character timestamp: %lld ms", subtitle_first_char_time_ms_);
             
             // Check if scrolling is needed
             if (text_width > container_width + 2) {
@@ -1620,9 +1661,9 @@ void LcdDisplay::VideoPlayTask(void* arg) {
             self->Unlock();
         }
         
-        if ((idx % 10) == 0) {
-            ESP_LOGI(TAG, "Playing group=%d idx=%u/%u off=%u", g, (unsigned)idx, (unsigned)frames, (unsigned)off);
-        }
+        // if ((idx % 10) == 0) {
+        //     ESP_LOGI(TAG, "Playing group=%d idx=%u/%u off=%u", g, (unsigned)idx, (unsigned)frames, (unsigned)off);
+        // }
         
         vTaskDelay(pdMS_TO_TICKS(self->kVideoFrameDelayMs));
         idx = (idx + 1) % frames; // Loop play current group until key switch
@@ -1936,14 +1977,36 @@ void LcdDisplay::UpdateSubtitleDisplay() {
     lv_coord_t pad_right = lv_obj_get_style_pad_right(chat_container_, 0);
     container_width = container_width - pad_left - pad_right;
     
+    // Check if scrolling has ended (scroll position reached end but scrolling flag is false)
+    // This can happen when scrolling just finished - hide container to avoid flickering
+    if (!subtitle_scrolling_ && !subtitle_text_.empty()) {
+        size_t text_len = subtitle_text_.length();
+        if (subtitle_scroll_pos_ >= text_len) {
+            // Scrolling has ended, hide container
+            if (chat_container_ != nullptr) {
+                lv_obj_add_flag(chat_container_, LV_OBJ_FLAG_HIDDEN);
+            }
+            if (chat_message_label_ != nullptr) {
+                lv_label_set_text(chat_message_label_, "");
+            }
+            return;
+        }
+    }
+    
     if (subtitle_scrolling_) {
         // Scrolling mode: show substring starting from scroll position
         size_t text_len = subtitle_text_.length();
         size_t start_pos = subtitle_scroll_pos_;
         
-        // If we've scrolled past the end, show the last part of the text
+        // If we've scrolled past the end, hide container immediately to avoid flickering
         if (start_pos >= text_len) {
-            start_pos = text_len;
+            if (chat_container_ != nullptr) {
+                lv_obj_add_flag(chat_container_, LV_OBJ_FLAG_HIDDEN);
+            }
+            if (chat_message_label_ != nullptr) {
+                lv_label_set_text(chat_message_label_, "");
+            }
+            return;
         }
         
         
@@ -1961,11 +2024,6 @@ void LcdDisplay::UpdateSubtitleDisplay() {
         
         if (max_chars == 0) {
             max_chars = 1; // At least show one character
-        }
-        
-        // Adjust start_pos if needed
-        if (start_pos >= text_len) {
-            start_pos = (text_len > max_chars) ? (text_len - max_chars) : 0;
         }
         
         // Show substring from start_pos
@@ -2024,18 +2082,25 @@ void LcdDisplay::UpdateSubtitleDisplay() {
 }
 
 void LcdDisplay::StartSubtitleScroll() {
+    ESP_LOGI(TAG, "StartSubtitleScroll called, subtitle_scrolling_=%d", subtitle_scrolling_);
+    
     // Stop any existing timers
     if (subtitle_scroll_delay_timer_ != nullptr) {
+        ESP_LOGI(TAG, "Stopping existing delay timer");
         esp_timer_stop(subtitle_scroll_delay_timer_);
         esp_timer_delete(subtitle_scroll_delay_timer_);
         subtitle_scroll_delay_timer_ = nullptr;
     }
     
     if (subtitle_scroll_timer_ != nullptr) {
+        ESP_LOGI(TAG, "Stopping existing scroll timer");
         esp_timer_stop(subtitle_scroll_timer_);
         esp_timer_delete(subtitle_scroll_timer_);
         subtitle_scroll_timer_ = nullptr;
     }
+    
+    // Make sure scrolling flag is false during delay period
+    subtitle_scrolling_ = false;
     
     // Create delay timer to wait before starting scroll
     esp_timer_create_args_t delay_timer_args = {
@@ -2053,16 +2118,78 @@ void LcdDisplay::StartSubtitleScroll() {
     }
     
     // Start delay timer (one-shot)
-    err = esp_timer_start_once(subtitle_scroll_delay_timer_, kSubtitleScrollDelayMs * 1000);
+    // esp_timer_start_once expects microseconds, so convert milliseconds to microseconds
+    uint64_t delay_us = (uint64_t)kSubtitleScrollDelayMs * 1000ULL;
+    ESP_LOGI(TAG, "Starting subtitle scroll delay timer: %llu microseconds (%d ms)", delay_us, kSubtitleScrollDelayMs);
+    err = esp_timer_start_once(subtitle_scroll_delay_timer_, delay_us);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start subtitle scroll delay timer: %s", esp_err_to_name(err));
         esp_timer_delete(subtitle_scroll_delay_timer_);
         subtitle_scroll_delay_timer_ = nullptr;
+    } else {
+        ESP_LOGI(TAG, "Subtitle scroll delay timer started successfully, will start scrolling in %d ms", kSubtitleScrollDelayMs);
+    }
+}
+
+void LcdDisplay::StartSubtitleScrollWithDelay(int delay_ms) {
+    ESP_LOGI(TAG, "StartSubtitleScrollWithDelay called with delay=%d ms, subtitle_scrolling_=%d", delay_ms, subtitle_scrolling_);
+    
+    // Stop any existing timers
+    if (subtitle_scroll_delay_timer_ != nullptr) {
+        ESP_LOGI(TAG, "Stopping existing delay timer");
+        esp_timer_stop(subtitle_scroll_delay_timer_);
+        esp_timer_delete(subtitle_scroll_delay_timer_);
+        subtitle_scroll_delay_timer_ = nullptr;
+    }
+    
+    if (subtitle_scroll_timer_ != nullptr) {
+        ESP_LOGI(TAG, "Stopping existing scroll timer");
+        esp_timer_stop(subtitle_scroll_timer_);
+        esp_timer_delete(subtitle_scroll_timer_);
+        subtitle_scroll_timer_ = nullptr;
+    }
+    
+    // Make sure scrolling flag is false during delay period
+    subtitle_scrolling_ = false;
+    
+    // Ensure delay is at least 1ms (minimum for esp_timer)
+    if (delay_ms <= 0) {
+        delay_ms = 1;
+    }
+    
+    // Create delay timer to wait before starting scroll
+    esp_timer_create_args_t delay_timer_args = {
+        .callback = SubtitleScrollDelayTimerCallback,
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "subtitle_scroll_delay_timer",
+        .skip_unhandled_events = true,
+    };
+    
+    esp_err_t err = esp_timer_create(&delay_timer_args, &subtitle_scroll_delay_timer_);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create subtitle scroll delay timer: %s", esp_err_to_name(err));
+        return;
+    }
+    
+    // Start delay timer (one-shot) with custom delay
+    // esp_timer_start_once expects microseconds, so convert milliseconds to microseconds
+    uint64_t delay_us = (uint64_t)delay_ms * 1000ULL;
+    ESP_LOGI(TAG, "Starting subtitle scroll delay timer: %llu microseconds (%d ms)", delay_us, delay_ms);
+    err = esp_timer_start_once(subtitle_scroll_delay_timer_, delay_us);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start subtitle scroll delay timer: %s", esp_err_to_name(err));
+        esp_timer_delete(subtitle_scroll_delay_timer_);
+        subtitle_scroll_delay_timer_ = nullptr;
+    } else {
+        ESP_LOGI(TAG, "Subtitle scroll delay timer started successfully, will start scrolling in %d ms", delay_ms);
     }
 }
 
 void LcdDisplay::StartSubtitleScrollDelayed() {
     // This is called after the delay period
+    ESP_LOGI(TAG, "StartSubtitleScrollDelayed called, starting actual scroll");
+    
     if (subtitle_scroll_timer_ != nullptr) {
         esp_timer_stop(subtitle_scroll_timer_);
         esp_timer_delete(subtitle_scroll_timer_);
@@ -2128,22 +2255,26 @@ void LcdDisplay::SubtitleScrollTimerCallback(void* arg) {
     size_t text_len = display->subtitle_text_.length();
     size_t current_pos = display->subtitle_scroll_pos_;
     
-    // Check if we've reached the end of the text
-    if (current_pos >= text_len) {
+    // Increment scroll position first
+    display->subtitle_scroll_pos_++;
+    
+    // Check if we've reached or passed the end of the text after incrementing
+    if (display->subtitle_scroll_pos_ >= text_len) {
         // Stop scrolling when we reach the end
-        display->StopSubtitleScroll();
-        // Hide container after scrolling ends
+        // First hide container and clear text to avoid flickering
         if (display->Lock(50)) {
             if (chat_container_ != nullptr) {
                 lv_obj_add_flag(chat_container_, LV_OBJ_FLAG_HIDDEN);
             }
+            if (display->chat_message_label_ != nullptr) {
+                lv_label_set_text(display->chat_message_label_, "");
+            }
             display->Unlock();
         }
+        // Then stop scrolling
+        display->StopSubtitleScroll();
         return;
     }
-    
-    // Increment scroll position
-    display->subtitle_scroll_pos_++;
     
     // Update display in LVGL context
     if (display->Lock(50)) {
@@ -2154,6 +2285,8 @@ void LcdDisplay::SubtitleScrollTimerCallback(void* arg) {
 
 void LcdDisplay::SubtitleScrollDelayTimerCallback(void* arg) {
     LcdDisplay* display = static_cast<LcdDisplay*>(arg);
+    
+    ESP_LOGI(TAG, "Subtitle scroll delay timer callback triggered, starting scroll");
     
     // Clean up delay timer
     if (display->subtitle_scroll_delay_timer_ != nullptr) {
