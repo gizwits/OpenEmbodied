@@ -458,19 +458,20 @@ void Application::Start() {
     // auto json = board.GetJson();
     // ESP_LOGI(TAG, "json: %s", json.c_str());
 
-    bool battery_ok = CheckBatteryLevel();
-    if (!battery_ok && Board::GetInstance().NeedBlockLowBattery()) {
-        // 播放提示
-        vTaskDelay(pdMS_TO_TICKS(3000));
-        Board::GetInstance().PowerOff();
-        return;
-    }
-
+    // 先播放联网成功提示音
     audio_service_.ResetDecoder();
     if (!is_silent_startup_) {
         audio_service_.PlaySound(Lang::Sounds::P3_CONNECT_SUCCESS);
     }
     vTaskDelay(pdMS_TO_TICKS(500));
+
+    // 然后检查电量，如果低电量则播放低电量提示音并关机
+    bool battery_ok = CheckBatteryLevel();
+    if (!battery_ok && Board::GetInstance().NeedBlockLowBattery()) {
+        // 直接调用 PowerOff()，它会等待低电量提示音播放完成后再关机
+        Board::GetInstance().PowerOff();
+        return;
+    }
 
     // Initialize NTP client
     auto& ntp_client = NtpClient::GetInstance();
