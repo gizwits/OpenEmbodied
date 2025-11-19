@@ -24,7 +24,7 @@
 
 #define TAG "CustomBoard"
 
-// 音量映射包装类：拦截所有 SetOutputVolume 调用，将数据点/Speaker音量(0-100)映射到板端(0-70)
+// 音量映射包装类：拦截所有 SetOutputVolume 调用，将数据点/Speaker音量(0-100)映射到板端(0-90)
 class VolumeMappedAudioCodec : public VbAduioCodec {
 public:
     VolumeMappedAudioCodec(gpio_num_t tx, gpio_num_t rx) : VbAduioCodec(tx, rx) {}
@@ -36,8 +36,8 @@ public:
         // 统一处理：所有0-100范围内的值都进行映射（数据点/Speaker都是0-100）
         // 按键调节的值会先转换为数据点值再传入，所以也会被映射
         if (volume >= 0 && volume <= 100) {
-            // 数据点/Speaker音量(0-100)映射到板端(0-70)
-            board_volume = (volume * 70) / 100;
+            // 数据点/Speaker音量(0-100)映射到板端(0-90)，100对应90
+            board_volume = (volume * 90) / 100;
             ESP_LOGI(TAG, "数据点下发音量: %d, 映射到板端音量: %d", datapoint_volume, board_volume);
         }
         
@@ -250,7 +250,7 @@ private:
             auto codec = GetAudioCodec();
             // 按键调节：获取当前板端值，转换为数据点值，加10，再传入（让包装类统一映射）
             int current_board_volume = codec->output_volume();
-            int current_datapoint_volume = (current_board_volume * 100) / 70;
+            int current_datapoint_volume = (current_board_volume * 100) / 90;
             int new_datapoint_volume = current_datapoint_volume + 10;
             if (new_datapoint_volume > 100) {
                 new_datapoint_volume = 100;
@@ -258,7 +258,7 @@ private:
             codec->SetOutputVolume(new_datapoint_volume);
         });
         volume_up_button_.OnLongPress([this]() {
-            // 长按设置为数据点最大值100（映射后为板端70）
+            // 长按设置为数据点最大值100（映射后为板端90）
             GetAudioCodec()->SetOutputVolume(100);
         });
 
@@ -283,9 +283,9 @@ private:
             },
             [this]() -> int { 
                 // 将板端音量映射回数据点(0-100)
-                // 数据点100对应板端70，所以反向映射：数据点 = (板端 * 100) / 70
+                // 数据点100对应板端90，所以反向映射：数据点 = (板端 * 100) / 90
                 int board_volume = GetAudioCodec()->output_volume();
-                int datapoint_volume = (board_volume * 100) / 70;
+                int datapoint_volume = (board_volume * 100) / 90;
                 // 限制最大值为100，防止超过数据点范围
                 if (datapoint_volume > 100) {
                     datapoint_volume = 100;
