@@ -146,7 +146,23 @@ public:
         SLEEPING,
         SILLY,
         VERTIGO,
-        CONFUSED
+        CONFUSED,
+        NEUTRAL,    // 中性表情（对应视频组1）
+        LISTEN,     // 聆听状态（对应视频组11）
+        TURN_LEFT,  // 左转（对应视频组12）
+        TURN_RIGHT, // 右转（对应视频组13）
+        ACCELERATE, // 加速（对应视频组14）
+        DECELERATE, // 减速/急刹（对应视频组15）
+        CHARGING    // 充电（对应视频组16）
+    };
+    
+    // 显示模式枚举
+    enum class DisplayMode {
+        FIXED_EMOTION = 0,      // 播固定表情模式
+        VIDEO_CYCLING = 1,      // 轮播模式
+        OTA_MODE = 2,           // OTA模式
+        WIFI_CONFIG = 3,        // 配网模式
+        BATTERY_SIGNAL = 4      // 显示电量和信号模式
     };
 
     EyeDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
@@ -177,8 +193,6 @@ public:
     virtual void EnterOTAMode() override;
     virtual void SetOTAProgress(int progress) override;
     
-    // 删除zzz对象（用于切换到视频模式时）
-    void DeleteZzzObjects();
     
     // 产测模式相关方法
     virtual void EnterTestMode() override;
@@ -189,17 +203,20 @@ public:
     // RGB三基色检测
     virtual void StartRGBTest() override;
     virtual void StopRGBTest() override;
-
-    // 电量圆环指示器
-    void ShowBatteryIndicator();
-    void HideBatteryIndicator();
     
-    // 充电时显示电量圆环（不清空表情，不显示信号，一直显示）
-    // battery_level: 可选的电量值，如果为-1则使用缓存值或默认值
-    void ShowBatteryIndicatorForCharging(int battery_level = -1);
-    void HideBatteryIndicatorForCharging();  // 隐藏充电时的电量圆环
-    void EnsureChargingBatteryArcOnTop(bool already_locked = false);  // 确保充电时的电量圆环在最前面（供VideoPlayer调用）
-    lv_obj_t* GetChargingBatteryArc() const { return charging_battery_arc_; }  // 获取充电圆环对象指针（用于在隐藏时排除）
+    // 显示Wi-Fi信号和当前电量
+    void ShowWifiSignalAndBattery();
+    
+    // 渲染当前电量
+    void ShowBatteryLevel();
+    void HiddenBatteryLevel();
+    
+    // 恢复显示电量UI之前的状态
+    void RestoreStateAfterBattery();
+    
+    // 获取和设置当前显示模式
+    DisplayMode GetDisplayMode() const { return current_display_mode_; }
+    void SetDisplayMode(DisplayMode mode) { current_display_mode_ = mode; }
     
     // 设置视频模式信息（用于恢复视频播放）
     void SetVideoModeInfo(bool was_video_mode, int video_group_index) {
@@ -207,11 +224,25 @@ public:
         saved_video_group_index_ = video_group_index;
     }
 
+    // 视频播放相关方法
+    void PlayVideoGroup(int index);
+    void StartVideoPlayback();
+    void StopVideoPlayback();
+    static void VideoPlayTask(void* arg);
+    
+    // 进入轮播模式
+    void ToggleVideoCyclingMode();
+    
+    // 切换轮播锁定状态（锁定当前视频/继续轮播）
+    void ToggleCyclingLock();
+    
     // 测试方法：按序号切换表情
     void TestNextEmotion();
 
 private:
     void SetupUI();
+    void CreateBatteryIndicator();  // 创建电量显示UI
+    void UpdateBatteryLevel(int level);  // 更新电量显示
     void StartIdleAnimation();
     void StartHappyAnimation();
     void StartLaughingAnimation();
@@ -274,6 +305,7 @@ private:
     int height_;
     DisplayFonts fonts_;
     EyeState current_state_ = EyeState::IDLE;
+    DisplayMode current_display_mode_ = DisplayMode::FIXED_EMOTION;  // 当前显示模式，默认为固定表情模式
     lv_anim_t left_anim_;
     lv_anim_t mouth_anim_;
     lv_obj_t* mouth_ = nullptr;  // 嘴巴（向下箭头）
@@ -296,8 +328,6 @@ private:
     bool emotion_disabled_ = false;
     
     // 双击显示的电量信号UI（5秒后自动隐藏）
-    lv_obj_t* battery_arc_ = nullptr;  // 电量圆环
-    lv_obj_t* battery_label_ = nullptr;  // 电量百分比标签
     lv_obj_t* signal_img_ = nullptr;  // 信号图标图片（显示在圆环中心）
     esp_timer_handle_t battery_display_timer_ = nullptr;  // 电量显示定时器（5秒后自动隐藏）
     std::string saved_emotion_before_battery_ = "";  // 显示电量UI之前保存的表情
@@ -305,12 +335,22 @@ private:
     int saved_video_group_index_ = -1;  // 显示电量UI之前保存的视频组索引
     lv_color_t saved_screen_bg_color_ = LV_COLOR_MAKE(0, 0, 0);  // 显示电量UI之前保存的屏幕背景色
     
-    // 充电时显示的电量圆环（一直显示，直到停止充电）
-    lv_obj_t* charging_battery_arc_ = nullptr;  // 充电时的电量圆环（独立对象）
-    esp_timer_handle_t battery_charging_update_timer_ = nullptr;  // 充电时电量更新定时器
-    bool charging_indicator_showing_ = false;  // 是否正在显示充电时的电量圆环
-    int last_charging_battery_level_ = -1;  // 上次充电时的电量（用于避免不必要的刷新）
-    uint32_t last_charging_arc_color_ = 0;  // 上次充电圆环的颜色（用于避免不必要的刷新）
+    // 电量显示UI（启动时创建，默认隐藏）
+    lv_obj_t* battery_arc_ = nullptr;  // 电量圆环
+    lv_obj_t* battery_label_ = nullptr;  // 电量百分比标签
+    esp_timer_handle_t battery_update_timer_ = nullptr;  // 电量更新定时器
+    bool battery_indicator_showing_ = false;  // 是否正在显示电量
+    
+    // 视频播放相关成员变量
+    bool video_playing_ = false;
+    TaskHandle_t video_task_handle_ = nullptr;
+    int video_group_index_ = 0;
+    bool cycling_locked_ = false;  // 轮播锁定状态（锁定当前视频，不自动切换）
+    lv_obj_t* video_img_ = nullptr;  // 视频图像对象
+    lv_image_dsc_t video_img_dsc_ = {};  // 视频图像描述符
+    uint8_t* first_frame_buf_ = nullptr;  // 第一帧缓冲区（用于避免闪烁）
+    static constexpr uint32_t kVideoFrameDelayMs = 100;
+    static constexpr uint32_t kVideoFlashBaseAddress = 0x000000;  // Flash 视频数据基地址
 };
 
 #endif // EYE_DISPLAY_H 
