@@ -45,7 +45,8 @@
 
 // 休眠时间配置（单位：秒）
 // 20分钟 = 60 * 20 = 1200秒
-#define SLEEP_TIME_SEC (30 * 1)
+// #define SLEEP_TIME_SEC (30 * 1)
+#define SLEEP_TIME_SEC (60 * 20)
 // 关机时间配置（单位：秒）
 // 30分钟 = 60 * 30 = 1800秒
 #define SHUTDOWN_TIME_SEC (60 * 30)
@@ -767,8 +768,6 @@ public:
             if (display_ != nullptr) {
                 // 使用Lock/Unlock来保护LVGL操作
                 if (display_->Lock(1000)) {
-                    // 先删除zzz对象，避免显示在视频上（在锁内删除确保线程安全）
-                    display_->DeleteZzzObjects();
                     
                     lv_obj_t* screen = lv_screen_active();
                     if (screen != nullptr) {

@@ -10,6 +10,8 @@
 #include <arpa/inet.h>
 #include "assets/lang_config.h"
 #include <queue>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #define TAG "WS"
 
@@ -85,6 +87,14 @@ bool WebsocketProtocol::IsAudioChannelOpened() const {
 }
 
 void WebsocketProtocol::CloseAudioChannel() {
+    if (!websocket_) {
+        ESP_LOGW(TAG, "websocket_ is null");
+        return;
+    }
+    
+    // 标记为客户端主动关闭
+    ws_client_initiated_close_ = true;
+    
     // Clear packet cache when closing audio channel (inlined logic)
     busy_sending_audio_ = true;
     packet_cache_.clear();
@@ -93,6 +103,12 @@ void WebsocketProtocol::CloseAudioChannel() {
     is_start_progress_ = false;
     ESP_LOGD(TAG, "Packet cache cleared");
     
+    // 先正常关闭websocket连接，这会触发OnDisconnected回调
+    ESP_LOGI(TAG, "WS Close() called by client");
+    websocket_->Close();
+    
+    // 等待一小段时间让Close完成，然后清理资源
+    vTaskDelay(pdMS_TO_TICKS(100));
     websocket_.reset();
 }
 
@@ -111,6 +127,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     }
 
     error_occurred_ = false;
+    ws_client_initiated_close_ = false;  // 重置客户端主动关闭标志
     
     // Initialize caching variables for new connection (inlined logic)
     packet_cache_.clear();
@@ -267,10 +284,14 @@ bool WebsocketProtocol::OpenAudioChannel() {
     });
 
     websocket_->OnDisconnected([this](bool is_clean) {
-        ESP_LOGI(TAG, "Websocket disconnected");
+        ESP_LOGI(TAG, "Websocket disconnected (is_clean=%d, client_initiated=%d)", is_clean, ws_client_initiated_close_);
+        // 如果是客户端主动关闭，应该传递true给回调
+        bool final_is_clean = is_clean || ws_client_initiated_close_;
         if (on_audio_channel_closed_ != nullptr) {
-            on_audio_channel_closed_(is_clean);
+            on_audio_channel_closed_(final_is_clean);
         }
+        // 重置标志
+        ws_client_initiated_close_ = false;
     });
 
     ESP_LOGI(TAG, "Connecting to websocket server: %s with version: %d", url.c_str(), version_);

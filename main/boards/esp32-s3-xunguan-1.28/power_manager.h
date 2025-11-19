@@ -7,6 +7,8 @@
 #include <esp_adc/adc_cali_scheme.h>
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <functional>
 #include "config.h"  // 包含GPIO引脚配置和ADC配置
 
@@ -33,7 +35,8 @@ private:
         {3703, 25}, {3672, 20}, {3570, 15}, {3420, 10}, {3220, 1}
     };
     
-    static constexpr size_t ADC_VALUES_COUNT = 10;
+    static constexpr size_t ADC_VALUES_COUNT = 20;  // 增加滑动窗口大小，提高稳定性
+    static constexpr int ADC_SAMPLE_COUNT = 10;  // 增加单次采样次数，提高精度
 
     esp_timer_handle_t timer_handle_ = nullptr;
     gpio_num_t charging_pin_;
@@ -117,7 +120,7 @@ private:
         }
     }
     
-    // 读取电池电压ADC数据（三次采集取平均值，与充电检测ADC方式一致）
+    // 读取电池电压ADC数据（多次采集取平均值，提高精度）
     void ReadBatteryAdcData() {
         // 检查ADC句柄是否有效
         if (battery_adc_handle_ == nullptr) {
@@ -125,11 +128,11 @@ private:
             return;
         }
         
-        // 三次采集取平均值
+        // 多次采集取平均值（提高精度）
         int32_t sum = 0;
         int32_t valid_reads = 0;
         
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < ADC_SAMPLE_COUNT; i++) {
             int temp_value = 0;
             esp_err_t ret = adc_oneshot_read(battery_adc_handle_, BAT_ADC_CHANNEL, &temp_value);
             if (ret == ESP_OK) {
@@ -138,17 +141,21 @@ private:
             } else {
                 ESP_LOGW("PowerManager", "🔋 电池ADC第%d次读取失败: %s", i+1, esp_err_to_name(ret));
             }
+            // 添加小延时，避免连续读取过快导致的不稳定
+            if (i < ADC_SAMPLE_COUNT - 1) {
+                vTaskDelay(pdMS_TO_TICKS(1));
+            }
         }
         
         if (valid_reads == 0) {
-            ESP_LOGW("PowerManager", "🔋 电池ADC三次读取全部失败");
+            ESP_LOGW("PowerManager", "🔋 电池ADC%d次读取全部失败", ADC_SAMPLE_COUNT);
             return;
         }
         
-        // 计算三次采集的平均值
+        // 计算多次采集的平均值
         battery_adc_value_ = sum / valid_reads;
         
-        ESP_LOGD("PowerManager", "🔋 电池ADC三次采集平均值: %d", battery_adc_value_);
+        ESP_LOGD("PowerManager", "🔋 电池ADC%d次采集平均值: %d", ADC_SAMPLE_COUNT, battery_adc_value_);
         
         // 使用平均值更新滑动窗口（参考gizwits-c2-6824-DRF-W300CA项目）
         // 首次读取时预填充均值缓冲
@@ -176,7 +183,7 @@ private:
         ESP_LOGD("PowerManager", "🔋 ADC滤波: 单次=%d, 滑动平均=%d", battery_adc_value_, average_adc_);
     }
     
-    // 读取充电检测ADC数据（三次采集取平均值）
+    // 读取充电检测ADC数据（多次采集取平均值，提高精度）
     void ReadChargingAdcData() {
         // 检查ADC句柄是否有效
         if (charging_detect_adc_handle_ == nullptr) {
@@ -184,11 +191,11 @@ private:
             return;
         }
         
-        // 三次采集取平均值
+        // 多次采集取平均值（提高精度）
         int32_t sum = 0;
         int32_t valid_reads = 0;
         
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < ADC_SAMPLE_COUNT; i++) {
             int temp_value = 0;
             esp_err_t ret = adc_oneshot_read(charging_detect_adc_handle_, CHARGING_DETECT_ADC_CHANNEL, &temp_value);
             if (ret == ESP_OK) {
@@ -197,17 +204,21 @@ private:
             } else {
                 ESP_LOGW("PowerManager", "🔋 充电检测ADC第%d次读取失败: %s", i+1, esp_err_to_name(ret));
             }
+            // 添加小延时，避免连续读取过快导致的不稳定
+            if (i < ADC_SAMPLE_COUNT - 1) {
+                vTaskDelay(pdMS_TO_TICKS(1));
+            }
         }
         
         if (valid_reads == 0) {
-            ESP_LOGW("PowerManager", "🔋 充电检测ADC三次读取全部失败");
+            ESP_LOGW("PowerManager", "🔋 充电检测ADC%d次读取全部失败", ADC_SAMPLE_COUNT);
             return;
         }
         
-        // 计算三次采集的平均值
+        // 计算多次采集的平均值
         charging_adc_value_ = sum / valid_reads;
         
-        ESP_LOGD("PowerManager", "🔋 充电检测ADC三次采集平均值: %d", charging_adc_value_);
+        ESP_LOGD("PowerManager", "🔋 充电检测ADC%d次采集平均值: %d", ADC_SAMPLE_COUNT, charging_adc_value_);
     }
     
     // 检查充电状态（仅判断充电/未充电，不计算电量）
@@ -298,9 +309,21 @@ private:
     }
     
     // 根据电压计算电量（使用电压-SOC对照表）
+    // 充电时电量只能增不能减，屏蔽ADC抖动
     void CalculateBatteryLevel() {
         uint32_t voltage_mv = GetBatteryVoltage();
-        battery_level_ = estimate_soc_from_voltage((uint16_t)voltage_mv);
+        uint8_t new_level = estimate_soc_from_voltage((uint16_t)voltage_mv);
+        
+        if (is_charging_) {
+            // 充电时：电量只能增加或保持不变，不能减少（屏蔽ADC抖动）
+            if (new_level >= battery_level_) {
+                battery_level_ = new_level;
+            }
+            // 如果new_level < battery_level_，保持当前电量不变
+        } else {
+            // 未充电时：电量可以正常变化（允许放电）
+            battery_level_ = new_level;
+        }
     }
     
     // 初始化电池电压检测ADC（使用ADC2_CH1）
