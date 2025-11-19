@@ -26,23 +26,23 @@ static const struct {
     const char* name;
     int group_index;
 } emotion_group_map[] = {
-    {"happy",        0},  // 组 0
-    {"neutral",      1},  // 组 1
-    {"sad",          2},  // 组 2
-    {"surprised",    3},  // 组 3
-    {"angry",        4},  // 组 4
-    {"loving",       5},  // 组 5
-    {"thinking",     6},  // 组 6
-    {"winking",      7},  // 组 7
-    {"sleepy",       8},  // 组 8
-    {"silly",        9},  // 组 9
-    {"vertigo",     10},  // 组 10
-    {"listen",      11},  // 组 11
-    {"Turn_left",   12},  // 组 12
-    {"Turn_right",  13},  // 组 13
-    {"Accelerate",  14},  // 组 14
-    {"Decelerate",  15},  // 组 15
-    {"Charging",    16}   // 组 16
+    {"happy",        0},  // 组 0开心表情
+    {"neutral",      1},  // 组 1中性开机表情
+    {"sad",          2},  // 组 2悲伤表情
+    {"surprised",    3},  // 组 3惊讶表情
+    {"angry",        4},  // 组 4愤怒表情
+    {"loving",       5},  // 组 5喜爱表情
+    {"thinking",     6},  // 组 6思考表情
+    {"winking",      7},  // 组 7眨眼表情
+    {"sleepy",       8},  // 组 8睡觉表情
+    // {"silly",        9},  // 组 9愚蠢表情       
+    {"vertigo",     9},  // 组 10眩晕表情
+    {"listen",      10},  // 组 11聆听表情
+    {"Turn_right",  11},  // 组 13右转表情
+    {"Turn_left",   12},  // 组 12左转表情
+    {"Accelerate",  13},  // 组 14加速表情
+    {"Decelerate",  14},  // 组 15急刹表情
+    {"Charging",    15}   // 组 16充电表情
 };
 
 EyeDisplay::EyeDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
@@ -176,6 +176,14 @@ void EyeDisplay::SetEmotion(const char* emotion) {
         ESP_LOGW(TAG, "SetEmotion: emotion is nullptr");
         return;
     }
+    
+    // 如果正在切换模式，延迟执行或跳过（避免在模式切换期间触发显示更新）
+    __sync_synchronize();
+    if (mode_switching_) {
+        ESP_LOGD(TAG, "SetEmotion: Mode switching, skipping emotion change");
+        return;
+    }
+    __sync_synchronize();
     
     // 更新显示模式为固定表情模式
     current_display_mode_ = DisplayMode::FIXED_EMOTION;
@@ -905,14 +913,28 @@ void EyeDisplay::UpdateBatteryLevel(int level) {
         return;
     }
     
+    // 如果正在切换模式，跳过更新（避免在切换过程中触发内存分配）
+    // 使用内存屏障确保读取到最新的标志位值
+    __sync_synchronize();
+    if (mode_switching_) {
+        ESP_LOGD(TAG, "UpdateBatteryLevel: Mode switching, skipping update");
+        return;
+    }
+    __sync_synchronize();
+    
     // 限制电量范围
     if (level < 0) level = 0;
     if (level > 100) level = 100;
     
-    DisplayLockGuard lock(this);
+    // 尝试获取锁，如果失败则跳过更新（避免阻塞）
+    if (!Lock(50)) {
+        ESP_LOGW(TAG, "UpdateBatteryLevel: Failed to acquire lock, skipping update");
+        return;
+    }
     
     // 检查对象是否有效
     if (!lv_obj_is_valid(battery_arc_)) {
+        Unlock();
         return;
     }
     
@@ -926,12 +948,16 @@ void EyeDisplay::UpdateBatteryLevel(int level) {
         color = 0x00FF00;  // 绿色
     }
     
-    // 更新进度条
+    // 更新进度条（在锁保护下操作，避免并发问题）
+    // 注意：如果内存不足，LVGL可能会失败，但不会崩溃（由LVGL内部处理）
     lv_arc_set_value(battery_arc_, level);
     lv_obj_set_style_arc_color(battery_arc_, lv_color_hex(color), LV_PART_INDICATOR);
     
-    // 确保充电环始终在最前面
+    // 确保充电环始终在最前面（这个操作可能触发重绘和内存分配）
+    // 如果内存不足，LVGL会返回失败，但不会崩溃
     lv_obj_move_foreground(battery_arc_);
+    
+    Unlock();
     
     // 不更新百分比标签（中间不显示数字）
 }
@@ -1006,21 +1032,61 @@ void EyeDisplay::VideoPlayTask(void* arg) {
     
     // Read header: 1 byte count + N*4 bytes frame counts
     uint8_t group_count = 0;
-    if (flash.Read(EyeDisplay::kVideoFlashBaseAddress, &group_count, 1) != ESP_OK || group_count == 0) {
-        ESP_LOGE(TAG, "invalid video header");
-        self->video_playing_ = false;
-        self->video_task_handle_ = nullptr;
-        vTaskDelete(nullptr);
-        return;
+    esp_err_t read_ret = flash.Read(EyeDisplay::kVideoFlashBaseAddress, &group_count, 1);
+    if (read_ret != ESP_OK) {
+        // 如果Flash被锁定，等待解锁
+        if (flash.IsLocked()) {
+            ESP_LOGI(TAG, "Flash is locked for erase/write, waiting for unlock...");
+            // 等待Flash解锁（最多等待5分钟）
+            for (int i = 0; i < 300 && flash.IsLocked(); ++i) {
+                vTaskDelay(pdMS_TO_TICKS(1000));  // 每秒检查一次
+            }
+            if (flash.IsLocked()) {
+                ESP_LOGE(TAG, "Flash still locked after 5 minutes, exiting video task");
+                self->video_playing_ = false;
+                self->video_task_handle_ = nullptr;
+                vTaskDelete(nullptr);
+                return;
+            }
+            // 重新读取
+            read_ret = flash.Read(EyeDisplay::kVideoFlashBaseAddress, &group_count, 1);
+        }
+        if (read_ret != ESP_OK || group_count == 0) {
+            ESP_LOGE(TAG, "invalid video header");
+            self->video_playing_ = false;
+            self->video_task_handle_ = nullptr;
+            vTaskDelete(nullptr);
+            return;
+        }
     }
     
     std::vector<uint32_t> frame_counts(group_count, 0);
-    if (flash.Read(EyeDisplay::kVideoFlashBaseAddress + 1, (uint8_t*)frame_counts.data(), group_count * sizeof(uint32_t)) != ESP_OK) {
-        ESP_LOGE(TAG, "read frame counts failed");
-        self->video_playing_ = false;
-        self->video_task_handle_ = nullptr;
-        vTaskDelete(nullptr);
-        return;
+    read_ret = flash.Read(EyeDisplay::kVideoFlashBaseAddress + 1, (uint8_t*)frame_counts.data(), group_count * sizeof(uint32_t));
+    if (read_ret != ESP_OK) {
+        // 如果Flash被锁定，等待解锁
+        if (flash.IsLocked()) {
+            ESP_LOGI(TAG, "Flash is locked for erase/write, waiting for unlock...");
+            // 等待Flash解锁（最多等待5分钟）
+            for (int i = 0; i < 300 && flash.IsLocked(); ++i) {
+                vTaskDelay(pdMS_TO_TICKS(1000));  // 每秒检查一次
+            }
+            if (flash.IsLocked()) {
+                ESP_LOGE(TAG, "Flash still locked after 5 minutes, exiting video task");
+                self->video_playing_ = false;
+                self->video_task_handle_ = nullptr;
+                vTaskDelete(nullptr);
+                return;
+            }
+            // 重新读取
+            read_ret = flash.Read(EyeDisplay::kVideoFlashBaseAddress + 1, (uint8_t*)frame_counts.data(), group_count * sizeof(uint32_t));
+        }
+        if (read_ret != ESP_OK) {
+            ESP_LOGE(TAG, "read frame counts failed");
+            self->video_playing_ = false;
+            self->video_task_handle_ = nullptr;
+            vTaskDelete(nullptr);
+            return;
+        }
     }
     
     // Compute offsets
@@ -1135,7 +1201,14 @@ void EyeDisplay::VideoPlayTask(void* arg) {
             
             // Read first frame of new group
             size_t off0 = EyeDisplay::kVideoFlashBaseAddress + group_base[current_group] + current_idx * frame_size;
-            if (flash.Read(off0, buf, frame_size) != ESP_OK) {
+            esp_err_t read_ret = flash.Read(off0, buf, frame_size);
+            if (read_ret != ESP_OK) {
+                // 如果Flash被锁定（正在擦写），等待并降低日志级别
+                if (flash.IsLocked()) {
+                    ESP_LOGD(TAG, "Flash is locked for erase/write, waiting...");
+                    vTaskDelay(pdMS_TO_TICKS(1000));  // 等待1秒
+                    continue;
+                }
                 ESP_LOGE(TAG, "read first frame of group %d failed", current_group);
                 vTaskDelay(pdMS_TO_TICKS(100));
                 continue;
@@ -1171,7 +1244,14 @@ void EyeDisplay::VideoPlayTask(void* arg) {
         // Play current frame
         if (current_frames > 0) {
             size_t off = EyeDisplay::kVideoFlashBaseAddress + group_base[current_group] + current_idx * frame_size;
-            if (flash.Read(off, buf, frame_size) != ESP_OK) {
+            esp_err_t read_ret = flash.Read(off, buf, frame_size);
+            if (read_ret != ESP_OK) {
+                // 如果Flash被锁定（正在擦写），等待并降低日志级别
+                if (flash.IsLocked()) {
+                    ESP_LOGD(TAG, "Flash is locked for erase/write, waiting...");
+                    vTaskDelay(pdMS_TO_TICKS(1000));  // 等待1秒
+                    continue;
+                }
                 ESP_LOGE(TAG, "read frame %u of group %d failed", (unsigned)current_idx, current_group);
                 vTaskDelay(pdMS_TO_TICKS(100));
                 continue;
@@ -1271,10 +1351,23 @@ void EyeDisplay::StartVideoPlayback() {
 
 void EyeDisplay::ToggleVideoCyclingMode() {
     ESP_LOGI(TAG, "ToggleVideoCyclingMode");
+    
+    // 设置切换标志，防止在切换过程中更新电量（使用内存屏障确保可见性）
+    mode_switching_ = true;
+    __sync_synchronize();  // 内存屏障，确保标志位对所有CPU核心可见
+    
+    // 在切换模式前，先停止电量更新定时器，避免在切换过程中触发更新
+    if (battery_update_timer_ != nullptr && battery_indicator_showing_) {
+        esp_timer_stop(battery_update_timer_);
+        // 等待定时器完全停止（给定时器任务时间处理停止请求）
+        vTaskDelay(pdMS_TO_TICKS(100));  // 增加等待时间，确保定时器完全停止
+    }
+    
     if (current_display_mode_ == DisplayMode::VIDEO_CYCLING) {
         current_display_mode_ = DisplayMode::FIXED_EMOTION;
-        // 播放睡眠表情
-        SetEmotion("sleepy");
+        // 直接设置视频组索引并播放，避免调用SetEmotion()触发额外的显示更新
+        video_group_index_ = 8;  // sleepy表情对应组8
+        PlayVideoGroup(8);
         // 解锁轮播锁定
         cycling_locked_ = false;
     } else {
@@ -1286,6 +1379,20 @@ void EyeDisplay::ToggleVideoCyclingMode() {
     // 确保视频播放任务正在运行
     if (video_task_handle_ == nullptr) {
         StartVideoPlayback();
+    }
+    
+    // 等待一段时间，确保所有切换操作完成，LVGL绘制完成
+    vTaskDelay(pdMS_TO_TICKS(150));  // 增加等待时间，确保LVGL绘制完成
+    
+    // 切换完成，清除标志（使用内存屏障）
+    __sync_synchronize();
+    mode_switching_ = false;
+    __sync_synchronize();
+    
+    // 如果电量指示器正在显示，延迟重新启动定时器（再等一段时间确保稳定）
+    if (battery_update_timer_ != nullptr && battery_indicator_showing_) {
+        vTaskDelay(pdMS_TO_TICKS(150));  // 增加等待时间
+        esp_timer_start_periodic(battery_update_timer_, 2000000);  // 2秒
     }
 }
 

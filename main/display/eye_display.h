@@ -340,6 +340,7 @@ private:
     lv_obj_t* battery_label_ = nullptr;  // 电量百分比标签
     esp_timer_handle_t battery_update_timer_ = nullptr;  // 电量更新定时器
     bool battery_indicator_showing_ = false;  // 是否正在显示电量
+    bool mode_switching_ = false;  // 是否正在切换模式（用于防止切换时更新电量）
     
     // 视频播放相关成员变量
     bool video_playing_ = false;
