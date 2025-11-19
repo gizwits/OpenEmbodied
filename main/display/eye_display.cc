@@ -70,7 +70,7 @@ EyeDisplay::EyeDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_
     ESP_LOGI(TAG, "Initialize LVGL port");
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     port_cfg.task_priority = 1;
-    port_cfg.timer_period_ms = 50;
+    port_cfg.timer_period_ms = 24;
     lvgl_port_init(&port_cfg);
 
     ESP_LOGI(TAG, "Adding LCD screen");
@@ -1192,6 +1192,8 @@ void EyeDisplay::VideoPlayTask(void* arg) {
                     if (!self->battery_indicator_showing_) {
                         lv_obj_move_foreground(self->video_img_);
                     }
+                    // 强制刷新，减少撕裂感
+                    lv_obj_invalidate(self->video_img_);
                 } else if (self->video_img_ != nullptr) {
                     // 对象已被删除，清空指针，下次循环会重新创建
                     self->video_img_ = nullptr;
