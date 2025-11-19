@@ -30,6 +30,8 @@
 #include "esp_timer.h"
 
 #include <math.h>
+#include <string.h>
+#include <string>
 
 #define TAG "MovecallMojiESP32S3"
 
@@ -49,11 +51,18 @@ private:
     // LIS2HH12专用I2C
     i2c_master_bus_handle_t lis2hh12_i2c_bus_;
     i2c_master_dev_handle_t lis2hh12_dev_;
+    uint8_t lis2hh12_i2c_addr_ = 0x1D;  // 检测到的I2C地址，默认为0x1D
     int64_t power_on_time_ = 0;  // 记录上电时间
     PowerManager* power_manager_;
     TickType_t last_touch_time_ = 0;  // 上次抚摸触发时间
     PowerSaveTimer* power_save_timer_;
     bool is_charging_sleep_ = false;
+    
+    // 陀螺仪表情恢复定时器（固定表情模式下使用）
+    esp_timer_handle_t gyro_emotion_restore_timer_ = nullptr;
+    std::string saved_emotion_before_gyro_;  // 陀螺仪触发前保存的表情
+    bool gyro_emotion_active_ = false;  // 是否正在显示陀螺仪触发的表情
+    TickType_t last_direction_time_ = 0;  // 上次方向触发时间（用于重置冷却时间）
 
     std::vector<TestItem> test_items = {
         {"lcd", "LCD测试", 1},
@@ -118,53 +127,317 @@ private:
 
     static void lis2hh12_task(void* arg) {
         MovecallMojiESP32S3* board = static_cast<MovecallMojiESP32S3*>(arg);
-        float last_ax = 0, last_ay = 0, last_az = 0;
-        const float threshold = 0.5; // g-force
+        float last_total_accel = 0.0f;
+        const float threshold = 0.45f; // g-force (摇晃检测阈值)
         int shake_count = 0;
-        const int shake_count_threshold = 10; // 连续3次才算shake
+        const int shake_count_threshold = 3; // 连续3次检测到变化才触发摇晃
         const int shake_count_decay = 1;     // 每次没检测到就-1
         TickType_t last_shake_time = 0;      // 上次摇晃触发时间
         const TickType_t shake_cooldown = pdMS_TO_TICKS(5000); // 5秒冷却时间
+        
+        // 方向检测阈值（使用变化量检测，类似眩晕检测）
+        // 使用raw值的变化量，避免静止状态误触发
+        const int16_t x_turn_threshold = 800;   // X轴变化量超过此值判断为转向（与前后阈值一致）
+        const int16_t y_forward_threshold = 800;  // Y轴变化量超过此值且为正向变化判断为前进
+        const int16_t y_backward_threshold = 800; // Y轴变化量超过此值且为负向变化判断为后退
+        
+        // 方向检测状态
+        int16_t last_x_raw = 0;  // 初始化为0，第一次读取后会更新
+        int16_t last_y_raw = 0;  // 初始化为0，第一次读取后会更新
+        bool first_reading = true;  // 标记是否为第一次读取
+        const TickType_t direction_cooldown = pdMS_TO_TICKS(5000); // 方向检测冷却时间5秒
+        
+        // 方向检测计数（类似摇晃检测）
+        int direction_count = 0;
+        const int direction_count_threshold = 3; // 连续3次检测到变化才触发
+        const int direction_count_decay = 1;     // 每次没检测到就-1
+        const char* last_detected_direction = nullptr; // 上次检测到的方向，用于判断方向是否改变
+        
         while (1) {
-            // 读取X/Y/Z
-            int16_t x = (int16_t)((board->lis2hh12_read_reg_pub(0x29) << 8) | board->lis2hh12_read_reg_pub(0x28));
-            int16_t y = (int16_t)((board->lis2hh12_read_reg_pub(0x2B) << 8) | board->lis2hh12_read_reg_pub(0x2A));
-            int16_t z = (int16_t)((board->lis2hh12_read_reg_pub(0x2D) << 8) | board->lis2hh12_read_reg_pub(0x2C));
-            float ax = x * 0.061f / 1000.0f;
-            float ay = y * 0.061f / 1000.0f;
-            float az = z * 0.061f / 1000.0f;
-            if (fabs(ax - last_ax) > threshold || fabs(ay - last_ay) > threshold || fabs(az - last_az) > threshold) {
+            // 读取X/Y/Z加速度数据（LIS2HH12使用±2g量程，灵敏度为0.061 mg/LSB）
+            int16_t x_raw = (int16_t)((board->lis2hh12_read_reg_pub(0x29) << 8) | board->lis2hh12_read_reg_pub(0x28));
+            int16_t y_raw = (int16_t)((board->lis2hh12_read_reg_pub(0x2B) << 8) | board->lis2hh12_read_reg_pub(0x2A));
+            int16_t z_raw = (int16_t)((board->lis2hh12_read_reg_pub(0x2D) << 8) | board->lis2hh12_read_reg_pub(0x2C));
+            
+            // 转换为g值：±2g量程，16位数据，灵敏度0.061 mg/LSB = 0.000061 g/LSB
+            // 所以转换公式：g = raw * 0.000061 * 2 / 32768 = raw * 0.061 / 1000
+            float ax = x_raw * 0.061f / 1000.0f;
+            float ay = y_raw * 0.061f / 1000.0f;
+            float az = z_raw * 0.061f / 1000.0f;
+            
+            // 计算总加速度（向量长度）：sqrt(ax^2 + ay^2 + az^2)
+            float total_accel = sqrtf(ax * ax + ay * ay + az * az);
+            
+            // 计算总加速度的变化量（更准确反映摇晃）
+            float delta_total = fabs(total_accel - last_total_accel);
+            
+            // 方向检测：根据轴的变化量判断方向（类似眩晕检测，使用变化量而不是绝对值）
+            TickType_t current_time = xTaskGetTickCount();
+            const char* detected_emotion = nullptr;
+            const char* direction = nullptr;
+            
+            // 第一次读取时，初始化last值，不进行方向检测
+            if (first_reading) {
+                last_x_raw = x_raw;
+                last_y_raw = y_raw;
+                first_reading = false;
+            } else {
+                // 计算各轴的变化量（相对于上次的值）
+                int16_t x_delta = abs(x_raw - last_x_raw);  // X轴变化量
+                int16_t y_delta = abs(y_raw - last_y_raw);  // Y轴变化量
+                int16_t y_change = y_raw - last_y_raw;      // Y轴变化方向（正负）
+                int16_t x_change = x_raw - last_x_raw;      // X轴变化方向（正负）
+                
+                // 同等优先级：根据变化量大小判断方向
+                // 如果Y轴变化量大于X轴变化量，且达到阈值，判断为前后
+                if (y_delta > x_delta && y_delta > y_forward_threshold) {
+                    // Y轴减小（向前倾斜）→ 前进
+                    if (y_change < 0) {
+                        direction = "前进";
+                        detected_emotion = "Accelerate";
+                    }
+                    // Y轴增大（向后倾斜）→ 后退
+                    else if (y_change > 0) {
+                        direction = "后退";
+                        detected_emotion = "Decelerate";
+                    }
+                }
+                // 如果X轴变化量大于Y轴变化量，且达到阈值，判断为左右转
+                else if (x_delta > y_delta && x_delta > x_turn_threshold) {
+                    // X轴减小（向左倾斜）→ 左转
+                    if (x_change < 0) {
+                        direction = "左转";
+                        detected_emotion = "Turn_left";
+                    }
+                    // X轴增大（向右倾斜）→ 右转
+                    else if (x_change > 0) {
+                        direction = "右转";
+                        detected_emotion = "Turn_right";
+                    }
+                }
+            }
+            
+            // 如果检测到方向变化，进行计数（类似眩晕检测）
+            if (detected_emotion != nullptr) {
+                // 如果方向改变，重置计数器
+                if (last_detected_direction != nullptr && strcmp(detected_emotion, last_detected_direction) != 0) {
+                    direction_count = 0;
+                }
+                last_detected_direction = detected_emotion;
+                direction_count++;
+                
+                // 检查是否达到触发阈值且已过冷却时间
+                if (direction_count >= direction_count_threshold && 
+                    current_time - board->last_direction_time_ >= direction_cooldown) {
+                    ESP_LOGI("LIS2HH12", "🔄 陀螺仪触发: 方向=%s, X轴=%d, Y轴=%d, 表情=%s", 
+                             direction, x_raw, y_raw, detected_emotion);
+                    
+                    if (Application::GetInstance().IsTmpFactoryTestMode()) {
+                        board->display_->UpdateTestItem("sensor", 1);
+                    } else {
+                        // 固定表情模式下：保存当前表情，触发表情，启动恢复定时器
+                        if (board->display_->GetDisplayMode() == EyeDisplay::DisplayMode::FIXED_EMOTION) {
+                            // 如果之前没有保存表情，保存当前表情（可能是默认的neutral）
+                            if (!board->gyro_emotion_active_) {
+                                // 获取当前表情（通过视频组索引反推，或使用默认值）
+                                board->saved_emotion_before_gyro_ = "neutral";  // 默认恢复为neutral
+                                board->gyro_emotion_active_ = true;
+                                ESP_LOGI("LIS2HH12", "保存当前表情: %s", board->saved_emotion_before_gyro_.c_str());
+                            }
+                            
+                            // 触发表情
+                            board->display_->SetEmotion(detected_emotion);
+                            ESP_LOGI("LIS2HH12", "已触发表情: %s (固定表情模式，5秒后恢复)", detected_emotion);
+                            
+                            // 创建或重启恢复定时器（5秒后恢复）
+                            if (board->gyro_emotion_restore_timer_ == nullptr) {
+                                esp_timer_create_args_t timer_args = {
+                                    .callback = [](void* arg) {
+                                        MovecallMojiESP32S3* board = static_cast<MovecallMojiESP32S3*>(arg);
+                                        ESP_LOGI("LIS2HH12", "⏰ 陀螺仪表情5秒到期，恢复表情: %s", 
+                                                 board->saved_emotion_before_gyro_.c_str());
+                                        board->display_->SetEmotion(board->saved_emotion_before_gyro_.c_str());
+                                        board->gyro_emotion_active_ = false;
+                                        board->saved_emotion_before_gyro_.clear();
+                                    },
+                                    .arg = board,
+                                    .name = "gyro_emotion_restore"
+                                };
+                                esp_timer_create(&timer_args, &board->gyro_emotion_restore_timer_);
+                            }
+                            esp_timer_stop(board->gyro_emotion_restore_timer_);  // 先停止（如果正在运行）
+                            esp_timer_start_once(board->gyro_emotion_restore_timer_, 5000000);  // 5秒 = 5000000微秒
+                        } else if (board->display_->GetDisplayMode() == EyeDisplay::DisplayMode::VIDEO_CYCLING) {
+                            // 轮播模式下：保存轮播状态，触发表情，启动恢复定时器
+                            if (!board->gyro_emotion_active_) {
+                                board->gyro_emotion_active_ = true;
+                                ESP_LOGI("LIS2HH12", "保存轮播状态，准备恢复轮播");
+                            }
+                            
+                            // 触发表情（会切换到固定表情模式）
+                            board->display_->SetEmotion(detected_emotion);
+                            ESP_LOGI("LIS2HH12", "已触发表情: %s (轮播模式，5秒后恢复轮播)", detected_emotion);
+                            
+                            // 创建或重启恢复定时器（5秒后恢复轮播）
+                            if (board->gyro_emotion_restore_timer_ == nullptr) {
+                                esp_timer_create_args_t timer_args = {
+                                    .callback = [](void* arg) {
+                                        MovecallMojiESP32S3* board = static_cast<MovecallMojiESP32S3*>(arg);
+                                        ESP_LOGI("LIS2HH12", "⏰ 陀螺仪表情5秒到期，恢复轮播模式");
+                                        // 恢复轮播模式
+                                        board->display_->ToggleVideoCyclingMode();
+                                        board->gyro_emotion_active_ = false;
+                                        // 重置方向检测冷却时间，允许立即检测新方向
+                                        board->last_direction_time_ = 0;
+                                    },
+                                    .arg = board,
+                                    .name = "gyro_emotion_restore"
+                                };
+                                esp_timer_create(&timer_args, &board->gyro_emotion_restore_timer_);
+                            }
+                            esp_timer_stop(board->gyro_emotion_restore_timer_);  // 先停止（如果正在运行）
+                            esp_timer_start_once(board->gyro_emotion_restore_timer_, 5000000);  // 5秒 = 5000000微秒
+                        } else {
+                            // 其他模式：直接触发表情，不恢复
+                            board->display_->SetEmotion(detected_emotion);
+                            ESP_LOGI("LIS2HH12", "已触发表情: %s", detected_emotion);
+                        }
+                    }
+                    
+                    // 重置计数和更新触发时间
+                    direction_count = 0;
+                    board->last_direction_time_ = current_time;
+                }
+            } else {
+                // 没有检测到方向变化，减少计数（类似摇晃检测的衰减）
+                if (direction_count > 0) {
+                    direction_count -= direction_count_decay;
+                    if (direction_count < 0) {
+                        direction_count = 0;
+                    }
+                }
+                // 如果长时间没有检测到方向，清空上次方向记录
+                if (last_detected_direction != nullptr && direction_count == 0) {
+                    last_detected_direction = nullptr;
+                }
+            }
+            
+            // 更新last值（用于下次计算变化量）
+            if (!first_reading) {
+                last_x_raw = x_raw;
+                last_y_raw = y_raw;
+            }
+            
+            // 检测是否有明显的总加速度变化（摇晃检测，优先级低于方向检测）
+            if (delta_total > threshold) {
                 shake_count++;
+                
                 if (shake_count >= shake_count_threshold) {
-                    TickType_t current_time = xTaskGetTickCount();
                     // 检查是否已经过了冷却时间
                     if (current_time - last_shake_time >= shake_cooldown) {
-                        ESP_LOGI("LIS2HH12", "Shake detected! ax=%.2f ay=%.2f az=%.2f", ax, ay, az);
+                        ESP_LOGI("LIS2HH12", "🔄 陀螺仪触发: 方向=摇晃, 总加速度=%.3f, 变化量=%.3f, 表情=vertigo", 
+                                 total_accel, delta_total);
+                        ESP_LOGI("LIS2HH12", "触发时数据: X=%.3f, Y=%.3f, Z=%.3f", ax, ay, az);
                         last_shake_time = current_time; // 更新上次触发时间
                         shake_count = 0; // 触发后清零
 
                         if (Application::GetInstance().IsTmpFactoryTestMode()) {
                             board->display_->UpdateTestItem("sensor", 1);
                         } else {
-                            // 这里可以触发你的摇晃事件
-                            if (board->ChannelIsOpen()) {
+                            // 固定表情模式下：保存当前表情，触发表情，启动恢复定时器
+                            if (board->display_->GetDisplayMode() == EyeDisplay::DisplayMode::FIXED_EMOTION) {
+                                // 如果之前没有保存表情，保存当前表情（可能是默认的neutral）
+                                if (!board->gyro_emotion_active_) {
+                                    board->saved_emotion_before_gyro_ = "neutral";  // 默认恢复为neutral
+                                    board->gyro_emotion_active_ = true;
+                                    ESP_LOGI("LIS2HH12", "保存当前表情: %s", board->saved_emotion_before_gyro_.c_str());
+                                }
+                                
+                                // 触发表情
                                 board->display_->SetEmotion("vertigo");
-                                Application::GetInstance().SendTextToAI("用户正在摇晃你");
+                                ESP_LOGI("LIS2HH12", "已触发表情: vertigo (固定表情模式，5秒后恢复)");
+                                
+                                // 创建或重启恢复定时器（5秒后恢复）
+                                if (board->gyro_emotion_restore_timer_ == nullptr) {
+                                    esp_timer_create_args_t timer_args = {
+                                        .callback = [](void* arg) {
+                                            MovecallMojiESP32S3* board = static_cast<MovecallMojiESP32S3*>(arg);
+                                            ESP_LOGI("LIS2HH12", "⏰ 陀螺仪表情5秒到期，恢复表情: %s", 
+                                                     board->saved_emotion_before_gyro_.c_str());
+                                            board->display_->SetEmotion(board->saved_emotion_before_gyro_.c_str());
+                                            board->gyro_emotion_active_ = false;
+                                            board->saved_emotion_before_gyro_.clear();
+                                        },
+                                        .arg = board,
+                                        .name = "gyro_emotion_restore"
+                                    };
+                                    esp_timer_create(&timer_args, &board->gyro_emotion_restore_timer_);
+                                }
+                                esp_timer_stop(board->gyro_emotion_restore_timer_);  // 先停止（如果正在运行）
+                                esp_timer_start_once(board->gyro_emotion_restore_timer_, 5000000);  // 5秒 = 5000000微秒
+                                
+                                // 如果Channel打开，发送AI消息
+                                if (board->ChannelIsOpen()) {
+                                    Application::GetInstance().SendTextToAI("用户正在摇晃你");
+                                }
+                            } else if (board->display_->GetDisplayMode() == EyeDisplay::DisplayMode::VIDEO_CYCLING) {
+                                // 轮播模式下：保存轮播状态，触发表情，启动恢复定时器
+                                if (!board->gyro_emotion_active_) {
+                                    board->gyro_emotion_active_ = true;
+                                    ESP_LOGI("LIS2HH12", "保存轮播状态，准备恢复轮播");
+                                }
+                                
+                                // 触发表情（会切换到固定表情模式）
+                                board->display_->SetEmotion("vertigo");
+                                ESP_LOGI("LIS2HH12", "已触发表情: vertigo (轮播模式，5秒后恢复轮播)");
+                                
+                                // 创建或重启恢复定时器（5秒后恢复轮播）
+                                if (board->gyro_emotion_restore_timer_ == nullptr) {
+                                    esp_timer_create_args_t timer_args = {
+                                        .callback = [](void* arg) {
+                                            MovecallMojiESP32S3* board = static_cast<MovecallMojiESP32S3*>(arg);
+                                            ESP_LOGI("LIS2HH12", "⏰ 陀螺仪表情5秒到期，恢复轮播模式");
+                                            // 恢复轮播模式
+                                            board->display_->ToggleVideoCyclingMode();
+                                            board->gyro_emotion_active_ = false;
+                                            // 重置方向检测冷却时间，允许立即检测新方向
+                                            board->last_direction_time_ = 0;
+                                        },
+                                        .arg = board,
+                                        .name = "gyro_emotion_restore"
+                                    };
+                                    esp_timer_create(&timer_args, &board->gyro_emotion_restore_timer_);
+                                }
+                                esp_timer_stop(board->gyro_emotion_restore_timer_);  // 先停止（如果正在运行）
+                                esp_timer_start_once(board->gyro_emotion_restore_timer_, 5000000);  // 5秒 = 5000000微秒
+                                
+                                // 如果Channel打开，发送AI消息
+                                if (board->ChannelIsOpen()) {
+                                    Application::GetInstance().SendTextToAI("用户正在摇晃你");
+                                }
                             } else {
-                                ESP_LOGI("LIS2HH12", "Channel is not open");
+                                // 其他模式：直接触发表情，不恢复
+                                if (board->ChannelIsOpen()) {
+                                    board->display_->SetEmotion("vertigo");
+                                    Application::GetInstance().SendTextToAI("用户正在摇晃你");
+                                } else {
+                                    ESP_LOGI("LIS2HH12", "Channel is not open");
+                                }
                             }
                         }
-
                     } else {
-                        ESP_LOGI("LIS2HH12", "Shake detected but in cooldown period");
                         shake_count = 0; // 重置计数但不触发
                     }
                 }
             } else {
-                if (shake_count > 0) shake_count -= shake_count_decay;
+                // 没有检测到明显变化，减少计数
+                if (shake_count > 0) {
+                    shake_count -= shake_count_decay;
+                }
             }
-            last_ax = ax; last_ay = ay; last_az = az;
-            vTaskDelay(pdMS_TO_TICKS(100));
+            
+            last_total_accel = total_accel;
+            vTaskDelay(pdMS_TO_TICKS(100)); // 100ms采样间隔
         }
     }
 
@@ -507,31 +780,91 @@ private:
             return;
         }
         
-        i2c_device_config_t dev_cfg = {
-            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-            .device_address = LIS2HH12_I2C_ADDR,
-            .scl_speed_hz = 400000,  // 降低到100kHz，提高稳定性
-        };
-        ret = i2c_master_bus_add_device(lis2hh12_i2c_bus_, &dev_cfg, &lis2hh12_dev_);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to add LIS2HH12 device: %s", esp_err_to_name(ret));
-            return;
+        ESP_LOGI(TAG, "LIS2HH12 I2C bus initialized successfully");
+    }
+
+    // 尝试检测LIS2HH12的I2C地址（0x1D或0x1E）
+    bool DetectLis2hh12Address(uint8_t& detected_addr) {
+        const uint8_t possible_addrs[] = {0x1D, 0x1E};
+        
+        for (int i = 0; i < 2; i++) {
+            uint8_t test_addr = possible_addrs[i];
+            ESP_LOGI(TAG, "尝试检测LIS2HH12地址: 0x%02X", test_addr);
+            
+            // 创建临时设备句柄进行测试
+            i2c_device_config_t dev_cfg = {
+                .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+                .device_address = test_addr,
+                .scl_speed_hz = 400000,
+            };
+            
+            i2c_master_dev_handle_t test_dev = nullptr;
+            esp_err_t ret = i2c_master_bus_add_device(lis2hh12_i2c_bus_, &dev_cfg, &test_dev);
+            if (ret != ESP_OK) {
+                ESP_LOGW(TAG, "无法添加设备到地址 0x%02X: %s", test_addr, esp_err_to_name(ret));
+                continue;
+            }
+            
+            // 尝试读取WHO_AM_I寄存器（0x0F）
+            uint8_t reg = 0x0F;
+            uint8_t data = 0;
+            ret = i2c_master_transmit_receive(test_dev, &reg, 1, &data, 1, pdMS_TO_TICKS(500));
+            
+            // 删除临时设备
+            i2c_master_bus_rm_device(test_dev);
+            
+            if (ret == ESP_OK && data == 0x41) {
+                // 找到正确的地址
+                detected_addr = test_addr;
+                ESP_LOGI(TAG, "LIS2HH12检测成功！地址: 0x%02X, WHO_AM_I: 0x%02X", test_addr, data);
+                return true;
+            } else if (ret == ESP_OK) {
+                ESP_LOGW(TAG, "地址 0x%02X 有响应但WHO_AM_I不正确: 0x%02X (期望0x41)", test_addr, data);
+            } else {
+                ESP_LOGW(TAG, "地址 0x%02X 无响应: %s", test_addr, esp_err_to_name(ret));
+            }
+            
+            vTaskDelay(pdMS_TO_TICKS(10)); // 短暂延迟
         }
         
-        ESP_LOGI(TAG, "LIS2HH12 I2C initialized successfully");
+        ESP_LOGE(TAG, "未找到LIS2HH12设备（尝试了0x1D和0x1E）");
+        return false;
     }
 
     void InitializeLis2hh12() {
-        // 首先检测设备是否存在
-        uint8_t who_am_i = this->lis2hh12_read_reg(0x0F); // WHO_AM_I寄存器
-        ESP_LOGI(TAG, "LIS2HH12 WHO_AM_I: 0x%02X", who_am_i);
-        
-        if (who_am_i != 0x41) { // LIS2HH12的WHO_AM_I值应该是0x41
-            ESP_LOGE(TAG, "LIS2HH12 not found! Expected 0x41, got 0x%02X", who_am_i);
+        // 首先自动检测I2C地址
+        if (!DetectLis2hh12Address(lis2hh12_i2c_addr_)) {
+            ESP_LOGE(TAG, "LIS2HH12地址检测失败，无法初始化");
+            lis2hh12_dev_ = nullptr;
             return;
         }
         
-        ESP_LOGI(TAG, "LIS2HH12 detected successfully");
+        // 使用检测到的地址创建设备句柄
+        i2c_device_config_t dev_cfg = {
+            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+            .device_address = lis2hh12_i2c_addr_,
+            .scl_speed_hz = 400000,
+        };
+        esp_err_t ret = i2c_master_bus_add_device(lis2hh12_i2c_bus_, &dev_cfg, &lis2hh12_dev_);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to add LIS2HH12 device at address 0x%02X: %s", 
+                     lis2hh12_i2c_addr_, esp_err_to_name(ret));
+            lis2hh12_dev_ = nullptr;
+            return;
+        }
+        
+        // 再次验证WHO_AM_I寄存器
+        uint8_t who_am_i = this->lis2hh12_read_reg(0x0F);
+        ESP_LOGI(TAG, "LIS2HH12 WHO_AM_I: 0x%02X (地址: 0x%02X)", who_am_i, lis2hh12_i2c_addr_);
+        
+        if (who_am_i != 0x41) {
+            ESP_LOGE(TAG, "LIS2HH12 WHO_AM_I验证失败! Expected 0x41, got 0x%02X", who_am_i);
+            i2c_master_bus_rm_device(lis2hh12_dev_);
+            lis2hh12_dev_ = nullptr;
+            return;
+        }
+        
+        ESP_LOGI(TAG, "LIS2HH12 detected successfully at address 0x%02X", lis2hh12_i2c_addr_);
         
         // 0x20: CTRL1, 0x57 = 100Hz, all axes enable, normal mode
         this->lis2hh12_write_reg(0x20, 0x57);

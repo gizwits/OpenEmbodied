@@ -23,7 +23,8 @@ W25Q64Flash::W25Q64Flash()
     , cs_pin_(-1)
     , chip_size_(0)
     , jedec_id_(0)
-    , mutex_(xSemaphoreCreateMutex()) {
+    , mutex_(xSemaphoreCreateMutex())
+    , erasing_(false) {
     if (mutex_ == nullptr) {
         ESP_LOGE(TAG, "Failed to create flash mutex");
     }
@@ -230,6 +231,12 @@ esp_err_t W25Q64Flash::Read(uint32_t address, uint8_t* data, size_t length) {
         return ESP_ERR_INVALID_ARG;
     }
 
+    // 如果正在擦写，禁止读取（使用DEBUG级别，避免大量警告日志）
+    if (erasing_) {
+        ESP_LOGD(TAG, "Flash is locked for erase/write, read operation denied");
+        return ESP_ERR_INVALID_STATE;
+    }
+
     if (mutex_ == nullptr) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -334,7 +341,23 @@ esp_err_t W25Q64Flash::Block64KErase(uint32_t address) {
 
 esp_err_t W25Q64Flash::ChipErase() {
     ESP_LOGI(TAG, "Chip erase started, this may take up to 100 seconds...");
-    return esp_flash_erase_chip(esp_flash_handle_);
+    ESP_LOGI(TAG, "正在擦除外置Flash芯片（W25Q64/W25Q128），请耐心等待...");
+    
+    // 记录开始时间
+    int64_t erase_start_time = esp_timer_get_time();
+    
+    // 直接调用擦除（阻塞操作，可能需要几分钟）
+    // 注意：这是擦除外置Flash（W25Q64/W25Q128），不是内部Flash
+    esp_err_t ret = esp_flash_erase_chip(esp_flash_handle_);
+    
+    if (ret == ESP_OK) {
+        int64_t total_time = (esp_timer_get_time() - erase_start_time) / 1000000;
+        ESP_LOGI(TAG, "✅ 外置Flash擦除完成！总耗时: %lld 秒", total_time);
+    } else {
+        ESP_LOGE(TAG, "❌ 外置Flash擦除失败: %s", esp_err_to_name(ret));
+    }
+    
+    return ret;
 }
 
 esp_err_t W25Q64Flash::PowerDown() {

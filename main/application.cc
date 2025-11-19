@@ -473,7 +473,7 @@ void Application::Start() {
     if (!flash.IsInitialized()) {
         ESP_LOGE(TAG, "外置Flash未初始化，无法下载表情包");
     } else {
-        const char* emotion_url = "http://xbgroup-1251025085.cos.ap-guangzhou.myqcloud.com/firmwares/output1.0.bin";
+        const char* emotion_url = "http://xbgroup-1251025085.cos.ap-guangzhou.myqcloud.com/firmwares/output1.1.bin";
         
         // 检查是否已经下载过这个URL
         Settings settings("emotion", true);
@@ -483,6 +483,21 @@ void Application::Start() {
             ESP_LOGI(TAG, "表情包URL已下载过，跳过下载: %s", emotion_url);
         } else {
             ESP_LOGI(TAG, "外置Flash已初始化，开始下载...");
+            
+            // 锁定Flash，禁止其他代码访问（防止读取表情导致失败）
+            ESP_LOGI(TAG, "锁定Flash，禁止访问...");
+            flash.LockForErase();
+            
+            // 烧录前先擦除整个Flash，防止有残留
+            ESP_LOGI(TAG, "开始擦除整个Flash芯片（这可能需要几分钟）...");
+            esp_err_t erase_ret = flash.ChipErase();
+            if (erase_ret != ESP_OK) {
+                ESP_LOGE(TAG, "❌ Flash擦除失败: %s", esp_err_to_name(erase_ret));
+                flash.UnlockAfterErase();
+                return;
+            }
+            ESP_LOGI(TAG, "✅ Flash擦除完成，开始下载表情包...");
+            
             esp_err_t download_ret = flash.DownloadToFlash(
                 emotion_url,
                 0x000000,
@@ -494,8 +509,18 @@ void Application::Start() {
                 // 保存下载成功的URL
                 settings.SetString("downloaded_url", emotion_url);
                 ESP_LOGI(TAG, "已保存表情包URL到配置");
+                
+                // 解锁Flash
+                flash.UnlockAfterErase();
+                
+                // 擦写完成，重启设备
+                ESP_LOGI(TAG, "Flash擦写完成，3秒后重启设备...");
+                vTaskDelay(pdMS_TO_TICKS(3000));
+                esp_restart();
             } else {
                 ESP_LOGE(TAG, "❌ 表情包下载失败: %s", esp_err_to_name(download_ret));
+                // 解锁Flash
+                flash.UnlockAfterErase();
             }
         }
     }
@@ -1039,7 +1064,7 @@ void Application::SetDeviceState(DeviceState state) {
             break;
         case kDeviceStateListening:
             display->SetStatus(Lang::Strings::LISTENING);
-            display->SetEmotion("neutral");
+            display->SetEmotion("listen");  // 显示聆听表情，而不是neutral
             // Make sure the audio processor is running
             if (!audio_service_.IsAudioProcessorRunning()) {
                 // Send the start listening command
@@ -1425,9 +1450,31 @@ void Application::EnterSleepMode() {
         wifi_station.Stop();
         SetDeviceState(kDeviceStateSleeping);
 
-    
+        // 检查电量和充电状态，决定显示哪个表情
+        int level = 0;
+        bool charging = false;
+        bool discharging = false;
+        bool has_battery = board.GetBatteryLevel(level, charging, discharging);
+        
         display->SetStatus(Lang::Strings::STANDBY);
-        display->SetEmotion("sleepy");
+        if (has_battery) {
+            if (charging && level < 100) {
+                // 正在充电且未满电，显示吃电池表情
+                ESP_LOGI(TAG, "充电中进入睡眠模式（电量: %d%%），显示吃电池表情", level);
+                display->SetEmotion("Charging");
+            } else if (level < 25) {
+                // 低电量（未充电），显示吃电池表情
+                ESP_LOGI(TAG, "低电量进入睡眠模式（电量: %d%%），显示吃电池表情", level);
+                display->SetEmotion("Charging");
+            } else {
+                // 正常电量或100%满电，显示睡觉表情
+                ESP_LOGI(TAG, "进入睡眠模式（电量: %d%%, 充电: %d），显示睡觉表情", level, charging);
+                display->SetEmotion("sleepy");
+            }
+        } else {
+            // 无法获取电量信息，默认显示睡觉表情
+            display->SetEmotion("sleepy");
+        }
         if (backlight) {
             backlight->SetBrightness(0);
         }

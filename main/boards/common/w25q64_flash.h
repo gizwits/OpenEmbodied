@@ -90,6 +90,11 @@ public:
     uint32_t GetSectorSize() const { return W25Q64_SECTOR_SIZE; }
     bool IsInitialized() const { return initialized_; }
     
+    // 锁定/解锁 Flash（擦写期间阻止访问）
+    void LockForErase() { erasing_ = true; }
+    void UnlockAfterErase() { erasing_ = false; }
+    bool IsLocked() const { return erasing_; }
+    
     // HTTP 下载到 Flash
     esp_err_t DownloadToFlash(const char* url, uint32_t flash_address, 
                               void (*progress_callback)(size_t downloaded, size_t total) = nullptr);
@@ -108,6 +113,7 @@ private:
     uint32_t chip_size_;
     uint32_t jedec_id_;
     SemaphoreHandle_t mutex_;  // 互斥锁，保护 flash 并发访问
+    bool erasing_;  // 是否正在擦写（锁定期间禁止读取）
     
     // 内部辅助函数
     esp_err_t WriteEnable();

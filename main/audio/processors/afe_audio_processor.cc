@@ -194,11 +194,12 @@ void AfeAudioProcessor::AudioProcessorTask() {
         }
         
         // 成功时也打印性能信息（每10次打印一次）
-        static int success_count = 0;
-        success_count++;
-        if (success_count % 10 == 0) {
-            ESP_LOGI(TAG, "AFE fetch成功，耗时: %lld us", fetch_time);
-        }
+        // 已禁用日志打印以减少日志输出
+        // static int success_count = 0;
+        // success_count++;
+        // if (success_count % 10 == 0) {
+        //     ESP_LOGI(TAG, "AFE fetch成功，耗时: %lld us", fetch_time);
+        // }
         
         // 成功读取，重置失败计数器
         consecutive_failures_ = 0;
