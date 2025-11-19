@@ -47,6 +47,20 @@ public:
     // 读取视频组数量
     int ReadVideoGroupCount();
 
+    // 播放完成回调函数类型
+    using OnGroupFinishedCallback = void(*)(void* arg, int group_index);
+    
+    // 设置播放完成回调（当一组播放完成时调用）
+    void SetOnGroupFinishedCallback(OnGroupFinishedCallback callback, void* arg) {
+        on_group_finished_callback_ = callback;
+        on_group_finished_arg_ = arg;
+    }
+    
+    // 设置是否循环播放同一组（DISPLAY_ANIMATION模式下应该循环播放）
+    void SetLoopGroup(bool loop) {
+        loop_group_ = loop;
+    }
+
 private:
     // 播放任务
     static void VideoPlayTask(void* arg);
@@ -71,6 +85,7 @@ private:
     // LVGL 相关
     lv_obj_t* video_img_ = nullptr;
     lv_img_dsc_t video_img_dsc_{};
+    lv_obj_t* cached_charging_arc_ = nullptr;  // 缓存的充电圆环对象，避免每次遍历
     
     // 状态映射函数
     EmotionToGroupFunc emotion_to_group_func_ = DefaultEmotionToGroup;
@@ -78,5 +93,12 @@ private:
     // 重入保护
     TickType_t last_start_tick_ = 0;
     int last_started_group_ = -1;
+    
+    // 播放完成回调
+    OnGroupFinishedCallback on_group_finished_callback_ = nullptr;
+    void* on_group_finished_arg_ = nullptr;
+    
+    // 是否循环播放同一组（DISPLAY_ANIMATION模式下为true）
+    bool loop_group_ = true;  // 默认循环播放，避免黑屏
 };
 

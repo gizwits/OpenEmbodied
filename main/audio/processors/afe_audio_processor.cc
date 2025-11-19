@@ -1,5 +1,9 @@
 #include "afe_audio_processor.h"
 #include <esp_log.h>
+#include <esp_timer.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <string.h>
 
 #define PROCESSOR_RUNNING 0x01
 
@@ -145,11 +149,34 @@ void AfeAudioProcessor::AudioProcessorTask() {
             continue;  // 事件位被清除，继续等待
         }
 
+        int64_t fetch_start_time = esp_timer_get_time();
         auto res = afe_iface_->fetch_with_delay(afe_data_, pdMS_TO_TICKS(100));
+        int64_t fetch_time = esp_timer_get_time() - fetch_start_time;
+        
         if (res == nullptr || res->ret_value == ESP_FAIL) {
             consecutive_failures_++;
-            ESP_LOGW(TAG, "AFE fetch failed, consecutive failures: %d/%d", 
-                     consecutive_failures_, MAX_CONSECUTIVE_FAILURES);
+            ESP_LOGW(TAG, "AFE fetch failed, consecutive failures: %d/%d, fetch耗时: %lld us", 
+                     consecutive_failures_, MAX_CONSECUTIVE_FAILURES, fetch_time);
+            
+            // 打印任务状态信息
+            TaskStatus_t task_status;
+            UBaseType_t task_count = uxTaskGetNumberOfTasks();
+            TaskStatus_t* task_array = (TaskStatus_t*)pvPortMalloc(task_count * sizeof(TaskStatus_t));
+            if (task_array != nullptr) {
+                task_count = uxTaskGetSystemState(task_array, task_count, nullptr);
+                for (UBaseType_t i = 0; i < task_count; i++) {
+                    if (strcmp(task_array[i].pcTaskName, "video_play") == 0 || 
+                        strcmp(task_array[i].pcTaskName, "audio_communication") == 0 ||
+                        strcmp(task_array[i].pcTaskName, "LVGL") == 0) {
+                        ESP_LOGW(TAG, "任务状态 - %s: 优先级=%d, 运行时间=%lu, 栈剩余=%u", 
+                                task_array[i].pcTaskName,
+                                task_array[i].uxCurrentPriority,
+                                task_array[i].ulRunTimeCounter,
+                                task_array[i].usStackHighWaterMark);
+                    }
+                }
+                vPortFree(task_array);
+            }
             
             // 连续20次失败后触发异常重启
             if (consecutive_failures_ >= MAX_CONSECUTIVE_FAILURES) {
@@ -160,8 +187,17 @@ void AfeAudioProcessor::AudioProcessorTask() {
             
             if (res != nullptr) {
                 ESP_LOGI(TAG, "Error code: %d", res->ret_value);
+            } else {
+                ESP_LOGE(TAG, "AFE fetch返回nullptr，可能是超时或资源竞争");
             }
             continue;
+        }
+        
+        // 成功时也打印性能信息（每10次打印一次）
+        static int success_count = 0;
+        success_count++;
+        if (success_count % 10 == 0) {
+            ESP_LOGI(TAG, "AFE fetch成功，耗时: %lld us", fetch_time);
         }
         
         // 成功读取，重置失败计数器

@@ -303,6 +303,7 @@ private:
     std::string saved_emotion_before_battery_ = "";  // 显示电量UI之前保存的表情
     bool was_video_mode_before_battery_ = false;  // 显示电量UI之前是否在视频模式
     int saved_video_group_index_ = -1;  // 显示电量UI之前保存的视频组索引
+    lv_color_t saved_screen_bg_color_ = LV_COLOR_MAKE(0, 0, 0);  // 显示电量UI之前保存的屏幕背景色
     
     // 充电时显示的电量圆环（一直显示，直到停止充电）
     lv_obj_t* charging_battery_arc_ = nullptr;  // 充电时的电量圆环（独立对象）

@@ -1290,8 +1290,16 @@ void EyeDisplay::SetupUI() {
     lv_obj_set_style_shadow_width(right_eye_, 0, 0);
     lv_obj_set_style_outline_width(right_eye_, 0, 0);
 
+    // 初始化时隐藏眼睛对象和容器，避免在视频播放前显示默认表情
+    // 视频播放会在 TriggerEmotion 时通过 VideoPlayer 显示
+    lv_obj_add_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(container, LV_OBJ_FLAG_HIDDEN);
+    ESP_LOGI(TAG, "SetupUI: 初始化时隐藏眼睛对象，等待视频播放");
+
     // 禁用默认的待机动画，改用视频播放，节省内存
-    StartIdleAnimation();
+    // 不再调用 StartIdleAnimation()，等待后续的 SetEmotion 调用来触发视频播放
+    // StartIdleAnimation();  // 已注释，统一使用视频播放
 }
 
 void EyeDisplay::TestNextEmotion() {
@@ -1364,21 +1372,31 @@ void EyeDisplay::EnterWifiConfig() {
             return;
         }
         
-        // 设置背景为白色
-        lv_obj_set_style_bg_color(screen, lv_color_white(), 0);
-        
         // 先逐个删除子对象，避免访问已删除的对象
+        // 注意：删除对象前先检查对象是否有效，避免访问已删除的对象
         uint32_t child_cnt = lv_obj_get_child_cnt(screen);
         ESP_LOGI(TAG, "EnterWifiConfig: 删除 %u 个子对象", child_cnt);
         for (int32_t i = child_cnt - 1; i >= 0; i--) {
             lv_obj_t* child = lv_obj_get_child(screen, i);
-            if (child != nullptr) {
+            if (child != nullptr && lv_obj_is_valid(child)) {
                 lv_obj_del(child);
             }
         }
         
-        // 等待一下确保删除完成
-        vTaskDelay(pdMS_TO_TICKS(50));
+        // 强制刷新LVGL，确保删除操作完成
+        lv_refr_now(nullptr);
+        
+        // 等待更长时间确保删除完成和LVGL稳定
+        // 同时给视频任务时间完全退出（DeviceStateEventManager回调中已经停止，但这里再等待一下确保）
+        // 增加等待时间，确保视频任务完全退出（因为任务可能在读取Flash或更新LVGL）
+        vTaskDelay(pdMS_TO_TICKS(800));
+        
+        // 设置背景为白色（在删除子对象后设置，确保背景显示）
+        lv_obj_set_style_bg_color(screen, lv_color_white(), 0);
+        lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
+        // 强制刷新屏幕背景
+        lv_obj_invalidate(screen);
+        lv_refr_now(nullptr);
         
         // 显示二维码图片
         if (qrcode_img_) {
@@ -1388,10 +1406,19 @@ void EyeDisplay::EnterWifiConfig() {
                 return;
             }
             lv_img_set_src(img, qrcode_img_);
-            lv_obj_set_style_img_recolor(img, lv_color_hex(EYE_COLOR), 0);
+            // 设置二维码颜色为黑色（在白色背景上更清晰）
+            lv_obj_set_style_img_recolor(img, lv_color_black(), 0);
+            lv_obj_set_style_img_recolor_opa(img, LV_OPA_COVER, 0);
+            // 确保图片可见
+            lv_obj_clear_flag(img, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_style_img_opa(img, LV_OPA_COVER, 0);
             lv_obj_center(img);
             // 确保二维码图片在最前面
             lv_obj_move_foreground(img);
+            // 强制刷新图片对象
+            lv_obj_invalidate(img);
+            // 强制刷新，确保二维码立即显示
+            lv_refr_now(nullptr);
             ESP_LOGI(TAG, "EnterWifiConfig: QR code image created successfully, img=%p", img);
         }
     } else {
@@ -1757,6 +1784,29 @@ void EyeDisplay::ShowBatteryIndicator() {
         return;
     }
     
+    // 保存当前背景色并设置黑色背景
+    saved_screen_bg_color_ = lv_obj_get_style_bg_color(screen, 0);
+    lv_obj_set_style_bg_color(screen, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
+    ESP_LOGI(TAG, "ShowBatteryIndicator: 设置黑色背景");
+    
+    // 隐藏视频图像对象（如果存在）
+    // 视频图像对象是通过 lv_image_create 创建的，大小通常是 240x240
+    uint32_t child_cnt = lv_obj_get_child_cnt(screen);
+    for (uint32_t i = 0; i < child_cnt; i++) {
+        lv_obj_t* child = lv_obj_get_child(screen, i);
+        if (child != nullptr && lv_obj_check_type(child, &lv_image_class)) {
+            // 检查对象大小，视频图像通常是全屏大小（240x240）
+            int32_t obj_w = lv_obj_get_width(child);
+            int32_t obj_h = lv_obj_get_height(child);
+            // 如果是全屏大小的图像对象，很可能是视频图像，隐藏它
+            if (obj_w >= width_ - 10 && obj_h >= height_ - 10) {
+                lv_obj_add_flag(child, LV_OBJ_FLAG_HIDDEN);
+                ESP_LOGI(TAG, "ShowBatteryIndicator: 隐藏视频图像对象 (size: %dx%d)", obj_w, obj_h);
+            }
+        }
+    }
+    
     // 清空所有表情UI元素：隐藏眼睛、嘴巴、爱心、眼泪、zzz标签、手部等
     if (left_eye_ != nullptr) {
         lv_obj_add_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
@@ -1956,9 +2006,11 @@ void EyeDisplay::ShowBatteryIndicator() {
     if (battery_display_timer_ == nullptr) {
         esp_timer_create_args_t timer_args = {
             .callback = [](void* arg) {
-                EyeDisplay* display = static_cast<EyeDisplay*>(arg);
-                // 通过 Board::GetInstance() 调用 HideBatteryIndicator，以便恢复视频播放
-                Board::GetInstance().HideBatteryIndicator();
+                // 使用 Application::Schedule 将恢复操作调度到主应用线程执行
+                // 避免在定时器任务中直接调用可能导致阻塞的操作
+                Application::GetInstance().Schedule([]() {
+                    Board::GetInstance().HideBatteryIndicator();
+                }, "HideBatteryIndicator_Timer");
             },
             .arg = this,
             .dispatch_method = ESP_TIMER_TASK,
@@ -2005,29 +2057,31 @@ void EyeDisplay::HideBatteryIndicator() {
             emotion_to_restore = saved_emotion_before_battery_;
             saved_emotion_before_battery_.clear();
         }
+        // 恢复背景色
+        lv_obj_t* screen = lv_screen_active();
+        if (screen != nullptr) {
+            lv_obj_set_style_bg_color(screen, saved_screen_bg_color_, 0);
+            ESP_LOGI(TAG, "HideBatteryIndicator: 恢复背景色");
+        }
         // 清除视频模式信息
         was_video_mode_before_battery_ = false;
         saved_video_group_index_ = -1;
     }  // 锁在这里自动释放
     
-    // 如果不是视频模式且不在特殊模式，恢复表情
-    if (!was_video_mode && !emotion_to_restore.empty() && !in_special_mode) {
-        ESP_LOGI(TAG, "恢复之前保存的表情: %s", emotion_to_restore.c_str());
-        // 延迟一下确保锁已释放
-        vTaskDelay(pdMS_TO_TICKS(50));
-        // 恢复表情
-        ProcessEmotionChange(emotion_to_restore.c_str());
+    // 所有表情都通过视频播放，由外部的 HideBatteryIndicator() 恢复视频播放
+    // 这里不再调用 ProcessEmotionChange()，因为所有表情都统一使用视频播放
+    if (was_video_mode) {
+        ESP_LOGI(TAG, "之前在视频模式，不恢复表情，由外部恢复视频播放");
+    } else if (in_special_mode) {
+        ESP_LOGI(TAG, "在特殊模式（配网/OTA/测试），不恢复表情");
     } else {
-        if (was_video_mode) {
-            ESP_LOGI(TAG, "之前在视频模式，不恢复表情，由外部恢复视频播放");
-        } else if (in_special_mode) {
-            ESP_LOGI(TAG, "在特殊模式（配网/OTA/测试），不恢复表情");
-        } else if (emotion_to_restore.empty()) {
+        // 理论上不应该到达这里，因为所有表情都通过视频播放
+        // 如果确实需要恢复，应该通过 SetEmotion() 来触发视频播放
+        ESP_LOGW(TAG, "HideBatteryIndicator: 非视频模式且不在特殊模式，但所有表情应通过视频播放");
+        if (!emotion_to_restore.empty()) {
+            ESP_LOGI(TAG, "理论上不应该执行：恢复之前保存的表情: %s (应通过视频播放)", emotion_to_restore.c_str());
+        } else {
             ESP_LOGW(TAG, "没有保存的表情可恢复，saved_emotion_before_battery_为空");
-            // 如果没有保存的表情，至少恢复默认的neutral表情
-            ESP_LOGI(TAG, "恢复默认neutral表情");
-            vTaskDelay(pdMS_TO_TICKS(50));
-            ProcessEmotionChange("neutral");
         }
     }
 }

@@ -43,6 +43,13 @@
 
 #define TAG "MovecallMojiESP32S3"
 
+// 休眠时间配置（单位：秒）
+// 20分钟 = 60 * 20 = 1200秒
+#define SLEEP_TIME_SEC (30 * 1)
+// 关机时间配置（单位：秒）
+// 30分钟 = 60 * 30 = 1800秒
+#define SHUTDOWN_TIME_SEC (60 * 30)
+
 LV_FONT_DECLARE(font_puhui_20_4);
 LV_FONT_DECLARE(font_awesome_20_4);
 
@@ -194,6 +201,16 @@ private:
     // 二维码显示状态
     bool qrcode_displaying_ = false;  // 是否正在显示二维码
     esp_timer_handle_t qrcode_timer_ = nullptr;  // 二维码显示后的定时器（用于自动进入配网模式）
+    
+    // 视频模式轮播相关
+    esp_timer_handle_t video_cycle_timer_ = nullptr;  // 视频轮播定时器
+    bool video_cycling_ = false;  // 是否正在轮播
+    esp_timer_handle_t gyro_emotion_timer_ = nullptr;  // 陀螺仪触发表情的恢复定时器（5秒后恢复轮播）
+    bool gyro_emotion_active_ = false;  // 是否正在显示陀螺仪触发的表情
+    const char* last_gyro_emotion_ = nullptr;  // 上次陀螺仪触发的表情，用于避免重复触发
+    
+    // 双击显示电量时保存的状态
+    bool was_video_cycling_before_battery_ = false;  // 显示电量前是否在轮播
 
     std::vector<TestItem> test_items = {
         {"lcd", "LCD测试", 1},
@@ -206,12 +223,28 @@ private:
 
 
     void InitializePowerSaveTimer() {
-        // 20 分钟进休眠
-        // 30 分钟 关机
-        power_save_timer_ = new PowerSaveTimer(-1, 60 * 20, 60 * 30);
-        // power_save_timer_ = new PowerSaveTimer(-1, 20 * 1, 60 * 2);
+        // 使用宏定义配置休眠和关机时间
+        // SLEEP_TIME_SEC: 进入睡眠的时间（默认20分钟）
+        // SHUTDOWN_TIME_SEC: 关机时间（默认30分钟）
+        power_save_timer_ = new PowerSaveTimer(-1, SLEEP_TIME_SEC, SHUTDOWN_TIME_SEC);
+        // power_save_timer_ = new PowerSaveTimer(-1, 20 * 1, 60 * 2);  // 测试用：20秒休眠，2分钟关机
         power_save_timer_->OnEnterSleepMode([this]() {
             ESP_LOGE(TAG, "Enabling sleep mode");
+            
+            // 先停止视频播放和轮播，避免视频任务阻塞休眠
+            if (video_player_ != nullptr) {
+                ESP_LOGI(TAG, "进入休眠模式前，停止视频播放");
+                // 如果正在轮播，保存状态以便唤醒后恢复
+                bool was_cycling = video_cycling_;
+                if (was_cycling) {
+                    ESP_LOGI(TAG, "进入休眠模式前，停止视频轮播（唤醒后恢复）");
+                    StopVideoCycling();
+                }
+                video_player_->StopPlayback();
+                // 等待视频任务完全退出
+                vTaskDelay(pdMS_TO_TICKS(500));
+            }
+            
             if(IsCharging()) {
                 // 充电中
                 is_charging_sleep_ = true;
@@ -219,8 +252,16 @@ private:
                     Application::GetInstance().QuitTalking();
                     Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
 
-                    // 在这个场景里要切换成睡觉表情 
-                    // display_->SetEmotion("sleepy");
+                    // 在视频模式下显示睡觉表情（组8对应sleepy）
+                    if (playback_mode_ == PlaybackMode::VIDEO_PLAYBACK && video_player_ != nullptr) {
+                        ESP_LOGI(TAG, "进入休眠模式：显示睡觉表情（组8）");
+                        // 停止轮播，只播放睡觉表情，循环播放
+                        video_player_->SetLoopGroup(true);
+                        video_player_->PlayVideoGroupByIndex(8);  // 组8对应sleepy
+                    } else if (display_ != nullptr) {
+                        // Display模式下使用传统方式
+                        display_->SetEmotion("sleepy");
+                    }
                 }, "EnterSleepMode_QuitTalking");
 
             } else {
@@ -230,6 +271,15 @@ private:
         });
         power_save_timer_->OnExitSleepMode([this]() {
             ESP_LOGE(TAG, "退出休眠模式");
+            // 如果之前在视频模式，恢复视频播放
+            if (playback_mode_ == PlaybackMode::VIDEO_PLAYBACK && video_player_ != nullptr) {
+                ESP_LOGI(TAG, "退出休眠模式后，恢复视频播放");
+                // 先停止当前的睡觉表情（如果正在播放）
+                video_player_->StopPlayback();
+                vTaskDelay(pdMS_TO_TICKS(200));
+                // 重新启动轮播（从组0开始）
+                StartVideoCycling();
+            }
         });
         power_save_timer_->OnShutdownRequest([this]() {
             // 关机
@@ -265,9 +315,30 @@ private:
         const int shake_count_decay = 1;     // 每次没检测到就-1
         TickType_t last_shake_time = 0;      // 上次摇晃触发时间
         const TickType_t shake_cooldown = pdMS_TO_TICKS(5000); // 5秒冷却时间（增加冷却时间，降低灵敏度）
-        int debug_counter = 0;  // 调试计数器，每50次打印一次数据
+        int debug_counter = 0;  // 调试计数器，每10次打印一次数据（用于校准轴方向）
         
-        ESP_LOGI("LIS2HH12", "陀螺仪检测任务启动");
+        // 轴校准参数（根据实际测试数据设置）
+        // 静止状态基准值（用于判断方向）
+        const int16_t x_rest = 4000;      // X轴静止时约3000-5000
+        const int16_t y_rest = 500;       // Y轴静止时约300-800
+        const int16_t z_rest = -15500;   // Z轴静止时约-15000（重力方向）
+        
+        // 方向检测阈值（raw值）
+        const int16_t x_turn_threshold = 8000;   // X轴变化超过此值判断为转向（左转X<0，右转X>0，但根据数据左转X变负）
+        const int16_t y_forward_threshold = 1000;  // Y轴正数超过此值判断为前进
+        const int16_t y_backward_threshold = -3000; // Y轴负数超过此值判断为后退/右转倾角
+        
+        // 方向检测状态
+        int16_t last_x_raw = x_rest;
+        int16_t last_y_raw = y_rest;
+        TickType_t last_direction_time = 0;
+        const TickType_t direction_cooldown = pdMS_TO_TICKS(2000); // 方向检测冷却时间2秒
+        
+        // ESP_LOGI("LIS2HH12", "陀螺仪检测任务启动");
+        // ESP_LOGI("LIS2HH12", "=== 轴校准模式：每10次采样打印一次数据 ===");
+        // ESP_LOGI("LIS2HH12", "格式: [X轴] [Y轴] [Z轴] | 原始值(raw) | g值 | 总加速度 | 变化量");
+        // ESP_LOGI("LIS2HH12", "方向检测阈值: X轴转向=%d, Y轴前进=%d, Y轴后退=%d", 
+        //          x_turn_threshold, y_forward_threshold, y_backward_threshold);
         
         while (1) {
             // 读取X/Y/Z加速度数据（LIS2HH12使用±2g量程，灵敏度为0.061 mg/LSB）
@@ -287,18 +358,119 @@ private:
             // 计算总加速度的变化量（更准确反映摇晃）
             float delta_total = fabs(total_accel - last_total_accel);
             
-            // 调试计数器（已禁用频繁日志输出）
-            debug_counter++;
+            // 调试计数器：每10次打印一次，用于校准轴方向
+            // debug_counter++;
+            // if (debug_counter >= 10) {
+            //     debug_counter = 0;
+            //     ESP_LOGI("LIS2HH12", "=== 轴数据 ===");
+            //     ESP_LOGI("LIS2HH12", "X轴: raw=%6d, g=%7.3f | Y轴: raw=%6d, g=%7.3f | Z轴: raw=%6d, g=%7.3f", 
+            //              x_raw, ax, y_raw, ay, z_raw, az);
+            //     ESP_LOGI("LIS2HH12", "总加速度=%.3f g, 变化量=%.3f g, 摇晃计数=%d", 
+            //              total_accel, delta_total, shake_count);
+            //     ESP_LOGI("LIS2HH12", "提示: 静止时总加速度应接近1.0g（重力），移动时观察哪个轴变化最大");
+            // }
+            
+            // 方向检测：根据轴的变化判断方向（优先于摇晃检测）
+            // 暂时注释掉，先调通整体逻辑
+            /*
+            TickType_t current_time = xTaskGetTickCount();
+            if (current_time - last_direction_time >= direction_cooldown) {
+                const char* detected_emotion = nullptr;
+                
+                // 检测左转：X轴从正数变为负数（或负数绝对值很大）
+                if (x_raw < -x_turn_threshold || (x_raw < 0 && last_x_raw > 0 && abs(x_raw - last_x_raw) > x_turn_threshold)) {
+                    ESP_LOGI("LIS2HH12", "=== 方向检测：左转 ===");
+                    ESP_LOGI("LIS2HH12", "检测到左转: X轴=%d (变化=%d), 触发表情: Turn_left -> 组12", x_raw, x_raw - last_x_raw);
+                    last_direction_time = current_time;
+                    detected_emotion = "Turn_left";
+                }
+                // 检测右转倾角：Y轴变为较大的负值
+                else if (y_raw < y_backward_threshold) {
+                    ESP_LOGI("LIS2HH12", "=== 方向检测：右转倾角 ===");
+                    ESP_LOGI("LIS2HH12", "检测到右转倾角: Y轴=%d (变化=%d), 触发表情: Turn_right -> 组13", y_raw, y_raw - last_y_raw);
+                    last_direction_time = current_time;
+                    detected_emotion = "Turn_right";
+                }
+                // 检测前进倾角：Y轴变为较大的正值 -> 触发加速表情
+                else if (y_raw > y_forward_threshold) {
+                    ESP_LOGI("LIS2HH12", "=== 方向检测：前进倾角 ===");
+                    ESP_LOGI("LIS2HH12", "检测到前进倾角: Y轴=%d (变化=%d), 触发表情: Accelerate -> 组14 (加速表情)", 
+                             y_raw, y_raw - last_y_raw);
+                    last_direction_time = current_time;
+                    detected_emotion = "Accelerate";
+                }
+                // 检测后退倾角：Y轴从正数变为较小的正数或负数（但绝对值不大） -> 触发急刹表情
+                // 根据数据，后退时Y轴可能回到接近静止状态，或者有特定的变化模式
+                // 这里暂时使用Y轴从较大正值快速减小来判断后退
+                else if (last_y_raw > y_forward_threshold && y_raw < last_y_raw - 500) {
+                    ESP_LOGI("LIS2HH12", "=== 方向检测：后退倾角 ===");
+                    ESP_LOGI("LIS2HH12", "检测到后退倾角: Y轴=%d -> %d (变化=%d), 触发表情: Decelerate -> 组15 (急刹表情)", 
+                             last_y_raw, y_raw, y_raw - last_y_raw);
+                    last_direction_time = current_time;
+                    detected_emotion = "Decelerate";
+                }
+                
+                // 如果检测到方向变化，在视频模式下处理
+                if (detected_emotion != nullptr) {
+                    if (board->playback_mode_ == PlaybackMode::VIDEO_PLAYBACK) {
+                        // 如果触发的表情和上次相同，且正在显示陀螺仪表情，不重新启动定时器
+                        if (board->gyro_emotion_active_ && 
+                            board->last_gyro_emotion_ != nullptr && 
+                            strcmp(detected_emotion, board->last_gyro_emotion_) == 0) {
+                            ESP_LOGI("LIS2HH12", "视频模式下触发相同陀螺仪表情: %s，跳过（已在显示中）", detected_emotion);
+                            // 跳过，不重新启动定时器，但继续更新 last_x_raw 和 last_y_raw
+                            last_x_raw = x_raw;
+                            last_y_raw = y_raw;
+                            last_total_accel = total_accel;
+                            vTaskDelay(pdMS_TO_TICKS(100));  // 延迟100ms
+                            continue;  // 跳过本次循环的后续处理
+                        }
+                        
+                        // 视频模式下：暂停轮播，显示陀螺仪触发的表情，5秒后恢复轮播
+                        ESP_LOGI("LIS2HH12", "视频模式下触发陀螺仪表情: %s，暂停轮播，5秒后恢复", detected_emotion);
+                        board->gyro_emotion_active_ = true;
+                        board->last_gyro_emotion_ = detected_emotion;  // 记录本次触发的表情
+                        board->TriggerEmotion(detected_emotion);
+                        
+                        // 创建或重启5秒恢复定时器
+                        if (board->gyro_emotion_timer_ == nullptr) {
+                            esp_timer_create_args_t timer_args = {
+                                .callback = [](void* arg) {
+                                    MovecallMojiESP32S3* board = static_cast<MovecallMojiESP32S3*>(arg);
+                                    ESP_LOGI("LIS2HH12", "陀螺仪表情5秒到期，恢复轮播");
+                                    board->ResumeVideoCycling();
+                                },
+                                .arg = board,
+                                .name = "gyro_emotion_timer"
+                            };
+                            esp_timer_create(&timer_args, &board->gyro_emotion_timer_);
+                        }
+                        esp_timer_stop(board->gyro_emotion_timer_);  // 先停止（如果正在运行）
+                        esp_timer_start_once(board->gyro_emotion_timer_, 5000000);  // 5秒 = 5000000微秒
+                    } else {
+                        // Display模式下：直接触发表情
+                        board->TriggerEmotion(detected_emotion);
+                    }
+                }
+            }
+            */
+            
+            last_x_raw = x_raw;
+            last_y_raw = y_raw;
             
             // 检测是否有明显的总加速度变化（比单轴变化更准确）
+            // 暂时注释掉，先调通整体逻辑
+            /*
             if (delta_total > threshold) {
                 shake_count++;
                 
                 if (shake_count >= shake_count_threshold) {
-                    TickType_t current_time = xTaskGetTickCount();
                     // 检查是否已经过了冷却时间
+                    TickType_t current_time = xTaskGetTickCount();
                     if (current_time - last_shake_time >= shake_cooldown) {
                         ESP_LOGI("LIS2HH12", "摇晃检测成功");
+                        ESP_LOGI("LIS2HH12", "触发时数据: X=%.3f, Y=%.3f, Z=%.3f, 总加速度=%.3f, 变化量=%.3f", 
+                                 ax, ay, az, total_accel, delta_total);
                         last_shake_time = current_time; // 更新上次触发时间
                         shake_count = 0; // 触发后清零
 
@@ -336,6 +508,7 @@ private:
                     shake_count -= shake_count_decay;
                 }
             }
+            */
             
             last_total_accel = total_accel;
             vTaskDelay(pdMS_TO_TICKS(100)); // 100ms采样间隔
@@ -451,47 +624,134 @@ private:
         
         // 创建视频播放器实例
         video_player_ = new VideoPlayer(DISPLAY_WIDTH, DISPLAY_HEIGHT);
+        
+        // 参考 gizwits-s3-vb6824-st7735s 项目，让 LVGL 完成首次界面创建并强制刷新 2~3 帧，确保显示内容完全准备好
+        if (lvgl_port_lock(100)) {
+            lv_timer_handler();
+            lvgl_port_unlock();
+        }
+        vTaskDelay(pdMS_TO_TICKS(30));
+        if (lvgl_port_lock(100)) {
+            lv_timer_handler();
+            lvgl_port_unlock();
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+        if (lvgl_port_lock(100)) {
+            lv_timer_handler();
+            lvgl_port_unlock();
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 
     // 重写 Board 基类的 PlayVideoGroup 方法，使用 VideoPlayer 类（和 SetEmotion 一样的调用方式）
     void PlayVideoGroup(const char* emotion) override {
+        ESP_LOGI(TAG, "=== PlayVideoGroup 开始 ===");
+        ESP_LOGI(TAG, "PlayVideoGroup: emotion='%s', video_player_=%p", 
+                 emotion ? emotion : "nullptr", video_player_);
+        
         if (emotion == nullptr || video_player_ == nullptr) {
             ESP_LOGE(TAG, "PlayVideoGroup: emotion is nullptr or video_player_ is nullptr");
             return;
         }
         // 使用 VideoPlayer 类播放视频
+        ESP_LOGI(TAG, "PlayVideoGroup: 调用 video_player_->PlayVideoGroup('%s')", emotion);
         video_player_->PlayVideoGroup(emotion);
+        ESP_LOGI(TAG, "PlayVideoGroup: 调用完成");
     }
 
 public:
-    // 统一的表情触发函数：根据当前模式选择使用display动画或视频播放
+    // 统一的表情触发函数：统一使用视频播放（默认表情映射也使用视频表情）
+    // 所有表情触发（包括AI对话、按钮、传感器等）都会通过这里
+    // 使用 VideoPlayer::DefaultEmotionToGroup 映射表来映射表情名称到视频组索引
     void TriggerEmotion(const char* emotion) {
+        ESP_LOGI(TAG, "=== TriggerEmotion 开始 ===");
+        ESP_LOGI(TAG, "TriggerEmotion: emotion='%s', video_player_=%p, playback_mode_=%d", 
+                 emotion ? emotion : "nullptr", video_player_, (int)playback_mode_);
+        
         if (emotion == nullptr) {
+            ESP_LOGW(TAG, "TriggerEmotion: emotion is nullptr, 返回");
             return;
         }
         
-        if (playback_mode_ == PlaybackMode::DISPLAY_ANIMATION) {
-            // Display动画模式：使用EyeDisplay的SetEmotion
-            if (display_ != nullptr) {
-                display_->SetEmotion(emotion);
+        // 检查是否在配网模式，如果是则忽略表情切换（二维码应该一直显示）
+        auto& app = Application::GetInstance();
+        if (app.GetDeviceState() == kDeviceStateWifiConfiguring || qrcode_displaying_) {
+            ESP_LOGI(TAG, "TriggerEmotion: 配网模式或正在显示二维码，忽略表情切换");
+            return;
+        }
+        
+        // 统一使用视频播放，两种模式都播放视频，只是播放方式不同
+        // VIDEO_PLAYBACK模式：不循环，播放完切换下一组（自动轮播）
+        // DISPLAY_ANIMATION模式：循环播放同一组（不轮播）
+        if (video_player_ != nullptr) {
+            if (playback_mode_ == PlaybackMode::VIDEO_PLAYBACK) {
+                video_player_->SetLoopGroup(false);  // 不循环，播放完切换
+                ESP_LOGI(TAG, "TriggerEmotion: 视频模式，调用 PlayVideoGroup('%s')，不循环", emotion);
+            } else {
+                video_player_->SetLoopGroup(true);   // 循环播放同一组
+                ESP_LOGI(TAG, "TriggerEmotion: Display模式，调用 PlayVideoGroup('%s')，循环播放", emotion);
             }
-            // 确保视频播放停止并隐藏视频图像
-            if (video_player_ != nullptr) {
-                video_player_->StopPlayback();
+            PlayVideoGroup(emotion);
+            
+            // 确保视频图像对象显示，眼睛对象（容器）隐藏
+            if (display_ != nullptr) {
+                if (display_->Lock(100)) {
+                    lv_obj_t* screen = lv_screen_active();
+                    if (screen != nullptr) {
+                        // 获取充电圆环对象指针，在隐藏时排除它
+                        EyeDisplay* eye_display = static_cast<EyeDisplay*>(display_);
+                        lv_obj_t* charging_arc = (eye_display != nullptr) ? eye_display->GetChargingBatteryArc() : nullptr;
+                        
+                        // 递归函数：隐藏对象及其所有子对象（用于隐藏眼睛容器）
+                        std::function<void(lv_obj_t*)> hide_recursive;
+                        hide_recursive = [&hide_recursive, &charging_arc](lv_obj_t* obj) -> void {
+                            if (obj == nullptr || obj == charging_arc) return;
+                            // 隐藏对象
+                            lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+                            // 递归隐藏所有子对象
+                            uint32_t child_cnt = lv_obj_get_child_cnt(obj);
+                            for (uint32_t i = 0; i < child_cnt; i++) {
+                                lv_obj_t* child = lv_obj_get_child(obj, i);
+                                if (child != nullptr) {
+                                    hide_recursive(child);
+                                }
+                            }
+                        };
+                        
+                        // 显示视频图像对象，隐藏眼睛对象（容器）
+                        uint32_t child_cnt = lv_obj_get_child_cnt(screen);
+                        uint32_t hidden_count = 0;
+                        for (uint32_t i = 0; i < child_cnt; i++) {
+                            lv_obj_t* child = lv_obj_get_child(screen, i);
+                            if (child != nullptr && child != charging_arc) {
+                                if (lv_obj_check_type(child, &lv_image_class)) {
+                                    // 视频图像对象：显示且在最前面
+                                    lv_obj_clear_flag(child, LV_OBJ_FLAG_HIDDEN);
+                                    lv_obj_move_foreground(child);
+                                } else {
+                                    // 眼睛对象（容器）：递归隐藏
+                                    hide_recursive(child);
+                                    hidden_count++;
+                                }
+                            }
+                        }
+                        ESP_LOGI(TAG, "TriggerEmotion: 隐藏了 %u 个眼睛对象，视频图像已显示", hidden_count);
+                    }
+                    display_->Unlock();
+                } else {
+                    ESP_LOGW(TAG, "TriggerEmotion: 无法获取Display锁");
+                }
             }
         } else {
-            // 视频播放模式：使用VideoPlayer播放
-            if (video_player_ != nullptr) {
-                PlayVideoGroup(emotion);
-            }
-            // 确保眼睛动画隐藏（EyeDisplay在视频模式下会自动隐藏眼睛）
-            // 视频播放时，VideoPlayer会显示在最前面，覆盖眼睛动画
+            ESP_LOGE(TAG, "TriggerEmotion: video_player_ 为 nullptr，无法播放视频");
         }
+        ESP_LOGI(TAG, "=== TriggerEmotion 完成 ===");
     }
 
     // 切换播放模式
     void SwitchPlaybackMode() {
         auto& app = Application::GetInstance();
+        ESP_LOGI(TAG, "SwitchPlaybackMode: 开始切换，当前模式=%d", (int)playback_mode_);
         
         if (playback_mode_ == PlaybackMode::DISPLAY_ANIMATION) {
             playback_mode_ = PlaybackMode::VIDEO_PLAYBACK;
@@ -575,126 +835,94 @@ public:
                 }
             }
             
-            // 启动视频播放
-            if (video_player_ != nullptr) {
-                video_player_->PlayVideoGroup("neutral");
-            }
+            // 启动视频轮播（会从组0开始播放）
+            StartVideoCycling();
             
             // 视频模式下禁用唤醒词检测和语音处理（离线模式）
             app.GetAudioService().EnableWakeWordDetection(false);
             app.GetAudioService().EnableVoiceProcessing(false);
         } else {
+            ESP_LOGI(TAG, "切换到Display动画模式");
             playback_mode_ = PlaybackMode::DISPLAY_ANIMATION;
             
-            // Display模式下恢复唤醒词检测（根据设备状态）
-            auto device_state = app.GetDeviceState();
+            // 先停止视频轮播并清除回调
+            StopVideoCycling();
             
-            // 延迟一下，确保所有状态更新完成后再恢复唤醒词检测
-            vTaskDelay(pdMS_TO_TICKS(100));
-            
-            // 重新获取设备状态（可能已经改变）
-            device_state = app.GetDeviceState();
-            
-            // 如果设备状态是idle或sleeping，恢复唤醒词检测
-            if (device_state == kDeviceStateIdle || device_state == kDeviceStateSleeping) {
-                app.GetAudioService().EnableWakeWordDetection(true);
-                app.GetAudioService().EnableVoiceProcessing(false);
-                ESP_LOGI(TAG, "Display模式：已恢复唤醒词检测（idle/sleeping状态）");
-            } else if (device_state == kDeviceStateListening || device_state == kDeviceStateSpeaking) {
-                // 在listening或speaking状态下，也需要启用唤醒词检测（可以在speaking时打断）
-                #if CONFIG_USE_AFE_WAKE_WORD
-                app.GetAudioService().EnableWakeWordDetection(true);
-                ESP_LOGI(TAG, "Display模式：已恢复唤醒词检测（listening/speaking状态，AFE唤醒词）");
-                #else
-                // 非AFE唤醒词，在speaking状态下不启用唤醒词检测
-                if (device_state == kDeviceStateListening) {
-                    app.GetAudioService().EnableWakeWordDetection(true);
-                    ESP_LOGI(TAG, "Display模式：已恢复唤醒词检测（listening状态）");
-                } else {
-                    ESP_LOGW(TAG, "Display模式：speaking状态下非AFE唤醒词不启用唤醒词检测");
-                }
-                #endif
-            } else {
-                // 其他状态，也尝试启用唤醒词检测（如果设备允许）
-                app.GetAudioService().EnableWakeWordDetection(true);
-                ESP_LOGI(TAG, "Display模式：已恢复唤醒词检测（其他状态）");
-            }
-            // 停止视频播放，显示display动画
+            // 停止当前视频播放，确保清除所有回调
             if (video_player_ != nullptr) {
                 video_player_->StopPlayback();
-                // 等待一下确保视频任务完全退出
+                // 等待更长时间，确保视频任务完全退出并清理句柄
+                // 因为视频任务可能在读取Flash或更新LVGL，需要更多时间
+                vTaskDelay(pdMS_TO_TICKS(500));
+                // 再次检查并强制停止（如果任务还在运行）
+                video_player_->StopPlayback();
                 vTaskDelay(pdMS_TO_TICKS(100));
+                // 再次清除回调，确保没有残留的回调
+                video_player_->SetOnGroupFinishedCallback(nullptr, nullptr);
             }
+            
+            // 参考 gizwits-s3-vb6824-st7735s 项目，不在模式切换时管理音频状态
+            // 让 Application::SetDeviceState 自己管理唤醒词检测和语音处理
+            ESP_LOGI(TAG, "Display模式：音频状态由 Application::SetDeviceState 管理");
+            
+            // Display模式也使用视频播放，只是循环播放同一组（不轮播）
+            // 确保眼睛对象隐藏，视频图像对象显示
             if (display_ != nullptr) {
-                // 先停止视频播放并隐藏视频图像
-                if (video_player_ != nullptr) {
-                    video_player_->StopPlayback();
-                    // 额外确保视频图像被隐藏（在Display锁内操作）
-                    if (display_->Lock(1000)) {
-                        // 查找并隐藏视频图像对象
-                        lv_obj_t* screen = lv_screen_active();
-                        if (screen != nullptr) {
-                            uint32_t child_cnt = lv_obj_get_child_cnt(screen);
-                            for (uint32_t i = 0; i < child_cnt; i++) {
-                                lv_obj_t* child = lv_obj_get_child(screen, i);
-                                if (child != nullptr && lv_obj_check_type(child, &lv_image_class)) {
-                                    // 找到图像对象，可能是视频图像
-                                    lv_obj_add_flag(child, LV_OBJ_FLAG_HIDDEN);
-                                    lv_obj_move_background(child);
-                                }
-                            }
-                        }
-                        display_->Unlock();
-                    }
-                    // 等待一下确保视频任务完全退出
-                    vTaskDelay(pdMS_TO_TICKS(100));
-                }
-                
-                // 显示Display对象（取消隐藏）
                 if (display_->Lock(1000)) {
                     lv_obj_t* screen = lv_screen_active();
                     if (screen != nullptr) {
-                        // 递归函数：取消隐藏对象及其所有子对象
-                        std::function<void(lv_obj_t*)> clear_hidden_recursive;
-                        clear_hidden_recursive = [&clear_hidden_recursive](lv_obj_t* obj) -> void {
-                            if (obj == nullptr) return;
-                            lv_obj_clear_flag(obj, LV_OBJ_FLAG_HIDDEN);
+                        // 获取充电圆环对象指针，在隐藏时排除它
+                        EyeDisplay* eye_display = static_cast<EyeDisplay*>(display_);
+                        lv_obj_t* charging_arc = (eye_display != nullptr) ? eye_display->GetChargingBatteryArc() : nullptr;
+                        
+                        // 递归函数：隐藏对象及其所有子对象（用于隐藏眼睛容器）
+                        std::function<void(lv_obj_t*)> hide_recursive;
+                        hide_recursive = [&hide_recursive, &charging_arc](lv_obj_t* obj) -> void {
+                            if (obj == nullptr || obj == charging_arc) return;
+                            // 隐藏对象
+                            lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+                            // 递归隐藏所有子对象
                             uint32_t child_cnt = lv_obj_get_child_cnt(obj);
                             for (uint32_t i = 0; i < child_cnt; i++) {
                                 lv_obj_t* child = lv_obj_get_child(obj, i);
                                 if (child != nullptr) {
-                                    clear_hidden_recursive(child);
+                                    hide_recursive(child);
                                 }
                             }
                         };
                         
-                        // 显示屏幕的所有子对象（递归取消隐藏）
+                        // 隐藏眼睛对象（容器），显示视频图像对象
                         uint32_t child_cnt = lv_obj_get_child_cnt(screen);
-                        ESP_LOGI(TAG, "Screen has %u children, clearing HIDDEN flags and moving to foreground", child_cnt);
+                        uint32_t hidden_count = 0;
                         for (uint32_t i = 0; i < child_cnt; i++) {
                             lv_obj_t* child = lv_obj_get_child(screen, i);
-                            if (child != nullptr) {
-                                // 跳过视频图像对象（图像类型）
+                            if (child != nullptr && child != charging_arc) {
                                 if (lv_obj_check_type(child, &lv_image_class)) {
-                                    continue;
+                                    // 视频图像对象：显示且在最前面
+                                    lv_obj_clear_flag(child, LV_OBJ_FLAG_HIDDEN);
+                                    lv_obj_move_foreground(child);
+                                } else {
+                                    // 眼睛对象（容器）：递归隐藏
+                                    hide_recursive(child);
+                                    hidden_count++;
                                 }
-                                clear_hidden_recursive(child);
-                                // 确保Display对象显示在最前面
-                                lv_obj_move_foreground(child);
                             }
                         }
-                    } else {
-                        ESP_LOGW(TAG, "Screen is nullptr");
+                        ESP_LOGI(TAG, "SwitchPlaybackMode: 隐藏了 %u 个眼睛对象，视频图像已显示", hidden_count);
                     }
                     display_->Unlock();
                 } else {
                     ESP_LOGW(TAG, "Failed to lock display");
                 }
-                // 立即设置表情，确保Display动画显示
-                display_->SetEmotion("neutral");
+                
+                // Display模式也使用视频播放，循环播放同一组
+                // 延迟一下，确保之前的视频任务完全退出
+                vTaskDelay(pdMS_TO_TICKS(100));
+                TriggerEmotion("neutral");
             } else {
                 ESP_LOGW(TAG, "Display is nullptr");
             }
+            ESP_LOGI(TAG, "SwitchPlaybackMode: 已切换到Display模式并触发neutral表情");
         }
     }
 
@@ -783,38 +1011,115 @@ public:
             return;
         }
 
-        // 使用新的封装方式：基于 emotion 状态名称循环切换
-        // 定义每个组对应的代表性 emotion（按照组索引顺序）
-        static const char* emotion_list[] = {
-            "happy",      // 组 0: 开心
-            "neutral",    // 组 1: 中性
-            "sad",       // 组 2: 悲伤
-            "surprised", // 组 3: 惊讶
-            "angry",     // 组 4: 愤怒
-            "loving",    // 组 5: 爱心
-            "thinking",  // 组 6: 思考
-            "winking",   // 组 7: 眨眼
-            "sleepy",    // 组 8: 睡眠
-            "silly",     // 组 9: 傻笑
-            "vertigo",   // 组 10: 眩晕
-            "listen"     // 组 11: 聆听
-        };
-        const int emotion_list_size = sizeof(emotion_list) / sizeof(emotion_list[0]);
-        
         // 获取当前播放的组索引
+        // 注意：如果视频任务刚退出，GetCurrentGroupIndex() 可能返回旧值
+        // 所以需要确保在任务完全退出后再获取组索引
         int current_group = video_player_->GetCurrentGroupIndex();
         
-        // 切换到下一个组（循环）
+        // 切换到下一个组（循环）：播完最后一个组后回到组0
         int next_group = (current_group + 1) % cnt;
         
-        // 确保 next_group 在 emotion_list 范围内
-        if (next_group >= emotion_list_size) {
-            next_group = 0;  // 超出范围则回到第一个
+        // 如果当前组索引无效或超出范围，从组0开始
+        if (current_group < 0 || current_group >= cnt) {
+            ESP_LOGW(TAG, "CycleVideoGroup: 当前组索引无效 (%d)，从组0开始", current_group);
+            next_group = 0;
         }
         
-        // 使用新的封装方式：通过 emotion 状态名称播放
-        const char* next_emotion = emotion_list[next_group];
-        video_player_->PlayVideoGroup(next_emotion);
+        ESP_LOGI(TAG, "CycleVideoGroup: 当前组=%d, 下一组=%d, 总组数=%d", current_group, next_group, cnt);
+        
+        // 直接使用组索引播放，确保所有组都能循环播放
+        video_player_->PlayVideoGroupByIndex(next_group);
+    }
+    
+    // 启动视频轮播（自动切换所有表情）
+    void StartVideoCycling() {
+        if (playback_mode_ != PlaybackMode::VIDEO_PLAYBACK) {
+            ESP_LOGW(TAG, "StartVideoCycling: 不在视频模式，不启动轮播");
+            return;
+        }
+        
+        if (video_cycling_) {
+            ESP_LOGI(TAG, "StartVideoCycling: 轮播已在进行中");
+            return;
+        }
+        
+        ESP_LOGI(TAG, "StartVideoCycling: 启动视频轮播（播完一组自动切换下一组）");
+        video_cycling_ = true;
+        
+        // 不再使用定时器，改为在视频播放完成时自动切换
+        // 设置播放完成回调，当一组播放完成时自动切换到下一组
+        if (video_player_ != nullptr) {
+            video_player_->SetOnGroupFinishedCallback([](void* arg, int group_index) {
+                MovecallMojiESP32S3* board = static_cast<MovecallMojiESP32S3*>(arg);
+                // 只在视频模式下才处理轮播
+                if (board->playback_mode_ != PlaybackMode::VIDEO_PLAYBACK) {
+                    ESP_LOGI("MovecallMojiESP32S3", "播放完成回调: 不在视频模式，跳过切换");
+                    return;
+                }
+                // 如果正在显示陀螺仪触发的表情，不切换
+                if (board->gyro_emotion_active_) {
+                    ESP_LOGI("MovecallMojiESP32S3", "播放完成回调: 正在显示陀螺仪表情，跳过切换");
+                    return;
+                }
+                // 如果轮播已停止，不切换
+                if (!board->video_cycling_) {
+                    ESP_LOGI("MovecallMojiESP32S3", "播放完成回调: 轮播已停止，跳过切换");
+                    return;
+                }
+                // 切换到下一个组
+                ESP_LOGI("MovecallMojiESP32S3", "播放完成回调: 组 %d 播放完成，切换到下一组", group_index);
+                // 先等待一下，确保视频任务完全退出（任务可能在回调后还在清理资源）
+                vTaskDelay(pdMS_TO_TICKS(100));
+                board->CycleVideoGroup();
+            }, this);
+        }
+        
+        // 从组0开始播放
+        if (video_player_ != nullptr) {
+            // 视频模式下不循环播放同一组，播放完一组后切换下一组
+            video_player_->SetLoopGroup(false);
+            video_player_->PlayVideoGroupByIndex(0);
+        }
+    }
+    
+    // 停止视频轮播
+    void StopVideoCycling() {
+        if (!video_cycling_) {
+            return;
+        }
+        
+        ESP_LOGI(TAG, "StopVideoCycling: 停止视频轮播");
+        video_cycling_ = false;
+        
+        if (video_cycle_timer_ != nullptr) {
+            esp_timer_stop(video_cycle_timer_);
+        }
+        
+        // 清除播放完成回调，避免在非视频模式下触发
+        if (video_player_ != nullptr) {
+            video_player_->SetOnGroupFinishedCallback(nullptr, nullptr);
+        }
+    }
+    
+    // 恢复视频轮播（从陀螺仪表情恢复）
+    void ResumeVideoCycling() {
+        ESP_LOGI(TAG, "ResumeVideoCycling: 恢复视频轮播");
+        gyro_emotion_active_ = false;
+        last_gyro_emotion_ = nullptr;  // 清除上次触发的表情记录
+        
+        // 停止陀螺仪表情恢复定时器
+        if (gyro_emotion_timer_ != nullptr) {
+            esp_timer_stop(gyro_emotion_timer_);
+        }
+        
+        // 如果轮播已启动，继续轮播
+        if (video_cycling_) {
+            // 轮播定时器会自动继续工作
+            ESP_LOGI(TAG, "ResumeVideoCycling: 轮播继续");
+        } else {
+            // 如果轮播未启动，重新启动
+            StartVideoCycling();
+        }
     }
 
     int MaxBacklightBrightness() {
@@ -824,19 +1129,36 @@ public:
     // 显示电量圆环指示器（委托给EyeDisplay）
     void ShowBatteryIndicator() {
         if (display_ != nullptr) {
-            // 如果在视频模式，停止视频播放并保存状态
-            if (playback_mode_ == PlaybackMode::VIDEO_PLAYBACK && video_player_ != nullptr) {
+            // 无论什么模式，都要停止视频播放（因为所有表情都通过视频播放）
+            if (video_player_ != nullptr) {
                 int current_group_index = video_player_->GetCurrentGroupIndex();
-                // 在停止播放之前保存组索引
+                // 在停止播放之前保存组索引和轮播状态
                 saved_video_group_index_for_battery_ = current_group_index;
+                was_video_cycling_before_battery_ = video_cycling_;  // 保存轮播状态
+                
+                // 停止视频播放和轮播
                 video_player_->StopPlayback();
-                // 延迟一下确保视频已停止
+                if (was_video_cycling_before_battery_) {
+                    StopVideoCycling();  // 停止轮播
+                }
+                
+                // 等待更长时间，确保视频任务完全退出（因为任务可能在读取Flash或更新LVGL）
+                vTaskDelay(pdMS_TO_TICKS(500));
+                
+                // 再次确认视频任务已停止
+                video_player_->StopPlayback();
                 vTaskDelay(pdMS_TO_TICKS(100));
-                // 设置视频模式信息，以便5秒后恢复
-                display_->SetVideoModeInfo(true, current_group_index);
+                
+                // 根据模式设置视频模式信息，以便5秒后恢复
+                if (playback_mode_ == PlaybackMode::VIDEO_PLAYBACK) {
+                    display_->SetVideoModeInfo(true, current_group_index);
+                } else {
+                    // DISPLAY_ANIMATION模式，也保存状态以便恢复
+                    display_->SetVideoModeInfo(false, current_group_index);
+                }
             } else {
-                // 非视频模式，清除视频模式信息
                 saved_video_group_index_for_battery_ = -1;
+                was_video_cycling_before_battery_ = false;
                 display_->SetVideoModeInfo(false, -1);
             }
             display_->ShowBatteryIndicator();
@@ -846,20 +1168,172 @@ public:
     // 隐藏电量圆环指示器（委托给EyeDisplay）
     void HideBatteryIndicator() {
         if (display_ != nullptr) {
-            // 使用之前保存的视频组索引
+            // 使用之前保存的视频组索引和轮播状态
             int saved_video_group_index = saved_video_group_index_for_battery_;
+            bool was_cycling = was_video_cycling_before_battery_;
+            
+            // 检查是否正在充电，如果正在充电，保存状态以便恢复后不重新显示充电圆环
+            bool was_charging = IsCharging();
             
             display_->HideBatteryIndicator();
             
-            // 如果之前在视频模式，恢复视频播放
-            if (playback_mode_ == PlaybackMode::VIDEO_PLAYBACK && video_player_ != nullptr && saved_video_group_index >= 0) {
-                vTaskDelay(pdMS_TO_TICKS(100));  // 延迟一下确保UI已更新
-                video_player_->PlayVideoGroupByIndex(saved_video_group_index);
-                // 清除保存的索引
+            // 无论什么模式，都要恢复视频播放（因为所有表情都通过视频播放）
+            if (video_player_ != nullptr && saved_video_group_index >= 0) {
+                // 确保之前的视频任务已经完全停止（在ShowBatteryIndicator中已经停止，但再次确认）
+                video_player_->StopPlayback();
+                // 等待更长时间，确保视频任务完全退出（因为任务可能在读取Flash或更新LVGL）
+                vTaskDelay(pdMS_TO_TICKS(500));
+                
+                // 再次确认视频任务已停止
+                video_player_->StopPlayback();
+                vTaskDelay(pdMS_TO_TICKS(100));
+                
+                // 根据模式恢复视频播放
+                if (playback_mode_ == PlaybackMode::VIDEO_PLAYBACK) {
+                // 视频模式：如果之前在轮播，恢复轮播；否则只播放一个表情
+                if (was_cycling) {
+                    ESP_LOGI(TAG, "HideBatteryIndicator: 恢复视频轮播，从组 %d 开始", saved_video_group_index);
+                    // 恢复轮播：手动设置轮播状态和回调，然后从保存的组开始播放
+                    // 不调用 StartVideoCycling()，因为它会从组0开始
+                    video_cycling_ = true;
+                    // 设置播放完成回调，当一组播放完成时自动切换到下一组
+                    if (video_player_ != nullptr) {
+                        video_player_->SetOnGroupFinishedCallback([](void* arg, int group_index) {
+                            MovecallMojiESP32S3* board = static_cast<MovecallMojiESP32S3*>(arg);
+                            // 只在视频模式下才处理轮播
+                            if (board->playback_mode_ != PlaybackMode::VIDEO_PLAYBACK) {
+                                ESP_LOGI("MovecallMojiESP32S3", "播放完成回调: 不在视频模式，跳过切换");
+                                return;
+                            }
+                            // 如果正在显示陀螺仪触发的表情，不切换
+                            if (board->gyro_emotion_active_) {
+                                ESP_LOGI("MovecallMojiESP32S3", "播放完成回调: 正在显示陀螺仪表情，跳过切换");
+                                return;
+                            }
+                            // 如果轮播已停止，不切换
+                            if (!board->video_cycling_) {
+                                ESP_LOGI("MovecallMojiESP32S3", "播放完成回调: 轮播已停止，跳过切换");
+                                return;
+                            }
+                            // 切换到下一个组
+                            ESP_LOGI("MovecallMojiESP32S3", "播放完成回调: 组 %d 播放完成，切换到下一组", group_index);
+                            board->CycleVideoGroup();
+                        }, this);
+                        // 视频模式下不循环播放同一组，播放完一组后切换下一组
+                        video_player_->SetLoopGroup(false);
+                        // 从保存的组开始播放
+                        video_player_->PlayVideoGroupByIndex(saved_video_group_index);
+                    }
+                    } else {
+                        // 不在轮播，只播放一个表情
+                        static const char* emotion_list[] = {
+                            "happy",        // 组 0
+                            "neutral",      // 组 1
+                            "sad",          // 组 2
+                            "surprised",    // 组 3
+                            "angry",        // 组 4
+                            "loving",       // 组 5
+                            "thinking",     // 组 6
+                            "winking",      // 组 7
+                            "sleepy",       // 组 8
+                            "silly",        // 组 9
+                            "vertigo",      // 组 10
+                            "listen",       // 组 11
+                            "Turn_left",    // 组 12
+                            "Turn_right",   // 组 13
+                            "Accelerate",   // 组 14
+                            "Decelerate",   // 组 15
+                            "Charging"      // 组 16
+                        };
+                        const int emotion_list_size = sizeof(emotion_list) / sizeof(emotion_list[0]);
+                        
+                        if (saved_video_group_index >= 0 && saved_video_group_index < emotion_list_size) {
+                            const char* emotion = emotion_list[saved_video_group_index];
+                            ESP_LOGI(TAG, "HideBatteryIndicator: 恢复之前的表情 '%s' (视频模式，不轮播)", 
+                                     emotion);
+                            TriggerEmotion(emotion);
+                        } else {
+                            ESP_LOGI(TAG, "HideBatteryIndicator: 索引超出范围，使用默认neutral");
+                            TriggerEmotion("neutral");
+                        }
+                    }
+                } else {
+                    // DISPLAY_ANIMATION模式：只播放一个表情
+                    static const char* emotion_list[] = {
+                        "happy",        // 组 0
+                        "neutral",      // 组 1
+                        "sad",          // 组 2
+                        "surprised",    // 组 3
+                        "angry",        // 组 4
+                        "loving",       // 组 5
+                        "thinking",     // 组 6
+                        "winking",      // 组 7
+                        "sleepy",       // 组 8
+                        "silly",        // 组 9
+                        "vertigo",      // 组 10
+                        "listen",       // 组 11
+                        "Turn_left",    // 组 12
+                        "Turn_right",   // 组 13
+                        "Accelerate",   // 组 14
+                        "Decelerate",   // 组 15
+                        "Charging"      // 组 16
+                    };
+                    const int emotion_list_size = sizeof(emotion_list) / sizeof(emotion_list[0]);
+                    
+                    if (saved_video_group_index >= 0 && saved_video_group_index < emotion_list_size) {
+                        const char* emotion = emotion_list[saved_video_group_index];
+                        ESP_LOGI(TAG, "HideBatteryIndicator: 恢复之前的表情 '%s' (Display模式)", 
+                                 emotion);
+                        TriggerEmotion(emotion);
+                    } else {
+                        ESP_LOGI(TAG, "HideBatteryIndicator: 索引超出范围，使用默认neutral");
+                        TriggerEmotion("neutral");
+                    }
+                }
+                
+                // 如果之前正在充电，恢复表情后确保充电圆环显示（如果被隐藏了）
+                // 但不要重新刷新，只确保它显示即可（如果圆环已存在，就不调用 ShowBatteryIndicatorForCharging）
+                if (was_charging && display_ != nullptr) {
+                    ESP_LOGI(TAG, "HideBatteryIndicator: 正在充电，检查充电圆环状态");
+                    auto& app = Application::GetInstance();
+                    auto device_state = app.GetDeviceState();
+                    if (device_state != kDeviceStateWifiConfiguring) {
+                        // 检查充电圆环是否已经存在（通过 EyeDisplay 的 GetChargingBatteryArc 方法）
+                        EyeDisplay* eye_display = static_cast<EyeDisplay*>(display_);
+                        lv_obj_t* charging_arc = (eye_display != nullptr) ? eye_display->GetChargingBatteryArc() : nullptr;
+                        if (charging_arc != nullptr && lv_obj_is_valid(charging_arc)) {
+                            // 充电圆环已存在，只确保它显示（如果被隐藏了）
+                            ESP_LOGI(TAG, "HideBatteryIndicator: 充电圆环已存在，只确保显示，不重新刷新");
+                            if (display_->Lock(100)) {
+                                if (lv_obj_has_flag(charging_arc, LV_OBJ_FLAG_HIDDEN)) {
+                                    lv_obj_clear_flag(charging_arc, LV_OBJ_FLAG_HIDDEN);
+                                    ESP_LOGI(TAG, "HideBatteryIndicator: 充电圆环被隐藏，恢复显示");
+                                }
+                                // 确保充电圆环在最前面
+                                lv_obj_move_foreground(charging_arc);
+                                display_->Unlock();
+                            }
+                        } else {
+                            // 充电圆环不存在，需要创建（这种情况应该很少，因为充电时圆环应该一直显示）
+                            ESP_LOGI(TAG, "HideBatteryIndicator: 充电圆环不存在，创建新的圆环");
+                            int battery_level = 0;
+                            bool charging = false;
+                            bool discharging = false;
+                            if (GetBatteryLevel(battery_level, charging, discharging)) {
+                                display_->ShowBatteryIndicatorForCharging(battery_level);
+                            } else {
+                                display_->ShowBatteryIndicatorForCharging();
+                            }
+                        }
+                    }
+                }
+                
+                // 清除保存的索引和轮播状态
                 saved_video_group_index_for_battery_ = -1;
+                was_video_cycling_before_battery_ = false;
             } else {
-                ESP_LOGW(TAG, "HideBatteryIndicator: 不恢复视频播放 - playback_mode_=%d, video_player_=%p, saved_video_group_index=%d", 
-                         (int)playback_mode_, video_player_, saved_video_group_index);
+                ESP_LOGW(TAG, "HideBatteryIndicator: 不恢复视频播放 - video_player_=%p, saved_video_group_index=%d", 
+                         video_player_, saved_video_group_index);
             }
         }
     }
@@ -888,7 +1362,8 @@ public:
         static int first_level = gpio_get_level(BOOT_BUTTON_GPIO);
         ESP_LOGI(TAG, "first_level: %d", first_level);
 
-        // 触摸按钮功能已启用
+        // 触摸按钮功能已禁用（注释掉）
+        /*
         touch_button_.OnPressDown([this]() {
             ESP_LOGI(TAG, "=== 触摸按钮检测到按下 ===");
             ESP_LOGI(TAG, "touch_button_.OnPressDown");
@@ -942,6 +1417,7 @@ public:
                          remaining_cooldown * portTICK_PERIOD_MS);
             }
         });
+        */
 
         // 创建双击检测定时器（使用esp_timer，避免栈溢出）
         if (!boot_button_timer_) {
@@ -962,8 +1438,8 @@ public:
                                 board->ExitQrcodeAndEnterVideoMode();
                             }
                         } else if (board->playback_mode_ == PlaybackMode::VIDEO_PLAYBACK) {
-                            // 视频模式下，单击切换视频组
-                            board->CycleVideoGroup();
+                            // 视频模式下，按键切换已禁用（使用自动轮播）
+                            ESP_LOGI("MovecallMojiESP32S3", "视频模式下按键切换已禁用，使用自动轮播");
                         } else {
                             // Display模式下，单击：强制打断讲话，进入聆听模式（参考 gizwits-c2-6824-DRF-W300CA）
                             ESP_LOGI("MovecallMojiESP32S3", "单击检测 - 强制打断讲话，进入聆听模式");
@@ -1069,8 +1545,9 @@ public:
                 InnerResetWifiConfiguration();
             } else if (repeat_count >= 4) {
                 // 四击：切换模式
-                ESP_LOGI(TAG, "四击检测 - 直接切换模式");
+                ESP_LOGI(TAG, "四击检测 - 直接切换模式，当前模式=%d", (int)playback_mode_);
                 SwitchPlaybackMode();
+                ESP_LOGI(TAG, "四击检测 - 切换模式完成，新模式=%d", (int)playback_mode_);
             }
             // 注意：单击（repeat_count == 1）仍然在定时器回调中处理，需要等待确认没有第二次点击
         });
@@ -1078,6 +1555,12 @@ public:
         // OnClick 只处理单击的情况（需要等待确认没有第二次点击）
         // 双击、三击、四击都在 OnPressRepeaDone 中立即处理，提高响应速度
         boot_button_.OnClick([this]() {
+            // 视频模式下禁用按键切换表情
+            if (playback_mode_ == PlaybackMode::VIDEO_PLAYBACK) {
+                ESP_LOGI(TAG, "视频模式下按键切换已禁用，使用自动轮播");
+                return;
+            }
+            
             int64_t now_ms = esp_timer_get_time() / 1000;
             const int64_t DOUBLE_CLICK_WINDOW_MS = kDoubleClickWindowMs;  // 使用成员变量的双击窗口时间（800ms）
             
@@ -1148,15 +1631,30 @@ public:
     void ShowQrcode() {
         ESP_LOGI(TAG, "ShowQrcode: 显示二维码");
         
-        // 先停止视频播放（如果正在播放），避免访问已删除的对象
-        if (video_player_ != nullptr && playback_mode_ == PlaybackMode::VIDEO_PLAYBACK) {
+        // 立即停止所有模式的视频播放和轮播，避免访问已删除的对象
+        if (video_player_ != nullptr) {
+            ESP_LOGI(TAG, "ShowQrcode: 立即停止视频播放和轮播（所有模式）");
+            // 如果正在轮播，先停止轮播
+            if (video_cycling_) {
+                StopVideoCycling();
+            }
+            // 立即停止视频播放，不等待
             video_player_->StopPlayback();
-            vTaskDelay(pdMS_TO_TICKS(200));  // 等待视频任务完全退出
+            // 等待更长时间，确保视频任务完全退出（因为任务可能在读取Flash或更新LVGL）
+            vTaskDelay(pdMS_TO_TICKS(500));
+            // 再次确认视频任务已停止
+            video_player_->StopPlayback();
+            vTaskDelay(pdMS_TO_TICKS(200));
+            // 第三次确认，确保任务完全退出
+            video_player_->StopPlayback();
+            vTaskDelay(pdMS_TO_TICKS(100));
+            ESP_LOGI(TAG, "ShowQrcode: 视频播放已完全停止");
         }
         
         if (display_ != nullptr) {
             display_->EnterWifiConfig();
             qrcode_displaying_ = true;
+            ESP_LOGI(TAG, "ShowQrcode: 二维码已显示，qrcode_displaying_=true");
         }
     }
     
@@ -1200,6 +1698,9 @@ public:
         if (playback_mode_ != PlaybackMode::DISPLAY_ANIMATION) {
             playback_mode_ = PlaybackMode::DISPLAY_ANIMATION;
             
+            // 停止视频轮播并清除回调
+            StopVideoCycling();
+            
             // Display模式下恢复唤醒词检测（根据设备状态）
             auto& app = Application::GetInstance();
             auto device_state = app.GetDeviceState();
@@ -1215,20 +1716,18 @@ public:
                 app.GetAudioService().EnableWakeWordDetection(true);
                 app.GetAudioService().EnableVoiceProcessing(false);
                 ESP_LOGI(TAG, "Display模式：已恢复唤醒词检测（idle/sleeping状态）");
-            } else if (device_state == kDeviceStateListening || device_state == kDeviceStateSpeaking) {
-                // 在listening或speaking状态下，也需要启用唤醒词检测（可以在speaking时打断）
+            } else if (device_state == kDeviceStateSpeaking) {
+                // 只在speaking状态下启用唤醒词检测（用于打断）
                 #if CONFIG_USE_AFE_WAKE_WORD
                 app.GetAudioService().EnableWakeWordDetection(true);
-                ESP_LOGI(TAG, "Display模式：已恢复唤醒词检测（listening/speaking状态，AFE唤醒词）");
+                ESP_LOGI(TAG, "Display模式：已恢复唤醒词检测（speaking状态，AFE唤醒词，用于打断）");
                 #else
                 // 非AFE唤醒词，在speaking状态下不启用唤醒词检测
-                if (device_state == kDeviceStateListening) {
-                    app.GetAudioService().EnableWakeWordDetection(true);
-                    ESP_LOGI(TAG, "Display模式：已恢复唤醒词检测（listening状态）");
-                } else {
-                    ESP_LOGW(TAG, "Display模式：speaking状态下非AFE唤醒词不启用唤醒词检测");
-                }
+                ESP_LOGW(TAG, "Display模式：speaking状态下非AFE唤醒词不启用唤醒词检测");
                 #endif
+            } else if (device_state == kDeviceStateListening) {
+                // listening状态下不启用唤醒词检测，避免与语音处理冲突
+                ESP_LOGI(TAG, "Display模式：listening状态下不启用唤醒词检测（避免与语音处理冲突）");
             } else {
                 // 其他状态，也尝试启用唤醒词检测（如果设备允许）
                 app.GetAudioService().EnableWakeWordDetection(true);
@@ -1238,10 +1737,8 @@ public:
             // 再次等待，确保所有操作完成和屏幕稳定
             vTaskDelay(pdMS_TO_TICKS(200));
             
-            // 重新初始化显示动画（屏幕已经清空）
-            if (display_ != nullptr) {
-                display_->SetEmotion("neutral");
-            }
+            // 统一使用视频播放，重新初始化表情（屏幕已经清空）
+            TriggerEmotion("neutral");
         }
     }
     
@@ -1318,10 +1815,8 @@ public:
             // 再次等待，确保所有操作完成和屏幕稳定
             vTaskDelay(pdMS_TO_TICKS(200));
             
-            // 启动视频播放（屏幕已经清空，不需要隐藏对象）
-            if (video_player_ != nullptr) {
-                video_player_->PlayVideoGroup("neutral");
-            }
+            // 启动视频轮播（会从组0开始播放）
+            StartVideoCycling();
         }
     }
 
@@ -1470,20 +1965,28 @@ public:
                 ESP_LOGI(TAG, "充电时设备状态: %d", device_state);
                 
                 // 只排除配网模式，其他所有状态都显示电量圆环
+                // 但如果 GetDisplay() 还没被调用（display_wrapper_ 为 nullptr），不立即显示电量圆环
+                // 因为 GetDisplay() 中会先显示表情，然后再显示电量圆环，确保表情先显示
                 if (device_state != kDeviceStateWifiConfiguring) {
-                    ESP_LOGI(TAG, "显示充电电量圆环");
-                    if (display_ != nullptr) {
-                        // 在调用 ShowBatteryIndicatorForCharging() 之前，先获取电量
-                        // 这样 ShowBatteryIndicatorForCharging() 就可以使用传入的电量值，避免在定时器回调中调用 Board::GetInstance()
-                        int battery_level = 0;
-                        bool charging = false;
-                        bool discharging = false;
-                        if (GetBatteryLevel(battery_level, charging, discharging)) {
-                            display_->ShowBatteryIndicatorForCharging(battery_level);
-                        } else {
-                            display_->ShowBatteryIndicatorForCharging();
+                    // 如果 GetDisplay() 已经被调用（display_wrapper_ 已创建），立即显示电量圆环
+                    // 否则，等待 GetDisplay() 时再显示（GetDisplay() 中会检查充电状态并显示）
+                    if (display_wrapper_ != nullptr) {
+                        ESP_LOGI(TAG, "显示充电电量圆环（GetDisplay已调用）");
+                        if (display_ != nullptr) {
+                            // 在调用 ShowBatteryIndicatorForCharging() 之前，先获取电量
+                            // 这样 ShowBatteryIndicatorForCharging() 就可以使用传入的电量值，避免在定时器回调中调用 Board::GetInstance()
+                            int battery_level = 0;
+                            bool charging = false;
+                            bool discharging = false;
+                            if (GetBatteryLevel(battery_level, charging, discharging)) {
+                                display_->ShowBatteryIndicatorForCharging(battery_level);
+                            } else {
+                                display_->ShowBatteryIndicatorForCharging();
+                            }
+                            ESP_LOGI(TAG, "ShowBatteryIndicatorForCharging调用完成");
                         }
-                        ESP_LOGI(TAG, "ShowBatteryIndicatorForCharging调用完成");
+                    } else {
+                        ESP_LOGI(TAG, "GetDisplay() 还未调用，等待 GetDisplay() 时再显示电量圆环");
                     }
                 }
             } else {
@@ -1516,27 +2019,58 @@ public:
                     power_manager_->CheckBatteryStatusImmediately();
                 }
                 
+                // 参考 gizwits-s3-vb6824-st7735s 项目，不在状态回调中管理音频状态和视频播放
+                // 让 Application::SetDeviceState 自己管理唤醒词检测和语音处理
+                // 视频播放任务使用非阻塞锁，不会阻塞音频处理，所以不需要在 listening 状态下停止
+                
+                // 配网模式：必须停止视频播放和轮播，确保二维码能正常显示
+                if (curr == kDeviceStateWifiConfiguring) {
+                    ESP_LOGI(TAG, "DeviceStateEventManager回调: 进入配网模式，停止视频播放和轮播");
+                    // 如果正在轮播，先停止轮播
+                    if (video_cycling_) {
+                        StopVideoCycling();
+                    }
+                    // 停止视频播放
+                    if (video_player_ != nullptr) {
+                        video_player_->StopPlayback();
+                        // 等待视频任务完全退出
+                        vTaskDelay(pdMS_TO_TICKS(500));
+                        // 再次确认视频任务已停止
+                        video_player_->StopPlayback();
+                        vTaskDelay(pdMS_TO_TICKS(200));
+                        ESP_LOGI(TAG, "DeviceStateEventManager回调: 视频播放已停止");
+                    }
+                }
+                
                 // 如果正在充电，根据新状态决定是否显示电量圆环
                 bool is_charging = IsCharging();
                 ESP_LOGI(TAG, "DeviceStateEventManager回调: is_charging=%d (强制刷新后)", is_charging);
                 if (is_charging) {
                     // 只排除配网模式，其他所有状态都显示电量圆环
+                    // 但如果 GetDisplay() 还没被调用（display_wrapper_ 为 nullptr），不立即显示电量圆环
+                    // 因为 GetDisplay() 中会先显示表情，然后再显示电量圆环，确保表情先显示
                     if (curr != kDeviceStateWifiConfiguring) {
-                        // 新状态允许显示电量圆环
-                        ESP_LOGI(TAG, "DeviceStateEventManager回调: 显示充电电量圆环 (device_state=%d, display_=%p)", 
-                                 curr, display_);
-                        if (display_ != nullptr) {
-                            int battery_level = 0;
-                            bool charging = false;
-                            bool discharging = false;
-                            if (GetBatteryLevel(battery_level, charging, discharging)) {
-                                display_->ShowBatteryIndicatorForCharging(battery_level);
+                        // 如果 GetDisplay() 已经被调用（display_wrapper_ 已创建），立即显示电量圆环
+                        // 否则，等待 GetDisplay() 时再显示（GetDisplay() 中会检查充电状态并显示）
+                        if (display_wrapper_ != nullptr) {
+                            // 新状态允许显示电量圆环
+                            ESP_LOGI(TAG, "DeviceStateEventManager回调: 显示充电电量圆环 (device_state=%d, display_=%p)", 
+                                     curr, display_);
+                            if (display_ != nullptr) {
+                                int battery_level = 0;
+                                bool charging = false;
+                                bool discharging = false;
+                                if (GetBatteryLevel(battery_level, charging, discharging)) {
+                                    display_->ShowBatteryIndicatorForCharging(battery_level);
+                                } else {
+                                    display_->ShowBatteryIndicatorForCharging();
+                                }
+                                ESP_LOGI(TAG, "DeviceStateEventManager回调: ShowBatteryIndicatorForCharging调用完成");
                             } else {
-                                display_->ShowBatteryIndicatorForCharging();
+                                ESP_LOGE(TAG, "DeviceStateEventManager回调: display_为nullptr，无法显示圆环");
                             }
-                            ESP_LOGI(TAG, "DeviceStateEventManager回调: ShowBatteryIndicatorForCharging调用完成");
                         } else {
-                            ESP_LOGE(TAG, "DeviceStateEventManager回调: display_为nullptr，无法显示圆环");
+                            ESP_LOGI(TAG, "DeviceStateEventManager回调: GetDisplay() 还未调用，等待 GetDisplay() 时再显示电量圆环");
                         }
                     } else {
                         // 配网模式，隐藏充电时的电量圆环
@@ -1609,25 +2143,10 @@ public:
             vTaskDelay(pdMS_TO_TICKS(500));  // 延迟500ms等待ADC稳定
             power_manager_->CheckBatteryStatusImmediately();  // 再次检测，确保状态更新
             
-            // 检查充电状态，如果正在充电，显示电量圆环
+            // 检查充电状态，但不在这里显示电量圆环
+            // 电量圆环会在 GetDisplay() 中，在表情显示之后显示，确保表情先显示
             if (IsCharging()) {
-                ESP_LOGI(TAG, "启动时检测到正在充电，显示电量圆环");
-                auto& app = Application::GetInstance();
-                auto device_state = app.GetDeviceState();
-                if (device_state != kDeviceStateWifiConfiguring && display_ != nullptr) {
-                    int battery_level = 0;
-                    bool charging = false;
-                    bool discharging = false;
-                    if (GetBatteryLevel(battery_level, charging, discharging)) {
-                        display_->ShowBatteryIndicatorForCharging(battery_level);
-                    } else {
-                        display_->ShowBatteryIndicatorForCharging();
-                    }
-                    ESP_LOGI(TAG, "启动时显示充电电量圆环完成");
-                } else {
-                    ESP_LOGI(TAG, "启动时不显示充电电量圆环 (device_state=%d, display_=%p)", 
-                             device_state, display_);
-                }
+                ESP_LOGI(TAG, "启动时检测到正在充电，将在 GetDisplay() 后显示电量圆环");
             } else {
                 ESP_LOGI(TAG, "启动时未检测到充电状态");
             }
@@ -1697,6 +2216,13 @@ public:
     }
 
     virtual void PowerOff() override {
+        // 关机前先停止视频播放，避免视频任务阻塞关机
+        if (video_player_ != nullptr) {
+            ESP_LOGI(TAG, "关机前，停止视频播放");
+            video_player_->StopPlayback();
+            // 等待视频任务完全退出
+            vTaskDelay(pdMS_TO_TICKS(200));
+        }
         gpio_set_level(POWER_GPIO, 0);
     }
 
@@ -1729,6 +2255,11 @@ public:
         bool charging, discharging;
         self->GetBatteryLevel(level, charging, discharging);
         // XunguanDisplay* xunguan_display = static_cast<XunguanDisplay*>(self->GetDisplay());
+        
+        // 参考 gizwits-s3-vb6824-st7735s 项目，确保显示内容已经完全渲染
+        vTaskDelay(pdMS_TO_TICKS(50));
+        
+        // 恢复背光（表情已经在 GetDisplay 时触发了）
         self->GetBacklight()->RestoreBrightness();
 
         // xunguan_display->StartAutoTest(1000);
@@ -1747,6 +2278,32 @@ public:
         // 返回包装器，以便拦截SetEmotion调用
         if (display_wrapper_ == nullptr && display_ != nullptr) {
             display_wrapper_ = new DisplayWrapper(display_, this);
+            // 参考 gizwits-s3-vb6824-st7735s 项目，立即触发默认表情，不等待背光恢复
+            // 显示内容已经在 InitializeGc9a01Display 中通过 lv_timer_handler 准备好了
+            if (video_player_ != nullptr) {
+                ESP_LOGI(TAG, "GetDisplay: 首次创建DisplayWrapper，立即触发默认neutral视频表情");
+                TriggerEmotion("neutral");
+                
+                // 表情显示后，检查是否需要显示电量圆环（确保表情先显示）
+                if (IsCharging()) {
+                    ESP_LOGI(TAG, "GetDisplay: 检测到正在充电，在表情显示后显示电量圆环");
+                    auto& app = Application::GetInstance();
+                    auto device_state = app.GetDeviceState();
+                    if (device_state != kDeviceStateWifiConfiguring && display_ != nullptr) {
+                        int battery_level = 0;
+                        bool charging = false;
+                        bool discharging = false;
+                        if (GetBatteryLevel(battery_level, charging, discharging)) {
+                            display_->ShowBatteryIndicatorForCharging(battery_level);
+                        } else {
+                            display_->ShowBatteryIndicatorForCharging();
+                        }
+                        ESP_LOGI(TAG, "GetDisplay: 电量圆环显示完成");
+                    }
+                }
+            } else {
+                ESP_LOGW(TAG, "GetDisplay: video_player_ 尚未初始化，跳过默认表情触发");
+            }
         }
         return display_wrapper_ != nullptr ? static_cast<Display*>(display_wrapper_) : display_;
     }
@@ -1809,12 +2366,31 @@ public:
 };
 
 // DisplayWrapper::SetEmotion 的实现（需要在 MovecallMojiESP32S3 类定义之后）
+// 所有通过 display->SetEmotion() 的调用（包括AI对话）都会路由到这里
+// 然后通过 TriggerEmotion -> PlayVideoGroup -> video_player_->PlayVideoGroup
+// 最终使用 VideoPlayer::DefaultEmotionToGroup 映射表来映射表情到视频组
+// 注意：不再调用 wrapped_display_->SetEmotion，避免启动Display动画，统一使用视频播放
 void DisplayWrapper::SetEmotion(const char* emotion) {
+    ESP_LOGI("DisplayWrapper", "=== DisplayWrapper::SetEmotion 开始 ===");
+    ESP_LOGI("DisplayWrapper", "SetEmotion: emotion='%s', board_=%p, wrapped_display_=%p", 
+             emotion ? emotion : "nullptr", board_, wrapped_display_);
+    
     if (board_ != nullptr) {
+        // 路由到 TriggerEmotion，统一使用视频播放和 video_player 的映射表
+        // 不再调用 wrapped_display_->SetEmotion，避免启动Display动画
+        ESP_LOGI("DisplayWrapper", "SetEmotion: 路由到 board_->TriggerEmotion('%s')", emotion);
         board_->TriggerEmotion(emotion);
-    } else if (wrapped_display_ != nullptr) {
-        wrapped_display_->SetEmotion(emotion);
+    } else {
+        // 如果board_为nullptr，才回退到wrapped_display_（这种情况不应该发生）
+        ESP_LOGW("DisplayWrapper", "SetEmotion: board_ 为 nullptr，回退到 wrapped_display_");
+        if (wrapped_display_ != nullptr) {
+            ESP_LOGI("DisplayWrapper", "SetEmotion: 路由到 wrapped_display_->SetEmotion('%s')", emotion);
+            wrapped_display_->SetEmotion(emotion);
+        } else {
+            ESP_LOGW("DisplayWrapper", "SetEmotion: board_ 和 wrapped_display_ 都为 nullptr");
+        }
     }
+    ESP_LOGI("DisplayWrapper", "SetEmotion: 完成");
 }
 
 DECLARE_BOARD(MovecallMojiESP32S3);
