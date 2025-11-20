@@ -7,6 +7,8 @@
 
 #include "iot/thing_manager.h"
 #include "power_manager.h"
+#include "data_point_manager.h"
+
 #include "assets/lang_config.h"
 #include "font_awesome_symbols.h"
 #include "wifi_connection_manager.h"
@@ -70,6 +72,34 @@ private:
     std::vector<std::string> network_config_words_ = {"开始配网"};
 
 
+
+    void InitializeDataPointManager() {
+        // 设置 DataPointManager 的回调函数
+        DataPointManager::GetInstance().SetCallbacks(
+            [this]() -> bool { return false; }, // IsCharging - toy 版本可能没有充电功能
+            []() -> int { return Application::GetInstance().GetChatMode(); },
+            [](int value) { Application::GetInstance().SetChatMode(value); },
+            [this]() -> int { 
+                int level = 0;
+                bool charging = false, discharging = false;
+                GetBatteryLevel(level, charging, discharging);
+                return level;
+            },
+            [this]() -> int { return GetAudioCodec()->output_volume(); },
+            [this](int value) { GetAudioCodec()->SetOutputVolume(value); },
+            []() -> int { 
+                wifi_ap_record_t ap_info;
+                if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+                    return 100 - (uint8_t)abs(ap_info.rssi);
+                }
+                return 0;
+            },
+            [this]() -> int { return 100; }, // 固定亮度 100%
+            [this](int value) { 
+                this->GetBacklight()->SetBrightness(value, true);
+            }
+        );
+    }
 
 
     void InitializePowerSaveTimer() {
@@ -275,8 +305,6 @@ private:
         };
         ESP_ERROR_CHECK(gpio_config(&mute_conf));
 
-        gpio_set_level(MCU_MUTE_PIN, 0);
-
         // 初始化时读取一次状态并设置MCU MUTE
         UpdateMuteSignal();
 
@@ -288,7 +316,7 @@ private:
         int hpr_level = gpio_get_level(HPR_SIGN_PIN);
         // HPR-SIGN为高时，有耳机插入，输出MCU MUTE为高
         // HPR-SIGN为低时，无耳机插入，输出MCU MUTE为低
-        gpio_set_level(MCU_MUTE_PIN, 0);
+        gpio_set_level(MCU_MUTE_PIN, hpr_level);
         ESP_LOGI(TAG, "HPR-SIGN: %d, MCU MUTE: %d", hpr_level, hpr_level);
     }
 
@@ -327,9 +355,10 @@ private:
 
             if (CheckAndHandleEnterSleepMode()) {
                 // 交给休眠逻辑托管
-                ESP_LOGI(TAG, "长按唤醒");
                 return;
             }
+
+
             auto& app = Application::GetInstance();
             app.ToggleChatState();
             // display_->TestNextEmotion();
@@ -400,7 +429,7 @@ private:
         });
         
         // Volume up button - short press to increase volume
-        volume_up_button_.OnClick([this]() {
+        volume_up_button_.OnPressDown([this]() {
             auto codec = GetAudioCodec();
             auto volume = codec->output_volume() + 10;
             if (volume > 100) {
@@ -411,7 +440,7 @@ private:
         });
         
         // Volume down button - short press to decrease volume
-        volume_down_button_.OnClick([this]() {
+        volume_down_button_.OnPressDown([this]() {
             auto codec = GetAudioCodec();
             auto volume = codec->output_volume() - 10;
             if (volume < 0) {
@@ -480,7 +509,7 @@ private:
                 // 充电开始时的处理逻辑
                 ESP_LOGI(TAG, "检测到开始充电");
                 // 降低发热                
-                GetBacklight()->SetBrightness(5, false);
+                // GetBacklight()->SetBrightness(5, false);
                 
             } else {
                 // 充电停止时的处理逻辑
@@ -529,6 +558,7 @@ public:
         InitializeIot();
         InitializePowerManager();
         InitializePowerSaveTimer();
+        InitializeDataPointManager();
         // ESP_LOGI(TAG, "ReadADC2_CH1_Oneshot");
         // ReadADC2_CH1_Oneshot();
         if (power_manager_) {
@@ -655,6 +685,10 @@ public:
         vTaskDelete(NULL); // 任务结束时删除自己
     }
 
+    virtual bool NeedToogleIdle() override {
+        return true;
+    }
+
     virtual Display* GetDisplay() override {
         return display_;
     }
@@ -690,6 +724,36 @@ public:
 
     virtual AudioCodec* GetAudioCodec() override {
         return &audio_codec;
+    }
+
+
+    // 数据点相关方法实现
+    const char* GetGizwitsProtocolJson() const override {
+        return DataPointManager::GetInstance().GetGizwitsProtocolJson();
+    }
+
+    size_t GetDataPointCount() const override {
+        return DataPointManager::GetInstance().GetDataPointCount();
+    }
+
+    bool GetDataPointValue(const std::string& name, int& value) const override {
+        return DataPointManager::GetInstance().GetDataPointValue(name, value);
+    }
+
+    bool SetDataPointValue(const std::string& name, int value) override {
+        return DataPointManager::GetInstance().SetDataPointValue(name, value);
+    }
+
+    void GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) override {
+        DataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
+    }
+
+    void ProcessDataPointValue(const std::string& name, int value) override {
+        DataPointManager::GetInstance().ProcessDataPointValue(name, value);
+    }
+
+    void ProcessBinaryDataPointValue(const std::string& name, const uint8_t* data, size_t data_len) override {
+        DataPointManager::GetInstance().ProcessBinaryDataPointValue(name, data, data_len);
     }
 };
 

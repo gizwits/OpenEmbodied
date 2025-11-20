@@ -34,6 +34,8 @@ public:
     virtual void SetOutputVolume(int volume) override;
     virtual void EnableInput(bool enable) override;
     virtual void EnableOutput(bool enable) override;
+
+    virtual bool supports_software_aec_reference() const override { return true; }
 };
 
 #endif // _ES8311_AUDIO_CODEC_H

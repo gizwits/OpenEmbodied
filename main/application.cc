@@ -290,11 +290,17 @@ void Application::ToggleChatState() {
             AbortSpeaking(kAbortReasonNone);
             ESP_LOGI(TAG, "ToggleChatState(kDeviceStateSpeaking)");
             SetDeviceState(kDeviceStateListening);
+            ResetDecoder();
         }, "ToggleChatState_AbortSpeaking");
     } else if (device_state_ == kDeviceStateListening) {
         // Schedule([this]() {
         //     protocol_->CloseAudioChannel();
         // });
+        if (Board::GetInstance().NeedToogleIdle()) {
+            Schedule([this]() {
+                protocol_->CloseAudioChannel();
+            });
+        }
     }
 }
 
@@ -909,12 +915,12 @@ void Application::MainEventLoop() {
 }
 
 void Application::OnWakeWordDetected() {
+    ESP_LOGI(TAG, "OnWakeWordDetected");
     if (chat_mode_ == 0) {
         ESP_LOGI(TAG, "OnWakeWordDetected: chat_mode_ == 0");
         return;
     }
     Board::GetInstance().WakeUpPowerSaveTimer();
-    ESP_LOGI(TAG, "OnWakeWordDetected");
     if (!protocol_) {
         return;
     }
@@ -1454,7 +1460,7 @@ void Application::HandleNetError() {
     PlaySound(Lang::Sounds::P3_NET_ERR);
 }
 void Application::SendTextToAI(const std::string& text) {
-    if (protocol_) {
+    if (protocol_ && protocol_->IsAudioChannelOpened()) {
         protocol_->SendTextToAI(text);
     }
 }
