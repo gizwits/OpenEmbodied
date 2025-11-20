@@ -244,6 +244,14 @@ void Application::DismissAlert() {
 void Application::ToggleChatState() {
     Board::GetInstance().WakeUpPowerSaveTimer();
 
+    // 清空字幕
+    auto display = Board::GetInstance().GetDisplay();
+    if (display) {
+        display->SetChatMessage("system", "");
+        display->SetChatMessage("user", "");
+        display->SetChatMessage("assistant", "");
+    }
+
     if (player_.IsDownloading()) {
         CancelPlayMusic();
         return;

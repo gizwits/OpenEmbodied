@@ -24,12 +24,30 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
 #include <lvgl.h>
+#include "../../managed_components/lvgl__lvgl/src/draw/lv_image_decoder_private.h"
 
 #include "board.h"
 #include "application.h"
+#include "device_state.h"
 
 #define TAG "LcdDisplay"
+
+// Initialize LVGL image decoders (PNG and JPG)
+static void InitializeLvglDecoders() {
+#if LV_USE_LODEPNG
+    extern void lv_lodepng_init(void);
+    lv_lodepng_init();
+    ESP_LOGI(TAG, "LODEPNG decoder initialized");
+#endif
+#if LV_USE_TJPGD
+    extern void lv_tjpgd_init(void);
+    lv_tjpgd_init();
+    ESP_LOGI(TAG, "TJPGD decoder initialized");
+#endif
+}
 
 // Background SPIFFS partition configuration
 #define BACKGROUND_PARTITION_LABEL "background"
@@ -125,6 +143,7 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
 
     ESP_LOGI(TAG, "Initialize LVGL library");
     lv_init();
+    InitializeLvglDecoders();
 
     ESP_LOGI(TAG, "Initialize LVGL port");
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
@@ -169,11 +188,12 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
         lv_display_set_offset(display_, offset_x, offset_y);
     }
 
+    // Mount background SPIFFS partition and register LVGL file system driver
+    // Must be called before SetupUI() so that background image can be loaded
+    LoadBackgroundFromSPIFFS();
+    
     SetupUI();
     RegisterDeviceStateCallback();
-    
-    // Mount background SPIFFS partition and register LVGL file system driver
-    LoadBackgroundFromSPIFFS();
 }
 
 // RGB LCD实现
@@ -191,6 +211,7 @@ RgbLcdDisplay::RgbLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
 
     ESP_LOGI(TAG, "Initialize LVGL library");
     lv_init();
+    InitializeLvglDecoders();
 
     ESP_LOGI(TAG, "Initialize LVGL port");
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
@@ -236,11 +257,12 @@ RgbLcdDisplay::RgbLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
         lv_display_set_offset(display_, offset_x, offset_y);
     }
 
+    // Mount background SPIFFS partition and register LVGL file system driver
+    // Must be called before SetupUI() so that background image can be loaded
+    LoadBackgroundFromSPIFFS();
+    
     SetupUI();
     RegisterDeviceStateCallback();
-    
-    // Mount background SPIFFS partition and register LVGL file system driver
-    LoadBackgroundFromSPIFFS();
 }
 
 MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
@@ -255,6 +277,7 @@ MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel
 
     ESP_LOGI(TAG, "Initialize LVGL library");
     lv_init();
+    InitializeLvglDecoders();
 
     ESP_LOGI(TAG, "Initialize LVGL port");
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
@@ -298,11 +321,12 @@ MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel
         lv_display_set_offset(display_, offset_x, offset_y);
     }
 
+    // Mount background SPIFFS partition and register LVGL file system driver
+    // Must be called before SetupUI() so that background image can be loaded
+    LoadBackgroundFromSPIFFS();
+    
     SetupUI();
     RegisterDeviceStateCallback();
-    
-    // Mount background SPIFFS partition and register LVGL file system driver
-    LoadBackgroundFromSPIFFS();
 }
 
 // Add background_image_ and chat_container_ as member variables (temporary storage)
@@ -354,6 +378,10 @@ bool LcdDisplay::Lock(int timeout_ms) {
 void LcdDisplay::Unlock() {
     lvgl_port_unlock();
 }
+
+// Forward declaration
+static bool DecodeAndSaveAsRGB565(const char* spiffs_path);
+static lv_image_dsc_t* LoadRGB565FromFile(const char* raw_path);
 
 #if CONFIG_USE_WECHAT_MESSAGE_STYLE
 void LcdDisplay::SetupUI() {
@@ -692,21 +720,16 @@ void LcdDisplay::SetupUI() {
     lv_obj_add_flag(background_image_, LV_OBJ_FLAG_FLOATING);  // Make it floating, not part of flex layout
     lv_obj_move_background(background_image_);  // Move to background layer
     
-    // Try to load from SPIFFS first
-    char bg_path[64];
-    snprintf(bg_path, sizeof(bg_path), "%c:/bg.jpg", BACKGROUND_DRIVE_LETTER);
-    // Check if file exists using SPIFFS path directly
-    char spiffs_path[128];
-    snprintf(spiffs_path, sizeof(spiffs_path), "%s/bg.jpg", BACKGROUND_MOUNT_POINT);
-    FILE* f = fopen(spiffs_path, "r");
-    if (f != nullptr) {
-        fclose(f);
-        // File exists, use LVGL path format
-        ESP_LOGI(TAG, "Loading background image from SPIFFS: %s", bg_path);
-        lv_image_set_src(background_image_, bg_path);
+    // Try to load from bg.raw (RGB565 format)
+    char raw_path[128];
+    snprintf(raw_path, sizeof(raw_path), "%s/bg.raw", BACKGROUND_MOUNT_POINT);
+    lv_image_dsc_t* img_dsc = LoadRGB565FromFile(raw_path);
+    if (img_dsc != nullptr) {
+        lv_image_set_src(background_image_, img_dsc);
+        ESP_LOGI(TAG, "Background image loaded from RGB565 raw file: %s", raw_path);
     } else {
         // Fallback to embedded image
-        ESP_LOGI(TAG, "SPIFFS background image not found, using embedded image");
+        ESP_LOGI(TAG, "Background image not found, using embedded image");
         lv_image_set_src(background_image_, &bg_1_img);
     }
 
@@ -1461,6 +1484,18 @@ void LcdDisplay::UpdateCountdownDisplay() {
         return;
     }
     
+    // 获取时间容器
+    lv_obj_t* time_container = lv_obj_get_parent(emotion_label_);
+    
+    // 检查是否处于 OTA 模式，如果是则隐藏时间显示
+    if (Application::GetInstance().GetDeviceState() == kDeviceStateUpgrading) {
+        if (time_container != nullptr) {
+            lv_obj_add_flag(time_container, LV_OBJ_FLAG_HIDDEN);
+        }
+        ESP_LOGD(TAG, "OTA mode active, hiding time container");
+        return;
+    }
+    
     // 检查是否有通知或错误显示（低电量弹窗）
     bool has_notification = false;
     if (notification_label_ != nullptr && !lv_obj_has_flag(notification_label_, LV_OBJ_FLAG_HIDDEN)) {
@@ -1471,7 +1506,6 @@ void LcdDisplay::UpdateCountdownDisplay() {
     }
     
     // 如果有通知或错误，隐藏时间容器
-    lv_obj_t* time_container = lv_obj_get_parent(emotion_label_);
     if (time_container != nullptr) {
         if (has_notification) {
             lv_obj_add_flag(time_container, LV_OBJ_FLAG_HIDDEN);
@@ -1710,7 +1744,7 @@ void LcdDisplay::AudioMonitorTask(void* arg) {
     // 持续查询音频队列，直到队列为空
     while (display->audio_monitor_active_) {
         size_t queue_size = Application::GetInstance().GetDecodeQueueSize();
-        
+        // ESP_LOGI(TAG, "Audio queue size: %zu", queue_size);
         if (queue_size == 0) {
             // 音频队列为空，显示背景图片
             ESP_LOGI(TAG, "Audio queue is empty, showing background image");
@@ -1747,7 +1781,7 @@ void LcdDisplay::StartAudioMonitor() {
     BaseType_t ret = xTaskCreate(
         AudioMonitorTask,
         "audio_monitor",
-        4096,  // 增加栈大小以避免栈溢出
+        4096 * 2,  // 增加栈大小以避免栈溢出
         this,
         1,  // 低优先级
         &audio_monitor_task_handle_
@@ -1775,6 +1809,313 @@ void LcdDisplay::StopAudioMonitor() {
     audio_monitor_task_handle_ = nullptr;
 }
 
+// Helper function to convert RGB888 to RGB565
+static uint16_t rgb888_to_rgb565(uint8_t r, uint8_t g, uint8_t b) {
+    return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+}
+
+// Helper function to get LVGL file path from SPIFFS path
+static const char* GetLvglPathFromSpiffs(const char* spiffs_path) {
+    // Extract filename from SPIFFS path
+    const char* filename = strrchr(spiffs_path, '/');
+    if (filename == nullptr) {
+        filename = spiffs_path;
+    } else {
+        filename++;  // Skip the '/'
+    }
+    
+    // Create LVGL file system path (format: "B:filename")
+    static char lvgl_path[128];
+    snprintf(lvgl_path, sizeof(lvgl_path), "%c:%s", BACKGROUND_DRIVE_LETTER, filename);
+    
+    return lvgl_path;
+}
+
+// Static variable to store decoded background image to avoid repeated file reads
+static lv_image_dsc_t* cached_bg_image_dsc = nullptr;
+
+// Helper function to decode image and save as RGB565 raw file
+static bool DecodeAndSaveAsRGB565(const char* spiffs_path) {
+    ESP_LOGI(TAG, "Decoding image and saving as RGB565: %s", spiffs_path);
+    
+    // Extract filename from SPIFFS path
+    const char* filename = strrchr(spiffs_path, '/');
+    if (filename == nullptr) {
+        filename = spiffs_path;
+    } else {
+        filename++;  // Skip the '/'
+    }
+    
+    // Create LVGL file system path (format: "B:filename")
+    char lvgl_path[128];
+    snprintf(lvgl_path, sizeof(lvgl_path), "%c:%s", BACKGROUND_DRIVE_LETTER, filename);
+    
+    ESP_LOGI(TAG, "Decoding image from SPIFFS: %s", spiffs_path);
+    
+    // First, get image info using decoder
+    lv_image_header_t header;
+    lv_result_t res = lv_image_decoder_get_info(lvgl_path, &header);
+    
+    if (res != LV_RESULT_OK) {
+        ESP_LOGE(TAG, "Failed to get image info: %s (error: %d)", lvgl_path, res);
+        // Try to check if file exists directly
+        FILE* test_file = fopen(spiffs_path, "rb");
+        if (test_file == nullptr) {
+            ESP_LOGE(TAG, "File does not exist: %s", spiffs_path);
+        } else {
+            fseek(test_file, 0, SEEK_END);
+            size_t file_size = ftell(test_file);
+            fclose(test_file);
+            ESP_LOGE(TAG, "File exists but decoder failed: %s (size: %zu bytes)", spiffs_path, file_size);
+        }
+        return false;
+    }
+    
+    uint32_t width = header.w;
+    uint32_t height = header.h;
+    uint32_t stride = width * 2;  // RGB565: 2 bytes per pixel
+    size_t rgb565_size = stride * height;
+    
+    ESP_LOGI(TAG, "Image info: %dx%d, format=%d, size=%zu bytes", width, height, header.cf, rgb565_size);
+    
+    // Allocate buffer for RGB565 data
+    uint8_t* rgb565_data = (uint8_t*)heap_caps_malloc(rgb565_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (rgb565_data == nullptr) {
+        rgb565_data = (uint8_t*)malloc(rgb565_size);
+    }
+    
+    if (rgb565_data == nullptr) {
+        ESP_LOGE(TAG, "Failed to allocate memory for RGB565 data (%zu bytes)", rgb565_size);
+        return false;
+    }
+    
+    // Use LVGL decoder API directly to decode the image
+    // Create decoder descriptor
+    lv_image_decoder_dsc_t dsc;
+    memset(&dsc, 0, sizeof(dsc));
+    
+    // Set decoder args (optional, NULL uses defaults)
+    lv_image_decoder_args_t args = {0};
+    args.no_cache = true;  // Don't cache the decoded image
+    
+    // Open decoder - this will decode the image and set dsc->decoded
+    lv_result_t decode_res = lv_image_decoder_open(&dsc, lvgl_path, &args);
+    if (decode_res == LV_RESULT_OK && dsc.decoded != nullptr) {
+        // Check decoded format - accept RGB565 or RGB565A8 (both are 16-bit per pixel)
+        lv_color_format_t decoded_cf = (lv_color_format_t)dsc.decoded->header.cf;
+        bool is_rgb565_compatible = (decoded_cf == LV_COLOR_FORMAT_RGB565 || 
+                                     decoded_cf == LV_COLOR_FORMAT_RGB565A8);
+        
+        // Also check by data size: RGB565 should be width*height*2 bytes
+        // Some decoders may report wrong format but return correct data size
+        uint32_t decoded_stride = dsc.decoded->header.stride;
+        uint32_t decoded_width = dsc.decoded->header.w;
+        uint32_t decoded_height = dsc.decoded->header.h;
+        size_t expected_rgb565_size = decoded_width * decoded_height * 2;
+        bool size_matches_rgb565 = (dsc.decoded->data_size >= expected_rgb565_size);
+        
+        ESP_LOGI(TAG, "Decoded format: %d, stride: %u, data_size: %u, expected RGB565 size: %zu", 
+                 decoded_cf, decoded_stride, dsc.decoded->data_size, expected_rgb565_size);
+        
+        if (!is_rgb565_compatible && !size_matches_rgb565) {
+            ESP_LOGE(TAG, "Decoded image format not compatible: format=%d (expected RGB565=%d or RGB565A8=%d), size=%u (expected >=%zu)", 
+                     decoded_cf, LV_COLOR_FORMAT_RGB565, LV_COLOR_FORMAT_RGB565A8, 
+                     dsc.decoded->data_size, expected_rgb565_size);
+            lv_image_decoder_close(&dsc);
+            free(rgb565_data);
+            return false;
+        }
+        
+        // Copy decoded data - use the actual decoded size or our expected size, whichever is smaller
+        size_t copy_size = (dsc.decoded->data_size < rgb565_size) ? dsc.decoded->data_size : rgb565_size;
+        if (dsc.decoded->data != nullptr && copy_size > 0) {
+            memcpy(rgb565_data, dsc.decoded->data, copy_size);
+            lv_image_decoder_close(&dsc);
+            ESP_LOGI(TAG, "Image decoded successfully: format=%d, copied %zu bytes", decoded_cf, copy_size);
+        } else {
+            ESP_LOGE(TAG, "Invalid decoded data: data=%p, size=%u", dsc.decoded->data, dsc.decoded->data_size);
+            lv_image_decoder_close(&dsc);
+            free(rgb565_data);
+            return false;
+        }
+    } else {
+        ESP_LOGE(TAG, "LVGL decoder API failed: %d", decode_res);
+        free(rgb565_data);
+        return false;
+    }
+    
+    // Check SPIFFS space before writing
+    size_t total = 0, used = 0;
+    esp_err_t ret = esp_spiffs_info(BACKGROUND_PARTITION_LABEL, &total, &used);
+    if (ret == ESP_OK) {
+        size_t free_space = total - used;
+        size_t required_space = sizeof(uint32_t) * 2 + rgb565_size;  // header + data
+        ESP_LOGI(TAG, "SPIFFS space check: total=%zu, used=%zu, free=%zu, required=%zu", 
+                 total, used, free_space, required_space);
+        if (free_space < required_space) {
+            ESP_LOGE(TAG, "Not enough SPIFFS space: free=%zu, required=%zu", free_space, required_space);
+            free(rgb565_data);
+            return false;
+        }
+    }
+    
+    // Save RGB565 data to file (bg.raw)
+    char raw_path[128];
+    snprintf(raw_path, sizeof(raw_path), "%s/bg.raw", BACKGROUND_MOUNT_POINT);
+    
+    // Delete existing file first to ensure clean write
+    unlink(raw_path);
+    
+    FILE* raw_file = fopen(raw_path, "wb");
+    if (raw_file == nullptr) {
+        ESP_LOGE(TAG, "Failed to open RGB565 file for writing: %s (errno: %d)", raw_path, errno);
+        free(rgb565_data);
+        return false;
+    }
+    
+    // Write header: width (4 bytes) + height (4 bytes)
+    size_t header_written = fwrite(&width, sizeof(uint32_t), 1, raw_file);
+    header_written += fwrite(&height, sizeof(uint32_t), 1, raw_file);
+    if (header_written != 2) {
+        ESP_LOGE(TAG, "Failed to write RGB565 header: written %zu/2", header_written);
+        fclose(raw_file);
+        unlink(raw_path);
+        free(rgb565_data);
+        return false;
+    }
+    
+    // Flush header to ensure it's written
+    fflush(raw_file);
+    
+    // Write RGB565 data in chunks to avoid issues
+    size_t total_written = 0;
+    const size_t chunk_size = 4096;  // Write in 4KB chunks
+    size_t remaining = rgb565_size;
+    uint8_t* data_ptr = rgb565_data;
+    
+    while (remaining > 0) {
+        size_t to_write = (remaining > chunk_size) ? chunk_size : remaining;
+        size_t written = fwrite(data_ptr, 1, to_write, raw_file);
+        if (written == 0) {
+            // Check for error
+            if (ferror(raw_file)) {
+                ESP_LOGE(TAG, "File write error at offset %zu (errno: %d)", total_written, errno);
+                fclose(raw_file);
+                unlink(raw_path);
+                free(rgb565_data);
+                return false;
+            }
+            // EOF reached unexpectedly
+            ESP_LOGE(TAG, "Unexpected EOF at offset %zu", total_written);
+            fclose(raw_file);
+            unlink(raw_path);
+            free(rgb565_data);
+            return false;
+        }
+        total_written += written;
+        data_ptr += written;
+        remaining -= written;
+        
+        // Flush periodically
+        if (total_written % (chunk_size * 4) == 0) {
+            fflush(raw_file);
+        }
+    }
+    
+    // Final flush and sync
+    fflush(raw_file);
+    fsync(fileno(raw_file));
+    fclose(raw_file);
+    free(rgb565_data);  // Free temporary buffer
+    
+    if (total_written != rgb565_size) {
+        ESP_LOGE(TAG, "Failed to write RGB565 data. Expected: %zu, Written: %zu", rgb565_size, total_written);
+        unlink(raw_path);
+        return false;
+    }
+    
+    ESP_LOGI(TAG, "Successfully decoded and saved RGB565 image: %s (%dx%d, %zu bytes)", raw_path, width, height, rgb565_size);
+    return true;
+}
+
+// Helper function to load RGB565 raw file
+// Note: bg.raw file contains raw RGB565 data without header, fixed size 240x320
+static lv_image_dsc_t* LoadRGB565FromFile(const char* raw_path) {
+    FILE* raw_file = fopen(raw_path, "rb");
+    if (raw_file == nullptr) {
+        return nullptr;
+    }
+    
+    // Get screen size from LVGL
+    const uint32_t width = LV_HOR_RES;
+    const uint32_t height = LV_VER_RES;
+    const uint32_t stride = width * 2;  // RGB565: 2 bytes per pixel
+    const size_t rgb565_size = stride * height;
+    
+    // Get file size to verify
+    fseek(raw_file, 0, SEEK_END);
+    size_t file_size = ftell(raw_file);
+    fseek(raw_file, 0, SEEK_SET);
+    
+    ESP_LOGI(TAG, "Loading RGB565 raw file: %s, file_size=%zu, expected=%zu (%dx%d)", 
+             raw_path, file_size, rgb565_size, width, height);
+    
+    // Verify file size
+    if (file_size < rgb565_size) {
+        ESP_LOGE(TAG, "File too small: %zu < %zu", file_size, rgb565_size);
+        fclose(raw_file);
+        return nullptr;
+    }
+    
+    if (file_size > rgb565_size) {
+        ESP_LOGW(TAG, "File larger than expected: %zu > %zu, will read %zu bytes", 
+                 file_size, rgb565_size, rgb565_size);
+    }
+    
+    // Allocate buffer for RGB565 data
+    uint8_t* rgb565_data = (uint8_t*)heap_caps_malloc(rgb565_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (rgb565_data == nullptr) {
+        rgb565_data = (uint8_t*)malloc(rgb565_size);
+    }
+    
+    if (rgb565_data == nullptr) {
+        ESP_LOGE(TAG, "Failed to allocate memory for RGB565 data (%zu bytes)", rgb565_size);
+        fclose(raw_file);
+        return nullptr;
+    }
+    
+    // Read RGB565 data
+    size_t read = fread(rgb565_data, 1, rgb565_size, raw_file);
+    fclose(raw_file);
+    
+    if (read != rgb565_size) {
+        ESP_LOGE(TAG, "Failed to read RGB565 data. Expected: %zu, Read: %zu", rgb565_size, read);
+        free(rgb565_data);
+        return nullptr;
+    }
+    
+    // Create and cache lv_image_dsc_t structure
+    cached_bg_image_dsc = (lv_image_dsc_t*)malloc(sizeof(lv_image_dsc_t));
+    if (cached_bg_image_dsc == nullptr) {
+        ESP_LOGE(TAG, "Failed to allocate memory for image descriptor");
+        free(rgb565_data);
+        return nullptr;
+    }
+    
+    cached_bg_image_dsc->header.magic = LV_IMAGE_HEADER_MAGIC;
+    cached_bg_image_dsc->header.cf = LV_COLOR_FORMAT_RGB565;
+    cached_bg_image_dsc->header.flags = 0;
+    cached_bg_image_dsc->header.w = width;
+    cached_bg_image_dsc->header.h = height;
+    cached_bg_image_dsc->header.stride = stride;
+    cached_bg_image_dsc->data_size = rgb565_size;
+    cached_bg_image_dsc->data = rgb565_data;
+    
+    ESP_LOGI(TAG, "Successfully loaded RGB565 image: %dx%d, %zu bytes", width, height, rgb565_size);
+    return cached_bg_image_dsc;
+}
+
+
 void LcdDisplay::ShowBackgroundImage() {
     ESP_LOGI(TAG, "ShowBackgroundImage called");
     
@@ -1790,26 +2131,21 @@ void LcdDisplay::ShowBackgroundImage() {
         lv_obj_add_flag(video_img_, LV_OBJ_FLAG_HIDDEN);
     }
     
-    // Try to load background image from SPIFFS first
+    // Load background image from bg.raw (RGB565 format)
     if (background_image_ != nullptr) {
-        // Try to load from SPIFFS (JPG/PNG)
-        char bg_path[64];
-        snprintf(bg_path, sizeof(bg_path), "%c:/bg.jpg", BACKGROUND_DRIVE_LETTER);
-        
-        // Check if file exists using SPIFFS path directly
-        char spiffs_path[128];
-        snprintf(spiffs_path, sizeof(spiffs_path), "%s/bg.jpg", BACKGROUND_MOUNT_POINT);
-        FILE* f = fopen(spiffs_path, "r");
-        if (f != nullptr) {
-            fclose(f);
-            // File exists, use LVGL path format
-            ESP_LOGI(TAG, "Loading background image from SPIFFS: %s", bg_path);
-            lv_image_set_src(background_image_, bg_path);
+        char raw_path[128];
+        snprintf(raw_path, sizeof(raw_path), "%s/bg.raw", BACKGROUND_MOUNT_POINT);
+        lv_image_dsc_t* img_dsc = LoadRGB565FromFile(raw_path);
+        if (img_dsc != nullptr) {
+            lv_image_set_src(background_image_, img_dsc);
             lv_obj_clear_flag(background_image_, LV_OBJ_FLAG_HIDDEN);
             lv_obj_move_background(background_image_);
+            lv_obj_invalidate(background_image_);
+            lv_refr_now(nullptr);
+            ESP_LOGI(TAG, "Background image loaded from RGB565 raw file: %s", raw_path);
         } else {
             // Fallback to embedded image
-            ESP_LOGI(TAG, "SPIFFS background image not found, using embedded image");
+            ESP_LOGI(TAG, "Background image not found, using embedded image");
             lv_image_set_src(background_image_, &bg_1_img);
             lv_obj_clear_flag(background_image_, LV_OBJ_FLAG_HIDDEN);
             lv_obj_move_background(background_image_);
@@ -2305,18 +2641,47 @@ static void* fs_open(lv_fs_drv_t* drv, const char* path, lv_fs_mode_t mode) {
     if (mode == LV_FS_MODE_WR) flags = "wb";
     else if (mode == (LV_FS_MODE_WR | LV_FS_MODE_RD)) flags = "rb+";
     
-    // Convert LVGL path (e.g., "B:/bg.jpg") to SPIFFS path (e.g., "/background/bg.jpg")
+    // Convert LVGL path (e.g., "B:bg.jpg" or "bg.jpg") to SPIFFS path (e.g., "/background/bg.jpg")
     char spiffs_path[128];
-    if (path[0] == BACKGROUND_DRIVE_LETTER && path[1] == ':') {
+    if (path != nullptr && path[0] == BACKGROUND_DRIVE_LETTER && path[1] == ':') {
         // Skip drive letter and colon (e.g., "B:")
-        snprintf(spiffs_path, sizeof(spiffs_path), "%s%s", BACKGROUND_MOUNT_POINT, path + 2);
+        // path + 2 points to the filename (e.g., "bg.jpg" or "/bg.jpg")
+        const char* filename = path + 2;
+        // Skip leading slash if present
+        if (filename[0] == '/') {
+            filename++;
+        }
+        snprintf(spiffs_path, sizeof(spiffs_path), "%s/%s", BACKGROUND_MOUNT_POINT, filename);
+    } else if (path != nullptr) {
+        // Path doesn't start with drive letter, might be just filename
+        // Try to construct full path
+        const char* filename = path;
+        // Skip leading slash if present
+        if (filename[0] == '/') {
+            filename++;
+        }
+        snprintf(spiffs_path, sizeof(spiffs_path), "%s/%s", BACKGROUND_MOUNT_POINT, filename);
     } else {
-        // Fallback: assume path is already correct
-        strncpy(spiffs_path, path, sizeof(spiffs_path) - 1);
-        spiffs_path[sizeof(spiffs_path) - 1] = '\0';
+        ESP_LOGE(TAG, "LVGL fs_open: null path");
+        return nullptr;
     }
     
+    ESP_LOGI(TAG, "LVGL fs_open: path='%s' -> spiffs_path='%s', mode=%d, flags='%s'", 
+             path ? path : "(null)", spiffs_path, mode, flags);
+    
     FILE* f = fopen(spiffs_path, flags);
+    if (f == nullptr) {
+        ESP_LOGW(TAG, "LVGL fs_open: failed to open file '%s' (errno: %d)", spiffs_path, errno);
+        // Try to check if file exists
+        struct stat st;
+        if (stat(spiffs_path, &st) == 0) {
+            ESP_LOGW(TAG, "File exists but cannot be opened (size: %ld)", st.st_size);
+        } else {
+            ESP_LOGW(TAG, "File does not exist at path '%s'", spiffs_path);
+        }
+    } else {
+        ESP_LOGD(TAG, "LVGL fs_open: successfully opened file '%s'", spiffs_path);
+    }
     return (void*)(uintptr_t)f;
 }
 
@@ -2395,24 +2760,50 @@ static lv_fs_res_t fs_dir_close(lv_fs_drv_t* drv, void* dir_p) {
 void LcdDisplay::LoadBackgroundFromSPIFFS() {
     ESP_LOGI(TAG, "Attempting to mount background SPIFFS partition...");
     
+    // 先检查分区是否存在
+    const esp_partition_t* partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, BACKGROUND_PARTITION_LABEL);
+    
+    if (partition == nullptr) {
+        ESP_LOGE(TAG, "Background partition '%s' not found in partition table", BACKGROUND_PARTITION_LABEL);
+        return;
+    }
+    
+    ESP_LOGI(TAG, "Found background partition: address=0x%x, size=%d KB", 
+             partition->address, partition->size / 1024);
+    
     // Mount SPIFFS partition
     esp_vfs_spiffs_conf_t conf = {
         .base_path = BACKGROUND_MOUNT_POINT,
         .partition_label = BACKGROUND_PARTITION_LABEL,
         .max_files = 5,
-        .format_if_mount_failed = false
+        .format_if_mount_failed = true  // 如果挂载失败，自动格式化
     };
     
     esp_err_t ret = esp_vfs_spiffs_register(&conf);
     if (ret != ESP_OK) {
         if (ret == ESP_FAIL) {
-            ESP_LOGW(TAG, "Failed to mount background SPIFFS partition");
+            ESP_LOGW(TAG, "Failed to mount background SPIFFS partition, trying to format...");
+            // 尝试手动格式化
+            ret = esp_spiffs_format(BACKGROUND_PARTITION_LABEL);
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to format SPIFFS partition: %s", esp_err_to_name(ret));
+                return;
+            }
+            ESP_LOGI(TAG, "SPIFFS partition formatted successfully, retrying mount...");
+            // 重新尝试挂载
+            ret = esp_vfs_spiffs_register(&conf);
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to mount SPIFFS partition after format: %s", esp_err_to_name(ret));
+                return;
+            }
         } else if (ret == ESP_ERR_NOT_FOUND) {
-            ESP_LOGW(TAG, "Background partition not found");
+            ESP_LOGE(TAG, "Background partition not found");
+            return;
         } else {
-            ESP_LOGW(TAG, "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
+            ESP_LOGE(TAG, "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
+            return;
         }
-        return;
     }
     
     // Check SPIFFS info
@@ -2441,4 +2832,569 @@ void LcdDisplay::LoadBackgroundFromSPIFFS() {
     lv_fs_drv_register(&fs_drv);
     
     ESP_LOGI(TAG, "LVGL file system driver registered for background partition (drive: %c:)", BACKGROUND_DRIVE_LETTER);
+}
+
+bool LcdDisplay::DownloadBackgroundImage(const std::string& url) {
+    ESP_LOGI(TAG, "Downloading background raw image from: %s", url.c_str());
+    
+    // 退出聊天，进入 OTA 模式
+    Application::GetInstance().QuitTalking();
+    SetChatMessage("system", "正在下载背景图片...");
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    if (video_playing_) {
+        StopVideoPlayback();
+    }
+    
+    Application::GetInstance().SetDeviceState(kDeviceStateUpgrading);
+    SetOTAProgress(0);
+    vTaskDelay(pdMS_TO_TICKS(3000));
+    
+    // 现在云端只发送 .raw 文件，直接下载为 bg.raw
+    const char* filename = "bg.raw";
+    
+    // 检查网络是否可用
+    auto network = Board::GetInstance().GetNetwork();
+    if (network == nullptr) {
+        ESP_LOGE(TAG, "Network interface not available");
+        SetChatMessage("system", "网络不可用");
+        return false;
+    }
+    
+    // 检查 SPIFFS 中是否已存在文件（用于断点续传）
+    char spiffs_path[128];
+    snprintf(spiffs_path, sizeof(spiffs_path), "%s/%s", BACKGROUND_MOUNT_POINT, filename);
+    FILE* existing_file = fopen(spiffs_path, "rb");
+    size_t existing_size = 0;
+    bool resume_download = false;
+    
+    if (existing_file != nullptr) {
+        // 获取已存在文件的大小
+        fseek(existing_file, 0, SEEK_END);
+        existing_size = ftell(existing_file);
+        fclose(existing_file);
+        
+        if (existing_size > 0) {
+            ESP_LOGI(TAG, "Found existing file: %s, size: %zu bytes (resume download)", spiffs_path, existing_size);
+            resume_download = true;
+        } else {
+            // 文件大小为0，删除它
+            unlink(spiffs_path);
+            existing_size = 0;
+            resume_download = false;
+        }
+    }
+    
+    // 创建 HTTP 客户端
+    auto http = network->CreateHttp(2);
+    if (http == nullptr) {
+        ESP_LOGE(TAG, "Failed to create HTTP client");
+        return false;
+    }
+    
+    // 如果支持断点续传，设置 Range 头
+    if (resume_download && existing_size > 0) {
+        // 注意：这里假设 HTTP 接口支持设置 Range 头
+        // 如果接口不支持，需要先获取完整文件大小，然后手动跳过已下载部分
+        ESP_LOGI(TAG, "Attempting to resume download from byte %zu", existing_size);
+    }
+    
+    // 打开 HTTP 连接
+    if (!http->Open("GET", url)) {
+        ESP_LOGE(TAG, "Failed to open HTTP connection");
+        return false;
+    }
+    
+    // 获取内容长度
+    size_t content_length = http->GetBodyLength();
+    if (content_length == 0) {
+        ESP_LOGE(TAG, "Failed to get content length or content length is 0");
+        http->Close();
+        return false;
+    }
+    
+    ESP_LOGI(TAG, "Content length: %zu bytes", content_length);
+    
+    // 如果断点续传，检查已下载部分是否完整
+    if (resume_download && existing_size >= content_length) {
+        ESP_LOGI(TAG, "File already downloaded completely (%zu >= %zu), skipping download", existing_size, content_length);
+        // 关闭 HTTP 连接（因为已经打开但不需要下载）
+        http->Close();
+        // 显示完成状态
+        SetOTAProgress(100);
+        SetChatMessage("system", "");
+        // SetChatMessage("system", "文件已存在");
+        // 清除缓存，强制重新加载
+        if (cached_bg_image_dsc != nullptr) {
+            if (cached_bg_image_dsc->data != nullptr) {
+                free((void*)cached_bg_image_dsc->data);
+            }
+            free(cached_bg_image_dsc);
+            cached_bg_image_dsc = nullptr;
+        }
+        // 刷新显示，使用已存在的背景图片
+        ShowBackgroundImage();
+        // 延迟一下，让用户看到提示
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        // 恢复正常状态
+        Application::GetInstance().SetDeviceState(kDeviceStateIdle);
+        return true;
+    }
+    
+    // 检查 SPIFFS 分区空间是否足够（考虑已存在的文件）
+    size_t total = 0, used = 0;
+    esp_err_t ret = esp_spiffs_info(BACKGROUND_PARTITION_LABEL, &total, &used);
+    if (ret == ESP_OK) {
+        // 计算实际需要的额外空间（如果断点续传，只需要下载剩余部分）
+        size_t remaining_size = resume_download ? (content_length - existing_size) : content_length;
+        size_t free_space = total - used;
+        
+        // 如果断点续传，需要加上已存在文件占用的空间（因为会先删除再重写）
+        if (resume_download) {
+            free_space += existing_size;
+        }
+        
+        if (content_length > free_space) {
+            ESP_LOGE(TAG, "Not enough space in SPIFFS partition. Required: %zu, Available: %zu", content_length, free_space);
+            http->Close();
+            return false;
+        }
+        ESP_LOGI(TAG, "SPIFFS free space: %zu bytes, remaining to download: %zu bytes", free_space, remaining_size);
+    }
+    
+    // 打开 SPIFFS 文件进行写入
+    // 如果断点续传，使用追加模式；否则使用覆盖模式
+    FILE* f = nullptr;
+    size_t bytes_to_skip = 0;
+    
+    if (resume_download && existing_size > 0) {
+        // 断点续传：以追加模式打开
+        f = fopen(spiffs_path, "ab");
+        if (f == nullptr) {
+            ESP_LOGW(TAG, "Failed to open file in append mode, trying overwrite mode");
+            f = fopen(spiffs_path, "wb");
+            resume_download = false;
+            existing_size = 0;
+        } else {
+            bytes_to_skip = existing_size;
+            ESP_LOGI(TAG, "Resuming download, will skip first %zu bytes", bytes_to_skip);
+        }
+    } else {
+        // 新下载：覆盖模式
+        f = fopen(spiffs_path, "wb");
+    }
+    
+    if (f == nullptr) {
+        ESP_LOGE(TAG, "Failed to open SPIFFS file for writing: %s", spiffs_path);
+        http->Close();
+        return false;
+    }
+    
+    // 读取并写入数据
+    char buffer[1024];
+    size_t total_read = 0;
+    size_t bytes_skipped = 0;
+    bool success = true;
+    size_t last_progress = 0;
+
+    while (true) {
+        int ret = http->Read(buffer, sizeof(buffer));
+        if (ret < 0) {
+            ESP_LOGE(TAG, "Failed to read HTTP data: %s", esp_err_to_name(ret));
+            success = false;
+            break;
+        }
+        
+        if (ret == 0) {
+            // 读取完成
+            break;
+        }
+        
+        // 如果断点续传，跳过已下载的部分
+        if (resume_download && bytes_skipped < bytes_to_skip) {
+            size_t skip_now = std::min(static_cast<size_t>(ret), bytes_to_skip - bytes_skipped);
+            bytes_skipped += skip_now;
+            
+            // 如果还有剩余数据需要写入
+            if (skip_now < static_cast<size_t>(ret)) {
+                size_t remaining = ret - skip_now;
+                size_t written = fwrite(buffer + skip_now, 1, remaining, f);
+                if (written != remaining) {
+                    ESP_LOGE(TAG, "Failed to write to SPIFFS file. Expected: %zu, Written: %zu", remaining, written);
+                    success = false;
+                    break;
+                }
+                total_read += remaining;
+            }
+        } else {
+            // 正常写入
+            size_t written = fwrite(buffer, 1, ret, f);
+            if (written != static_cast<size_t>(ret)) {
+                ESP_LOGE(TAG, "Failed to write to SPIFFS file. Expected: %d, Written: %zu", ret, written);
+                success = false;
+                break;
+            }
+            total_read += ret;
+        }
+        
+        // 计算总进度（包括已下载部分）
+        size_t total_progress = existing_size + total_read;
+        
+        // 更新下载进度（每 1% 或每 10KB 更新一次）
+        size_t progress = (total_progress * 100) / content_length;
+        if (total_progress % 10240 == 0 || total_progress == content_length || 
+            progress != last_progress) {
+            last_progress = progress;
+            SetOTAProgress(progress);
+            char progress_msg[64];
+            snprintf(progress_msg, sizeof(progress_msg), "下载中: %zu%%", progress);
+            SetChatMessage("system", progress_msg);
+            ESP_LOGI(TAG, "Download progress: %zu%% (%zu/%zu bytes)%s", 
+                     progress, total_progress, content_length,
+                     resume_download ? " (resumed)" : "");
+        }
+    }
+    
+    // 关闭文件
+    fclose(f);
+    
+    if (!success) {
+        // 如果下载失败，保留已下载的部分（用于下次断点续传）
+        ESP_LOGE(TAG, "Download failed, keeping partial file for resume: %s (%zu bytes)", spiffs_path, existing_size + total_read);
+        http->Close();
+        SetChatMessage("system", "下载失败");
+        // 恢复正常状态
+        Application::GetInstance().SetDeviceState(kDeviceStateIdle);
+        return false;
+    }
+    
+    // 计算总下载大小
+    size_t total_downloaded = existing_size + total_read;
+    
+    if (total_downloaded != content_length) {
+        ESP_LOGW(TAG, "Download incomplete. Expected: %zu, Received: %zu", content_length, total_downloaded);
+        // 仍然认为成功，因为可能服务器没有返回 Content-Length 或实际内容更少
+    }
+    
+    ESP_LOGI(TAG, "Background raw image downloaded successfully: %s (%zu bytes)%s", 
+             spiffs_path, total_downloaded, resume_download ? " (resumed)" : "");
+    
+    // 关闭 HTTP 连接
+    http->Close();
+    
+    // 确保文件写入完成
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
+    // 下载完成，更新进度为 100%
+    SetOTAProgress(100);
+    SetChatMessage("system", "");
+
+    
+    // 清除缓存，强制重新加载
+    if (cached_bg_image_dsc != nullptr) {
+        if (cached_bg_image_dsc->data != nullptr) {
+            free((void*)cached_bg_image_dsc->data);
+        }
+        free(cached_bg_image_dsc);
+        cached_bg_image_dsc = nullptr;
+    }
+    
+    // 刷新显示，使用新的背景图片（.raw 文件已经是 RGB565 格式，无需解码）
+    ShowBackgroundImage();
+    
+    // 延迟一下，让用户看到完成提示
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    
+    // 恢复正常状态
+    Application::GetInstance().SetDeviceState(kDeviceStateIdle);
+    
+    return true;
+}
+
+bool LcdDisplay::TestDownloadRawImage(const std::string& url) {
+    ESP_LOGI(TAG, "Test: Downloading raw image from: %s", url.c_str());
+    
+    // 检查网络是否可用
+    auto network = Board::GetInstance().GetNetwork();
+    if (network == nullptr) {
+        ESP_LOGE(TAG, "Network interface not available");
+        return false;
+    }
+    
+    // 目标文件路径
+    char raw_path[128];
+    snprintf(raw_path, sizeof(raw_path), "%s/bg.raw", BACKGROUND_MOUNT_POINT);
+    
+    // 删除现有文件
+    unlink(raw_path);
+    
+    // 创建 HTTP 客户端
+    auto http = network->CreateHttp(2);
+    if (http == nullptr) {
+        ESP_LOGE(TAG, "Failed to create HTTP client");
+        return false;
+    }
+    
+    // 打开 HTTP 连接
+    if (!http->Open("GET", url)) {
+        ESP_LOGE(TAG, "Failed to open HTTP connection");
+        return false;
+    }
+    
+    // 获取内容长度
+    size_t content_length = http->GetBodyLength();
+    if (content_length == 0) {
+        ESP_LOGE(TAG, "Failed to get content length or content length is 0");
+        http->Close();
+        return false;
+    }
+    
+    ESP_LOGI(TAG, "Content length: %zu bytes", content_length);
+    
+    // 检查 SPIFFS 分区空间是否足够
+    size_t total = 0, used = 0;
+    esp_err_t ret = esp_spiffs_info(BACKGROUND_PARTITION_LABEL, &total, &used);
+    if (ret == ESP_OK) {
+        size_t free_space = total - used;
+        if (content_length > free_space) {
+            ESP_LOGE(TAG, "Not enough space in SPIFFS partition. Required: %zu, Available: %zu", content_length, free_space);
+            http->Close();
+            return false;
+        }
+        ESP_LOGI(TAG, "SPIFFS free space: %zu bytes, file size: %zu bytes", free_space, content_length);
+    }
+    
+    // 打开 SPIFFS 文件进行写入
+    FILE* f = fopen(raw_path, "wb");
+    if (f == nullptr) {
+        ESP_LOGE(TAG, "Failed to open SPIFFS file for writing: %s (errno: %d)", raw_path, errno);
+        http->Close();
+        return false;
+    }
+    
+    // 读取并写入数据
+    char buffer[4096];
+    size_t total_written = 0;
+    bool success = true;
+    
+    while (true) {
+        int ret = http->Read(buffer, sizeof(buffer));
+        if (ret < 0) {
+            ESP_LOGE(TAG, "Failed to read HTTP data: %s", esp_err_to_name(ret));
+            success = false;
+            break;
+        }
+        
+        if (ret == 0) {
+            // 读取完成
+            break;
+        }
+        
+        // 写入数据
+        size_t written = fwrite(buffer, 1, ret, f);
+        if (written != static_cast<size_t>(ret)) {
+            ESP_LOGE(TAG, "Failed to write to SPIFFS file. Expected: %d, Written: %zu", ret, written);
+            success = false;
+            break;
+        }
+        total_written += written;
+        
+        // 每 10KB 输出一次进度
+        if (total_written % 10240 == 0 || total_written == content_length) {
+            size_t progress = (total_written * 100) / content_length;
+            ESP_LOGI(TAG, "Download progress: %zu%% (%zu/%zu bytes)", progress, total_written, content_length);
+        }
+    }
+    
+    // 关闭文件
+    fflush(f);
+    fsync(fileno(f));
+    fclose(f);
+    
+    if (!success) {
+        ESP_LOGE(TAG, "Download failed");
+        unlink(raw_path);
+        http->Close();
+        return false;
+    }
+    
+    if (total_written != content_length) {
+        ESP_LOGW(TAG, "Download incomplete. Expected: %zu, Received: %zu", content_length, total_written);
+    }
+    
+    ESP_LOGI(TAG, "Raw image downloaded successfully: %s (%zu bytes)", raw_path, total_written);
+    
+    // 关闭 HTTP 连接
+    http->Close();
+    
+    // 清除缓存，强制重新加载
+    if (cached_bg_image_dsc != nullptr) {
+        if (cached_bg_image_dsc->data != nullptr) {
+            free((void*)cached_bg_image_dsc->data);
+        }
+        free(cached_bg_image_dsc);
+        cached_bg_image_dsc = nullptr;
+    }
+    
+    // 刷新显示，使用新的背景图片
+    ShowBackgroundImage();
+    
+    ESP_LOGI(TAG, "Test: Raw image displayed successfully");
+    return true;
+}
+
+bool LcdDisplay::DownloadBackgroundVideo(const std::string& url) {
+    ESP_LOGI(TAG, "Downloading background video from: %s", url.c_str());
+    
+    
+    Application::GetInstance().QuitTalking();
+    SetChatMessage("system", "正在下载背景视频...");
+
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    if (video_playing_) {
+        StopVideoPlayback();
+    }
+    
+    
+    Application::GetInstance().SetDeviceState(kDeviceStateUpgrading);
+
+    SetOTAProgress(0);
+
+    vTaskDelay(pdMS_TO_TICKS(3000));
+    
+    // 检查网络是否可用
+    auto network = Board::GetInstance().GetNetwork();
+    if (network == nullptr) {
+        ESP_LOGE(TAG, "Network interface not available");
+        SetChatMessage("system", "网络不可用");
+        return false;
+    }
+    
+    // 查找 video 分区
+    const esp_partition_t* part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "video");
+    if (!part) {
+        ESP_LOGE(TAG, "video partition not found");
+        SetChatMessage("system", "视频分区不存在");
+        return false;
+    }
+    
+    ESP_LOGI(TAG, "Video partition found: size=%zu bytes", part->size);
+    
+    // 创建 HTTP 客户端
+    auto http = network->CreateHttp(2);
+    if (http == nullptr) {
+        ESP_LOGE(TAG, "Failed to create HTTP client");
+        SetChatMessage("system", "创建HTTP客户端失败");
+        return false;
+    }
+    
+    // 打开 HTTP 连接
+    if (!http->Open("GET", url)) {
+        ESP_LOGE(TAG, "Failed to open HTTP connection");
+        SetChatMessage("system", "打开HTTP连接失败");
+        return false;
+    }
+    
+    // 获取内容长度
+    size_t content_length = http->GetBodyLength();
+    if (content_length == 0) {
+        ESP_LOGE(TAG, "Failed to get content length or content length is 0");
+        http->Close();
+        SetChatMessage("system", "获取文件大小失败");
+        return false;
+    }
+    
+    ESP_LOGI(TAG, "Content length: %zu bytes", content_length);
+    
+    // 检查分区空间是否足够
+    if (content_length > part->size) {
+        ESP_LOGE(TAG, "Video file too large: %zu > %zu", content_length, part->size);
+        http->Close();
+        SetChatMessage("system", "视频文件过大");
+        return false;
+    }
+    
+    // 擦除分区
+    ESP_LOGI(TAG, "Erasing video partition...");
+    SetChatMessage("system", "正在下载壁纸...");
+    esp_err_t err = esp_partition_erase_range(part, 0, part->size);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to erase video partition: %s", esp_err_to_name(err));
+        http->Close();
+        SetChatMessage("system", "下载失败");
+        return false;
+    }
+    
+    // 读取并写入数据到分区
+    char buffer[4096];
+    size_t total_written = 0;
+    bool success = true;
+    size_t last_progress = 0;
+    while (true) {
+        int ret = http->Read(buffer, sizeof(buffer));
+
+        if (ret < 0) {
+            ESP_LOGE(TAG, "Failed to read HTTP data: %s", esp_err_to_name(ret));
+            success = false;
+            break;
+        }
+        
+        if (ret == 0) {
+            // 读取完成
+            break;
+        }
+        
+        // 写入到分区
+        err = esp_partition_write(part, total_written, buffer, ret);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to write to video partition at offset %zu: %s", total_written, esp_err_to_name(err));
+            success = false;
+            break;
+        }
+        
+        total_written += ret;
+        
+        // 更新下载进度（每 1% 或每 10KB 更新一次）
+        size_t progress = (total_written * 100) / content_length;
+        if (total_written % 10240 == 0 || total_written == content_length || 
+            progress != last_progress) {
+            last_progress = progress;
+            SetOTAProgress(progress);
+            char progress_msg[64];
+            snprintf(progress_msg, sizeof(progress_msg), "下载中: %zu%%", progress);
+            SetChatMessage("system", progress_msg);
+            ESP_LOGI(TAG, "Download progress: %zu%% (%zu/%zu bytes)", 
+                     progress, total_written, content_length);
+        }
+    }
+    
+    // 关闭 HTTP 连接
+    http->Close();
+    
+    if (!success) {
+        ESP_LOGE(TAG, "Download failed at offset %zu", total_written);
+        SetChatMessage("system", "下载失败");
+        return false;
+    }
+    
+    if (total_written != content_length) {
+        ESP_LOGW(TAG, "Download incomplete. Expected: %zu, Received: %zu", content_length, total_written);
+    }
+    
+    ESP_LOGI(TAG, "Background video downloaded successfully: %zu bytes", total_written);
+    
+    // 下载完成，更新进度为 100%
+    SetOTAProgress(100);
+    SetChatMessage("system", "下载完成");
+    
+    // 延迟一下，让用户看到完成提示
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    SetChatMessage("system", "");
+
+    
+    // 恢复正常状态
+    Application::GetInstance().SetDeviceState(kDeviceStateIdle);
+    
+    return true;
 }

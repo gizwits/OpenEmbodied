@@ -38,6 +38,7 @@
         "ENTERING_WIFI_CONFIG_MODE":"进入配网模式...",
         "SCANNING_WIFI":"扫描 Wi-Fi...",
 
+        "UPGRADE_BG": "更新背景",
         "NEW_VERSION": "新版本 ",
         "OTA_UPGRADE":"OTA 升级",
         "UPGRADING":"正在升级系统...",

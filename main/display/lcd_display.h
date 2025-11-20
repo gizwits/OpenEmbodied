@@ -74,7 +74,7 @@ protected:
     lv_obj_t* video_img_ = nullptr;
     lv_img_dsc_t video_img_dsc_{};
     uint8_t* first_frame_buf_ = nullptr;  // Buffer for first frame to avoid flicker
-    static constexpr int kVideoFrameDelayMs = 150;
+    static constexpr int kVideoFrameDelayMs = 62;
     
     // Subtitle scroll related members
     esp_timer_handle_t subtitle_scroll_timer_ = nullptr;
@@ -84,8 +84,8 @@ protected:
     size_t subtitle_scroll_pos_ = 0;
     bool subtitle_scrolling_ = false;
     int64_t subtitle_first_char_time_ms_ = 0;  // Timestamp when first character was displayed (in milliseconds)
-    static constexpr int kSubtitleScrollPeriodMs = 85;  // Scroll period in milliseconds (configurable, smaller = faster)
-    static constexpr int kSubtitleScrollDelayMs = 2000;  // Delay before starting scroll in milliseconds (2 seconds)
+    static constexpr int kSubtitleScrollPeriodMs = 70;  // Scroll period in milliseconds (configurable, smaller = faster)
+    static constexpr int kSubtitleScrollDelayMs = 1000;  // Delay before starting scroll in milliseconds (2 seconds)
 
     void SetupUI();
     void StartIdleCountdown();
@@ -154,6 +154,15 @@ public:
     
     // Show background image (bg1) in content area
     void ShowBackgroundImage();
+    
+    // Download background image from HTTP URL and save to SPIFFS
+    bool DownloadBackgroundImage(const std::string& url);
+    
+    // Download background video from HTTP URL and save to SPIFFS
+    bool DownloadBackgroundVideo(const std::string& url);
+    
+    // Test method: Download .raw file from HTTP URL and display directly (no decoding)
+    bool TestDownloadRawImage(const std::string& url);
 };
 
 // RGB LCD显示器

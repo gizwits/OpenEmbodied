@@ -7,7 +7,7 @@
 
 #include "iot/thing_manager.h"
 #include "power_manager.h"
-#include "data_point_manager.h"
+#include "gc_data_point_manager.h"
 
 #include "assets/lang_config.h"
 #include "font_awesome_symbols.h"
@@ -74,8 +74,8 @@ private:
 
 
     void InitializeDataPointManager() {
-        // 设置 DataPointManager 的回调函数
-        DataPointManager::GetInstance().SetCallbacks(
+        // 设置 GCDataPointManager 的回调函数
+        GCDataPointManager::GetInstance().SetCallbacks(
             [this]() -> bool { return false; }, // IsCharging - toy 版本可能没有充电功能
             []() -> int { return Application::GetInstance().GetChatMode(); },
             [](int value) { Application::GetInstance().SetChatMode(value); },
@@ -97,6 +97,13 @@ private:
             [this]() -> int { return 100; }, // 固定亮度 100%
             [this](int value) { 
                 this->GetBacklight()->SetBrightness(value, true);
+            },
+            [this](const std::string& url) {
+                display_->DownloadBackgroundImage(url);
+            },
+            [this](const std::string& url) {
+                // 创建结构体来传递 board 和 url
+                display_->DownloadBackgroundVideo(url);
             }
         );
     }
@@ -363,7 +370,9 @@ private:
                 // 交给休眠逻辑托管
                 return;
             }
+            
 
+            GetBacklight()->RestoreBrightness();
 
             auto& app = Application::GetInstance();
             app.ToggleChatState();
@@ -400,13 +409,13 @@ private:
                 xTaskCreate([](void* arg) {
                     auto* board = static_cast<MovecallMojiESP32S3*>(arg);
                     board->display_->SetEmotion("neutral");
+                    Application::GetInstance().QuitTalking();
+
 
                     if (board->IsCharging()) {
                         // 充电中，只关闭背光
                         board->GetBacklight()->SetBrightness(0, false);
                         // is_charging_sleep_ 已经在创建Task之前设置了
-                        ESP_LOGI(TAG, "充电中，关机");
-                        Application::GetInstance().QuitTalking();
                     } else {
                         // 没有充电，关机
                         board->PowerOff();
@@ -520,17 +529,10 @@ private:
         // 注册充电状态改变回调
         power_manager_->SetChargingStatusCallback([this](bool is_charging) {
             ESP_LOGI(TAG, "充电状态改变: %s", is_charging ? "开始充电" : "停止充电");
-            // XunguanDisplay* xunguan_display = static_cast<XunguanDisplay*>(GetDisplay());
             if (is_charging) {
-                // 充电开始时的处理逻辑
                 ESP_LOGI(TAG, "检测到开始充电");
-                // 降低发热                
-                // GetBacklight()->SetBrightness(5, false);
-                
             } else {
-                // 充电停止时的处理逻辑
                 ESP_LOGI(TAG, "检测到停止充电");
-                
                 if (this->is_charging_sleep_) {
                     ESP_LOGI(TAG, "充电停止，关机");
                     PowerOff();
@@ -538,8 +540,8 @@ private:
             }
 
             // 通知 mqtt 
-            auto& mqtt_client = MqttClient::getInstance();
-            mqtt_client.ReportTimer();
+            // auto& mqtt_client = MqttClient::getInstance();
+            // mqtt_client.ReportTimer();
 
         });
     }
@@ -731,10 +733,11 @@ public:
 
 
     virtual bool IsCharging() override {
-        int chrg = gpio_get_level(CHARGING_PIN);
-        int standby = gpio_get_level(STANDBY_PIN);
-        // return false;
-        return chrg == 0 || standby == 0;
+        // int chrg = gpio_get_level(CHARGING_PIN);
+        // int standby = gpio_get_level(STANDBY_PIN);
+        // // return false;
+        // return chrg == 0 || standby == 0;
+        return power_manager_->IsCharging();
     }
 
     virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
@@ -753,31 +756,31 @@ public:
 
     // 数据点相关方法实现
     const char* GetGizwitsProtocolJson() const override {
-        return DataPointManager::GetInstance().GetGizwitsProtocolJson();
+        return GCDataPointManager::GetInstance().GetGizwitsProtocolJson();
     }
 
     size_t GetDataPointCount() const override {
-        return DataPointManager::GetInstance().GetDataPointCount();
+        return GCDataPointManager::GetInstance().GetDataPointCount();
     }
 
     bool GetDataPointValue(const std::string& name, int& value) const override {
-        return DataPointManager::GetInstance().GetDataPointValue(name, value);
+        return GCDataPointManager::GetInstance().GetDataPointValue(name, value);
     }
 
     bool SetDataPointValue(const std::string& name, int value) override {
-        return DataPointManager::GetInstance().SetDataPointValue(name, value);
+        return GCDataPointManager::GetInstance().SetDataPointValue(name, value);
     }
 
     void GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) override {
-        DataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
+        GCDataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
     }
 
     void ProcessDataPointValue(const std::string& name, int value) override {
-        DataPointManager::GetInstance().ProcessDataPointValue(name, value);
+        GCDataPointManager::GetInstance().ProcessDataPointValue(name, value);
     }
 
     void ProcessBinaryDataPointValue(const std::string& name, const uint8_t* data, size_t data_len) override {
-        DataPointManager::GetInstance().ProcessBinaryDataPointValue(name, data, data_len);
+        GCDataPointManager::GetInstance().ProcessBinaryDataPointValue(name, data, data_len);
     }
 };
 
