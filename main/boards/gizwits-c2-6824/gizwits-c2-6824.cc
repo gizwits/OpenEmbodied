@@ -38,7 +38,7 @@ private:
     // PowerManager* power_manager_;
     
     // 唤醒词列表
-    std::vector<std::string> wake_words_ = {"你好小智", "你好小云", "合养精灵", "嗨小火人"};
+    std::vector<std::string> wake_words_ = {"你好小智", "你好小云", "合养精灵", "嗨小火人", "小鹿小鹿", "你好小鹿"};
     std::vector<std::string> network_config_words_ = {"开始配网"};
 
     void InitializePowerSaveTimer() {

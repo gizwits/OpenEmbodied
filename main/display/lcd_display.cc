@@ -1284,16 +1284,16 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
                 int64_t current_time_ms = esp_timer_get_time() / 1000;  // Convert to milliseconds
                 
                 // If this is the first time we see text (no timestamp recorded), record it now
-                if (subtitle_first_char_time_ms_ == 0) {
-                    subtitle_first_char_time_ms_ = current_time_ms;
-                    ESP_LOGI(TAG, "First character displayed, recording timestamp: %lld ms", subtitle_first_char_time_ms_);
-                }
+                // if (subtitle_first_char_time_ms_ == 0) {
+                //     subtitle_first_char_time_ms_ = current_time_ms;
+                //     ESP_LOGI(TAG, "First character displayed, recording timestamp: %lld ms", subtitle_first_char_time_ms_);
+                // }
                 
                 int64_t elapsed_ms = current_time_ms - subtitle_first_char_time_ms_;
                 int64_t remaining_delay_ms = kSubtitleScrollDelayMs - elapsed_ms;
                 
-                ESP_LOGI(TAG, "Append: text needs scrolling, elapsed=%lld ms, remaining_delay=%lld ms", 
-                         elapsed_ms, remaining_delay_ms);
+                // ESP_LOGI(TAG, "Append: text needs scrolling, elapsed=%lld ms, remaining_delay=%lld ms", 
+                //          elapsed_ms, remaining_delay_ms);
                 
                 // For append operations, start scrolling from the beginning (position 0)
                 // This ensures the user sees the text from the start, not jumping to the end
@@ -1301,11 +1301,11 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
                 
                 if (remaining_delay_ms <= 0) {
                     // Delay time has passed, start scrolling immediately
-                    ESP_LOGI(TAG, "Delay time has passed, starting scroll immediately");
+                    // ESP_LOGI(TAG, "Delay time has passed, starting scroll immediately");
                     StartSubtitleScrollDelayed();
                 } else {
                     // Delay time hasn't passed yet, start delay timer with remaining time
-                    ESP_LOGI(TAG, "Starting delay timer with remaining time: %lld ms", remaining_delay_ms);
+                    // ESP_LOGI(TAG, "Starting delay timer with remaining time: %lld ms", remaining_delay_ms);
                     StartSubtitleScrollWithDelay((int)remaining_delay_ms);
                 }
             }
@@ -1329,7 +1329,7 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
             
             // Record timestamp when first character is displayed (for new message)
             subtitle_first_char_time_ms_ = esp_timer_get_time() / 1000;  // Convert to milliseconds
-            ESP_LOGI(TAG, "New message, recording first character timestamp: %lld ms", subtitle_first_char_time_ms_);
+            // ESP_LOGI(TAG, "New message, recording first character timestamp: %lld ms", subtitle_first_char_time_ms_);
             
             // Check if scrolling is needed
             if (text_width > container_width + 2) {
@@ -2863,25 +2863,58 @@ bool LcdDisplay::DownloadBackgroundImage(const std::string& url) {
     
     // 检查 SPIFFS 中是否已存在文件（用于断点续传）
     char spiffs_path[128];
+    char url_meta_path[128];
     snprintf(spiffs_path, sizeof(spiffs_path), "%s/%s", BACKGROUND_MOUNT_POINT, filename);
-    FILE* existing_file = fopen(spiffs_path, "rb");
+    snprintf(url_meta_path, sizeof(url_meta_path), "%s/%s.url", BACKGROUND_MOUNT_POINT, filename);
+    
     size_t existing_size = 0;
     bool resume_download = false;
+    bool url_matches = false;
     
-    if (existing_file != nullptr) {
-        // 获取已存在文件的大小
-        fseek(existing_file, 0, SEEK_END);
-        existing_size = ftell(existing_file);
-        fclose(existing_file);
+    // 检查元数据文件是否存在，验证 URL 是否匹配
+    FILE* url_meta_file = fopen(url_meta_path, "r");
+    if (url_meta_file != nullptr) {
+        char saved_url[512];
+        size_t url_len = fread(saved_url, 1, sizeof(saved_url) - 1, url_meta_file);
+        fclose(url_meta_file);
         
-        if (existing_size > 0) {
-            ESP_LOGI(TAG, "Found existing file: %s, size: %zu bytes (resume download)", spiffs_path, existing_size);
-            resume_download = true;
-        } else {
-            // 文件大小为0，删除它
-            unlink(spiffs_path);
-            existing_size = 0;
-            resume_download = false;
+        if (url_len > 0) {
+            saved_url[url_len] = '\0';
+            // 去除末尾的换行符
+            while (url_len > 0 && (saved_url[url_len - 1] == '\n' || saved_url[url_len - 1] == '\r')) {
+                saved_url[--url_len] = '\0';
+            }
+            
+            if (url == saved_url) {
+                url_matches = true;
+                ESP_LOGI(TAG, "URL matches saved URL, checking file size");
+            } else {
+                ESP_LOGI(TAG, "URL changed from '%s' to '%s', will re-download", saved_url, url.c_str());
+                // URL 不匹配，删除旧文件和元数据文件
+                unlink(spiffs_path);
+                unlink(url_meta_path);
+                existing_size = 0;
+                resume_download = false;
+            }
+        }
+    }
+    
+    // 如果 URL 匹配，检查文件是否存在
+    if (url_matches) {
+        FILE* existing_file = fopen(spiffs_path, "rb");
+        if (existing_file != nullptr) {
+            // 获取已存在文件的大小
+            fseek(existing_file, 0, SEEK_END);
+            existing_size = ftell(existing_file);
+            fclose(existing_file);
+            
+            if (existing_size > 0) {
+                ESP_LOGI(TAG, "Found existing file: %s, size: %zu bytes", spiffs_path, existing_size);
+            } else {
+                // 文件大小为0，删除它
+                unlink(spiffs_path);
+                existing_size = 0;
+            }
         }
     }
     
@@ -2890,13 +2923,6 @@ bool LcdDisplay::DownloadBackgroundImage(const std::string& url) {
     if (http == nullptr) {
         ESP_LOGE(TAG, "Failed to create HTTP client");
         return false;
-    }
-    
-    // 如果支持断点续传，设置 Range 头
-    if (resume_download && existing_size > 0) {
-        // 注意：这里假设 HTTP 接口支持设置 Range 头
-        // 如果接口不支持，需要先获取完整文件大小，然后手动跳过已下载部分
-        ESP_LOGI(TAG, "Attempting to resume download from byte %zu", existing_size);
     }
     
     // 打开 HTTP 连接
@@ -2915,15 +2941,15 @@ bool LcdDisplay::DownloadBackgroundImage(const std::string& url) {
     
     ESP_LOGI(TAG, "Content length: %zu bytes", content_length);
     
-    // 如果断点续传，检查已下载部分是否完整
-    if (resume_download && existing_size >= content_length) {
-        ESP_LOGI(TAG, "File already downloaded completely (%zu >= %zu), skipping download", existing_size, content_length);
+    // 如果 URL 匹配且文件大小也匹配，才认为已下载完成
+    if (url_matches && existing_size > 0 && existing_size == content_length) {
+        ESP_LOGI(TAG, "File already downloaded completely (URL matches, size: %zu == %zu), skipping download", 
+                 existing_size, content_length);
         // 关闭 HTTP 连接（因为已经打开但不需要下载）
         http->Close();
         // 显示完成状态
         SetOTAProgress(100);
         SetChatMessage("system", "");
-        // SetChatMessage("system", "文件已存在");
         // 清除缓存，强制重新加载
         if (cached_bg_image_dsc != nullptr) {
             if (cached_bg_image_dsc->data != nullptr) {
@@ -2939,6 +2965,21 @@ bool LcdDisplay::DownloadBackgroundImage(const std::string& url) {
         // 恢复正常状态
         Application::GetInstance().SetDeviceState(kDeviceStateIdle);
         return true;
+    }
+    
+    // 如果 URL 匹配但文件大小不匹配，或者文件大小大于服务器文件，需要重新下载
+    if (url_matches && existing_size > 0 && existing_size != content_length) {
+        ESP_LOGI(TAG, "File size mismatch (local: %zu, server: %zu), will re-download", 
+                 existing_size, content_length);
+        unlink(spiffs_path);
+        existing_size = 0;
+        resume_download = false;
+    }
+    
+    // 如果 URL 匹配且文件大小小于服务器文件，可以断点续传
+    if (url_matches && existing_size > 0 && existing_size < content_length) {
+        resume_download = true;
+        ESP_LOGI(TAG, "Attempting to resume download from byte %zu", existing_size);
     }
     
     // 检查 SPIFFS 分区空间是否足够（考虑已存在的文件）
@@ -3081,6 +3122,16 @@ bool LcdDisplay::DownloadBackgroundImage(const std::string& url) {
     
     // 关闭 HTTP 连接
     http->Close();
+    
+    // 保存 URL 到元数据文件，用于下次验证
+    FILE* url_meta_write_file = fopen(url_meta_path, "w");
+    if (url_meta_write_file != nullptr) {
+        fprintf(url_meta_write_file, "%s", url.c_str());
+        fclose(url_meta_write_file);
+        ESP_LOGI(TAG, "Saved URL to metadata file: %s", url_meta_path);
+    } else {
+        ESP_LOGW(TAG, "Failed to save URL to metadata file: %s", url_meta_path);
+    }
     
     // 确保文件写入完成
     vTaskDelay(pdMS_TO_TICKS(100));
