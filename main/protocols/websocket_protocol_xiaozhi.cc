@@ -270,6 +270,20 @@ bool WebsocketProtocol::OpenAudioChannel() {
                     if (on_incoming_json_ != nullptr) {
                         on_incoming_json_(root);
                     }
+                } else if (strcmp(type->valuestring, "stt") == 0) {
+                    // 同时发送多一个pre_start事件 兼容动画表情
+                    char message_buffer[256];
+                    snprintf(message_buffer, sizeof(message_buffer), 
+                        "{\"type\":\"tts\",\"state\":\"pre_start\"}");
+                    auto message_json = cJSON_Parse(message_buffer);
+                    if (message_json) {
+                        on_incoming_json_(message_json);
+                        cJSON_Delete(message_json);
+                    }
+                   
+                    if (on_incoming_json_ != nullptr) {
+                        on_incoming_json_(root);
+                    }
                 } else {
                     if (on_incoming_json_ != nullptr) {
                         on_incoming_json_(root);
