@@ -1774,7 +1774,7 @@ void LcdDisplay::StartAudioMonitor() {
         StopAudioMonitor();
     }
     
-    ESP_LOGI(TAG, "Starting audio monitor task");
+    // ESP_LOGI(TAG, "Starting audio monitor task");
     audio_monitor_active_ = true;
     
     // 创建音频监控 task，优先级较低，避免影响音频播放
@@ -2283,7 +2283,7 @@ void LcdDisplay::RegisterDeviceStateCallback() {
                 current_state == kDeviceStateSleeping
             ) {
                 // 启动音频监控 task，等待音频播放完成后显示背景图片
-                ESP_LOGI(TAG, "Starting audio monitor task to wait for audio playback completion");
+                // ESP_LOGI(TAG, "Starting audio monitor task to wait for audio playback completion");
                 StartAudioMonitor();
             }
         }
@@ -2524,7 +2524,7 @@ void LcdDisplay::StartSubtitleScrollWithDelay(int delay_ms) {
 
 void LcdDisplay::StartSubtitleScrollDelayed() {
     // This is called after the delay period
-    ESP_LOGI(TAG, "StartSubtitleScrollDelayed called, starting actual scroll");
+    // ESP_LOGI(TAG, "StartSubtitleScrollDelayed called, starting actual scroll");
     
     if (subtitle_scroll_timer_ != nullptr) {
         esp_timer_stop(subtitle_scroll_timer_);
