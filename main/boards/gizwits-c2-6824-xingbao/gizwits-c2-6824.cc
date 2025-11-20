@@ -43,6 +43,7 @@ private:
     bool is_sleep_ = false;
 
     PowerManager* power_manager_;
+    bool last_charging_state_ = false;  // 跟踪上一次充电状态，用于检测充电状态变化
     
     // LED control
     enum LedMode { kLedSolid, kLedSlowBlink, kLedFastBlink };
@@ -390,17 +391,54 @@ private:
         
         // 注册充电状态改变回调
         power_manager_->SetChargingStatusCallback([this](bool is_charging) {
+            bool was_charging = last_charging_state_;
+            last_charging_state_ = is_charging;  // 更新状态
+            
             ESP_LOGI(TAG, "充电状态改变: %s", is_charging ? "开始充电" : "停止充电");
+            
+            // 只在静默启动状态下检查拔掉充电线的情况
+            if (silent_startup_from_board_) {
+                // 如果从充电变为非充电，且处于静默启动状态，则自动关机
+                if (was_charging && !is_charging) {
+                    ESP_LOGI(TAG, "🔋 静默启动状态下检测到USB已拔掉（从充电变为非充电），自动关机以节省功耗");
+                    // 保存标志位：电池模式下关机，保存silent_next=0
+                    {
+                        Settings settings("system", true);
+                        settings.SetInt("silent_next", 0);
+                        ESP_LOGI(TAG, "电池模式下关机，保存silent_next=0");
+                    }
+                    // 延迟一小段时间再关机，避免误判
+                    xTaskCreate([](void* arg) {
+                        vTaskDelay(pdMS_TO_TICKS(2000));  // 等待2秒确认
+                        CustomBoard* board = static_cast<CustomBoard*>(arg);
+                        if (!board->power_manager_->IsCharging() && board->silent_startup_from_board_) {
+                            ESP_LOGI(TAG, "确认USB已拔掉，执行静默关机（不播放音频）");
+                            // 静默启动状态下直接关机，不播放任何音频
+                            auto& app = Application::GetInstance();
+                            app.QuitTalking();
+                            // 拉低电源保持引脚，关闭电池供电
+                            gpio_set_level(POWER_HOLD_GPIO, 0);
+                            ESP_LOGI(TAG, "🔋 电源保持引脚已拉低，设备关机 (GPIO%d)", POWER_HOLD_GPIO);
+                            // 延时3秒后进入深度睡眠
+                            vTaskDelay(pdMS_TO_TICKS(3000));
+                            board->run_sleep_mode(false);
+                        }
+                        vTaskDelete(NULL);
+                    }, "auto_poweroff_task", 2048, this, 5, NULL);  // 减小栈大小：2KB足够（等待+关机操作）
+                    return;  // 静默模式下拔掉充电线直接返回，不执行后续逻辑
+                }
+            }
+            
             // XunguanDisplay* xunguan_display = static_cast<XunguanDisplay*>(GetDisplay());
             if (is_charging) {
                 // 充电开始时的处理逻辑
                 ESP_LOGI(TAG, "检测到开始充电");
             } else {
-                // 充电停止时的处理逻辑
+                // 充电停止时的处理逻辑（非静默模式）
                 ESP_LOGI(TAG, "检测到停止充电");
                 auto state = Application::GetInstance().GetDeviceState();
-                // 待机状态，直接关机
-                if (state == kDeviceStateIdle) {
+                // 待机或休眠状态，直接关机
+                if (state == kDeviceStateIdle || state == kDeviceStateSleeping) {
                     gpio_set_level(POWER_HOLD_GPIO, 0);
                 }
             }
@@ -502,8 +540,9 @@ public:
         InitializePowerManager();
         ESP_LOGI(TAG, "Power Manager initialized.");
 
-        // 立即检测一次充电状态
+        // 立即检测一次充电状态，并初始化 last_charging_state_
         power_manager_->CheckBatteryStatusImmediately();
+        last_charging_state_ = power_manager_->IsCharging();
 
         // 检查开机复位原因与充电状态，决定是否静默启动
         auto reset_reason = esp_reset_reason();
