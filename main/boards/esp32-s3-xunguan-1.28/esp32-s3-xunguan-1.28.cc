@@ -1035,6 +1035,7 @@ public:
     }
 
     virtual void PowerOff() override {
+        ESP_LOGI(TAG, "PowerOff");
         gpio_set_level(POWER_GPIO, 0);
     }
 
@@ -1086,14 +1087,11 @@ public:
     }
 
     virtual bool IsCharging() override {
-        int chrg = gpio_get_level(CHARGING_PIN);
-        int standby = gpio_get_level(STANDBY_PIN);
-        // return false;
-        return chrg == 0 || standby == 0;
+        return power_manager_->IsCharging();
     }
 
     virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
-        charging = IsCharging();
+        charging = power_manager_->IsCharging();
         discharging = !charging;
         level = power_manager_->GetBatteryLevel();
         ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);

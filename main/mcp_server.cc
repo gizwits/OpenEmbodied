@@ -106,6 +106,32 @@
                  backlight->SetBrightness(brightness, true);
                  return true;
              });
+         
+         AddTool("self.screen.set_brightness_brighter",
+             "Increase the brightness of the screen by 10. The brightness will be clamped to a maximum of 100.",
+             PropertyList(),
+             [backlight](const PropertyList& properties) -> ReturnValue {
+                 int current_brightness = backlight->brightness();
+                 int new_brightness = current_brightness + 10;
+                 if (new_brightness > 100) {
+                     new_brightness = 100;
+                 }
+                 backlight->SetBrightness(static_cast<uint8_t>(new_brightness), true);
+                 return true;
+             });
+         
+         AddTool("self.screen.set_brightness_darker",
+             "Decrease the brightness of the screen by 10. The brightness will be clamped to a minimum of 0.",
+             PropertyList(),
+             [backlight](const PropertyList& properties) -> ReturnValue {
+                 int current_brightness = backlight->brightness();
+                 int new_brightness = current_brightness - 10;
+                 if (new_brightness < 0) {
+                     new_brightness = 0;
+                 }
+                 backlight->SetBrightness(static_cast<uint8_t>(new_brightness), true);
+                 return true;
+             });
      }
  
  #ifdef HAVE_LVGL
