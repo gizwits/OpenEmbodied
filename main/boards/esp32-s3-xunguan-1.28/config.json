@@ -17,7 +17,7 @@
                 "CONFIG_ESP_WIFI_RX_IRAM_OPT=y",
                 "CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=128",
                 "CONFIG_LANGUAGE_EN_US=y",
-                "CONFIG_CUSTOM_TENANT_ID=\"1985275231374155778\"",
+                "CONFIG_CUSTOM_TENANT_ID=\"1985610720722112513\"",
                 "CONFIG_PROTOCOL_TYPE_XIAOZHI=y",
                 "CONFIG_USE_DEVICE_AEC=y",
                 "CONFIG_DEFAULT_CHAT_MODE=\"2\""
