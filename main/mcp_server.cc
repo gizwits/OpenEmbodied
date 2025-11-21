@@ -55,17 +55,45 @@
              return board.GetDeviceStatusJson();
          });
  
-     AddTool("self.audio_speaker.set_volume", 
-         "Set the volume of the audio speaker. If the current volume is unknown, you must call `self.get_device_status` tool first and then call this tool.",
-         PropertyList({
-             Property("volume", kPropertyTypeInteger, 0, 100)
-         }), 
-         [&board](const PropertyList& properties) -> ReturnValue {
-             auto codec = board.GetAudioCodec();
-             codec->SetOutputVolume(properties["volume"].value<int>());
-             return true;
-         });
-     
+    AddTool("self.audio_speaker.set_volume", 
+        "Set the volume of the audio speaker. If the current volume is unknown, you must call `self.get_device_status` tool first and then call this tool.",
+        PropertyList({
+            Property("volume", kPropertyTypeInteger, 0, 100)
+        }), 
+        [&board](const PropertyList& properties) -> ReturnValue {
+            auto codec = board.GetAudioCodec();
+            codec->SetOutputVolume(properties["volume"].value<int>());
+            return true;
+        });
+    
+    AddTool("self.audio_speaker.set_volume_louder",
+        "Increase the volume of the audio speaker by 10. The volume will be clamped to a maximum of 100.",
+        PropertyList(),
+        [&board](const PropertyList& properties) -> ReturnValue {
+            auto codec = board.GetAudioCodec();
+            int current_volume = codec->output_volume();
+            int new_volume = current_volume + 10;
+            if (new_volume > 100) {
+                new_volume = 100;
+            }
+            codec->SetOutputVolume(new_volume);
+            return true;
+        });
+    
+    AddTool("self.audio_speaker.set_volume_down",
+        "Decrease the volume of the audio speaker by 10. The volume will be clamped to a minimum of 0.",
+        PropertyList(),
+        [&board](const PropertyList& properties) -> ReturnValue {
+            auto codec = board.GetAudioCodec();
+            int current_volume = codec->output_volume();
+            int new_volume = current_volume - 10;
+            if (new_volume < 0) {
+                new_volume = 0;
+            }
+            codec->SetOutputVolume(new_volume);
+            return true;
+        });
+    
      auto backlight = board.GetBacklight();
      if (backlight) {
          AddTool("self.screen.set_brightness",

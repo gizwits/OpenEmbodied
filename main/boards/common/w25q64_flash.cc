@@ -101,6 +101,12 @@ esp_err_t W25Q64Flash::Initialize(int mosi_pin, int miso_pin, int clk_pin, int c
 
     ESP_LOGI(TAG, "Flash JEDEC ID: 0x%06" PRIX32, jedec_id);
     
+    // 尝试从 ESP-IDF 获取检测到的 flash 大小（如果支持）
+    uint32_t detected_size = 0;
+    if (esp_flash_get_size(esp_flash_handle_, &detected_size) == ESP_OK) {
+        ESP_LOGI(TAG, "ESP-IDF detected flash size: %" PRIu32 " MB", detected_size / (1024 * 1024));
+    }
+    
     // 识别芯片类型
     jedec_id_ = jedec_id & 0xFFFFFF;
     if (jedec_id_ == W25Q64_JEDEC_ID) {
@@ -109,11 +115,26 @@ esp_err_t W25Q64Flash::Initialize(int mosi_pin, int miso_pin, int clk_pin, int c
     } else if (jedec_id_ == W25Q128_JEDEC_ID) {
         chip_size_ = W25Q128_CHIP_SIZE;
         ESP_LOGI(TAG, "Detected W25Q128 (16MB) Flash");
+    } else if (jedec_id_ == W25Q256_JEDEC_ID) {
+        chip_size_ = W25Q256_CHIP_SIZE;
+        ESP_LOGI(TAG, "Detected W25Q256 or compatible (32MB) Flash");
     } else {
-        ESP_LOGE(TAG, "Unknown Flash chip. JEDEC ID: 0x%06" PRIX32, jedec_id_);
+        ESP_LOGW(TAG, "Unknown Flash chip. JEDEC ID: 0x%06" PRIX32, jedec_id_);
         ESP_LOGI(TAG, "Continuing anyway, assuming compatible chip");
-        // 默认按照较小的容量处理，以确保安全
-        chip_size_ = W25Q64_CHIP_SIZE;
+        // 尝试从 JEDEC ID 推断容量
+        // 0xC2 可能是 Winbond，0x19 可能表示 32MB
+        if ((jedec_id_ & 0xFF0000) == 0xC20000) {
+            // 可能是 Winbond 32MB 芯片
+            chip_size_ = W25Q256_CHIP_SIZE;
+            ESP_LOGI(TAG, "Assuming 32MB Flash based on JEDEC ID pattern");
+        } else if (detected_size > 0) {
+            // 如果 ESP-IDF 检测到了大小，使用它
+            chip_size_ = detected_size;
+            ESP_LOGI(TAG, "Using ESP-IDF detected size: %" PRIu32 " MB", chip_size_ / (1024 * 1024));
+        } else {
+            // 默认按照较小的容量处理，以确保安全
+            chip_size_ = W25Q64_CHIP_SIZE;
+        }
     }
 
     initialized_ = true;
@@ -382,7 +403,7 @@ bool W25Q64Flash::SelfTest() {
     
     // 检查是否是支持的芯片
     uint32_t id = jedec_id & 0xFFFFFF;
-    if (id != W25Q64_JEDEC_ID && id != W25Q128_JEDEC_ID) {
+    if (id != W25Q64_JEDEC_ID && id != W25Q128_JEDEC_ID && id != W25Q256_JEDEC_ID) {
         ESP_LOGW(TAG, "Unknown JEDEC ID, but continuing test...");
     }
     
