@@ -208,7 +208,8 @@ public:
     void ShowWifiSignalAndBattery();
     
     // 渲染当前电量
-    void ShowBatteryLevel();
+    // show_bg: true=显示背景颜色, false=隐藏背景颜色（只显示进度条）
+    void ShowBatteryLevel(bool show_bg = true);
     void HiddenBatteryLevel();
     
     // 恢复显示电量UI之前的状态
@@ -347,10 +348,13 @@ private:
     TaskHandle_t video_task_handle_ = nullptr;
     int video_group_index_ = 0;
     bool cycling_locked_ = false;  // 轮播锁定状态（锁定当前视频，不自动切换）
+    int cycling_repeat_count_ = 0;  // 轮播模式下当前组已播放次数
+    int cycling_repeat_target_ = 3;  // 轮播模式下每个组需要播放的次数（3次）
     lv_obj_t* video_img_ = nullptr;  // 视频图像对象
     lv_image_dsc_t video_img_dsc_ = {};  // 视频图像描述符
     uint8_t* first_frame_buf_ = nullptr;  // 第一帧缓冲区（用于避免闪烁）
-    static constexpr uint32_t kVideoFrameDelayMs = 100;  // 降低延迟以提高帧率，减少撕裂感（从120ms改为50ms，约20 FPS）
+    bool video_img_foreground_ = false;  // 视频图像是否已经在最前面（用于优化，避免重复调用move_foreground）
+    static constexpr uint32_t kVideoFrameDelayMs = 100;  // 1000/15=66.66ms
     static constexpr uint32_t kVideoFlashBaseAddress = 0x000000;  // Flash 视频数据基地址
 };
 

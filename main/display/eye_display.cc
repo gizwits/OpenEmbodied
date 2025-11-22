@@ -193,6 +193,44 @@ void EyeDisplay::SetEmotion(const char* emotion) {
     }
     __sync_synchronize();
     
+    // 如果从BATTERY_SIGNAL模式切换，需要清除信号图标和电量环（除非正在充电）
+    if (current_display_mode_ == DisplayMode::BATTERY_SIGNAL) {
+        // 停止电量显示定时器
+        if (battery_display_timer_ != nullptr) {
+            esp_timer_stop(battery_display_timer_);
+        }
+        
+        // 检查是否正在充电
+        int level = 0;
+        bool charging = false;
+        bool discharging = false;
+        Board::GetInstance().GetBatteryLevel(level, charging, discharging);
+        
+        DisplayLockGuard lock1(this);
+        // 清除信号图标（无论是否充电都要清除）
+        if (signal_img_ != nullptr) {
+            if (lv_obj_is_valid(signal_img_)) {
+                lv_obj_del(signal_img_);
+            }
+            signal_img_ = nullptr;
+            ESP_LOGI(TAG, "SetEmotion: 已清除信号图标");
+        }
+        
+        // 如果不在充电，清除电量环；如果正在充电，保持电量环显示但隐藏背景
+        if (!charging && battery_indicator_showing_) {
+            HiddenBatteryLevel();
+            ESP_LOGI(TAG, "SetEmotion: 已清除电量环（未充电）");
+        } else if (charging && battery_indicator_showing_) {
+            // 充电时：保持电量环显示，但隐藏背景颜色（只显示进度条）
+            if (battery_arc_ != nullptr && lv_obj_is_valid(battery_arc_)) {
+                lv_obj_set_style_arc_width(battery_arc_, 0, LV_PART_MAIN);
+                lv_obj_set_style_arc_opa(battery_arc_, LV_OPA_TRANSP, LV_PART_MAIN);
+                lv_obj_move_foreground(battery_arc_);
+            }
+            ESP_LOGI(TAG, "SetEmotion: 保持电量环显示（正在充电，隐藏背景）");
+        }
+    }  // lock1 在这里自动解锁
+    
     // 更新显示模式为固定表情模式
     current_display_mode_ = DisplayMode::FIXED_EMOTION;
     
@@ -259,6 +297,42 @@ void EyeDisplay::TestNextEmotion() {
 void EyeDisplay::EnterWifiConfig() {
     ESP_LOGI(TAG, "EnterWifiConfig");
     
+    // 停止电量显示定时器（如果正在运行）
+    if (battery_display_timer_ != nullptr) {
+        esp_timer_stop(battery_display_timer_);
+    }
+    
+    // 检查是否正在充电
+    int level = 0;
+    bool charging = false;
+    bool discharging = false;
+    Board::GetInstance().GetBatteryLevel(level, charging, discharging);
+    
+    // 清除信号图标（无论是否充电都要清除）
+    DisplayLockGuard lock1(this);
+    if (signal_img_ != nullptr) {
+        if (lv_obj_is_valid(signal_img_)) {
+            lv_obj_del(signal_img_);
+        }
+        signal_img_ = nullptr;
+        ESP_LOGI(TAG, "EnterWifiConfig: 已清除信号图标");
+    }
+    
+    // 如果不在充电，清除电量环；如果正在充电，保持电量环显示但隐藏背景
+    if (!charging && battery_indicator_showing_) {
+        HiddenBatteryLevel();
+        ESP_LOGI(TAG, "EnterWifiConfig: 已清除电量环（未充电）");
+    } else if (charging && battery_indicator_showing_) {
+        // 充电时：保持电量环显示，但隐藏背景颜色（只显示进度条）
+        if (battery_arc_ != nullptr && lv_obj_is_valid(battery_arc_)) {
+            lv_obj_set_style_arc_width(battery_arc_, 0, LV_PART_MAIN);
+            lv_obj_set_style_arc_opa(battery_arc_, LV_OPA_TRANSP, LV_PART_MAIN);
+            lv_obj_move_foreground(battery_arc_);
+        }
+        ESP_LOGI(TAG, "EnterWifiConfig: 保持电量环显示（正在充电，隐藏背景）");
+    }
+    // lock1 在这里自动解锁（作用域结束）
+    
     // 更新显示模式
     current_display_mode_ = DisplayMode::WIFI_CONFIG;
     
@@ -282,15 +356,19 @@ void EyeDisplay::EnterWifiConfig() {
         
         // 先逐个删除子对象，避免访问已删除的对象
         // 注意：删除对象前先检查对象是否有效，避免访问已删除的对象
-        // 保留充电环，如果它正在显示
+        // 保留充电环，如果它正在显示（正在充电时）
         uint32_t child_cnt = lv_obj_get_child_cnt(screen);
         ESP_LOGI(TAG, "EnterWifiConfig: 删除 %u 个子对象（保留充电环）", child_cnt);
         for (int32_t i = child_cnt - 1; i >= 0; i--) {
             lv_obj_t* child = lv_obj_get_child(screen, i);
             if (child != nullptr && lv_obj_is_valid(child)) {
-                // 跳过充电环和充电标签，如果它们正在显示
-                if (battery_indicator_showing_ && 
+                // 跳过充电环和充电标签，如果正在充电且正在显示
+                if (charging && battery_indicator_showing_ && 
                     (child == battery_arc_ || child == battery_label_)) {
+                    continue;
+                }
+                // 跳过信号图标（已经在上面删除了）
+                if (child == signal_img_) {
                     continue;
                 }
                 lv_obj_del(child);
@@ -342,16 +420,47 @@ void EyeDisplay::EnterWifiConfig() {
 void EyeDisplay::EnterOTAMode() {
     ESP_LOGI(TAG, "EnterOTAMode");
     
+    // 停止电量显示定时器（如果正在运行）
+    if (battery_display_timer_ != nullptr) {
+        esp_timer_stop(battery_display_timer_);
+    }
+    
+    // 检查是否正在充电
+    int level = 0;
+    bool charging = false;
+    bool discharging = false;
+    Board::GetInstance().GetBatteryLevel(level, charging, discharging);
+    
+    DisplayLockGuard lock1(this);
+    // 清除信号图标（无论是否充电都要清除）
+    if (signal_img_ != nullptr) {
+        if (lv_obj_is_valid(signal_img_)) {
+            lv_obj_del(signal_img_);
+        }
+        signal_img_ = nullptr;
+        ESP_LOGI(TAG, "EnterOTAMode: 已清除信号图标");
+    }
+    
+    // 如果不在充电，清除电量环；如果正在充电，保持电量环显示但隐藏背景
+    if (!charging && battery_indicator_showing_) {
+        HiddenBatteryLevel();
+        ESP_LOGI(TAG, "EnterOTAMode: 已清除电量环（未充电）");
+    } else if (charging && battery_indicator_showing_) {
+        // 充电时：保持电量环显示，但隐藏背景颜色（只显示进度条）
+        if (battery_arc_ != nullptr && lv_obj_is_valid(battery_arc_)) {
+            lv_obj_set_style_arc_width(battery_arc_, 0, LV_PART_MAIN);
+            lv_obj_set_style_arc_opa(battery_arc_, LV_OPA_TRANSP, LV_PART_MAIN);
+            lv_obj_move_foreground(battery_arc_);
+        }
+        ESP_LOGI(TAG, "EnterOTAMode: 保持电量环显示（正在充电，隐藏背景）");
+    }
+    // lock1 在这里自动解锁（作用域结束）
+    
     // 更新显示模式
     current_display_mode_ = DisplayMode::OTA_MODE;
     
     // 禁用表情切换
     emotion_disabled_ = true;
-    
-    // 隐藏充电环，避免显示冲突
-    if (battery_indicator_showing_) {
-        HiddenBatteryLevel();
-    }
     
     DisplayLockGuard lock(this);
     
@@ -662,6 +771,12 @@ void EyeDisplay::UpdateTestItemStatus(const std::string& id, int status) {
 void EyeDisplay::ShowWifiSignalAndBattery() {
     ESP_LOGI(TAG, "ShowWifiSignalAndBattery: 显示Wi-Fi信号和电量");
     
+    // 检查是否正在充电
+    int level = 0;
+    bool charging = false;
+    bool discharging = false;
+    Board::GetInstance().GetBatteryLevel(level, charging, discharging);
+    
     // 查找当前视频组对应的表情名称（使用共享的映射表）
     const char* current_emotion = "neutral";  // 默认值
     for (size_t i = 0; i < sizeof(emotion_group_map) / sizeof(emotion_group_map[0]); i++) {
@@ -678,6 +793,10 @@ void EyeDisplay::ShowWifiSignalAndBattery() {
     ESP_LOGI(TAG, "保存当前状态: emotion=%s, video_mode=%d, group_index=%d", 
              saved_emotion_before_battery_.c_str(), was_video_mode_before_battery_, saved_video_group_index_);
     
+    // 先停止视频播放（停止动画表情）
+    StopVideoPlayback();
+    ESP_LOGI(TAG, "已停止视频播放");
+    
     // 更新显示模式
     current_display_mode_ = DisplayMode::BATTERY_SIGNAL;
     
@@ -687,8 +806,8 @@ void EyeDisplay::ShowWifiSignalAndBattery() {
         lv_obj_add_flag(video_img_, LV_OBJ_FLAG_HIDDEN);
     }
     
-    // 显示电量（复用 ShowBatteryLevel）
-    ShowBatteryLevel();
+    // 显示电量：充电时隐藏背景，未充电时显示背景
+    ShowBatteryLevel(!charging);
     
     // 在圆环中心显示Wi-Fi信号图标
     DisplayLockGuard lock(this);
@@ -779,7 +898,9 @@ void EyeDisplay::ShowWifiSignalAndBattery() {
     
     ESP_LOGI(TAG, "Wi-Fi信号和电量已显示");
     
-    // 创建定时器，5秒后自动隐藏并恢复表情
+    // 创建定时器，5秒后自动清除信号图标
+    // 充电时：5秒后只清除信号图标，电量环继续显示（无背景）
+    // 未充电时：5秒后清除信号图标和电量环
     if (battery_display_timer_ == nullptr) {
         esp_timer_create_args_t timer_args = {
             .callback = [](void* arg) {
@@ -809,21 +930,30 @@ void EyeDisplay::RestoreStateAfterBattery() {
     bool discharging = false;
     Board::GetInstance().GetBatteryLevel(level, charging, discharging);
     
-    // 如果正在充电，不隐藏充电环；否则隐藏
-    if (!charging) {
-        HiddenBatteryLevel();
-    } else {
-        ESP_LOGI(TAG, "正在充电，保持充电环显示");
-    }
-    
     DisplayLockGuard lock(this);
     
-    // 删除信号图标
+    // 删除信号图标（无论是否充电都要删除）
     if (signal_img_ != nullptr) {
         if (lv_obj_is_valid(signal_img_)) {
             lv_obj_del(signal_img_);
         }
         signal_img_ = nullptr;
+        ESP_LOGI(TAG, "RestoreStateAfterBattery: 已清除信号图标");
+    }
+    
+    // 如果正在充电，保持电量环显示但隐藏背景颜色；否则隐藏电量环
+    if (charging) {
+        // 充电时：保持电量环显示，但隐藏背景颜色（只显示进度条）
+        if (battery_arc_ != nullptr && lv_obj_is_valid(battery_arc_)) {
+            lv_obj_set_style_arc_width(battery_arc_, 0, LV_PART_MAIN);
+            lv_obj_set_style_arc_opa(battery_arc_, LV_OPA_TRANSP, LV_PART_MAIN);
+            lv_obj_move_foreground(battery_arc_);
+        }
+        ESP_LOGI(TAG, "RestoreStateAfterBattery: 保持充电环显示（正在充电，隐藏背景）");
+    } else {
+        // 未充电时：隐藏电量环
+        HiddenBatteryLevel();
+        ESP_LOGI(TAG, "RestoreStateAfterBattery: 已清除电量环（未充电）");
     }
     
     // 恢复之前的显示模式
@@ -849,6 +979,10 @@ void EyeDisplay::RestoreStateAfterBattery() {
     if (video_img_ != nullptr && lv_obj_is_valid(video_img_)) {
         lv_obj_clear_flag(video_img_, LV_OBJ_FLAG_HIDDEN);
     }
+    
+    // 重新启动视频播放（恢复动画表情）
+    StartVideoPlayback();
+    ESP_LOGI(TAG, "已重新启动视频播放");
     
     ESP_LOGI(TAG, "状态已恢复");
 }
@@ -970,7 +1104,7 @@ void EyeDisplay::UpdateBatteryLevel(int level) {
     // 不更新百分比标签（中间不显示数字）
 }
 
-void EyeDisplay::ShowBatteryLevel() {
+void EyeDisplay::ShowBatteryLevel(bool show_bg) {
     if (battery_arc_ == nullptr || battery_label_ == nullptr) {
         ESP_LOGW(TAG, "Battery indicator not created, creating now");
         CreateBatteryIndicator();
@@ -978,11 +1112,23 @@ void EyeDisplay::ShowBatteryLevel() {
     
     DisplayLockGuard lock(this);
 
-    ESP_LOGI(TAG, "ShowBatteryLevel");
+    ESP_LOGI(TAG, "ShowBatteryLevel: show_bg=%d", show_bg);
     
     // 显示电量UI（只显示圆环，不显示数字）
     lv_obj_clear_flag(battery_arc_, LV_OBJ_FLAG_HIDDEN);
     // battery_label_ 保持隐藏，不显示数字
+    
+    // 根据参数设置背景颜色显示/隐藏
+    if (show_bg) {
+        // 显示背景颜色
+        lv_obj_set_style_arc_width(battery_arc_, 3, LV_PART_MAIN);
+        lv_obj_set_style_arc_color(battery_arc_, lv_color_black(), LV_PART_MAIN);
+        lv_obj_set_style_arc_opa(battery_arc_, LV_OPA_COVER, LV_PART_MAIN);
+    } else {
+        // 隐藏背景颜色（只显示进度条）
+        lv_obj_set_style_arc_width(battery_arc_, 0, LV_PART_MAIN);
+        lv_obj_set_style_arc_opa(battery_arc_, LV_OPA_TRANSP, LV_PART_MAIN);
+    }
     
     // 确保在最前面
     lv_obj_move_foreground(battery_arc_);
@@ -1002,6 +1148,8 @@ void EyeDisplay::ShowBatteryLevel() {
     }
     
     battery_indicator_showing_ = true;
+    // 电量环显示时，视频不在最前面
+    video_img_foreground_ = false;
     ESP_LOGI(TAG, "Battery indicator shown");
 }
 
@@ -1022,6 +1170,8 @@ void EyeDisplay::HiddenBatteryLevel() {
     }
     
     battery_indicator_showing_ = false;
+    // 电量环隐藏时，重置视频前景标志，让视频任务重新判断
+    video_img_foreground_ = false;
     ESP_LOGI(TAG, "Battery indicator hidden");
 }
 
@@ -1045,17 +1195,11 @@ void EyeDisplay::VideoPlayTask(void* arg) {
         // 如果Flash被锁定，等待解锁
         if (flash.IsLocked()) {
             ESP_LOGI(TAG, "Flash is locked for erase/write, waiting for unlock...");
-            // 等待Flash解锁（最多等待5分钟）
-            for (int i = 0; i < 300 && flash.IsLocked(); ++i) {
+            // 无限等待Flash解锁（擦除可能需要很长时间）
+            while (flash.IsLocked()) {
                 vTaskDelay(pdMS_TO_TICKS(1000));  // 每秒检查一次
             }
-            if (flash.IsLocked()) {
-                ESP_LOGE(TAG, "Flash still locked after 5 minutes, exiting video task");
-                self->video_playing_ = false;
-                self->video_task_handle_ = nullptr;
-                vTaskDelete(nullptr);
-                return;
-            }
+            ESP_LOGI(TAG, "Flash unlocked, resuming video playback");
             // 重新读取
             read_ret = flash.Read(EyeDisplay::kVideoFlashBaseAddress, &group_count, 1);
         }
@@ -1074,17 +1218,11 @@ void EyeDisplay::VideoPlayTask(void* arg) {
         // 如果Flash被锁定，等待解锁
         if (flash.IsLocked()) {
             ESP_LOGI(TAG, "Flash is locked for erase/write, waiting for unlock...");
-            // 等待Flash解锁（最多等待5分钟）
-            for (int i = 0; i < 300 && flash.IsLocked(); ++i) {
+            // 无限等待Flash解锁（擦除可能需要很长时间）
+            while (flash.IsLocked()) {
                 vTaskDelay(pdMS_TO_TICKS(1000));  // 每秒检查一次
             }
-            if (flash.IsLocked()) {
-                ESP_LOGE(TAG, "Flash still locked after 5 minutes, exiting video task");
-                self->video_playing_ = false;
-                self->video_task_handle_ = nullptr;
-                vTaskDelete(nullptr);
-                return;
-            }
+            ESP_LOGI(TAG, "Flash unlocked, resuming video playback");
             // 重新读取
             read_ret = flash.Read(EyeDisplay::kVideoFlashBaseAddress + 1, (uint8_t*)frame_counts.data(), group_count * sizeof(uint32_t));
         }
@@ -1175,12 +1313,17 @@ void EyeDisplay::VideoPlayTask(void* arg) {
         }
         
         // 确保视频图像可见（如果之前被隐藏了）
-        if (self->Lock(20)) {
+        if (self->Lock(50)) {
             if (self->video_img_ != nullptr && lv_obj_is_valid(self->video_img_)) {
-                lv_obj_clear_flag(self->video_img_, LV_OBJ_FLAG_HIDDEN);
+                if (lv_obj_has_flag(self->video_img_, LV_OBJ_FLAG_HIDDEN)) {
+                    lv_obj_clear_flag(self->video_img_, LV_OBJ_FLAG_HIDDEN);
+                }
+                // 重置前景标志，让下一帧更新时重新判断
+                self->video_img_foreground_ = false;
             } else if (self->video_img_ != nullptr) {
                 // 对象已被删除，清空指针，下次循环会重新创建
                 self->video_img_ = nullptr;
+                self->video_img_foreground_ = false;
             }
             self->Unlock();
         }
@@ -1197,6 +1340,10 @@ void EyeDisplay::VideoPlayTask(void* arg) {
             current_frames = frame_counts[current_group];
             current_idx = 0;
             last_idx = UINT32_MAX;  // 重置，避免误判
+            // 切换到新组时，重置播放次数计数
+            if (current_mode == DisplayMode::VIDEO_CYCLING) {
+                self->cycling_repeat_count_ = 0;
+            }
             
             if (current_frames == 0) {
                 ESP_LOGE(TAG, "No frames in group %d, skipping", current_group);
@@ -1204,26 +1351,37 @@ void EyeDisplay::VideoPlayTask(void* arg) {
                 continue;
             }
             
-            ESP_LOGI(TAG, "Switching to video group %d, frames=%u, mode=%d", 
-                     current_group, (unsigned)current_frames, (int)current_mode);
+            ESP_LOGI(TAG, "Switching to video group %d, frames=%u, mode=%d (VIDEO_CYCLING=%d)", 
+                     current_group, (unsigned)current_frames, (int)current_mode, (int)DisplayMode::VIDEO_CYCLING);
             
             // Read first frame of new group
             size_t off0 = EyeDisplay::kVideoFlashBaseAddress + group_base[current_group] + current_idx * frame_size;
             esp_err_t read_ret = flash.Read(off0, buf, frame_size);
             if (read_ret != ESP_OK) {
-                // 如果Flash被锁定（正在擦写），等待并降低日志级别
+                // 如果Flash被锁定（正在擦写），进入等待循环，完全停止读取
                 if (flash.IsLocked()) {
-                    ESP_LOGD(TAG, "Flash is locked for erase/write, waiting...");
-                    vTaskDelay(pdMS_TO_TICKS(1000));  // 等待1秒
+                    ESP_LOGI(TAG, "Flash is locked for erase/write, waiting for unlock...");
+                    // 无限等待Flash解锁（擦除可能需要很长时间）
+                    while (flash.IsLocked()) {
+                        vTaskDelay(pdMS_TO_TICKS(1000));  // 每秒检查一次
+                    }
+                    ESP_LOGI(TAG, "Flash unlocked, resuming video playback");
+                    // Flash已解锁，重新尝试读取
+                    read_ret = flash.Read(off0, buf, frame_size);
+                    if (read_ret != ESP_OK) {
+                        ESP_LOGE(TAG, "read first frame of group %d failed after unlock", current_group);
+                        vTaskDelay(pdMS_TO_TICKS(100));
+                        continue;
+                    }
+                } else {
+                    ESP_LOGE(TAG, "read first frame of group %d failed", current_group);
+                    vTaskDelay(pdMS_TO_TICKS(100));
                     continue;
                 }
-                ESP_LOGE(TAG, "read first frame of group %d failed", current_group);
-                vTaskDelay(pdMS_TO_TICKS(100));
-                continue;
             }
             
             // Display first frame
-            if (self->Lock(20)) {
+            if (self->Lock(50)) {
                 if (self->video_img_ != nullptr && lv_obj_is_valid(self->video_img_)) {
                     self->video_img_dsc_.header.w = self->width_;
                     self->video_img_dsc_.header.h = self->height_;
@@ -1232,15 +1390,18 @@ void EyeDisplay::VideoPlayTask(void* arg) {
                     self->video_img_dsc_.data_size = frame_size;
                     lv_img_set_src(self->video_img_, &self->video_img_dsc_);
                     lv_obj_clear_flag(self->video_img_, LV_OBJ_FLAG_HIDDEN);
-                    // 如果电量环未显示，才把视频移到最前面
-                    if (!self->battery_indicator_showing_) {
+                    // 如果电量环未显示，才把视频移到最前面（只在组切换时调用一次）
+                    if (!self->battery_indicator_showing_ && !self->video_img_foreground_) {
                         lv_obj_move_foreground(self->video_img_);
+                        self->video_img_foreground_ = true;
+                    } else if (self->battery_indicator_showing_) {
+                        self->video_img_foreground_ = false;  // 电量环显示时，视频不在最前面
                     }
-                    // 强制刷新
-                    lv_obj_invalidate(self->video_img_);
+                    // lv_img_set_src 会自动触发刷新，不需要手动 invalidate
                 } else if (self->video_img_ != nullptr) {
                     // 对象已被删除，清空指针，下次循环会重新创建
                     self->video_img_ = nullptr;
+                    self->video_img_foreground_ = false;
                 }
                 self->Unlock();
             }
@@ -1254,37 +1415,51 @@ void EyeDisplay::VideoPlayTask(void* arg) {
             size_t off = EyeDisplay::kVideoFlashBaseAddress + group_base[current_group] + current_idx * frame_size;
             esp_err_t read_ret = flash.Read(off, buf, frame_size);
             if (read_ret != ESP_OK) {
-                // 如果Flash被锁定（正在擦写），等待并降低日志级别
+                // 如果Flash被锁定（正在擦写），进入等待循环，完全停止读取
                 if (flash.IsLocked()) {
-                    ESP_LOGD(TAG, "Flash is locked for erase/write, waiting...");
-                    vTaskDelay(pdMS_TO_TICKS(1000));  // 等待1秒
+                    ESP_LOGI(TAG, "Flash is locked for erase/write, waiting for unlock...");
+                    // 无限等待Flash解锁（擦除可能需要很长时间）
+                    while (flash.IsLocked()) {
+                        vTaskDelay(pdMS_TO_TICKS(1000));  // 每秒检查一次
+                    }
+                    ESP_LOGI(TAG, "Flash unlocked, resuming video playback");
+                    // Flash已解锁，重新尝试读取
+                    read_ret = flash.Read(off, buf, frame_size);
+                    if (read_ret != ESP_OK) {
+                        ESP_LOGE(TAG, "read frame %u of group %d failed after unlock", (unsigned)current_idx, current_group);
+                        vTaskDelay(pdMS_TO_TICKS(100));
+                        continue;
+                    }
+                } else {
+                    ESP_LOGE(TAG, "read frame %u of group %d failed", (unsigned)current_idx, current_group);
+                    vTaskDelay(pdMS_TO_TICKS(100));
                     continue;
                 }
-                ESP_LOGE(TAG, "read frame %u of group %d failed", (unsigned)current_idx, current_group);
-                vTaskDelay(pdMS_TO_TICKS(100));
-                continue;
             }
             
             // Update LVGL image
-            if (self->Lock(20)) {
+            if (self->Lock(50)) {
                 if (self->video_img_ != nullptr && lv_obj_is_valid(self->video_img_)) {
-                    self->video_img_dsc_.header.w = self->width_;
-                    self->video_img_dsc_.header.h = self->height_;
-                    self->video_img_dsc_.header.cf = LV_COLOR_FORMAT_RGB565;
+                    // 只更新数据指针，其他字段在组切换时已经设置
                     self->video_img_dsc_.data = buf;
                     self->video_img_dsc_.data_size = frame_size;
                     lv_img_set_src(self->video_img_, &self->video_img_dsc_);
-                    // 确保对象可见
-                    lv_obj_clear_flag(self->video_img_, LV_OBJ_FLAG_HIDDEN);
-                    // 如果电量环未显示，才把视频移到最前面
-                    if (!self->battery_indicator_showing_) {
-                        lv_obj_move_foreground(self->video_img_);
+                    // 确保对象可见（只在隐藏时清除标志，避免重复操作）
+                    if (lv_obj_has_flag(self->video_img_, LV_OBJ_FLAG_HIDDEN)) {
+                        lv_obj_clear_flag(self->video_img_, LV_OBJ_FLAG_HIDDEN);
                     }
-                    // 强制刷新，减少撕裂感
-                    lv_obj_invalidate(self->video_img_);
+                    // 只在电量环状态变化时才移动前景（避免每帧都调用）
+                    if (!self->battery_indicator_showing_ && !self->video_img_foreground_) {
+                        lv_obj_move_foreground(self->video_img_);
+                        self->video_img_foreground_ = true;
+                    } else if (self->battery_indicator_showing_ && self->video_img_foreground_) {
+                        self->video_img_foreground_ = false;  // 电量环显示时，视频不在最前面
+                    }
+                    // lv_img_set_src 会自动触发刷新，不需要手动 invalidate（减少开销）
                 } else if (self->video_img_ != nullptr) {
                     // 对象已被删除，清空指针，下次循环会重新创建
                     self->video_img_ = nullptr;
+                    self->video_img_foreground_ = false;
                 }
                 self->Unlock();
             }
@@ -1319,13 +1494,28 @@ void EyeDisplay::VideoPlayTask(void* arg) {
                         // ESP_LOGI(TAG, "VIDEO_CYCLING (locked): Group %d finished, looping same group", current_group);
                         last_idx = UINT32_MAX;  // 重置，避免重复判断
                     } else {
-                        // 未锁定：自动切换到下一个组
-                        int next_group = (current_group + 1) % group_count;
-                        // ESP_LOGI(TAG, "VIDEO_CYCLING: Group %d finished, cycling to next group %d", current_group, next_group);
-                        self->video_group_index_ = next_group;
-                        // 重置状态，下一轮循环会切换到新组
-                        current_group = -1;  // 强制触发组切换
-                        last_idx = UINT32_MAX;  // 重置
+                        // 未锁定：增加播放次数计数
+                        self->cycling_repeat_count_++;
+                        ESP_LOGI(TAG, "VIDEO_CYCLING: Group %d finished, repeat count: %d/%d", 
+                                 current_group, self->cycling_repeat_count_, self->cycling_repeat_target_);
+                        
+                        // 如果还没播放够指定次数，继续播放当前组
+                        if (self->cycling_repeat_count_ < self->cycling_repeat_target_) {
+                            // 继续播放当前组
+                            ESP_LOGI(TAG, "VIDEO_CYCLING: Group %d repeat %d/%d, continuing same group", 
+                                     current_group, self->cycling_repeat_count_, self->cycling_repeat_target_);
+                            last_idx = UINT32_MAX;  // 重置，继续循环
+                        } else {
+                            // 已经播放够次数，切换到下一个组
+                            int next_group = (current_group + 1) % group_count;
+                            ESP_LOGI(TAG, "VIDEO_CYCLING: Group %d finished %d times, cycling to next group %d", 
+                                     current_group, self->cycling_repeat_count_, next_group);
+                            self->video_group_index_ = next_group;
+                            self->cycling_repeat_count_ = 0;  // 重置计数
+                            // 重置状态，下一轮循环会切换到新组
+                            current_group = -1;  // 强制触发组切换
+                            last_idx = UINT32_MAX;  // 重置
+                        }
                     }
                 } else if (current_mode == DisplayMode::FIXED_EMOTION) {
                     // 固定表情模式：循环播放当前组（current_idx 已经是 0，会继续播放）
@@ -1362,6 +1552,45 @@ void EyeDisplay::StartVideoPlayback() {
 void EyeDisplay::ToggleVideoCyclingMode() {
     ESP_LOGI(TAG, "ToggleVideoCyclingMode");
     
+    // 如果从BATTERY_SIGNAL模式切换，需要清除信号图标和电量环（除非正在充电）
+    if (current_display_mode_ == DisplayMode::BATTERY_SIGNAL) {
+        // 停止电量显示定时器
+        if (battery_display_timer_ != nullptr) {
+            esp_timer_stop(battery_display_timer_);
+        }
+        
+        // 检查是否正在充电
+        int level = 0;
+        bool charging = false;
+        bool discharging = false;
+        Board::GetInstance().GetBatteryLevel(level, charging, discharging);
+        
+        DisplayLockGuard lock1(this);
+        // 清除信号图标（无论是否充电都要清除）
+        if (signal_img_ != nullptr) {
+            if (lv_obj_is_valid(signal_img_)) {
+                lv_obj_del(signal_img_);
+            }
+            signal_img_ = nullptr;
+            ESP_LOGI(TAG, "ToggleVideoCyclingMode: 已清除信号图标");
+        }
+        
+        // 如果不在充电，清除电量环；如果正在充电，保持电量环显示但隐藏背景
+        if (!charging && battery_indicator_showing_) {
+            HiddenBatteryLevel();
+            ESP_LOGI(TAG, "ToggleVideoCyclingMode: 已清除电量环（未充电）");
+        } else if (charging && battery_indicator_showing_) {
+            // 充电时：保持电量环显示，但隐藏背景颜色（只显示进度条）
+            if (battery_arc_ != nullptr && lv_obj_is_valid(battery_arc_)) {
+                lv_obj_set_style_arc_width(battery_arc_, 0, LV_PART_MAIN);
+                lv_obj_set_style_arc_opa(battery_arc_, LV_OPA_TRANSP, LV_PART_MAIN);
+                lv_obj_move_foreground(battery_arc_);
+            }
+            ESP_LOGI(TAG, "ToggleVideoCyclingMode: 保持电量环显示（正在充电，隐藏背景）");
+        }
+        // lock1 在这里自动解锁（作用域结束）
+    }
+    
     // 设置切换标志，防止在切换过程中更新电量（使用内存屏障确保可见性）
     mode_switching_ = true;
     __sync_synchronize();  // 内存屏障，确保标志位对所有CPU核心可见
@@ -1384,6 +1613,8 @@ void EyeDisplay::ToggleVideoCyclingMode() {
         current_display_mode_ = DisplayMode::VIDEO_CYCLING;
         // 切换到轮播模式时，解锁锁定状态
         cycling_locked_ = false;
+        cycling_repeat_count_ = 0;  // 重置播放次数计数
+        ESP_LOGI(TAG, "切换到轮播模式，重置播放次数计数，当前组: %d", video_group_index_);
     }
     
     // 确保视频播放任务正在运行

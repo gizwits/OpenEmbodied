@@ -42,10 +42,10 @@ static const char* const STATE_STRINGS[] = {
 
 
 // 带进度回调的使用
-void download_progress(size_t downloaded, size_t total) {
-    int percent = (downloaded * 100) / total;
-    printf("Progress: %d%% (%zu/%zu bytes)\n", percent, downloaded, total);
-}
+// void download_progress(size_t downloaded, size_t total) {
+//     int percent = (downloaded * 100) / total;
+//     printf("Progress: %d%% (%zu/%zu bytes)\n", percent, downloaded, total);
+// }
 
 
 Application::Application() {
@@ -463,67 +463,67 @@ void Application::Start() {
     board.StartNetwork();
 
     // // 等待网络连接稳定(减少到30秒,确保WiFi已连接)
-    ESP_LOGI(TAG, "等待网络连接稳定,准备下载表情包...");
-    // vTaskDelay(pdMS_TO_TICKS(30000));  // 30秒延时,等待WiFi连接稳定
+    // ESP_LOGI(TAG, "等待网络连接稳定,准备下载表情包...");
+    // // vTaskDelay(pdMS_TO_TICKS(30000));  // 30秒延时,等待WiFi连接稳定
 
-    // 下载表情包到 Flash
-    ESP_LOGI(TAG, "开始下载表情包到外置Flash...");
-    auto& flash = W25Q64Flash::GetInstance();
+    // // 下载表情包到 Flash
+    // ESP_LOGI(TAG, "开始下载表情包到外置Flash...");
+    // auto& flash = W25Q64Flash::GetInstance();
     
-    if (!flash.IsInitialized()) {
-        ESP_LOGE(TAG, "外置Flash未初始化,无法下载表情包");
-    } else {
-        const char* emotion_url = "http://xbgroup-1251025085.cos.ap-guangzhou.myqcloud.com/firmwares/output1.2.bin";
+    // if (!flash.IsInitialized()) {
+    //     ESP_LOGE(TAG, "外置Flash未初始化,无法下载表情包");
+    // } else {
+    //     const char* emotion_url = "http://xbgroup-1251025085.cos.ap-guangzhou.myqcloud.com/firmwares/output1.3.bin";
         
-        // 检查是否已经下载过这个URL
-        Settings settings("emotion", true);
-        std::string saved_url = settings.GetString("downloaded_url", "");
+    //     // 检查是否已经下载过这个URL
+    //     Settings settings("emotion", true);
+    //     std::string saved_url = settings.GetString("downloaded_url", "");
         
-        if (saved_url == emotion_url) {
-            ESP_LOGI(TAG, "表情包URL已下载过,跳过下载: %s", emotion_url);
-        } else {
-            ESP_LOGI(TAG, "外置Flash已初始化,开始下载...");
+    //     if (saved_url == emotion_url) {
+    //         ESP_LOGI(TAG, "表情包URL已下载过,跳过下载: %s", emotion_url);
+    //     } else {
+    //         ESP_LOGI(TAG, "外置Flash已初始化,开始下载...");
             
-            // 锁定Flash,禁止其他代码访问(防止读取表情导致失败)
-            ESP_LOGI(TAG, "锁定Flash,禁止访问...");
-            flash.LockForErase();
+    //         // 锁定Flash,禁止其他代码访问(防止读取表情导致失败)
+    //         ESP_LOGI(TAG, "锁定Flash,禁止访问...");
+    //         flash.LockForErase();
             
-            // 烧录前先擦除整个Flash,防止有残留
-            ESP_LOGI(TAG, "开始擦除整个Flash芯片(这可能需要几分钟)...");
-            esp_err_t erase_ret = flash.ChipErase();
-            if (erase_ret != ESP_OK) {
-                ESP_LOGE(TAG, "❌ Flash擦除失败: %s", esp_err_to_name(erase_ret));
-                flash.UnlockAfterErase();
-                return;
-            }
-            ESP_LOGI(TAG, "✅ Flash擦除完成,开始下载表情包...");
+    //         // 烧录前先擦除整个Flash,防止有残留
+    //         ESP_LOGI(TAG, "开始擦除整个Flash芯片(这可能需要几分钟)...");
+    //         esp_err_t erase_ret = flash.ChipErase();
+    //         if (erase_ret != ESP_OK) {
+    //             ESP_LOGE(TAG, "❌ Flash擦除失败: %s", esp_err_to_name(erase_ret));
+    //             flash.UnlockAfterErase();
+    //             return;
+    //         }
+    //         ESP_LOGI(TAG, "✅ Flash擦除完成,开始下载表情包...");
             
-            esp_err_t download_ret = flash.DownloadToFlash(
-                emotion_url,
-                0x000000,
-                download_progress
-            );
+    //         esp_err_t download_ret = flash.DownloadToFlash(
+    //             emotion_url,
+    //             0x000000,
+    //             download_progress
+    //         );
             
-            if (download_ret == ESP_OK) {
-                ESP_LOGI(TAG, "✅ 表情包下载成功！");
-                // 保存下载成功的URL
-                settings.SetString("downloaded_url", emotion_url);
-                ESP_LOGI(TAG, "已保存表情包URL到配置");
+    //         if (download_ret == ESP_OK) {
+    //             ESP_LOGI(TAG, "✅ 表情包下载成功！");
+    //             // 保存下载成功的URL
+    //             settings.SetString("downloaded_url", emotion_url);
+    //             ESP_LOGI(TAG, "已保存表情包URL到配置");
                 
-                // 解锁Flash
-                flash.UnlockAfterErase();
+    //             // 解锁Flash
+    //             flash.UnlockAfterErase();
                 
-                // 擦写完成,重启设备
-                ESP_LOGI(TAG, "Flash擦写完成,3秒后重启设备...");
-                vTaskDelay(pdMS_TO_TICKS(3000));
-                esp_restart();
-            } else {
-                ESP_LOGE(TAG, "❌ 表情包下载失败: %s", esp_err_to_name(download_ret));
-                // 解锁Flash
-                flash.UnlockAfterErase();
-            }
-        }
-    }
+    //             // 擦写完成,重启设备
+    //             ESP_LOGI(TAG, "Flash擦写完成,3秒后重启设备...");
+    //             vTaskDelay(pdMS_TO_TICKS(3000));
+    //             esp_restart();
+    //         } else {
+    //             ESP_LOGE(TAG, "❌ 表情包下载失败: %s", esp_err_to_name(download_ret));
+    //             // 解锁Flash
+    //             flash.UnlockAfterErase();
+    //         }
+    //     }
+    // }
 
     // auto json = board.GetJson();
     // ESP_LOGI(TAG, "json: %s", json.c_str());
