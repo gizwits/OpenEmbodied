@@ -109,11 +109,25 @@ esp_err_t W25Q64Flash::Initialize(int mosi_pin, int miso_pin, int clk_pin, int c
     } else if (jedec_id_ == W25Q128_JEDEC_ID) {
         chip_size_ = W25Q128_CHIP_SIZE;
         ESP_LOGI(TAG, "Detected W25Q128 (16MB) Flash");
+    } else if (jedec_id_ == W25Q256_JEDEC_ID) {
+        chip_size_ = W25Q256_CHIP_SIZE;
+        ESP_LOGI(TAG, "Detected W25Q256 (32MB) Flash");
     } else {
-        ESP_LOGE(TAG, "Unknown Flash chip. JEDEC ID: 0x%06" PRIX32, jedec_id_);
-        ESP_LOGI(TAG, "Continuing anyway, assuming compatible chip");
-        // 默认按照较小的容量处理，以确保安全
-        chip_size_ = W25Q64_CHIP_SIZE;
+        ESP_LOGW(TAG, "Unknown Flash chip. JEDEC ID: 0x%06" PRIX32, jedec_id_);
+        ESP_LOGI(TAG, "Attempting to detect capacity from esp_flash_get_size...");
+        
+        // 尝试从esp_flash获取实际容量
+        uint32_t detected_size = 0;
+        esp_err_t size_ret = esp_flash_get_size(esp_flash_handle_, &detected_size);
+        if (size_ret == ESP_OK && detected_size > 0) {
+            chip_size_ = detected_size;
+            ESP_LOGI(TAG, "Detected Flash capacity from esp_flash: %" PRIu32 " MB (0x%08" PRIX32 " bytes)", 
+                     chip_size_ / (1024 * 1024), chip_size_);
+        } else {
+            ESP_LOGE(TAG, "Failed to detect Flash capacity, using default 8MB");
+            // 默认按照较小的容量处理，以确保安全
+            chip_size_ = W25Q64_CHIP_SIZE;
+        }
     }
 
     initialized_ = true;
@@ -382,7 +396,7 @@ bool W25Q64Flash::SelfTest() {
     
     // 检查是否是支持的芯片
     uint32_t id = jedec_id & 0xFFFFFF;
-    if (id != W25Q64_JEDEC_ID && id != W25Q128_JEDEC_ID) {
+    if (id != W25Q64_JEDEC_ID && id != W25Q128_JEDEC_ID && id != W25Q256_JEDEC_ID) {
         ESP_LOGW(TAG, "Unknown JEDEC ID, but continuing test...");
     }
     

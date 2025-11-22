@@ -149,7 +149,7 @@ void Application::CheckNewVersion(Ota& ota) {
                 // Upgrade failed, restart audio service and continue running
                 ESP_LOGE(TAG, "Firmware upgrade failed, restarting audio service and continuing operation...");
                 audio_service_.Start(); // Restart audio service
-                // 暂时禁用省电模式，避免影响网络连接
+                // 暂时禁用省电模式,避免影响网络连接
         // board.SetPowerSaveMode(true); // Restore power save mode
                 Alert(Lang::Strings::ERROR, Lang::Strings::UPGRADE_FAILED, "sad", Lang::Sounds::P3_EXCLAMATION);
                 vTaskDelay(pdMS_TO_TICKS(3000));
@@ -462,41 +462,41 @@ void Application::Start() {
     /* Wait for the network to be ready */
     board.StartNetwork();
 
-    // // 等待网络连接稳定（减少到30秒，确保WiFi已连接）
-    ESP_LOGI(TAG, "等待网络连接稳定，准备下载表情包...");
-    // vTaskDelay(pdMS_TO_TICKS(30000));  // 30秒延时，等待WiFi连接稳定
+    // // 等待网络连接稳定(减少到30秒,确保WiFi已连接)
+    ESP_LOGI(TAG, "等待网络连接稳定,准备下载表情包...");
+    // vTaskDelay(pdMS_TO_TICKS(30000));  // 30秒延时,等待WiFi连接稳定
 
     // 下载表情包到 Flash
     ESP_LOGI(TAG, "开始下载表情包到外置Flash...");
     auto& flash = W25Q64Flash::GetInstance();
     
     if (!flash.IsInitialized()) {
-        ESP_LOGE(TAG, "外置Flash未初始化，无法下载表情包");
+        ESP_LOGE(TAG, "外置Flash未初始化,无法下载表情包");
     } else {
-        const char* emotion_url = "http://xbgroup-1251025085.cos.ap-guangzhou.myqcloud.com/firmwares/output1.1.bin";
+        const char* emotion_url = "http://xbgroup-1251025085.cos.ap-guangzhou.myqcloud.com/firmwares/output1.2.bin";
         
         // 检查是否已经下载过这个URL
         Settings settings("emotion", true);
         std::string saved_url = settings.GetString("downloaded_url", "");
         
         if (saved_url == emotion_url) {
-            ESP_LOGI(TAG, "表情包URL已下载过，跳过下载: %s", emotion_url);
+            ESP_LOGI(TAG, "表情包URL已下载过,跳过下载: %s", emotion_url);
         } else {
-            ESP_LOGI(TAG, "外置Flash已初始化，开始下载...");
+            ESP_LOGI(TAG, "外置Flash已初始化,开始下载...");
             
-            // 锁定Flash，禁止其他代码访问（防止读取表情导致失败）
-            ESP_LOGI(TAG, "锁定Flash，禁止访问...");
+            // 锁定Flash,禁止其他代码访问(防止读取表情导致失败)
+            ESP_LOGI(TAG, "锁定Flash,禁止访问...");
             flash.LockForErase();
             
-            // 烧录前先擦除整个Flash，防止有残留
-            ESP_LOGI(TAG, "开始擦除整个Flash芯片（这可能需要几分钟）...");
+            // 烧录前先擦除整个Flash,防止有残留
+            ESP_LOGI(TAG, "开始擦除整个Flash芯片(这可能需要几分钟)...");
             esp_err_t erase_ret = flash.ChipErase();
             if (erase_ret != ESP_OK) {
                 ESP_LOGE(TAG, "❌ Flash擦除失败: %s", esp_err_to_name(erase_ret));
                 flash.UnlockAfterErase();
                 return;
             }
-            ESP_LOGI(TAG, "✅ Flash擦除完成，开始下载表情包...");
+            ESP_LOGI(TAG, "✅ Flash擦除完成,开始下载表情包...");
             
             esp_err_t download_ret = flash.DownloadToFlash(
                 emotion_url,
@@ -513,8 +513,8 @@ void Application::Start() {
                 // 解锁Flash
                 flash.UnlockAfterErase();
                 
-                // 擦写完成，重启设备
-                ESP_LOGI(TAG, "Flash擦写完成，3秒后重启设备...");
+                // 擦写完成,重启设备
+                ESP_LOGI(TAG, "Flash擦写完成,3秒后重启设备...");
                 vTaskDelay(pdMS_TO_TICKS(3000));
                 esp_restart();
             } else {
@@ -554,7 +554,7 @@ void Application::Start() {
     // Update the status bar immediately to show the network state
     display->UpdateStatusBar(true);
     
-    // 先创建protocol_，确保MQTT回调中能安全访问
+    // 先创建protocol_,确保MQTT回调中能安全访问
 
     protocol_ = std::make_unique<WebsocketProtocol>();
 
@@ -567,7 +567,7 @@ void Application::Start() {
     // Initialize the protocol
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
 
-    // protocol_已经在上面创建过了，不需要重复创建
+    // protocol_已经在上面创建过了,不需要重复创建
 
 #ifdef CONFIG_PROTOCOL_TYPE_XIAOZHI
 
@@ -602,7 +602,7 @@ void Application::Start() {
             ESP_LOGW(TAG, "Audio channel closed unexpectedly");
             HandleNetError();
         }
-        // 暂时禁用省电模式，避免影响网络连接
+        // 暂时禁用省电模式,避免影响网络连接
         // board.SetPowerSaveMode(true);
         
         if (device_state_ != kDeviceStateSleeping) {
@@ -628,7 +628,7 @@ void Application::Start() {
                 if (!has_emotion_) {
                     Schedule([this]() {
                         auto display = Board::GetInstance().GetDisplay();
-                        // 没有情绪，则设置为开心
+                        // 没有情绪,则设置为开心
                         display->SetStatus(Lang::Strings::SPEAKING);
                         display->SetEmotion("happy");
                     }, "OnIncomingJson_TTS_Start");
@@ -645,7 +645,7 @@ void Application::Start() {
                         ResetDecoder();
                         PlaySound(Lang::Sounds::P3_BO);
                     } else if (board.NeedPlayProcessVoiceWithLife()) {
-                        // 不满足上面的条件，但是又开启了自然对话提示音
+                        // 不满足上面的条件,但是又开启了自然对话提示音
                         ResetDecoder();
                         PlaySound(Lang::Sounds::P3_BO);
                     }
@@ -798,7 +798,7 @@ bool Application::ProductTestCheck() {
         auto& wifi_station = WifiStation::GetInstance();
         // 启动WiFi模块
         wifi_station.Start();
-        // 临时连接到产测WiFi（不保存凭据）
+        // 临时连接到产测WiFi(不保存凭据)
         if (wifi_station.ConnectToWifiAndWait(CONFIG_TMP_PRODUCT_TEST_WIFI, CONFIG_TMP_PRODUCT_TEST_WIFI_PASSWORD, 15000)) {
           
             audio_service_.PlaySound(Lang::Sounds::P3_CONNECT_SUCCESS);
@@ -843,7 +843,7 @@ void Application::Schedule(std::function<void()> callback, const std::string& ta
 // they should use Schedule to call this function
 void Application::MainEventLoop() {
     auto& watchdog = Watchdog::GetInstance();
-    const TickType_t timeout = pdMS_TO_TICKS(300);  // 减少到100ms，提高响应性
+    const TickType_t timeout = pdMS_TO_TICKS(300);  // 减少到100ms,提高响应性
     // Raise the priority of the main event loop to avoid being interrupted by background tasks (which has priority 2)
     vTaskPrioritySet(NULL, 3);
 
@@ -862,7 +862,7 @@ void Application::MainEventLoop() {
 
         
 #if CONFIG_IDF_TARGET_ESP32C2
-// 处理 MQTT 消息队列（替代独立任务）
+// 处理 MQTT 消息队列(替代独立任务)
 // 这样做的好处：
 // 1. 减少内存占用 - 不需要为每个任务分配独立的栈空间
 // 2. 简化任务管理 - 减少任务切换的开销
@@ -880,7 +880,7 @@ if (mqtt_client.isInitialized()) {
         auto battery_check_time_offset = Board::GetInstance().GetBatteryCheckTimeOffset();
         if (duration >= battery_check_time_offset) {
             if (!CheckBatteryLevel() && Board::GetInstance().NeedBlockLowBattery()) {
-                // 电池电量不足且需要阻止低电量运行，执行关机操作
+                // 电池电量不足且需要阻止低电量运行,执行关机操作
                 ESP_LOGW(TAG, "Low battery detected during operation, shutting down...");
                 Board::GetInstance().PowerOff();
             }
@@ -903,7 +903,7 @@ if (mqtt_client.isInitialized()) {
                 // 尝试发送音频包
                 bool sent = protocol_->SendAudio(*packet);
                 if (!sent) {
-                    // 如果发送失败（比如被忽略），主动清理 packet 内存
+                    // 如果发送失败(比如被忽略),主动清理 packet 内存
                     if (!packet->payload.empty()) {
                         ESP_LOGD(TAG, "Clearing unsent packet payload: %u bytes", (unsigned int)packet->payload.size());
                         packet->payload.clear();
@@ -954,7 +954,7 @@ if (mqtt_client.isInitialized()) {
         auto loop_end = esp_timer_get_time();
         auto loop_duration = loop_end - loop_start;
         
-        // 只在循环时间超过10ms时打印，避免日志过多
+        // 只在循环时间超过10ms时打印,避免日志过多
         if (loop_duration > 10000) {  // 10ms
             ESP_LOGD(TAG, "Main loop took %lld us (%.2f ms)", loop_duration, loop_duration / 1000.0);
         }
@@ -1064,7 +1064,7 @@ void Application::SetDeviceState(DeviceState state) {
             break;
         case kDeviceStateListening:
             display->SetStatus(Lang::Strings::LISTENING);
-            display->SetEmotion("listen");  // 显示聆听表情，而不是neutral
+            display->SetEmotion("listen");  // 显示聆听表情,而不是neutral
             // Make sure the audio processor is running
             if (!audio_service_.IsAudioProcessorRunning()) {
                 // Send the start listening command
@@ -1128,7 +1128,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     ESP_LOGI(TAG, "Wake word invoke: %s device_state_: %s chat_mode_: %d", wake_word.c_str(), STATE_STRINGS[device_state_], chat_mode_);
     
     if (IsTmpFactoryTestMode()) {
-        // 临时测试模式，播放提示音
+        // 临时测试模式,播放提示音
         PlaySound(Lang::Sounds::P3_WAKE_WORD);
         return;
     }
@@ -1141,7 +1141,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     }
 
     if (chat_mode_ == 2 && device_state_ != kDeviceStateIdle) {
-        // 自然对话模式，聊天中的时候唤醒词不需要工作
+        // 自然对话模式,聊天中的时候唤醒词不需要工作
         return;
     }
 
@@ -1263,7 +1263,7 @@ void Application::initGizwitsServer() {
     auto& mqtt_client = MqttClient::getInstance();
     mqtt_client.OnRoomParamsUpdated([this](const RoomParams& params, bool is_mutual) {
         // 判断 protocol_ 是否启动
-        // 如果启动了，就断开重新连接
+        // 如果启动了,就断开重新连接
         if (protocol_->IsAudioChannelOpened()) {
             // 先停止所有正在进行的操作
             Schedule([this, is_mutual]() {
@@ -1450,7 +1450,7 @@ void Application::EnterSleepMode() {
         wifi_station.Stop();
         SetDeviceState(kDeviceStateSleeping);
 
-        // 检查电量和充电状态，决定显示哪个表情
+        // 检查电量和充电状态,决定显示哪个表情
         int level = 0;
         bool charging = false;
         bool discharging = false;
@@ -1459,20 +1459,20 @@ void Application::EnterSleepMode() {
         display->SetStatus(Lang::Strings::STANDBY);
         if (has_battery) {
             if (charging && level < 100) {
-                // 正在充电且未满电，显示吃电池表情
-                ESP_LOGI(TAG, "充电中进入睡眠模式（电量: %d%%），显示吃电池表情", level);
+                // 正在充电且未满电,显示吃电池表情
+                ESP_LOGI(TAG, "充电中进入睡眠模式(电量: %d%%),显示吃电池表情", level);
                 display->SetEmotion("Charging");
             } else if (level < 25) {
-                // 低电量（未充电），显示吃电池表情
-                ESP_LOGI(TAG, "低电量进入睡眠模式（电量: %d%%），显示吃电池表情", level);
+                // 低电量(未充电),显示吃电池表情
+                ESP_LOGI(TAG, "低电量进入睡眠模式(电量: %d%%),显示吃电池表情", level);
                 display->SetEmotion("Charging");
             } else {
-                // 正常电量或100%满电，显示睡觉表情
-                ESP_LOGI(TAG, "进入睡眠模式（电量: %d%%, 充电: %d），显示睡觉表情", level, charging);
+                // 正常电量或100%满电,显示睡觉表情
+                ESP_LOGI(TAG, "进入睡眠模式(电量: %d%%, 充电: %d),显示睡觉表情", level, charging);
                 display->SetEmotion("sleepy");
             }
         } else {
-            // 无法获取电量信息，默认显示睡觉表情
+            // 无法获取电量信息,默认显示睡觉表情
             display->SetEmotion("sleepy");
         }
         if (backlight) {
@@ -1548,7 +1548,7 @@ void Application::QuitTalking() {
         // 先发送中止消息
         protocol_->SendAbortSpeaking(kAbortReasonNone);
         
-        // 关闭音频通道（可能阻塞，但这是必要的清理操作）
+        // 关闭音频通道(可能阻塞,但这是必要的清理操作)
         protocol_->CloseAudioChannel();
     }
 
@@ -1567,7 +1567,7 @@ void Application::PlayMusic(const char* url) {
     if (url_str.substr(0, 6) == "https:") {
         url_str = "http:" + url_str.substr(6);
     }
-    // 新增：如果以 .mp3 结尾，替换为 .p3
+    // 新增：如果以 .mp3 结尾,替换为 .p3
     if (url_str.size() >= 4 && url_str.substr(url_str.size() - 4) == ".mp3") {
         url_str.replace(url_str.size() - 4, 4, ".p3");
     }
@@ -1635,9 +1635,9 @@ int Application::StartRecordTest(int duration_seconds) {
     record_test_duration_seconds_ = duration_seconds;
     record_test_start_time_ = std::chrono::steady_clock::now();
     recorded_audio_data_.clear();
-    // 开始录制：打开音频测试分支，使 AudioInputTask 采集并追加数据
+    // 开始录制：打开音频测试分支,使 AudioInputTask 采集并追加数据
     audio_service_.EnableAudioTesting(true);
-    // 启动超时计时器，到时自动停止录制
+    // 启动超时计时器,到时自动停止录制
     if (record_timer_handle_) {
         esp_timer_stop(record_timer_handle_);
         esp_timer_delete(record_timer_handle_);
@@ -1679,7 +1679,7 @@ int Application::StartPlayTest(int duration_seconds) {
     play_test_start_time_ = std::chrono::steady_clock::now();
     play_test_data_index_ = 0;
     
-    // 使用 AudioService 的解码队列播放，避免本地再次创建解码器
+    // 使用 AudioService 的解码队列播放,避免本地再次创建解码器
     const int frame_duration_ms = 20;   // VB6824 录制固定 20ms 一包
     const int sample_rate_hz = 16000;
     ESP_LOGI(TAG, "Total recorded data size: %zu bytes", recorded_audio_data_.size());
@@ -1721,7 +1721,7 @@ void Application::StopRecordTest() {
     }
     
     record_test_active_ = false;
-    // 结束录制：关闭音频测试分支，停止采集
+    // 结束录制：关闭音频测试分支,停止采集
     audio_service_.EnableAudioTesting(false);
     if (record_timer_handle_) {
         esp_timer_stop(record_timer_handle_);
@@ -1736,7 +1736,7 @@ void Application::StopRecordTest() {
     auto duration = std::chrono::duration_cast<std::chrono::seconds>(end_time - record_test_start_time_).count();
     ESP_LOGI(TAG, "Actual recording duration");
     
-    // 保留录制数据，便于后续播放测试
+    // 保留录制数据,便于后续播放测试
 }
 
 void Application::AppendRecordedAudioData(const uint8_t* data, size_t size) {

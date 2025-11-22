@@ -34,10 +34,12 @@
 #define W25Q64_SECTOR_SIZE       4096       // 扇区大小 4KB
 #define W25Q64_BLOCK_32K_SIZE    32768      // 32KB 块大小
 #define W25Q64_BLOCK_64K_SIZE    65536      // 64KB 块大小
-#define W25Q64_CHIP_SIZE         (8*1024*1024)  // W25Q64 芯片大小 8MB
-#define W25Q128_CHIP_SIZE        (16*1024*1024) // W25Q128 芯片大小 16MB
+#define W25Q64_CHIP_SIZE         (8*1024*1024)   // W25Q64 芯片大小 8MB
+#define W25Q128_CHIP_SIZE        (16*1024*1024)  // W25Q128 芯片大小 16MB
+#define W25Q256_CHIP_SIZE        (32*1024*1024)  // W25Q256 芯片大小 32MB
 #define W25Q64_JEDEC_ID          0xEF4017   // W25Q64 的 JEDEC ID
 #define W25Q128_JEDEC_ID         0xEF4018   // W25Q128 的 JEDEC ID
+#define W25Q256_JEDEC_ID         0xEF4019   // W25Q256 的 JEDEC ID
 
 // 状态寄存器位定义
 #define W25Q64_SR_BUSY           0x01       // 忙标志位
