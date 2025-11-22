@@ -350,7 +350,7 @@ private:
     lv_obj_t* video_img_ = nullptr;  // 视频图像对象
     lv_image_dsc_t video_img_dsc_ = {};  // 视频图像描述符
     uint8_t* first_frame_buf_ = nullptr;  // 第一帧缓冲区（用于避免闪烁）
-    static constexpr uint32_t kVideoFrameDelayMs = 120;  // 降低延迟以提高帧率，减少撕裂感（从120ms改为50ms，约20 FPS）
+    static constexpr uint32_t kVideoFrameDelayMs = 67;  // 匹配 15 FPS 提取速度（1000/15≈67ms），减少卡顿感
     static constexpr uint32_t kVideoFlashBaseAddress = 0x000000;  // Flash 视频数据基地址
 };
 

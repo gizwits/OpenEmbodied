@@ -154,6 +154,13 @@ private:
         const char* last_detected_direction = nullptr; // 上次检测到的方向，用于判断方向是否改变
         
         while (1) {
+            // 检查设备是否已初始化
+            if (!board->is_lis2hh12_initialized()) {
+                // 设备未初始化，等待一段时间后重试（可能初始化还在进行中）
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                continue;
+            }
+            
             // 读取X/Y/Z加速度数据（LIS2HH12使用±2g量程，灵敏度为0.061 mg/LSB）
             int16_t x_raw = (int16_t)((board->lis2hh12_read_reg_pub(0x29) << 8) | board->lis2hh12_read_reg_pub(0x28));
             int16_t y_raw = (int16_t)((board->lis2hh12_read_reg_pub(0x2B) << 8) | board->lis2hh12_read_reg_pub(0x2A));
@@ -781,11 +788,15 @@ private:
         }
         
         ESP_LOGI(TAG, "LIS2HH12 I2C bus initialized successfully");
+        // 给传感器一些启动时间（LIS2HH12 上电后需要约 10-50ms 才能响应）
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
 
     // 尝试检测LIS2HH12的I2C地址（0x1D或0x1E）
     bool DetectLis2hh12Address(uint8_t& detected_addr) {
         const uint8_t possible_addrs[] = {0x1D, 0x1E};
+        const int MAX_RETRIES = 3;  // 每个地址重试3次
+        const uint32_t I2C_SPEED_HZ = 100000;  // 降低到100kHz，更稳定
         
         for (int i = 0; i < 2; i++) {
             uint8_t test_addr = possible_addrs[i];
@@ -795,7 +806,7 @@ private:
             i2c_device_config_t dev_cfg = {
                 .dev_addr_length = I2C_ADDR_BIT_LEN_7,
                 .device_address = test_addr,
-                .scl_speed_hz = 400000,
+                .scl_speed_hz = I2C_SPEED_HZ,  // 降低速度提高稳定性
             };
             
             i2c_master_dev_handle_t test_dev = nullptr;
@@ -805,29 +816,40 @@ private:
                 continue;
             }
             
-            // 尝试读取WHO_AM_I寄存器（0x0F）
-            uint8_t reg = 0x0F;
-            uint8_t data = 0;
-            ret = i2c_master_transmit_receive(test_dev, &reg, 1, &data, 1, pdMS_TO_TICKS(500));
+            // 重试机制：每个地址尝试多次
+            for (int retry = 0; retry < MAX_RETRIES; retry++) {
+                if (retry > 0) {
+                    ESP_LOGI(TAG, "地址 0x%02X 重试第 %d 次", test_addr, retry + 1);
+                    vTaskDelay(pdMS_TO_TICKS(50));  // 重试前等待
+                }
+                
+                // 尝试读取WHO_AM_I寄存器（0x0F）
+                uint8_t reg = 0x0F;
+                uint8_t data = 0;
+                ret = i2c_master_transmit_receive(test_dev, &reg, 1, &data, 1, pdMS_TO_TICKS(500));
+                
+                if (ret == ESP_OK && data == 0x41) {
+                    // 找到正确的地址
+                    detected_addr = test_addr;
+                    ESP_LOGI(TAG, "LIS2HH12检测成功！地址: 0x%02X, WHO_AM_I: 0x%02X (重试 %d 次)", 
+                             test_addr, data, retry + 1);
+                    // 删除临时设备
+                    i2c_master_bus_rm_device(test_dev);
+                    return true;
+                } else if (ret == ESP_OK) {
+                    ESP_LOGW(TAG, "地址 0x%02X 有响应但WHO_AM_I不正确: 0x%02X (期望0x41)", test_addr, data);
+                } else {
+                    ESP_LOGD(TAG, "地址 0x%02X 无响应 (重试 %d/%d): %s", 
+                             test_addr, retry + 1, MAX_RETRIES, esp_err_to_name(ret));
+                }
+            }
             
             // 删除临时设备
             i2c_master_bus_rm_device(test_dev);
-            
-            if (ret == ESP_OK && data == 0x41) {
-                // 找到正确的地址
-                detected_addr = test_addr;
-                ESP_LOGI(TAG, "LIS2HH12检测成功！地址: 0x%02X, WHO_AM_I: 0x%02X", test_addr, data);
-                return true;
-            } else if (ret == ESP_OK) {
-                ESP_LOGW(TAG, "地址 0x%02X 有响应但WHO_AM_I不正确: 0x%02X (期望0x41)", test_addr, data);
-            } else {
-                ESP_LOGW(TAG, "地址 0x%02X 无响应: %s", test_addr, esp_err_to_name(ret));
-            }
-            
-            vTaskDelay(pdMS_TO_TICKS(10)); // 短暂延迟
+            vTaskDelay(pdMS_TO_TICKS(20)); // 尝试下一个地址前延迟
         }
         
-        ESP_LOGE(TAG, "未找到LIS2HH12设备（尝试了0x1D和0x1E）");
+        ESP_LOGE(TAG, "未找到LIS2HH12设备（尝试了0x1D和0x1E，每个地址重试%d次）", MAX_RETRIES);
         return false;
     }
 
@@ -843,7 +865,7 @@ private:
         i2c_device_config_t dev_cfg = {
             .dev_addr_length = I2C_ADDR_BIT_LEN_7,
             .device_address = lis2hh12_i2c_addr_,
-            .scl_speed_hz = 400000,
+            .scl_speed_hz = 100000,  // 使用100kHz，与检测时一致
         };
         esp_err_t ret = i2c_master_bus_add_device(lis2hh12_i2c_bus_, &dev_cfg, &lis2hh12_dev_);
         if (ret != ESP_OK) {
@@ -876,6 +898,10 @@ private:
 
     // LIS2HH12 I2C读写成员函数
     uint8_t lis2hh12_read_reg(uint8_t reg) {
+        if (lis2hh12_dev_ == nullptr) {
+            // 设备未初始化，直接返回0，避免错误日志
+            return 0;
+        }
         uint8_t data = 0;
         esp_err_t ret = i2c_master_transmit_receive(lis2hh12_dev_, &reg, 1, &data, 1, pdMS_TO_TICKS(500));
         if (ret != ESP_OK) {
@@ -886,6 +912,10 @@ private:
     }
     
     void lis2hh12_write_reg(uint8_t reg, uint8_t value) {
+        if (lis2hh12_dev_ == nullptr) {
+            // 设备未初始化，直接返回，避免错误日志
+            return;
+        }
         uint8_t buf[2] = {reg, value};
         esp_err_t ret = i2c_master_transmit(lis2hh12_dev_, buf, 2, pdMS_TO_TICKS(100));
         if (ret != ESP_OK) {
@@ -1119,6 +1149,9 @@ public:
 
     // 公开I2C读寄存器方法供任务调用
     uint8_t lis2hh12_read_reg_pub(uint8_t reg) { return this->lis2hh12_read_reg(reg); }
+    
+    // 检查LIS2HH12设备是否已初始化
+    bool is_lis2hh12_initialized() const { return lis2hh12_dev_ != nullptr; }
 };
 
 DECLARE_BOARD(MovecallMojiESP32S3);

@@ -26,23 +26,31 @@ static const struct {
     const char* name;
     int group_index;
 } emotion_group_map[] = {
-    {"happy",        0},  // 组 0开心表情
-    {"neutral",      1},  // 组 1中性开机表情
-    {"sad",          2},  // 组 2悲伤表情
-    {"surprised",    3},  // 组 3惊讶表情
-    {"angry",        4},  // 组 4愤怒表情
-    {"loving",       5},  // 组 5喜爱表情
-    {"thinking",     6},  // 组 6思考表情
-    {"winking",      7},  // 组 7眨眼表情
-    {"sleepy",       8},  // 组 8睡觉表情
-    // {"silly",        9},  // 组 9愚蠢表情       
-    {"vertigo",     9},  // 组 10眩晕表情
-    {"listen",      10},  // 组 11聆听表情
-    {"Turn_right",  11},  // 组 13右转表情
-    {"Turn_left",   12},  // 组 12左转表情
-    {"Accelerate",  13},  // 组 14加速表情
-    {"Decelerate",  14},  // 组 15急刹表情
-    {"Charging",    15}   // 组 16充电表情
+    {"happy",         0},  // 组 0开心表情
+    {"neutral",       1},  // 组 1中性开机表情
+    {"sad",           2},  // 组 2悲伤表情
+    {"surprised",     3},  // 组 3惊讶表情
+    {"angry",         4},  // 组 4愤怒表情
+    {"loving",        5},  // 组 5喜爱表情
+    {"thinking",      6},  // 组 6思考表情
+    {"winking",       7},  // 组 7眨眼表情
+    {"sleepy",        8},  // 组 8睡觉表情   
+    {"vertigo",       9},  // 组 10眩晕表情
+    {"listen",       10},  // 组 11聆听表情
+    {"Turn_right",   11},  // 组 13右转表情
+    {"Turn_left",    12},  // 组 12左转表情
+    {"Accelerate",   13},  // 组 14加速表情
+    {"Decelerate",   14},  // 组 15急刹表情
+    {"Charging",     15},  // 组 16充电吃电池表情
+    {"Arrogant",     16},   // 组 16傲娇表情
+    {"Bite_coin",    17},   // 组 17爆金币表情
+    {"Bite_big_bone",18},   // 组 18吃大肉骨表情
+    {"silly",        19},   // 组 19抚摸1愚蠢表情
+    {"Rub_2",        20},   // 组 20抚摸2表情
+    {"Rub_3",        21},   // 组 21抚摸3表情
+    {"Angry",        22},   // 组 22愤怒表情
+    {"Listen_music", 23}   // 组 23听音乐表情
+
 };
 
 EyeDisplay::EyeDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
