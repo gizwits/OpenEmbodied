@@ -20,6 +20,7 @@
 
 #include <wifi_station.h>
 #include "power_save_timer.h"
+#include "settings.h"
 #include <esp_log.h>
 #include <esp_efuse_table.h>
 #include <driver/i2c_master.h>
@@ -31,6 +32,8 @@
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_timer.h"
+#include <time.h>
+#include <sys/time.h>
 
 #include <math.h>
 
@@ -56,6 +59,7 @@ private:
     PowerManager* power_manager_;
     PowerSaveTimer* power_save_timer_;
     bool is_charging_sleep_ = false;
+    esp_timer_handle_t alarm_check_timer_ = nullptr;  // 闹钟检查定时器
 
     // std::vector<TestItem> test_items = {
     //     {"lcd", "LCD测试", 1},
@@ -104,7 +108,19 @@ private:
             [this](const std::string& url) {
                 // 创建结构体来传递 board 和 url
                 display_->DownloadBackgroundVideo(url);
-            }
+            },
+            // 新增数据点的回调函数
+            []() -> bool { return true; }, // get_switch_callback - 默认开启
+            [](bool value) { /* TODO: 实现开关功能 */ }, // set_switch_callback
+            []() -> bool { return true; }, // get_wakeup_word_callback - 默认开启
+            [](bool value) { /* TODO: 实现唤醒词开关功能 */ }, // set_wakeup_word_callback
+            []() -> int { return 0; }, // get_alert_tone_language_callback - 0=中文
+            [](int value) { /* TODO: 实现提示音语言切换功能 */ }, // set_alert_tone_language_callback
+            []() -> int { return 0; }, // get_speed_callback - 默认语速0
+            [](int value) { /* TODO: 实现语速设置功能 */ }, // set_speed_callback
+            [](int index) -> uint32_t { return 0; }, // get_timer_callback - 默认返回0
+            [](int index, uint32_t value) { /* TODO: 实现闹钟设置功能 */ }, // set_timer_callback
+            [](int index, const std::string& text) { /* TODO: 实现闹钟文字提示设置功能 */ } // set_tts_callback
         );
     }
 
@@ -147,6 +163,95 @@ private:
             }
         });
         power_save_timer_->SetEnabled(true);
+    }
+
+    // 检查闹钟并执行提醒
+    void CheckAlarms() {
+        time_t now;
+        time(&now);
+        
+        // 获取当前时间的时分秒（忽略日期）
+        struct tm timeinfo;
+        localtime_r(&now, &timeinfo);
+        uint32_t current_time_seconds = timeinfo.tm_hour * 3600 + timeinfo.tm_min * 60 + timeinfo.tm_sec;
+        
+        // 检查 timer1-timer10
+        for (int i = 1; i <= 10; i++) {
+            std::string timer_name = "timer" + std::to_string(i);
+            int timer_value = 0;
+            
+            // 从缓存或存储中获取闹钟时间戳
+            if (!GCDataPointManager::GetInstance().GetCachedDataPoint(timer_name, timer_value)) {
+                // 如果缓存中没有，尝试从存储读取
+                Settings settings("datapoint", false);
+                timer_value = settings.GetInt(timer_name, 0);
+            }
+            
+            if (timer_value == 0) {
+                continue; // 未设置的闹钟跳过
+            }
+            
+            // timer_value 是时间戳，需要转换为当天的时分秒
+            struct tm alarm_timeinfo;
+            localtime_r((time_t*)&timer_value, &alarm_timeinfo);
+            uint32_t alarm_time_seconds = alarm_timeinfo.tm_hour * 3600 + alarm_timeinfo.tm_min * 60 + alarm_timeinfo.tm_sec;
+            
+            // 检查当前时间是否匹配闹钟时间（允许30秒误差）
+            int time_diff = abs((int)current_time_seconds - (int)alarm_time_seconds);
+            if (time_diff <= 30) {
+                ESP_LOGI(TAG, "闹钟 timer%d 触发！当前时间: %02d:%02d:%02d, 闹钟时间: %02d:%02d:%02d",
+                         i, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec,
+                         alarm_timeinfo.tm_hour, alarm_timeinfo.tm_min, alarm_timeinfo.tm_sec);
+                
+                // 获取对应的 TTS 文本
+                std::string tts_name = "tts" + std::to_string(i);
+                Settings settings("datapoint", false);
+                std::string tts_text = settings.GetString(tts_name, "");
+                
+                if (!tts_text.empty()) {
+                    ESP_LOGI(TAG, "播放闹钟提醒: %s", tts_text.c_str());
+                    // TODO: 播放 TTS 或执行提醒动作
+                    // 可以调用 Application::GetInstance().Speak(tts_text) 或类似方法
+                } else {
+                    ESP_LOGI(TAG, "闹钟 timer%d 触发，但未设置提醒文本", i);
+                    // 可以播放默认提示音
+                    // Application::GetInstance().PlaySound(Lang::Sounds::P3_ALARM);
+                }
+            }
+        }
+    }
+
+    // 闹钟检查定时器回调
+    static void AlarmCheckTimerCallback(void* arg) {
+        auto* self = static_cast<MovecallMojiESP32S3*>(arg);
+        self->CheckAlarms();
+    }
+
+    void InitializeAlarmCheckTimer() {
+        esp_timer_create_args_t timer_args = {
+            .callback = AlarmCheckTimerCallback,
+            .arg = this,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "alarm_check_timer",
+            .skip_unhandled_events = true,
+        };
+        
+        esp_err_t ret = esp_timer_create(&timer_args, &alarm_check_timer_);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "创建闹钟检查定时器失败: %s", esp_err_to_name(ret));
+            return;
+        }
+        
+        // 每30秒检查一次
+        ret = esp_timer_start_periodic(alarm_check_timer_, 30 * 1000000ULL); // 30秒 = 30 * 1000000 微秒
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "启动闹钟检查定时器失败: %s", esp_err_to_name(ret));
+            esp_timer_delete(alarm_check_timer_);
+            alarm_check_timer_ = nullptr;
+            return;
+        }
+        
+        ESP_LOGI(TAG, "闹钟检查定时器已启动，每30秒检查一次");
     }
 
     virtual void ResetPowerSaveTimer() {
@@ -584,6 +689,7 @@ public:
         InitializePowerManager();
         InitializePowerSaveTimer();
         InitializeDataPointManager();
+        InitializeAlarmCheckTimer();
         // ESP_LOGI(TAG, "ReadADC2_CH1_Oneshot");
         // ReadADC2_CH1_Oneshot();
         if (power_manager_) {
@@ -731,7 +837,6 @@ public:
         return 20;
     }
 
-
     virtual bool IsCharging() override {
         // int chrg = gpio_get_level(CHARGING_PIN);
         // int standby = gpio_get_level(STANDBY_PIN);
@@ -763,11 +868,11 @@ public:
         return GCDataPointManager::GetInstance().GetDataPointCount();
     }
 
-    bool GetDataPointValue(const std::string& name, int& value) const override {
+    bool GetDataPointValue(const std::string& name, uint32_t& value) const override {
         return GCDataPointManager::GetInstance().GetDataPointValue(name, value);
     }
 
-    bool SetDataPointValue(const std::string& name, int value) override {
+    bool SetDataPointValue(const std::string& name, uint32_t value) override {
         return GCDataPointManager::GetInstance().SetDataPointValue(name, value);
     }
 
@@ -775,7 +880,7 @@ public:
         GCDataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
     }
 
-    void ProcessDataPointValue(const std::string& name, int value) override {
+    void ProcessDataPointValue(const std::string& name, uint32_t value) override {
         GCDataPointManager::GetInstance().ProcessDataPointValue(name, value);
     }
 

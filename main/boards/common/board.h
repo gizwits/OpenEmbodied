@@ -117,10 +117,10 @@ public:
     // 数据点相关方法
     virtual const char* GetGizwitsProtocolJson() const { return nullptr; }
     virtual size_t GetDataPointCount() const { return 0; }
-    virtual bool GetDataPointValue(const std::string& name, int& value) const { return false; }
-    virtual bool SetDataPointValue(const std::string& name, int value) { return false; }
+    virtual bool GetDataPointValue(const std::string& name, uint32_t& value) const { return false; }
+    virtual bool SetDataPointValue(const std::string& name, uint32_t value) { return false; }
     virtual void GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) { data_size = 0; }
-    virtual void ProcessDataPointValue(const std::string& name, int value) {}
+    virtual void ProcessDataPointValue(const std::string& name, uint32_t value) {}
     virtual void ProcessBinaryDataPointValue(const std::string& name, const uint8_t* data, size_t data_len) {}
 
 };

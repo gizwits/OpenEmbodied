@@ -6,6 +6,8 @@
 #include "protocol/ota_protocol.h"
 #include <cstring>
 #include <algorithm>
+#include <climits>
+#include <cstdint>
 #include "auth.h"
 #include <arpa/inet.h>
 #include "application.h"
@@ -1070,11 +1072,17 @@ void MqttClient::app2devMsgHandler(const uint8_t *data, int32_t len)
             }
             
             // 拼接属性区所有字节为一个二进制串
-            uint16_t bits = 0;
+            // 使用 uint32_t 以支持最多 4 字节的 attr_size_
+            uint32_t bits = 0;
             for (int i = 0; i < attr_size_; ++i) {
                 bits = (bits << 8) | business_instruction[1 + i];
             }
-            
+
+            // 打印nbit 
+            ESP_LOGI(TAG, "nbit: 0x%08X", bits);
+            for (int i = 0; i < attr_size_; ++i) {
+                ESP_LOGI(TAG, "nbit[%d]: 0x%02X (%d)", i, business_instruction[1 + i], business_instruction[1 + i]);
+            }
             // 优化：预先计算bit字段的总长度，避免重复计算
             static int total_bit_len = -1;
             static int bit_bytes = -1;
@@ -1094,60 +1102,69 @@ void MqttClient::app2devMsgHandler(const uint8_t *data, int32_t len)
             int payload_bit_index = 0;
             int payload_byte_index = 0;
             
+            // 遍历所有可能的 bit 位置（最多 attr_size_ * 8 个）
+            // 但只处理在 g_attrs 中定义的属性
+            // 遍历所有 bit 位置，但只处理在 g_attrs 中定义的属性
             for (int bit_index = 0; bit_index < attr_size_ * 8; ++bit_index) {
                 int bit_val = (bits >> bit_index) & 0x01;
-                ESP_LOGI(TAG, "bit_val: %d, bit_index: %d, attr_size: %d", bit_val, bit_index, (int)g_attrs.size());
-                if (bit_index < (int)g_attrs.size()) {
-                    const Attr& attr = g_attrs[bit_index];
-                    if (bit_val == 1) {
-                        // 数据有效，提取 attr.len 长度的数据
-                        if (attr.unit == "bit") {
-                            int value = 0;
-                            int len = attr.len;
-                            ESP_LOGI(TAG, "len: %d", len);
-                            for (int l = 0; l < len; ++l) {
-                                int byte_pos = 1 + attr_size_ + (payload_bit_index + l) / 8;
-                                int bit_pos = (payload_bit_index + l) % 8;
-                                ESP_LOGI(TAG, "byte_pos: %d", business_instruction[byte_pos]);
-                                int bit = (business_instruction[byte_pos] >> bit_pos) & 0x01;
-                                value |= (bit << l);
-                            }
-                            payload_bit_index += len;
-                            ESP_LOGI(TAG, "bit attr: %s = %d", attr.name.c_str(), value);
-                            processAttrValue(attr.name, value);
-                        } else if (attr.unit == "byte") {
-                            int len = attr.len; 
-                            int byte_start = attr_size_ + bit_bytes + payload_byte_index;
-                            
-                            // 检查是否为 binary 类型
-                            if (attr.data_type == "binary") {
-                                // 提取原始二进制数据
-                                if (business_instruction_len >= byte_start + len) {
-                                    const uint8_t* binary_data = business_instruction + byte_start;
-                                    ESP_LOGI(TAG, "binary attr: %s, len=%d", attr.name.c_str(), len);
-                                    
-                                    // 调用二进制数据点处理方法
-                                    if (Board::GetInstance().GetGizwitsProtocolJson()) {
-                                        Board::GetInstance().ProcessBinaryDataPointValue(attr.name, binary_data, len);
-                                    } else {
-                                        ESP_LOGW(TAG, "Board does not support data points, skipping binary data point processing");
-                                    }
+                ESP_LOGI(TAG, "bit_val: %d, bit_index: %d, total_attrs: %d", bit_val, bit_index, (int)g_attrs.size());
+                
+                // 只处理在 g_attrs 中定义的属性
+                if (bit_index >= (int)g_attrs.size()) {
+                    continue; // 跳过未定义的 bit 位置
+                }
+                
+                const Attr& attr = g_attrs[bit_index];
+                if (bit_val == 1) {
+                    // 数据有效，提取 attr.len 长度的数据
+                    if (attr.unit == "bit") {
+                        uint32_t value = 0;
+                        int len = attr.len;
+                        ESP_LOGI(TAG, "len: %d", len);
+                        for (int l = 0; l < len; ++l) {
+                            int byte_pos = 1 + attr_size_ + (payload_bit_index + l) / 8;
+                            int bit_pos = (payload_bit_index + l) % 8;
+                            ESP_LOGI(TAG, "byte_pos: %d", business_instruction[byte_pos]);
+                            uint32_t bit = (business_instruction[byte_pos] >> bit_pos) & 0x01;
+                            value |= (bit << l);
+                        }
+                        payload_bit_index += len;
+                        ESP_LOGI(TAG, "bit attr: %s = %u", attr.name.c_str(), value);
+                        processAttrValue(attr.name, value);
+                    } else if (attr.unit == "byte") {
+                        int len = attr.len; 
+                        int byte_start = attr_size_ + bit_bytes + payload_byte_index;
+                        
+                        // 检查是否为 binary 类型
+                        if (attr.data_type == "binary") {
+                            // 提取原始二进制数据
+                            if (business_instruction_len >= byte_start + len) {
+                                const uint8_t* binary_data = business_instruction + byte_start;
+                                ESP_LOGI(TAG, "binary attr: %s, len=%d", attr.name.c_str(), len);
+                                
+                                // 调用二进制数据点处理方法
+                                if (Board::GetInstance().GetGizwitsProtocolJson()) {
+                                    Board::GetInstance().ProcessBinaryDataPointValue(attr.name, binary_data, len);
                                 } else {
-                                    ESP_LOGE(TAG, "Binary data out of bounds: byte_start=%d, len=%d, available=%d", 
-                                             byte_start, len, business_instruction_len);
+                                    ESP_LOGW(TAG, "Board does not support data points, skipping binary data point processing");
                                 }
                             } else {
-                                // 非 binary 类型，按原来的方式处理为 int
-                                int value = 0;
-                                for (int l = 0; l < len; ++l) {
-                                    value |= (business_instruction[byte_start + l] << (8 * l));
-                                }
-                                ESP_LOGI(TAG, "byte attr: %s = %d", attr.name.c_str(), value);
-                                processAttrValue(attr.name, value);
+                                ESP_LOGE(TAG, "Binary data out of bounds: byte_start=%d, len=%d, available=%d", 
+                                         byte_start, len, business_instruction_len);
                             }
-                            
-                            payload_byte_index += len;
+                        } else {
+                            // 统一使用 uint32_t 来解析，使用大端序（与协议头保持一致）
+                            // 协议头使用大端序：fixed_header = (data[0] << 24) | (data[1] << 16) | ...
+                            // 所以 byte 属性也应该使用大端序：第一个字节在最高位
+                            uint32_t uint_value = 0;
+                            for (int l = 0; l < len; ++l) {
+                                uint_value |= (static_cast<uint32_t>(business_instruction[byte_start + l]) << (8 * (len - 1 - l)));
+                            }
+                            ESP_LOGI(TAG, "byte attr: %s = %u (0x%08X)", attr.name.c_str(), uint_value, uint_value);
+                            processAttrValue(attr.name, uint_value);
                         }
+                        
+                        payload_byte_index += len;
                     }
                 }
             }
@@ -1156,8 +1173,9 @@ void MqttClient::app2devMsgHandler(const uint8_t *data, int32_t len)
     }
 }
 
-void MqttClient::processAttrValue(std::string attr_name, int value) {
-    ESP_LOGI(TAG, "processAttrValue: %s = %d", attr_name.c_str(), value);
+
+void MqttClient::processAttrValue(std::string attr_name, uint32_t value) {
+    ESP_LOGI(TAG, "processAttrValue: %s = %u", attr_name.c_str(), value);
     
     // 检查 board 是否支持数据点
     if (!Board::GetInstance().GetGizwitsProtocolJson()) {

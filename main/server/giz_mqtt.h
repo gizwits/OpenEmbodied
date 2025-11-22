@@ -170,7 +170,7 @@ private:
     static void tokenRefreshTimerCallback(TimerHandle_t xTimer);  // Token 刷新定时器回调
     static void reconnectTask(void* arg);
 
-    void processAttrValue(std::string attr_name, int value);
+    void processAttrValue(std::string attr_name, uint32_t value);
     uint8_t mqttNumRemLenBytes(const uint8_t *buf);
     bool parseRealtimeAgent(const char* in_str, int in_len, room_params_t* params);
     bool parseM2MCtrlMsg(const char* in_str, int in_len);
