@@ -96,3 +96,7 @@ std::string DualNetworkBoard::GetBoardJson() {
 std::string DualNetworkBoard::GetDeviceStatusJson() {
     return current_board_->GetDeviceStatusJson();
 }
+
+std::string DualNetworkBoard::GetImei() const {
+    return current_board_->GetImei();
+}
