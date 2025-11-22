@@ -1,7 +1,10 @@
 import os, sys, subprocess, tempfile, shutil, struct
 from PIL import Image
 
+# 16MB
 # python make_emotion_bin.py output1.1.bin 16 开心.mp4 开机.mp4 哭.mp4 惊讶.mp4 愤怒.mp4 喜欢.mp4 喝奶茶.mp4 玩游戏.mp4 睡觉.mp4 呕吐.mp4 聆听.mp4 左转.mp4 右转.mp4 加速.mp4 撞玻璃.mp4 吃电池.mp4
+# 32MB
+# python make_emotion_bin.py output1.2.bin 15 开心.mp4 开机.mp4 哭.mp4 惊讶.mp4 生气.mp4 喜欢.mp4 喝奶茶.mp4 玩游戏.mp4 睡觉.mp4 呕吐.mp4 聆听.mp4 左转.mp4 右转.mp4 加速.mp4 撞玻璃.mp4 吃电池.mp4 傲娇.mp4 爆金币.mp4 吃大肉骨.mp4 抚摸1.mp4 抚摸2.mp4 抚摸3.mp4 愤怒.mp4 听音乐.mp4
 
 # 固定使用本机 ffmpeg 绝对路径，避免 ESP-IDF 终端找不到可执行文件
 FFMPEG = r"C:\\Program Files\\FFmpeg\\ffmpeg-2025-10-27-git-68152978b5-full_build\\bin\\ffmpeg.exe"
@@ -11,7 +14,7 @@ if not os.path.isfile(FFMPEG):
 
 TARGET_W, TARGET_H = 240, 240
 # 目标单组大小（约）单位MB：将每个视频组限制在该容量内
-TARGET_MB = 1.0
+TARGET_MB = 1.4
 # 计算每帧大小与每组最大帧数
 FRAME_SIZE = TARGET_W * TARGET_H * 2  # RGB565 bytes
 MAX_FRAMES_PER_GROUP = max(1, int((TARGET_MB * 1024 * 1024) // FRAME_SIZE))
