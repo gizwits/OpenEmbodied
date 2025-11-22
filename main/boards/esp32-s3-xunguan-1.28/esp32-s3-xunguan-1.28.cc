@@ -572,7 +572,7 @@ private:
     }
 
     int MaxBacklightBrightness() {
-        return 8;
+        return 100;
     }
 
     void InitializeChargingGpio() {
@@ -783,7 +783,7 @@ private:
         };
         esp_err_t ret = i2c_new_master_bus(&i2c_bus_cfg, &lis2hh12_i2c_bus_);
         if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to create LIS2HH12 I2C bus: %s", esp_err_to_name(ret));
+            // ESP_LOGE(TAG, "Failed to create LIS2HH12 I2C bus: %s", esp_err_to_name(ret));
             return;
         }
         
@@ -989,8 +989,8 @@ public:
         // InitializeGpio(DISPLAY_BACKLIGHT_PIN, false);
         InitializeSpi();
         InitializeGc9a01Display();
-        InitializeLis2hh12I2c(); // 新增LIS2HH12专用I2C
-        InitializeLis2hh12();    // 初始化LIS2HH12
+        // InitializeLis2hh12I2c(); // 新增LIS2HH12专用I2C
+        // InitializeLis2hh12();    // 初始化LIS2HH12
         
         // 检查I2C设备是否正常
         if (lis2hh12_dev_ == nullptr) {
@@ -1000,7 +1000,7 @@ public:
         }
         InitializeButtons();
         InitializeIot();
-        xTaskCreatePinnedToCore(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 1024 * 3, this, 1, NULL, 0); // 启动检测任务
+        // xTaskCreatePinnedToCore(MovecallMojiESP32S3::lis2hh12_task, "lis2hh12_task", 1024 * 3, this, 1, NULL, 0); // 启动检测任务
         InitializePowerManager();
         InitializePowerSaveTimer();
         // ESP_LOGI(TAG, "ReadADC2_CH1_Oneshot");
@@ -1065,6 +1065,7 @@ public:
     }
 
     virtual void PowerOff() override {
+        ESP_LOGI(TAG, "PowerOff");
         gpio_set_level(POWER_GPIO, 0);
     }
 
@@ -1116,14 +1117,11 @@ public:
     }
 
     virtual bool IsCharging() override {
-        int chrg = gpio_get_level(CHARGING_PIN);
-        int standby = gpio_get_level(STANDBY_PIN);
-        // return false;
-        return chrg == 0 || standby == 0;
+        return power_manager_->IsCharging();
     }
 
     virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
-        charging = IsCharging();
+        charging = power_manager_->IsCharging();
         discharging = !charging;
         level = power_manager_->GetBatteryLevel();
         ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);

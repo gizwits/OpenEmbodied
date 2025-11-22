@@ -101,6 +101,12 @@ esp_err_t W25Q64Flash::Initialize(int mosi_pin, int miso_pin, int clk_pin, int c
 
     ESP_LOGI(TAG, "Flash JEDEC ID: 0x%06" PRIX32, jedec_id);
     
+    // 尝试从 ESP-IDF 获取检测到的 flash 大小（如果支持）
+    uint32_t detected_size = 0;
+    if (esp_flash_get_size(esp_flash_handle_, &detected_size) == ESP_OK) {
+        ESP_LOGI(TAG, "ESP-IDF detected flash size: %" PRIu32 " MB", detected_size / (1024 * 1024));
+    }
+    
     // 识别芯片类型
     jedec_id_ = jedec_id & 0xFFFFFF;
     if (jedec_id_ == W25Q64_JEDEC_ID) {
