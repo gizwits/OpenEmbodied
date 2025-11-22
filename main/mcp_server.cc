@@ -44,6 +44,14 @@
  
      // Do not add custom tools here.
      // Custom tools must be added in the board's InitializeTools function.
+
+     AddTool("self.handle_exit_intent",
+         "Handle the exit intent of the device. If the user wants to exit the device, you must call this tool.",
+         PropertyList(),
+         [&board](const PropertyList& properties) -> ReturnValue {
+             Application::GetInstance().QuitTalking();
+             return true;
+         });
  
      AddTool("self.get_device_status",
          "Provides the real-time information of the device, including the current status of the audio speaker, screen, battery, network, etc.\n"
