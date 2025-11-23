@@ -1053,40 +1053,45 @@ public:
         // 注册充电状态变化回调（用于检测静默启动时拔掉USB的情况）
         PowerManager::GetInstance().SetChargingStateChangeCallback(
             [this](bool was_charging, bool is_charging) {
-                // 只在静默启动状态下检查
-                if (!silent_startup_from_board_) {
-                    return;
-                }
-                
-                // 如果从充电变为非充电，且处于静默启动状态，则自动关机
+                // 如果从充电变为非充电
                 if (was_charging && !is_charging) {
-                    ESP_LOGI(TAG, "🔋 静默启动状态下检测到USB已拔掉（从充电变为非充电），自动关机以节省功耗");
-                    // 保存标志位：电池模式下关机，保存silent_next=0
-                    {
-                        Settings settings("system", true);
-                        settings.SetInt("silent_next", 0);
-                        ESP_LOGI(TAG, "电池模式下关机，保存silent_next=0");
-                    }
-                    // 延迟一小段时间再关机，避免误判
-                    xTaskCreate([](void* arg) {
-                        vTaskDelay(pdMS_TO_TICKS(2000));  // 等待2秒确认
-                        CustomBoard* board = static_cast<CustomBoard*>(arg);
-                        if (!PowerManager::GetInstance().IsCharging() && board->silent_startup_from_board_) {
-                            ESP_LOGI(TAG, "确认USB已拔掉，执行静默关机（不播放音频）");
-                            // 静默启动状态下直接关机，不播放任何音频
-                            board->StopRgbLightEffect();
-                            board->motor_control_.Stop();
-                            board->motor_on_ = false;
-                            board->device_powered_on_ = false;
-                            // 拉低电源保持引脚，关闭电池供电
-                            gpio_set_level(POWER_HOLD_GPIO, 0);
-                            ESP_LOGI(TAG, "🔋 电源保持引脚已拉低，设备关机 (GPIO%d)", POWER_HOLD_GPIO);
-                            // 延时3秒后进入深度睡眠
-                            vTaskDelay(pdMS_TO_TICKS(3000));
-                            board->run_sleep_mode(false);
+                    // 静默启动状态下的处理
+                    if (silent_startup_from_board_) {
+                        ESP_LOGI(TAG, "🔋 静默启动状态下检测到USB已拔掉（从充电变为非充电），自动关机以节省功耗");
+                        // 保存标志位：电池模式下关机，保存silent_next=0
+                        {
+                            Settings settings("system", true);
+                            settings.SetInt("silent_next", 0);
+                            ESP_LOGI(TAG, "电池模式下关机，保存silent_next=0");
                         }
-                        vTaskDelete(NULL);
-                    }, "auto_poweroff_task", 2048, this, 5, NULL);  // 减小栈大小：2KB足够（等待+关机操作）
+                        // 延迟一小段时间再关机，避免误判
+                        xTaskCreate([](void* arg) {
+                            vTaskDelay(pdMS_TO_TICKS(2000));  // 等待2秒确认
+                            CustomBoard* board = static_cast<CustomBoard*>(arg);
+                            if (!PowerManager::GetInstance().IsCharging() && board->silent_startup_from_board_) {
+                                ESP_LOGI(TAG, "确认USB已拔掉，执行静默关机（不播放音频）");
+                                // 静默启动状态下直接关机，不播放任何音频
+                                board->StopRgbLightEffect();
+                                board->motor_control_.Stop();
+                                board->motor_on_ = false;
+                                board->device_powered_on_ = false;
+                                // 拉低电源保持引脚，关闭电池供电
+                                gpio_set_level(POWER_HOLD_GPIO, 0);
+                                ESP_LOGI(TAG, "🔋 电源保持引脚已拉低，设备关机 (GPIO%d)", POWER_HOLD_GPIO);
+                                // 延时3秒后进入深度睡眠
+                                vTaskDelay(pdMS_TO_TICKS(3000));
+                                board->run_sleep_mode(false);
+                            }
+                            vTaskDelete(NULL);
+                        }, "auto_poweroff_task", 2048, this, 5, NULL);  // 减小栈大小：2KB足够（等待+关机操作）
+                    } else {
+                        // 非静默模式下的处理：如果设备处于待机或休眠状态，则自动关机
+                        auto state = Application::GetInstance().GetDeviceState();
+                        if (state == kDeviceStateIdle || state == kDeviceStateSleeping) {
+                            ESP_LOGI(TAG, "🔋 非静默模式下检测到USB已拔掉，设备处于待机/休眠状态，自动关机");
+                            PowerOff();
+                        }
+                    }
                 }
             }
         );

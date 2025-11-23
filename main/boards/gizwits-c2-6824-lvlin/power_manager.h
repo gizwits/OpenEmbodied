@@ -12,6 +12,7 @@
 #include "driver/gpio.h"
 #include <inttypes.h>
 #include "settings.h"
+#include <functional>
 
 // Battery ADC configuration
 #define BAT_ADC_CHANNEL  ADC_CHANNEL_3  // Battery voltage ADC channel
@@ -60,6 +61,9 @@ private:
     uint8_t last_recorded_level_ = 0;             // 上次记录的电量
     uint32_t last_non_charging_average_adc_ = 0;  // 最近一次非充电状态下的 average_adc
     int64_t non_charging_stable_time_us_ = 0;     // 进入非充电状态的稳定时间（微秒），用于防止电压抖动
+
+    // 充电状态变化回调
+    std::function<void(bool was_charging, bool is_charging)> charging_state_change_callback_;
 
     // 电压-电量对照表
     static constexpr struct VoltageSocPair {
@@ -195,6 +199,8 @@ private:
 
     // 处理充电状态变化
     void HandleChargingStateChange() {
+        bool state_changed = (is_charging_ != was_charging_);
+        
         // 检测从不充电到充电的状态变化
         if (is_charging_ && !was_charging_) {
             // 进入充电状态
@@ -207,7 +213,13 @@ private:
         }
         
         // 更新上一次的充电状态
+        bool previous_was_charging = was_charging_;
         was_charging_ = is_charging_;
+        
+        // 如果充电状态发生变化，调用回调
+        if (state_changed && charging_state_change_callback_) {
+            charging_state_change_callback_(previous_was_charging, is_charging_);
+        }
         
         // 如果正在充电，更新充电模拟
         if (is_charging_ && is_charging_simulation_active_) {
@@ -451,6 +463,11 @@ public:
     
     bool IsFullyCharged() { return is_fully_charged_; }
     
+    // 设置充电状态变化回调
+    void SetChargingStateChangeCallback(std::function<void(bool was_charging, bool is_charging)> callback) {
+        charging_state_change_callback_ = callback;
+    }
+    
     // 立即检测一次电量
     void CheckBatteryStatusImmediately() {
         CheckBatteryStatus();
@@ -485,7 +502,7 @@ public:
             ESP_LOGI("PowerManager", "[关机保存] 没有非充电状态下的 average_adc 记录，跳过保存");
         }
         vb6824_shutdown();
-        vTaskDelay(pdMS_TO_TICKS(200));
+        vTaskDelay(pdMS_TO_TICKS(100));
         // 配置唤醒源 只有电源域是VDD3P3_RTC的才能唤醒深睡
         uint64_t wakeup_pins = (BIT(GPIO_NUM_1));
         esp_deep_sleep_enable_gpio_wakeup(wakeup_pins, ESP_GPIO_WAKEUP_GPIO_LOW);

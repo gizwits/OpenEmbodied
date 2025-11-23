@@ -42,29 +42,33 @@ private:
 
     adc_oneshot_unit_handle_t adc_handle_;
 
-    // 电压-电量对照表
+    // 电压-电量对照表 (4200mV=100%, 3000mV=0%)
     static constexpr struct VoltageSocPair {
         uint16_t adcValue; // ADC value
         uint8_t soc;       // State of Charge (percentage of battery capacity)
     } dischargeCurve[] = {
-        {4200, 100}, // 满电压附近
-        {4160, 95},
-        {4120, 90},
-        {4080, 85},
-        {4040, 80},
-        {4000, 75},
-        {3960, 70},
-        {3920, 60},
-        {3880, 50},
-        {3850, 40},
-        {3820, 35},
-        {3790, 30},
-        {3760, 25},
-        {3720, 20},
-        {3680, 15},
-        {3600, 10},
-        {3500, 5},
-        {3400, 0},
+        {4200, 100}, // 满电压
+        {4150, 95},
+        {4100, 90},
+        {4050, 85},
+        {4000, 80},
+        {3950, 75},
+        {3900, 70},
+        {3850, 65},
+        {3800, 60},
+        {3750, 55},
+        {3700, 50},
+        {3650, 45},
+        {3600, 40},
+        {3550, 35},
+        {3500, 30},
+        {3450, 25},
+        {3400, 20},
+        {3350, 15},
+        {3300, 10},
+        {3250, 5},
+        {3050, 1},
+        {3000, 0},  // 最低电压
     };
 
     // 查表函数
@@ -130,6 +134,11 @@ private:
         //          adc_values_[5], adc_values_[6], adc_values_[7], adc_values_[8], adc_values_[9]);
 
         CalculateBatteryLevel(average_adc*2);
+
+        // 打印平均ADC值、电压和电量
+        uint32_t voltage = average_adc * 2;
+        ESP_LOGI("PowerManager", "ADC平均值: %lu, 电压: %lu mV, 电量: %u%%", 
+                 average_adc, voltage, battery_level_);
 
         // if(times++ % 50 == 0){
         //     ESP_LOGI("PowerManager", "adc: %d adc_avg: %ld, VBAT: %ld, battery_level_: %u%%", 

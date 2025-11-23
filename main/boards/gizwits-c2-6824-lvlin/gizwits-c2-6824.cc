@@ -178,12 +178,15 @@ private:
                     // 电池模式下，等待音频播放完成后再关机
                     ESP_LOGI(TAG, "等待音频播放完成");
                     int wait_count = 0;
-                    while (!Application::GetInstance().GetAudioService().IsIdle() && wait_count < 30) {
-                        vTaskDelay(pdMS_TO_TICKS(50));  // 50ms检查一次，更快响应
+                    while (!Application::GetInstance().GetAudioService().IsIdle() && wait_count < 80) {
+                        vTaskDelay(pdMS_TO_TICKS(50));  // 50ms检查一次，最多等待4秒
                         wait_count++;
                     }
+                    // 额外等待一小段时间，确保音频完全播放完毕
+                    vTaskDelay(pdMS_TO_TICKS(100));
                     ESP_LOGI(TAG, "音频播放完成，准备关机");
-                    Application::GetInstance().SetDeviceState(kDeviceStateIdle);
+                    // 提前停止所有功能，加快关机速度
+                    Application::GetInstance().QuitTalking();
                 } else {
                     // 充电模式下，禁用定时器，避免定时器再次触发休眠
                     if (power_save_timer_) {
@@ -204,12 +207,15 @@ private:
                     // 电池模式下，等待音频播放完成后再关机
                     ESP_LOGI(TAG, "等待音频播放完成");
                     int wait_count = 0;
-                    while (!Application::GetInstance().GetAudioService().IsIdle() && wait_count < 30) {
-                        vTaskDelay(pdMS_TO_TICKS(50));  // 50ms检查一次，更快响应
+                    while (!Application::GetInstance().GetAudioService().IsIdle() && wait_count < 80) {
+                        vTaskDelay(pdMS_TO_TICKS(50));  // 50ms检查一次，最多等待4秒
                         wait_count++;
                     }
+                    // 额外等待一小段时间，确保音频完全播放完毕
+                    vTaskDelay(pdMS_TO_TICKS(100));
                     ESP_LOGI(TAG, "音频播放完成，准备关机");
-                    Application::GetInstance().SetDeviceState(kDeviceStateIdle);
+                    // 提前停止所有功能，加快关机速度
+                    Application::GetInstance().QuitTalking();
                 } else {
                     // 充电模式下，禁用定时器，避免定时器再次触发休眠
                     if (power_save_timer_) {
@@ -328,6 +334,38 @@ public:
 
         PowerManager::GetInstance().CheckBatteryStatusImmediately();
 
+        // 注册充电状态变化回调，处理拔掉USB后的自动关机
+        PowerManager::GetInstance().SetChargingStateChangeCallback(
+            [this](bool was_charging, bool is_charging) {
+                // 检测到从充电变为非充电（拔掉USB）
+                if (was_charging && !is_charging) {
+                    ESP_LOGI(TAG, "检测到停止充电（拔掉USB）");
+                    
+                    // 延迟一小段时间确认状态稳定，避免误判
+                    Application::GetInstance().Schedule([this]() {
+                        // 再次确认不在充电状态
+                        if (!PowerManager::GetInstance().IsCharging()) {
+                            bool is_in_sleep_mode = (power_save_timer_ && power_save_timer_->IsInSleepMode());
+                            // 如果设备处于睡眠状态，自动关机
+                            if (is_in_sleep_mode) {
+                                ESP_LOGI(TAG, "设备处于睡眠状态且已拔掉USB，自动关机");
+                                // 等待音频播放完成后再关机
+                                int wait_count = 0;
+                                while (!Application::GetInstance().GetAudioService().IsIdle() && wait_count < 80) {
+                                    vTaskDelay(pdMS_TO_TICKS(50));
+                                    wait_count++;
+                                }
+                                vTaskDelay(pdMS_TO_TICKS(100));
+                                // 提前停止所有功能，加快关机速度
+                                Application::GetInstance().QuitTalking();
+                                PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
+                            }
+                        }
+                    }, "AutoPowerOffAfterUnplug");
+                }
+            }
+        );
+
         ESP_LOGI(TAG, "Initializing Data Point Manager...");
         InitializeDataPointManager();
         ESP_LOGI(TAG, "Data Point Manager initialized.");
@@ -400,14 +438,16 @@ public:
         }
         
         // 给一点时间让音频包放入队列并开始播放
-        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelay(pdMS_TO_TICKS(200));
         
         // 等待音频播放完成（队列为空）
         int wait_count = 0;
-        while (!Application::GetInstance().GetAudioService().IsIdle() && wait_count < 60) {
-            vTaskDelay(pdMS_TO_TICKS(50));  // 50ms检查一次，最多等待3秒
+        while (!Application::GetInstance().GetAudioService().IsIdle() && wait_count < 80) {
+            vTaskDelay(pdMS_TO_TICKS(50));  // 50ms检查一次，最多等待4秒
             wait_count++;
         }
+        // 额外等待一小段时间，确保音频完全播放完毕
+        vTaskDelay(pdMS_TO_TICKS(200));
         ESP_LOGI(TAG, "低电量提示音播放完成，准备关机");
         
         // 停止所有功能
