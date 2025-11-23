@@ -21,10 +21,23 @@ def encode_audio_to_opus(input_file, output_file, target_lufs=None):
         print("      audio distortion. If the input audio has already been ", file=sys.stderr)
         print("      loudness-adjusted or if the input audio is TTS audio, ", file=sys.stderr)
         print("      please use the `-d` parameter to disable loudness adjustment.", file=sys.stderr)
+        
+        # Check if audio is long enough for loudness normalization
+        # pyloudnorm requires audio length > block_size (typically 400ms)
         meter = pyln.Meter(sample_rate)
-        current_loudness = meter.integrated_loudness(audio)
-        audio = pyln.normalize.loudness(audio, current_loudness, target_lufs)
-        print(f"Adjusted loudness: {current_loudness:.1f} LUFS -> {target_lufs} LUFS")
+        min_required_length = meter.block_size
+        audio_duration_seconds = len(audio) / sample_rate
+        
+        if len(audio) <= min_required_length:
+            print(f"Warning: Audio is too short ({audio_duration_seconds:.3f}s) for loudness normalization.", file=sys.stderr)
+            print(f"         Minimum required: {min_required_length / sample_rate:.3f}s. Skipping loudness adjustment.", file=sys.stderr)
+        else:
+            try:
+                current_loudness = meter.integrated_loudness(audio)
+                audio = pyln.normalize.loudness(audio, current_loudness, target_lufs)
+                print(f"Adjusted loudness: {current_loudness:.1f} LUFS -> {target_lufs} LUFS")
+            except ValueError as e:
+                print(f"Warning: Failed to normalize loudness: {e}. Skipping loudness adjustment.", file=sys.stderr)
 
     # Convert sample rate to 16000Hz if necessary
     target_sample_rate = 16000

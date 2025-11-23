@@ -17,6 +17,8 @@ choice
         bool "Chinese"
     config LANGUAGE_ZH_CN_LVLIN
         bool "Chinese LVLIN"
+    config LANGUAGE_ZH_CN_KUN
+        bool "Chinese KUN"
     config LANGUAGE_ZH_TW
         bool "Chinese Traditional"
     config LANGUAGE_EN_US
