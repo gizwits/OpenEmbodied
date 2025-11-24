@@ -37,9 +37,9 @@
 #define TAG "MovecallMojiESP32S3"
 
 // 电源管理定时器配置（单位：秒）
-#define POWER_SAVE_SLEEP_SECONDS 60*2        // 第一个定时器：30秒后进入睡眠模式
+#define POWER_SAVE_SLEEP_SECONDS 60*20        // 第一个定时器：30秒后进入睡眠模式
 #define POWER_SAVE_SHUTDOWN_SECONDS 50     // 第二个定时器：50秒后关机（注意：进入睡眠模式后此定时器不会触发，实际由轮播模式睡眠计时定时器替代）
-#define VIDEO_CYCLING_SLEEP_SHUTDOWN_SECONDS 60*1  // 轮播模式睡眠计时：20秒后关机（第一个定时器触发后20秒，总共50秒）
+#define VIDEO_CYCLING_SLEEP_SHUTDOWN_SECONDS 60*10  // 轮播模式睡眠计时：20秒后关机（第一个定时器触发后20秒，总共50秒）
 
 LV_FONT_DECLARE(font_puhui_20_4);
 LV_FONT_DECLARE(font_awesome_20_4);
