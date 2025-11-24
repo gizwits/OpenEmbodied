@@ -46,7 +46,6 @@ private:
     bool volume_up_long_pressed_ = false;
     bool volume_down_long_pressed_ = false;
     int64_t dual_long_press_time_ = 0;
-    bool is_charging_sleep_ = false;
     bool is_sleep_ = false;
     
     bool last_charging_state_ = false;  // 跟踪上一次充电状态，用于检测充电状态变化
@@ -62,9 +61,9 @@ private:
         // power_save_timer_ = new PowerSaveTimer(-1, 20 * 1, 60 * 2);
         power_save_timer_->OnEnterSleepMode([this]() {
             ESP_LOGE(TAG, "Enabling sleep mode");
-            if(IsCharging()) {
+            if(is_sleep_) {
                 // 充电中
-                is_charging_sleep_ = true;
+                is_sleep_ = true;
                 Application::GetInstance().Schedule([this]() {
                     Application::GetInstance().QuitTalking();
                     Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
@@ -202,21 +201,7 @@ private:
                 ESP_LOGI(TAG, "首次上电5秒内，忽略长按操作");
                 return;
             }
-            
-            // 只有充电导致的静默启动才需要长按唤醒，异常重启的静默启动直接执行关机
-            if (silent_startup_from_board_) {
-                ESP_LOGI(TAG, "充电静默启动状态，长按清除静默标志并重启");
-                Settings settings("system", true);
-                settings.SetInt("silent_next", 0);
-                // 设置一个标志，表示用户主动唤醒，下次启动不应该静默
-                settings.SetInt("user_wakeup", 1);
-                ESP_LOGI(TAG, "记录NVS: silent_next=0, user_wakeup=1（充电状态: %s）", is_charging_now ? "充电中" : "未充电");
-                
-                // 立即重启，不做任何延迟
-                esp_restart();
-                return;
-            }
-            
+        
             // 非静默启动状态，执行关机操作
             // 检查是否在充电状态
             bool is_charging = is_charging_now;
@@ -249,11 +234,13 @@ private:
             ESP_LOGI(TAG, "boot_button_.OnPressUp");
             if (need_power_off_) {
                 need_power_off_ = false;
+                is_sleep_ = true;
                 // NVS标志已经在OnLongPress中设置了，这里直接关机
                 // 检查是否在充电状态
                 bool is_charging = power_manager_ && power_manager_->IsCharging();
                 if (is_charging) {
                 } else {
+                    vTaskDelay(pdMS_TO_TICKS(2000));
                     PowerOff();
                 }
             }
