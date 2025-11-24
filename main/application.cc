@@ -1528,9 +1528,11 @@ void Application::PlayMusic(const char* url) {
         url_str = "http:" + url_str.substr(6);
     }
     // 新增：如果以 .mp3 结尾，替换为 .p3
+#ifndef CONFIG_IDF_TARGET_ESP32S3
     if (url_str.size() >= 4 && url_str.substr(url_str.size() - 4) == ".mp3") {
         url_str.replace(url_str.size() - 4, 4, ".p3");
     }
+#endif
     QuitTalking();
 
     // 设置数据包回调：快速发送数据，不阻塞
