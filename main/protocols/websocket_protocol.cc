@@ -902,6 +902,30 @@ void WebsocketProtocol::SendTextToAI(const std::string& text) {
     SendText(message_cstr);
 }
 
+void WebsocketProtocol::GenerateTTSFromText(const std::string& text) {
+    if (!websocket_ || !websocket_->IsConnected()) {
+        ESP_LOGW(TAG, "WebSocket not connected, cannot generate TTS");
+        return;
+    }
+    
+    // 创建事件 ID
+    char event_id[32];
+    uint32_t random_value = esp_random();
+    snprintf(event_id, sizeof(event_id), "%lu", random_value);
+    
+    // 构建 TTS 合成请求消息
+    std::string message = "{"
+        "\"id\":\"" + std::string(event_id) + "\","
+        "\"event_type\":\"input_text.generate_audio\","
+        "\"data\":{"
+            "\"mode\":\"text\","
+            "\"text\":\"" + text + "\""
+        "}"
+    "}";
+    
+    SendText(message);
+}
+
 void WebsocketProtocol::ParseServerHello(const cJSON* root) {
     // COZE 的音频信息是由设备发起的，因此这里直接返回
     server_sample_rate_ = 16000;

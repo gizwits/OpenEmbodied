@@ -87,6 +87,7 @@ public:
     virtual bool SendAudio(const AudioStreamPacket& packet) = 0;
     virtual void SendWakeWordDetected(const std::string& wake_word);
     virtual void SendTextToAI(const std::string& text);
+    virtual void GenerateTTSFromText(const std::string& text);
     virtual void SendStartListening(ListeningMode mode);
     virtual void SendStopListening();
     virtual void PreAbortSpeaking();
@@ -97,6 +98,7 @@ public:
     virtual void UpdateRoomParams(const RoomParams& params);
     virtual const RoomParams& GetRoomParams() const { return room_params_; }
     virtual bool HasErrorOccurred() const { return error_occurred_; }
+    virtual void SetAudioUploadEnabled(bool enabled);  // 临时禁用/启用音频上传
     // virtual void SendMcpMessage(const std::string& message);
 
 protected:

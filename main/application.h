@@ -108,6 +108,7 @@ public:
     void PlaySound(const std::string_view& sound);
     void WakeWordInvoke(const std::string& wake_word);
     bool CanEnterSleepMode();
+    void GenerateTTSFromText(const std::string& text);
     void SendMcpMessage(const std::string& payload);
     void QuitTalking();
     void SetChatMode(int mode);
@@ -140,6 +141,7 @@ public:
 
     bool IsWebsocketWorking() const { return protocol_ ? protocol_->IsAudioChannelOpened() : false; }
     bool HasWebsocketError() const { return protocol_ ? protocol_->HasErrorOccurred() : false; }
+    void SetAudioUploadEnabled(bool enabled);  // 临时禁用/启用音频上传
 
 private:
     Application();

@@ -193,7 +193,10 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
     LoadBackgroundFromSPIFFS();
     
     SetupUI();
-    RegisterDeviceStateCallback();
+    // RegisterDeviceStateCallback();
+    
+    // Start resident audio monitor task
+    StartAudioMonitor();
 }
 
 // RGB LCD实现
@@ -263,6 +266,9 @@ RgbLcdDisplay::RgbLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
     
     SetupUI();
     RegisterDeviceStateCallback();
+    
+    // Start resident audio monitor task
+    StartAudioMonitor();
 }
 
 MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
@@ -327,6 +333,9 @@ MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel
     
     SetupUI();
     RegisterDeviceStateCallback();
+    
+    // Start resident audio monitor task
+    StartAudioMonitor();
 }
 
 // Add background_image_ and chat_container_ as member variables (temporary storage)
@@ -1347,6 +1356,9 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
 void LcdDisplay::SetSocketConnected(bool connected) {
     ESP_LOGI(TAG, "SetSocketConnected: %s", connected ? "connected" : "disconnected");
     
+    // 更新 socket 连接状态
+    socket_connected_ = connected;
+    
     if (!connected) {
         // Show clock when socket is not connected
         ESP_LOGI(TAG, "Socket disconnected, showing clock");
@@ -1357,7 +1369,7 @@ void LcdDisplay::SetSocketConnected(bool connected) {
         // Hide clock when socket is connected
         ESP_LOGI(TAG, "Socket connected, hiding clock");
         StopIdleCountdown();
-        // PlayVideoGroup(0);  // 播放第0组视频
+        // 音频监控任务会自动处理 video 播放和背景显示
 
     }
 }
@@ -1739,24 +1751,88 @@ void LcdDisplay::StopVideoPlayback() {
 void LcdDisplay::AudioMonitorTask(void* arg) {
     LcdDisplay* display = static_cast<LcdDisplay*>(arg);
     
-    ESP_LOGI(TAG, "Audio monitor task started");
+    ESP_LOGI(TAG, "Audio monitor task started (resident mode)");
     
-    // 持续查询音频队列，直到队列为空
+    // 常驻运行，持续监听
     while (display->audio_monitor_active_) {
-        size_t queue_size = Application::GetInstance().GetDecodeQueueSize();
-        // ESP_LOGI(TAG, "Audio queue size: %zu", queue_size);
-        if (queue_size == 0) {
-            // 音频队列为空，显示背景图片
-            ESP_LOGI(TAG, "Audio queue is empty, showing background image");
-            if (display->Lock(50)) {
-                display->ShowBackgroundImage();
-                display->Unlock();
+        // 只有当 socket 连接成功时才进入判断逻辑
+        if (display->socket_connected_) {
+            size_t queue_size = Application::GetInstance().GetDecodeQueueSize();
+            int64_t current_time_ms = esp_timer_get_time() / 1000;  // 当前时间（毫秒）
+            
+            if (queue_size > 0) {
+                // 播放管道有数据，播放 video
+                if (!display->video_playing_) {
+                    ESP_LOGI(TAG, "Audio queue has data (%zu), starting video playback", queue_size);
+                    if (display->Lock(50)) {
+                        display->PlayVideoGroup(0);  // 播放第0组视频
+                        display->background_showing_ = false;  // 视频播放中，背景未显示
+                        display->Unlock();
+                    }
+                }
+                // 队列有数据，重置空队列计时器
+                display->empty_queue_start_time_ms_ = 0;
+            } else {
+                // 播放管道没有数据
+                if (display->video_playing_) {
+                    // 视频正在播放，需要延迟保护
+                    if (display->empty_queue_start_time_ms_ == 0) {
+                        // 第一次检测到队列为空，记录时间戳
+                        display->empty_queue_start_time_ms_ = current_time_ms;
+                        // ESP_LOGD(TAG, "Audio queue empty detected, starting protection timer (will wait %d ms)", 
+                        //          display->kVideoStopDelayMs);
+                    } else {
+                        // 检查是否已经过了保护时间
+                        int64_t elapsed_ms = current_time_ms - display->empty_queue_start_time_ms_;
+                        if (elapsed_ms >= display->kVideoStopDelayMs) {
+                            // 保护时间已过，停止视频并显示背景
+                            // ESP_LOGI(TAG, "Audio queue empty for %lld ms (threshold: %d ms), stopping video and showing background", 
+                            //          elapsed_ms, display->kVideoStopDelayMs);
+                            if (display->Lock(50)) {
+                                display->StopVideoPlayback();
+                                display->ShowBackgroundImage();
+                                display->background_showing_ = true;  // 背景已显示
+                                display->empty_queue_start_time_ms_ = 0;  // 重置计时器
+                                display->Unlock();
+                            }
+                        } else {
+                            // 还在保护时间内，继续等待
+                            ESP_LOGD(TAG, "Audio queue empty, but within protection period (%lld/%d ms), keeping video playing", 
+                                     elapsed_ms, display->kVideoStopDelayMs);
+                        }
+                    }
+                } else if (!display->background_showing_) {
+                    // 视频未播放，确保显示背景图片
+                    ESP_LOGD(TAG, "Ensuring background image is shown");
+                    if (display->Lock(50)) {
+                        display->ShowBackgroundImage();
+                        display->background_showing_ = true;  // 背景已显示
+                        display->empty_queue_start_time_ms_ = 0;  // 重置计时器
+                        display->Unlock();
+                    }
+                }
             }
-            // 停止监控 task
-            display->audio_monitor_active_ = false;
-            break;
         } else {
-            ESP_LOGD(TAG, "Audio queue size: %zu, waiting for playback to complete", queue_size);
+            // Socket 未连接，确保显示背景图片
+            if (display->video_playing_) {
+                ESP_LOGI(TAG, "Socket disconnected, stopping video and showing background");
+                if (display->Lock(50)) {
+                    display->StopVideoPlayback();
+                    display->ShowBackgroundImage();
+                    display->background_showing_ = true;  // 背景已显示
+                    display->empty_queue_start_time_ms_ = 0;  // 重置计时器
+                    display->Unlock();
+                }
+            } else if (!display->background_showing_) {
+                // 只有在背景未显示时才调用 ShowBackgroundImage
+                ESP_LOGD(TAG, "Socket disconnected, ensuring background image is shown");
+                if (display->Lock(50)) {
+                    display->ShowBackgroundImage();
+                    display->background_showing_ = true;  // 背景已显示
+                    display->empty_queue_start_time_ms_ = 0;  // 重置计时器
+                    display->Unlock();
+                }
+            }
         }
         
         // 每 100ms 检查一次
@@ -1769,15 +1845,16 @@ void LcdDisplay::AudioMonitorTask(void* arg) {
 }
 
 void LcdDisplay::StartAudioMonitor() {
-    // 如果已经有监控 task 在运行，先停止它
+    // 如果已经有监控 task 在运行，直接返回
     if (audio_monitor_task_handle_ != nullptr) {
-        StopAudioMonitor();
+        ESP_LOGD(TAG, "Audio monitor task already running");
+        return;
     }
     
-    // ESP_LOGI(TAG, "Starting audio monitor task");
+    ESP_LOGI(TAG, "Starting resident audio monitor task");
     audio_monitor_active_ = true;
     
-    // 创建音频监控 task，优先级较低，避免影响音频播放
+    // 创建常驻音频监控 task，优先级较低，避免影响音频播放
     BaseType_t ret = xTaskCreate(
         AudioMonitorTask,
         "audio_monitor",
@@ -2117,6 +2194,12 @@ static lv_image_dsc_t* LoadRGB565FromFile(const char* raw_path) {
 
 
 void LcdDisplay::ShowBackgroundImage() {
+    // 如果背景已经在显示，避免重复加载
+    if (background_showing_ && !video_playing_) {
+        ESP_LOGD(TAG, "Background image already showing, skipping reload");
+        return;
+    }
+    
     ESP_LOGI(TAG, "ShowBackgroundImage called");
     
     // Stop video playback if playing (outside lock to avoid deadlock)
@@ -2151,6 +2234,9 @@ void LcdDisplay::ShowBackgroundImage() {
             lv_obj_move_background(background_image_);
         }
     }
+    
+    // 更新状态标志
+    background_showing_ = true;
 }
 
 void LcdDisplay::PlayVideoGroup(int index) {
@@ -2265,30 +2351,35 @@ void LcdDisplay::PlayVideoGroup(int index) {
     
     // Start playback task (it will use first_frame_buf_ if available, then free it)
     StartVideoPlayback();
+    
+    // 更新状态标志：视频播放中，背景未显示
+    background_showing_ = false;
+    // 重置空队列计时器
+    empty_queue_start_time_ms_ = 0;
 }
 
-void LcdDisplay::RegisterDeviceStateCallback() {
-    DeviceStateEventManager::GetInstance().RegisterStateChangeCallback(
-        [this](DeviceState previous_state, DeviceState current_state) {
-            ESP_LOGI(TAG, "Device state changed: %d -> %d", previous_state, current_state);
+// void LcdDisplay::RegisterDeviceStateCallback() {
+//     DeviceStateEventManager::GetInstance().RegisterStateChangeCallback(
+//         [this](DeviceState previous_state, DeviceState current_state) {
+//             ESP_LOGI(TAG, "Device state changed: %d -> %d", previous_state, current_state);
             
-            if (current_state == kDeviceStateRealSpeaking) {
-                // 说话中播放视频
-                ESP_LOGI(TAG, "Speaking state detected, starting video playback");
-                PlayVideoGroup(0);  // 播放第0组视频
-            } else if (
-                current_state == kDeviceStateListening ||
-                current_state == kDeviceStateIdle ||
-                current_state == kDeviceStateFatalError ||
-                current_state == kDeviceStateSleeping
-            ) {
-                // 启动音频监控 task，等待音频播放完成后显示背景图片
-                // ESP_LOGI(TAG, "Starting audio monitor task to wait for audio playback completion");
-                StartAudioMonitor();
-            }
-        }
-    );
-}
+//             if (current_state == kDeviceStateRealSpeaking) {
+//                 // 说话中播放视频
+//                 ESP_LOGI(TAG, "Speaking state detected, starting video playback");
+//                 PlayVideoGroup(0);  // 播放第0组视频
+//             } else if (
+//                 current_state == kDeviceStateListening ||
+//                 current_state == kDeviceStateIdle ||
+//                 current_state == kDeviceStateFatalError ||
+//                 current_state == kDeviceStateSleeping
+//             ) {
+//                 // 启动音频监控 task，等待音频播放完成后显示背景图片
+//                 // ESP_LOGI(TAG, "Starting audio monitor task to wait for audio playback completion");
+//                 StartAudioMonitor();
+//             }
+//         }
+//     );
+// }
 
 void LcdDisplay::UpdateSubtitleDisplay() {
     if (chat_message_label_ == nullptr) {
@@ -2622,7 +2713,7 @@ void LcdDisplay::SubtitleScrollTimerCallback(void* arg) {
 void LcdDisplay::SubtitleScrollDelayTimerCallback(void* arg) {
     LcdDisplay* display = static_cast<LcdDisplay*>(arg);
     
-    ESP_LOGI(TAG, "Subtitle scroll delay timer callback triggered, starting scroll");
+    // ESP_LOGI(TAG, "Subtitle scroll delay timer callback triggered, starting scroll");
     
     // Clean up delay timer
     if (display->subtitle_scroll_delay_timer_ != nullptr) {

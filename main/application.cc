@@ -553,6 +553,12 @@ void Application::Start() {
         
         // Notify display that socket is connected
         display->SetSocketConnected(true);
+
+        // Schedule([this]() {
+        //     vTaskDelay(pdMS_TO_TICKS(5000));
+        //     SetDeviceState(kDeviceStateSpeaking);
+        //     GenerateTTSFromText("你是谁");
+        // }, "GenerateTTSFromText_Hello");
     });
     protocol_->OnAudioChannelClosed([this, &board, display](bool is_clean) {
         ESP_LOGW("OnAudioChannelClosed", "is_clean: %d", is_clean);
@@ -1708,4 +1714,16 @@ void Application::AppendRecordedAudioData(const uint8_t* data, size_t size) {
         return;
     }
     recorded_audio_data_.insert(recorded_audio_data_.end(), data, data + size);
+}
+
+void Application::GenerateTTSFromText(const std::string& text) {
+    if (protocol_ && protocol_->IsAudioChannelOpened()) {
+        protocol_->GenerateTTSFromText(text);
+    }
+}
+
+void Application::SetAudioUploadEnabled(bool enabled) {
+    if (protocol_) {
+        protocol_->SetAudioUploadEnabled(enabled);
+    }
 }

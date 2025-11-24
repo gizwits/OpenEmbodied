@@ -70,6 +70,10 @@ protected:
     // Audio queue monitoring task
     TaskHandle_t audio_monitor_task_handle_ = nullptr;
     bool audio_monitor_active_ = false;
+    bool socket_connected_ = false;  // Track socket connection status
+    bool background_showing_ = false;  // Track if background image is currently showing
+    int64_t empty_queue_start_time_ms_ = 0;  // Timestamp when queue first became empty (for video protection)
+    static constexpr int kVideoStopDelayMs = 500;  // Delay before stopping video when queue is empty
     int video_group_index_ = 0;
     lv_obj_t* video_img_ = nullptr;
     lv_img_dsc_t video_img_dsc_{};

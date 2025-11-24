@@ -165,60 +165,241 @@ private:
         power_save_timer_->SetEnabled(true);
     }
 
+    // 打印 Unicode 文本（支持 UTF-8 和 UTF-16），返回解码后的 UTF-8 文本
+    std::string PrintUnicodeText(const std::string& text, const char* label = "文本") {
+        if (text.empty()) {
+            return "";
+        }
+        
+        // 如果是 UTF-16，固定使用 BE 解码（如果有 BOM 则按 BOM 指示）
+        if (text.length() >= 2 && (text.length() % 2 == 0)) {
+            bool is_le = false;
+            size_t start = 0;
+            
+            // 检查 BOM: FE FF (UTF-16 BE) 或 FF FE (UTF-16 LE)
+            if (text.length() >= 2) {
+                uint8_t b0 = static_cast<uint8_t>(text[0]);
+                uint8_t b1 = static_cast<uint8_t>(text[1]);
+                
+                if ((b0 == 0xFE && b1 == 0xFF) || (b0 == 0xFF && b1 == 0xFE)) {
+                    is_le = (b0 == 0xFF && b1 == 0xFE);
+                    start = 2;  // 跳过 BOM
+                }
+            }
+            
+            std::string utf8_text;
+            
+            for (size_t j = start; j + 1 < text.length(); j += 2) {
+                uint16_t code_point;
+                if (is_le) {
+                    // UTF-16 LE
+                    code_point = static_cast<uint8_t>(text[j]) | 
+                                 (static_cast<uint8_t>(text[j + 1]) << 8);
+                } else {
+                    // UTF-16 BE（默认）
+                    code_point = (static_cast<uint8_t>(text[j]) << 8) | 
+                                 static_cast<uint8_t>(text[j + 1]);
+                }
+                
+                if (code_point == 0) {
+                    break;
+                }
+                
+                // 转换为 UTF-8
+                if (code_point < 0x80) {
+                    utf8_text += static_cast<char>(code_point);
+                } else if (code_point < 0x800) {
+                    utf8_text += static_cast<char>(0xC0 | (code_point >> 6));
+                    utf8_text += static_cast<char>(0x80 | (code_point & 0x3F));
+                } else {
+                    utf8_text += static_cast<char>(0xE0 | (code_point >> 12));
+                    utf8_text += static_cast<char>(0x80 | ((code_point >> 6) & 0x3F));
+                    utf8_text += static_cast<char>(0x80 | (code_point & 0x3F));
+                }
+            }
+            
+            if (!utf8_text.empty()) {
+                return utf8_text;  // 返回解码后的 UTF-8 文本
+            }
+        }
+        
+        // 如果不是 UTF-16 或解码失败，返回原始文本（可能是 UTF-8）
+        return text;
+    }
+
     // 检查闹钟并执行提醒
     void CheckAlarms() {
         time_t now;
         time(&now);
         
-        // 获取当前时间的时分秒（忽略日期）
+        // 获取当前时间
         struct tm timeinfo;
         localtime_r(&now, &timeinfo);
-        uint32_t current_time_seconds = timeinfo.tm_hour * 3600 + timeinfo.tm_min * 60 + timeinfo.tm_sec;
+        
+        ESP_LOGI(TAG, "═══════════════════════════════════════");
+        ESP_LOGI(TAG, "⏰ 开始检查闹钟");
+        ESP_LOGI(TAG, "当前时间: %04d-%02d-%02d %02d:%02d:%02d (时间戳: %ld)",
+                 timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
+                 timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec, now);
         
         // 检查 timer1-timer10
         for (int i = 1; i <= 10; i++) {
             std::string timer_name = "timer" + std::to_string(i);
-            int timer_value = 0;
+            uint32_t timer_value = 0;
+            bool from_cache = false;
+            
+            // ESP_LOGI(TAG, "─────────────────────────────────────");
+            // ESP_LOGI(TAG, "检查 timer%d (%s)", i, timer_name.c_str());
             
             // 从缓存或存储中获取闹钟时间戳
-            if (!GCDataPointManager::GetInstance().GetCachedDataPoint(timer_name, timer_value)) {
+            int cached_int_value = 0;
+            if (GCDataPointManager::GetInstance().GetCachedDataPoint(timer_name, cached_int_value)) {
+                from_cache = true;
+                // 如果缓存值是 -1，说明原始值超过了 int32_t 范围，需要从字符串读取
+                if (cached_int_value == -1) {
+                    Settings settings("datapoint", false);
+                    std::string str_val = settings.GetString(timer_name, "");
+                    if (!str_val.empty()) {
+                        try {
+                            timer_value = std::stoul(str_val);
+                            // ESP_LOGI(TAG, "  ✓ 从缓存(-1标记)和NVS字符串读取 timer_value: %s -> %u (0x%08X)", 
+                            //          str_val.c_str(), timer_value, timer_value);
+                        } catch (const std::exception& e) {
+                            ESP_LOGW(TAG, "  ✗ 字符串转换失败: %s", e.what());
+                        }
+                    }
+                } else {
+                    timer_value = static_cast<uint32_t>(cached_int_value);
+                    // ESP_LOGI(TAG, "  ✓ 从缓存读取 timer_value: %u (0x%08X)", timer_value, timer_value);
+                }
+            } else {
                 // 如果缓存中没有，尝试从存储读取
                 Settings settings("datapoint", false);
-                timer_value = settings.GetInt(timer_name, 0);
+                int32_t int_val = settings.GetInt(timer_name, -1);
+                // ESP_LOGI(TAG, "  ✓ 从NVS读取 timer_value (int): %d (0x%08X)", int_val, int_val);
+                
+                // 如果 int 读取失败或值可能被截断，尝试从字符串读取
+                if (int_val == -1 || int_val == 0) {
+                    std::string str_val = settings.GetString(timer_name, "");
+                    if (!str_val.empty()) {
+                        try {
+                            timer_value = std::stoul(str_val);
+                            // ESP_LOGI(TAG, "  ✓ 从NVS字符串读取 timer_value: %s -> %u (0x%08X)", 
+                            //          str_val.c_str(), timer_value, timer_value);
+                        } catch (const std::exception& e) {
+                            ESP_LOGW(TAG, "  ✗ 字符串转换失败: %s", e.what());
+                        }
+                    } else if (int_val == 0) {
+                        timer_value = 0;
+                    }
+                } else {
+                    // 检查 int 值是否可能被截断（如果原始值超过 INT32_MAX，应该存储为字符串）
+                    timer_value = static_cast<uint32_t>(int_val);
+                    // ESP_LOGI(TAG, "  ✓ 使用NVS int值 timer_value: %u (0x%08X)", timer_value, timer_value);
+                }
             }
             
             if (timer_value == 0) {
+                // ESP_LOGI(TAG, "  → timer%d 未设置，跳过", i);
                 continue; // 未设置的闹钟跳过
             }
             
-            // timer_value 是时间戳，需要转换为当天的时分秒
-            struct tm alarm_timeinfo;
-            localtime_r((time_t*)&timer_value, &alarm_timeinfo);
-            uint32_t alarm_time_seconds = alarm_timeinfo.tm_hour * 3600 + alarm_timeinfo.tm_min * 60 + alarm_timeinfo.tm_sec;
+            // timer_value 是完整的时间戳（包括日期和时间）
+            // ESP_LOGI(TAG, "  原始 timer_value: %u (0x%08X)", timer_value, timer_value);
+            time_t alarm_t = static_cast<time_t>(timer_value);
+            // ESP_LOGI(TAG, "  转换后 alarm_t: %ld (0x%016lX)", alarm_t, alarm_t);
             
-            // 检查当前时间是否匹配闹钟时间（允许30秒误差）
-            int time_diff = abs((int)current_time_seconds - (int)alarm_time_seconds);
-            if (time_diff <= 30) {
-                ESP_LOGI(TAG, "闹钟 timer%d 触发！当前时间: %02d:%02d:%02d, 闹钟时间: %02d:%02d:%02d",
-                         i, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec,
-                         alarm_timeinfo.tm_hour, alarm_timeinfo.tm_min, alarm_timeinfo.tm_sec);
+            struct tm alarm_timeinfo;
+            localtime_r(&alarm_t, &alarm_timeinfo);
+            // ESP_LOGI(TAG, "  闹钟完整时间戳: %ld", alarm_t);
+            // ESP_LOGI(TAG, "  闹钟日期时间: %04d-%02d-%02d %02d:%02d:%02d",
+            //          alarm_timeinfo.tm_year + 1900, alarm_timeinfo.tm_mon + 1, alarm_timeinfo.tm_mday,
+            //          alarm_timeinfo.tm_hour, alarm_timeinfo.tm_min, alarm_timeinfo.tm_sec);
+            
+            // 直接比较完整时间戳（允许30秒误差）
+            const int TIME_TOLERANCE_SECONDS = 30;
+            int64_t time_diff = static_cast<int64_t>(now) - static_cast<int64_t>(alarm_t);
+            int64_t abs_time_diff = (time_diff < 0) ? -time_diff : time_diff;
+            
+            // ESP_LOGI(TAG, "  当前时间戳: %ld", now);
+            // ESP_LOGI(TAG, "  闹钟时间戳: %ld", alarm_t);
+            // ESP_LOGI(TAG, "  时间差: %lld 秒 (阈值: %d 秒)", time_diff, TIME_TOLERANCE_SECONDS);
+            
+            // 获取并打印对应的 TTS 文本（无论是否触发都打印）
+            std::string tts_name = "tts" + std::to_string(i);
+            Settings settings("datapoint", false);
+            std::string tts_text_raw = settings.GetString(tts_name, "");
+            std::string tts_text = "";  // 解码后的文本
+            
+            if (!tts_text_raw.empty()) {
+                // 使用封装的方法打印 Unicode 文本，并获取解码后的文本
+                tts_text = PrintUnicodeText(tts_text_raw, "TTS文本");
+            } else {
+                // ESP_LOGI(TAG, "     TTS文本: (未设置)");
+            }
+            
+            // 如果闹钟时间已经过期（超过阈值），跳过
+            if (time_diff > TIME_TOLERANCE_SECONDS) {
+                // ESP_LOGI(TAG, "  → timer%d 已过期 (时间差 %lld 秒 > 阈值 %d 秒)", 
+                //          i, time_diff, TIME_TOLERANCE_SECONDS);
+                continue;
+            }
+            
+            // 如果闹钟时间在未来（超过阈值），还未到时间
+            if (time_diff < -TIME_TOLERANCE_SECONDS) {
+                // ESP_LOGI(TAG, "  → timer%d 未到时间 (时间差 %lld 秒 < -阈值 %d 秒)", 
+                //          i, time_diff, -TIME_TOLERANCE_SECONDS);
+                continue;
+            }
+            
+            // 在误差范围内，触发闹钟
+            if (abs_time_diff <= TIME_TOLERANCE_SECONDS) {
+                // ESP_LOGI(TAG, "  ⚡ 闹钟 timer%d 触发！", i);
+                // ESP_LOGI(TAG, "     当前时间: %04d-%02d-%02d %02d:%02d:%02d (时间戳: %ld)",
+                //          timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
+                //          timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec, now);
+                // ESP_LOGI(TAG, "     闹钟时间: %04d-%02d-%02d %02d:%02d:%02d (时间戳: %ld)",
+                //          alarm_timeinfo.tm_year + 1900, alarm_timeinfo.tm_mon + 1, alarm_timeinfo.tm_mday,
+                //          alarm_timeinfo.tm_hour, alarm_timeinfo.tm_min, alarm_timeinfo.tm_sec, alarm_t);
+                // ESP_LOGI(TAG, "     时间差: %lld 秒", time_diff);
                 
-                // 获取对应的 TTS 文本
-                std::string tts_name = "tts" + std::to_string(i);
-                Settings settings("datapoint", false);
-                std::string tts_text = settings.GetString(tts_name, "");
-                
+                // TTS 文本已经在上面打印过了，这里只需要处理播放逻辑
                 if (!tts_text.empty()) {
-                    ESP_LOGI(TAG, "播放闹钟提醒: %s", tts_text.c_str());
-                    // TODO: 播放 TTS 或执行提醒动作
-                    // 可以调用 Application::GetInstance().Speak(tts_text) 或类似方法
+                    Application::GetInstance().ToggleChatState();
+                    Application::GetInstance().Schedule([this, tts_text]() {
+                        // 临时禁用音频上传，避免闹钟播放时上传麦克风音频
+                        ESP_LOGI(TAG, "     临时禁用音频上传，准备播放闹钟提醒");
+                        Application::GetInstance().SetAudioUploadEnabled(false);
+                        
+                        // 等待连接成功
+                        vTaskDelay(pdMS_TO_TICKS(2000));
+
+                        Application::GetInstance().SetDeviceState(kDeviceStateSpeaking);
+                        ESP_LOGI(TAG, "     播放闹钟提醒: %s", tts_text.c_str());
+                        Application::GetInstance().GenerateTTSFromText(tts_text);
+                        
+                        // 发送完 TTS 请求后，延迟一段时间再恢复音频上传
+                        // 给 TTS 音频一些时间开始播放，避免立即恢复上传导致干扰
+                        vTaskDelay(pdMS_TO_TICKS(5000));
+                        ESP_LOGI(TAG, "     恢复音频上传");
+                        Application::GetInstance().SetAudioUploadEnabled(true);
+                    }, "PlayTTS_Alarm");
                 } else {
-                    ESP_LOGI(TAG, "闹钟 timer%d 触发，但未设置提醒文本", i);
+                    ESP_LOGI(TAG, "     闹钟 timer%d 触发，但未设置提醒文本", i);
                     // 可以播放默认提示音
+                    Application::GetInstance().Schedule([this, tts_text]() {
+                        Application::GetInstance().ResetDecoder();
+                        vTaskDelay(pdMS_TO_TICKS(1000));
+                        Application::GetInstance().PlaySound(Lang::Sounds::P3_SUCCESS);
+                    });
                     // Application::GetInstance().PlaySound(Lang::Sounds::P3_ALARM);
                 }
+            } else {
+                // ESP_LOGI(TAG, "  → timer%d 未到时间 (时间差 %d 秒 > 阈值 %d 秒)", 
+                //          i, time_diff, TIME_TOLERANCE_SECONDS);
             }
         }
+        ESP_LOGI(TAG, "═══════════════════════════════════════");
     }
 
     // 闹钟检查定时器回调
@@ -421,10 +602,8 @@ private:
         };
         ESP_ERROR_CHECK(gpio_config(&mute_conf));
 
-        gpio_set_level(MCU_MUTE_PIN, 1);
-
         // 初始化时读取一次状态并设置MCU MUTE
-        // UpdateMuteSignal();
+        UpdateMuteSignal();
 
         ESP_LOGI(TAG, "Headphone detection GPIO initialized");
     }
