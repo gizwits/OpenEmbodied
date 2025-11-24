@@ -575,8 +575,8 @@ void LWSDataPointManager::GenerateReportData(uint8_t* buffer, size_t buffer_size
 }
 
 // 标准实现：处理数据点值
-void LWSDataPointManager::ProcessDataPointValue(const std::string& name, int value) {
-    ESP_LOGI(TAG, "ProcessDataPointValue: %s = %d", name.c_str(), value);
+void LWSDataPointManager::ProcessDataPointValue(const std::string& name, uint32_t value) {
+    ESP_LOGI(TAG, "ProcessDataPointValue: %s = %u", name.c_str(), value);
     SetDataPointValue(name, value);
 }
 
