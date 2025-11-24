@@ -1,6 +1,7 @@
 #include "application.h"
 #include "board.h"
 #include "display.h"
+#include "display/eye_display.h"
 #include "system_info.h"
 #include "audio_codec.h"
 #include "server/giz_mqtt.h"
@@ -977,6 +978,32 @@ void Application::OnWakeWordDetected() {
         PlaySound(Lang::Sounds::P3_WAKE_WORD);
         audio_service_.EncodeWakeWord();
 
+        // 检查WiFi连接状态，如果没连接，可能是从睡眠状态唤醒的，需要先恢复WiFi
+        auto& wifi_station = WifiStation::GetInstance();
+        if (!wifi_station.IsConnected()) {
+            ESP_LOGI(TAG, "OnWakeWordDetected: WiFi not connected, may be from sleep mode, reconnecting WiFi...");
+            // 立即更新表情为 neutral，表示正在连接，避免一直显示充电动画
+            auto& board = Board::GetInstance();
+            auto display = board.GetDisplay();
+            if (display) {
+                display->SetEmotion("neutral");
+                display->SetStatus(Lang::Strings::CONNECTING);
+            }
+            // 从睡眠状态唤醒时，需要先恢复WiFi连接
+            wifi_station.Start();
+            // 等待WiFi连接完成
+            if (!wifi_station.WaitForConnected(30 * 1000)) { // 30秒超时
+                ESP_LOGE(TAG, "OnWakeWordDetected: Failed to reconnect to WiFi");
+                audio_service_.EnableWakeWordDetection(true);
+                return;
+            }
+            // WiFi连接后，等待一小段时间让DNS和网络栈完全初始化
+            vTaskDelay(pdMS_TO_TICKS(500));
+            // 重新连接MQTT
+            auto& mqtt_client = MqttClient::getInstance();
+            mqtt_client.connect();
+        }
+
         if (!protocol_->IsAudioChannelOpened()) {
             SetDeviceState(kDeviceStateConnecting);
             if (!protocol_->OpenAudioChannel()) {
@@ -1450,34 +1477,7 @@ void Application::EnterSleepMode() {
         wifi_station.Stop();
         SetDeviceState(kDeviceStateSleeping);
 
-        // 检查电量和充电状态,决定显示哪个表情
-        int level = 0;
-        bool charging = false;
-        bool discharging = false;
-        bool has_battery = board.GetBatteryLevel(level, charging, discharging);
-        
         display->SetStatus(Lang::Strings::STANDBY);
-        if (has_battery) {
-            if (charging && level < 100) {
-                // 正在充电且未满电,显示吃电池表情
-                ESP_LOGI(TAG, "充电中进入睡眠模式(电量: %d%%),显示吃电池表情", level);
-                display->SetEmotion("Charging");
-            } else if (level < 25) {
-                // 低电量(未充电),显示吃电池表情
-                ESP_LOGI(TAG, "低电量进入睡眠模式(电量: %d%%),显示吃电池表情", level);
-                display->SetEmotion("Charging");
-            } else {
-                // 正常电量或100%满电,显示睡觉表情
-                ESP_LOGI(TAG, "进入睡眠模式(电量: %d%%, 充电: %d),显示睡觉表情", level, charging);
-                display->SetEmotion("sleepy");
-            }
-        } else {
-            // 无法获取电量信息,默认显示睡觉表情
-            display->SetEmotion("sleepy");
-        }
-        if (backlight) {
-            backlight->SetBrightness(0);
-        }
 
         // 启动唤醒词
         audio_service_.EnableVoiceProcessing(false);

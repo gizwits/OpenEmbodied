@@ -386,7 +386,7 @@ private:
     
     // 初始化充电检测ADC
     void InitializeChargingDetectAdc() {
-        ESP_LOGI("PowerManager", "开始初始化充电检测ADC: unit=%d, channel=%d, atten=%d", 
+        ESP_LOGI("PowerManager", "开始初始化充电检测ADC: unit=%d, channel=%d (ADC2_CH2), atten=%d", 
                  CHARGING_DETECT_ADC_UNIT, CHARGING_DETECT_ADC_CHANNEL, CHARGING_DETECT_ADC_ATTEN);
         
         // 如果电池ADC已经初始化，且使用同一单元，则共享句柄
@@ -401,10 +401,13 @@ private:
             };
             esp_err_t ret = adc_oneshot_new_unit(&init_config, &charging_detect_adc_handle_);
             if (ret != ESP_OK) {
-                ESP_LOGE("PowerManager", "创建充电检测ADC单元失败: %s (0x%x)", esp_err_to_name(ret), ret);
+                ESP_LOGE("PowerManager", "❌ ADC2_CH2初始化失败: 创建ADC单元失败, unit=%d, channel=%d, 错误: %s (0x%x)", 
+                         CHARGING_DETECT_ADC_UNIT, CHARGING_DETECT_ADC_CHANNEL, esp_err_to_name(ret), ret);
                 charging_detect_adc_handle_ = nullptr;
+                charging_detect_adc_initialized_ = false;
                 return;
             }
+            ESP_LOGI("PowerManager", "✅ ADC2_CH2单元创建成功");
         }
         
         // 配置通道（无论是否共享句柄，都需要配置通道）
@@ -414,17 +417,20 @@ private:
         };
         esp_err_t ret = adc_oneshot_config_channel(charging_detect_adc_handle_, CHARGING_DETECT_ADC_CHANNEL, &chan_config);
         if (ret != ESP_OK) {
-            ESP_LOGE("PowerManager", "配置充电检测ADC通道失败: %s (0x%x)", esp_err_to_name(ret), ret);
+            ESP_LOGE("PowerManager", "❌ ADC2_CH2初始化失败: 配置ADC通道失败, unit=%d, channel=%d, 错误: %s (0x%x)", 
+                     CHARGING_DETECT_ADC_UNIT, CHARGING_DETECT_ADC_CHANNEL, esp_err_to_name(ret), ret);
             // 只有在创建了新单元时才删除
             if (CHARGING_DETECT_ADC_UNIT != BAT_ADC_UNIT || battery_adc_handle_ == nullptr) {
                 adc_oneshot_del_unit(charging_detect_adc_handle_);
             }
             charging_detect_adc_handle_ = nullptr;
+            charging_detect_adc_initialized_ = false;
             return;
         }
         
         charging_detect_adc_initialized_ = true;
-        ESP_LOGI("PowerManager", "充电检测ADC2_CH2初始化成功，用于检测VDD电压");
+        ESP_LOGI("PowerManager", "✅ ADC2_CH2初始化成功，用于检测VDD电压, unit=%d, channel=%d", 
+                 CHARGING_DETECT_ADC_UNIT, CHARGING_DETECT_ADC_CHANNEL);
     }
     
 
