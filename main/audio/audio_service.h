@@ -40,7 +40,7 @@
 #define MAX_PLAYBACK_TASKS_IN_QUEUE 2
 
 #ifdef CONFIG_IDF_TARGET_ESP32S3
-#define MAX_DECODE_PACKETS_IN_QUEUE (20000 / OPUS_FRAME_DURATION_MS)  
+#define MAX_DECODE_PACKETS_IN_QUEUE (200000 / OPUS_FRAME_DURATION_MS)  
 #define MAX_SEND_PACKETS_IN_QUEUE (5000 / OPUS_FRAME_DURATION_MS)    
 #else
 #define MAX_DECODE_PACKETS_IN_QUEUE (3600 / OPUS_FRAME_DURATION_MS)
@@ -116,6 +116,7 @@ public:
     void SetCallbacks(AudioServiceCallbacks& callbacks);
 
     bool PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> packet, bool wait = false);
+    size_t GetDecodeQueueSize() const;  // 获取解码队列当前大小
     std::unique_ptr<AudioStreamPacket> PopPacketFromSendQueue();
     void ResetSendQueue();
     void PlaySound(const std::string_view& sound);
@@ -158,7 +159,7 @@ private:
     TaskHandle_t audio_input_task_handle_ = nullptr;
     TaskHandle_t audio_output_task_handle_ = nullptr;
     TaskHandle_t opus_codec_task_handle_ = nullptr;
-    std::mutex audio_queue_mutex_;
+    mutable std::mutex audio_queue_mutex_;  // mutable 允许在 const 方法中锁定
     std::condition_variable audio_queue_cv_;
     std::deque<std::unique_ptr<AudioStreamPacket>> audio_decode_queue_;
     std::deque<std::unique_ptr<AudioStreamPacket>> audio_send_queue_;
@@ -174,6 +175,7 @@ private:
 #ifndef CONFIG_USE_EYE_STYLE_VB6824
     // Software AEC reference buffer (only for Es8311)
     std::deque<int16_t> reference_ring_;
+    mutable std::mutex reference_ring_mutex_;  // Mutex to protect reference_ring_ from concurrent access
     bool enable_software_aec_ = false;
     size_t reference_ring_max_samples_ = 16000 * 2; // ~2 seconds @16k mono
 #endif
