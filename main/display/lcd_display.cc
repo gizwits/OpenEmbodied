@@ -1763,7 +1763,7 @@ void LcdDisplay::AudioMonitorTask(void* arg) {
             if (queue_size > 0) {
                 // 播放管道有数据，播放 video
                 if (!display->video_playing_) {
-                    ESP_LOGI(TAG, "Audio queue has data (%zu), starting video playback", queue_size);
+                    // ESP_LOGI(TAG, "Audio queue has data (%zu), starting video playback", queue_size);
                     if (display->Lock(50)) {
                         display->PlayVideoGroup(0);  // 播放第0组视频
                         display->background_showing_ = false;  // 视频播放中，背景未显示

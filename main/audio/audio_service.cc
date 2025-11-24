@@ -137,7 +137,10 @@ void AudioService::Initialize(AudioCodec* codec) {
         if (codec->output_sample_rate() != 16000) {
             playback_ref_resampler_.Configure(codec->output_sample_rate(), 16000);
         }
-        reference_ring_.clear();
+        {
+            std::lock_guard<std::mutex> lock(reference_ring_mutex_);
+            reference_ring_.clear();
+        }
     }
 #endif
 }
@@ -388,7 +391,23 @@ void AudioService::AudioInputTask() {
             int samples = wake_word_->GetFeedSize();
             if (samples > 0) {
                 if (ReadAudioData(data, 16000, samples)) {
-                    wake_word_->Feed(data);
+                    if (enable_software_aec_ && codec_->input_channels() == 1 && codec_->input_reference()) {
+                        // For software AEC, wake word detector expects interleaved MR format
+                        std::vector<int16_t> reference;
+                        PopReferenceSamples(data.size(), reference);
+                        if (reference.size() < data.size()) {
+                            reference.resize(data.size(), 0);
+                        }
+                        std::vector<int16_t> interleaved;
+                        interleaved.resize(data.size() * 2);
+                        for (size_t i = 0, j = 0; i < data.size(); ++i, j += 2) {
+                            interleaved[j] = data[i];
+                            interleaved[j + 1] = reference[i];
+                        }
+                        wake_word_->Feed(std::move(interleaved));
+                    } else {
+                        wake_word_->Feed(std::move(data));
+                    }
                     continue;
                 }
             }
@@ -987,6 +1006,7 @@ void AudioService::CheckAndUpdateAudioPowerState() {
 #ifndef CONFIG_USE_EYE_STYLE_VB6824
 void AudioService::PushReferenceSamples(const int16_t* data, size_t samples) {
     if (!samples) return;
+    std::lock_guard<std::mutex> lock(reference_ring_mutex_);
     // Limit ring buffer size
     size_t free_cap = (reference_ring_max_samples_ > reference_ring_.size()) ? (reference_ring_max_samples_ - reference_ring_.size()) : 0;
     size_t to_push = samples;
@@ -1004,6 +1024,7 @@ void AudioService::PushReferenceSamples(const int16_t* data, size_t samples) {
 
 void AudioService::PopReferenceSamples(size_t samples, std::vector<int16_t>& out) {
     out.clear();
+    std::lock_guard<std::mutex> lock(reference_ring_mutex_);
     size_t take = std::min(samples, reference_ring_.size());
     if (take) {
         out.insert(out.end(), reference_ring_.begin(), reference_ring_.begin() + take);

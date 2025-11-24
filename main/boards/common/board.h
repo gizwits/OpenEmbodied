@@ -72,7 +72,7 @@ public:
 #ifdef CONFIG_IDF_TARGET_ESP32C2
         return 17;
 #else
-        return 25;
+        return 20;
 #endif
     }
     // 是否要 bo 一下

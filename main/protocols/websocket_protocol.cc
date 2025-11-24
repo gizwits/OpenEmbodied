@@ -151,7 +151,7 @@ bool WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
 
 
 bool WebsocketProtocol::SendText(const std::string& text) {
-    if (!websocket_) {
+    if (!websocket_ || !websocket_->IsConnected()) {
         return false;
     }
     websocket_->Send(text);
@@ -159,7 +159,8 @@ bool WebsocketProtocol::SendText(const std::string& text) {
 }
 
 void WebsocketProtocol::SendStopListening() {
-    if (!websocket_) {
+    if (!websocket_ || !websocket_->IsConnected()) {
+        ESP_LOGD(TAG, "SendStopListening: WebSocket not connected, skipping");
         return;
     }
 

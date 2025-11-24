@@ -40,7 +40,7 @@
 #define MAX_PLAYBACK_TASKS_IN_QUEUE 2
 
 #ifdef CONFIG_IDF_TARGET_ESP32S3
-#define MAX_DECODE_PACKETS_IN_QUEUE (20000 / OPUS_FRAME_DURATION_MS)  
+#define MAX_DECODE_PACKETS_IN_QUEUE (200000 / OPUS_FRAME_DURATION_MS)  
 #define MAX_SEND_PACKETS_IN_QUEUE (5000 / OPUS_FRAME_DURATION_MS)    
 #else
 #define MAX_DECODE_PACKETS_IN_QUEUE (3600 / OPUS_FRAME_DURATION_MS)
@@ -175,6 +175,7 @@ private:
 #ifndef CONFIG_USE_EYE_STYLE_VB6824
     // Software AEC reference buffer (only for Es8311)
     std::deque<int16_t> reference_ring_;
+    mutable std::mutex reference_ring_mutex_;  // Mutex to protect reference_ring_ from concurrent access
     bool enable_software_aec_ = false;
     size_t reference_ring_max_samples_ = 16000 * 2; // ~2 seconds @16k mono
 #endif
