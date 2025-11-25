@@ -91,25 +91,68 @@ void WebsocketProtocol::CloseAudioChannel() {
         ESP_LOGW(TAG, "websocket_ is null");
         return;
     }
+
+    // 如果已经有关闭任务在运行，直接返回（防止重复关闭）
+    if (close_task_handle_ != nullptr) {
+        ESP_LOGW(TAG, "close_task_handle_ is not null, already closing");
+        return;
+    }
+
+    ESP_LOGI(TAG, "Starting audio channel close task...");
     
-    // 标记为客户端主动关闭
-    ws_client_initiated_close_ = true;
+    // 启动关闭任务（与 websocket_protocol.cc 保持一致）
+    BaseType_t ret = xTaskCreate(
+        CloseAudioChannelTask,
+        "ws_close_task",
+        4096,
+        this,
+        10,
+        &close_task_handle_
+    );
     
-    // Clear packet cache when closing audio channel (inlined logic)
-    busy_sending_audio_ = true;
-    packet_cache_.clear();
-    cached_packet_count_ = 0;
-    is_first_packet_ = false;
-    is_start_progress_ = false;
+    if (ret != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create close task");
+        // 如果创建任务失败，直接执行关闭逻辑
+        CloseAudioChannelTask(this);
+    }
+}
+
+void WebsocketProtocol::CloseAudioChannelTask(void* param) {
+    WebsocketProtocol* self = static_cast<WebsocketProtocol*>(param);
+    
+    ESP_LOGI(TAG, "Closing audio channel...");
+    self->ws_client_initiated_close_ = true; // 由本端主动触发关闭
+    
+    // Clear packet cache when closing audio channel
+    self->busy_sending_audio_ = true;
+    self->packet_cache_.clear();
+    self->cached_packet_count_ = 0;
+    self->is_first_packet_ = false;
+    self->is_start_progress_ = false;
     ESP_LOGD(TAG, "Packet cache cleared");
     
-    // 先正常关闭websocket连接，这会触发OnDisconnected回调
-    ESP_LOGI(TAG, "WS Close() called by client");
-    websocket_->Close();
+    // 等待当前正在传输的音频数据完成
+    vTaskDelay(pdMS_TO_TICKS(300));
+    
+    // 发送关闭帧给服务器
+    if (self->websocket_) {
+        ESP_LOGI(TAG, "WS Close() called by client");
+        self->websocket_->Close();
+    }
     
     // 等待一小段时间让Close完成，然后清理资源
     vTaskDelay(pdMS_TO_TICKS(100));
-    websocket_.reset();
+    if (self->websocket_) {
+        self->websocket_.reset();
+    }
+    
+    ESP_LOGI(TAG, "Audio channel closed successfully");
+    
+    // 清理任务句柄
+    self->close_task_handle_ = nullptr;
+    
+    // 删除任务
+    vTaskDelete(nullptr);
 }
 
 
@@ -128,6 +171,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
 
     error_occurred_ = false;
     ws_client_initiated_close_ = false;  // 重置客户端主动关闭标志
+    close_task_handle_ = nullptr;  // 重置关闭任务句柄
     
     // Initialize caching variables for new connection (inlined logic)
     packet_cache_.clear();
@@ -317,15 +361,19 @@ bool WebsocketProtocol::OpenAudioChannel() {
 
     // Send hello message to describe the client
     auto message = GetHelloMessage();
+    ESP_LOGI(TAG, "Sending hello message: %s", message.c_str());
     if (!SendText(message)) {
+        ESP_LOGE(TAG, "Failed to send hello message");
         return false;
     }
 
+    ESP_LOGI(TAG, "Waiting for server hello");
     // Wait for server hello
     EventBits_t bits = xEventGroupWaitBits(event_group_handle_, WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT, pdTRUE, pdFALSE, pdMS_TO_TICKS(10000));
     if (!(bits & WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT)) {
         ESP_LOGE(TAG, "Failed to receive server hello");
         SetError(Lang::Strings::SERVER_TIMEOUT);
+        on_audio_channel_closed_(true);
         return false;
     }
 

@@ -53,42 +53,10 @@
          PropertyList(),
          [&board](const PropertyList& properties) -> ReturnValue {
              // 先启用音频输出，确保可以播放音频
-             auto codec = board.GetAudioCodec();
-             codec->EnableOutput(true);
-             // 等待TTS音频播放完成后再播放睡眠音频，然后退出对话
-             Application::GetInstance().Schedule([]() {
-                 auto& app = Application::GetInstance();
-                 auto& audio_service = app.GetAudioService();
-                 
-                 // 等待TTS音频播放完成（最多等待10秒）
-                 int wait_count = 0;
-                 const int max_wait_count = 100; // 10秒 = 100 * 100ms
-                 while (!audio_service.IsIdle() && wait_count < max_wait_count) {
-                     vTaskDelay(pdMS_TO_TICKS(100));
-                     wait_count++;
-                 }
-                 
-                 if (wait_count >= max_wait_count) {
-                     ESP_LOGW("MCP", "Timeout waiting for TTS audio to complete, proceeding anyway");
-                 } else {
-                     ESP_LOGI("MCP", "TTS audio completed, waiting 500ms before playing sleep sound");
-                     vTaskDelay(pdMS_TO_TICKS(500));
-                 }
-                 
-                 // 播放睡眠音频
-                 app.PlaySound(Lang::Sounds::P3_SLEEP);
-                 
-                 // 等待睡眠音频播放完成（最多等待5秒）
-                 wait_count = 0;
-                 const int max_sleep_wait_count = 50; // 5秒 = 50 * 100ms
-                 while (!audio_service.IsIdle() && wait_count < max_sleep_wait_count) {
-                     vTaskDelay(pdMS_TO_TICKS(100));
-                     wait_count++;
-                 }
-                 
-                 // 退出对话
-                 app.QuitTalking();
-             }, "handle_exit_intent_play_sleep_sound");
+             Application::GetInstance().QuitTalking();
+
+            Application::GetInstance().ResetDecoder();
+            Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
              return true;
          });
  

@@ -36,11 +36,6 @@
 
 #define TAG "MovecallMojiESP32S3"
 
-// 电源管理定时器配置（单位：秒）
-#define POWER_SAVE_SLEEP_SECONDS 60*20        // 第一个定时器：30秒后进入睡眠模式
-#define POWER_SAVE_SHUTDOWN_SECONDS 50     // 第二个定时器：50秒后关机（注意：进入睡眠模式后此定时器不会触发，实际由轮播模式睡眠计时定时器替代）
-#define VIDEO_CYCLING_SLEEP_SHUTDOWN_SECONDS 60*10  // 轮播模式睡眠计时：20秒后关机（第一个定时器触发后20秒，总共50秒）
-
 LV_FONT_DECLARE(font_puhui_20_4);
 LV_FONT_DECLARE(font_awesome_20_4);
 
@@ -75,6 +70,7 @@ private:
     std::string saved_emotion_before_gyro_;  // 陀螺仪触发前保存的表情
     bool gyro_emotion_active_ = false;  // 是否正在显示陀螺仪触发的表情
     TickType_t last_direction_time_ = 0;  // 上次方向触发时间（用于重置冷却时间）
+    const char* last_triggered_direction_ = nullptr;  // 上次触发的方向（用于判断是否相同方向）
     
     // 操作检测标志（用于轮播模式下的定时器）
     bool has_user_interaction_ = false;  // 是否有用户操作（陀螺仪或按键）
@@ -92,102 +88,53 @@ private:
 
     void InitializePowerSaveTimer() {
         // 使用宏定义配置定时器时间
-        power_save_timer_ = new PowerSaveTimer(-1, POWER_SAVE_SLEEP_SECONDS, POWER_SAVE_SHUTDOWN_SECONDS);
+        power_save_timer_ = new PowerSaveTimer(-1, 30 , 60);
         power_save_timer_->OnEnterSleepMode([this]() {
+            if (is_charging_sleep_) {
+                return;
+            }
+            is_charging_sleep_ = true;
+            Application::GetInstance().QuitTalking();
             ESP_LOGI(TAG, "第一个定时器触发，进入睡眠模式（轮播模式）");
             // 第一个定时器：进入睡眠时切换到轮播模式，不调用 SetEmotion
             // 如果已经在轮播模式，直接进入睡眠
             if(display_->GetDisplayMode() != EyeDisplay::DisplayMode::VIDEO_CYCLING){
                 ESP_LOGI(TAG, "进入睡眠模式，自动切换到轮播模式");
-                Application::GetInstance().QuitTalking();
+                
                 display_->ToggleVideoCyclingMode();
             }
             // 设置标志，表示应该在轮播模式下进入睡眠
             sleep_with_video_cycling_ = true;
             // 重置操作标志，进入睡眠后开始检测操作
             has_user_interaction_ = false;
-            last_interaction_time_ = xTaskGetTickCount();
-            // 注意：音频播放由 Application::EnterSleepMode 统一处理，这里不重复播放
-            Application::GetInstance().EnterSleepMode();
-            
-            // 板级逻辑：延迟启动自定义定时器，确保 EnterSleepMode 完成后再检查轮播模式
-            // 因为 EnterSleepMode 是异步的，需要等待状态稳定后再启动定时器
-            Application::GetInstance().Schedule([this]() {
-                // 等待 EnterSleepMode 完成，确保设备状态稳定
-                vTaskDelay(pdMS_TO_TICKS(500));
-                // 检查是否在轮播模式，如果是则启动自定义定时器继续计时
-                if (display_->GetDisplayMode() == EyeDisplay::DisplayMode::VIDEO_CYCLING) {
-                    ESP_LOGI(TAG, "第一个定时器触发后，确认在轮播模式，启动轮播模式睡眠计时定时器");
-                    StartVideoCyclingSleepTimer();
-                } else {
-                    ESP_LOGW(TAG, "第一个定时器触发后，不在轮播模式，无法启动轮播模式睡眠计时定时器");
-                }
-            }, "start_video_cycling_sleep_timer");
         });
         power_save_timer_->OnExitSleepMode([this]() {
             ESP_LOGE(TAG, "退出休眠模式");
             // 板级逻辑：退出睡眠模式时停止轮播模式计时定时器
-            StopVideoCyclingSleepTimer();
         });
         power_save_timer_->OnShutdownRequest([this]() {
-            // 第二个定时器：根据充电状态决定行为
-            // 如果轮播模式下没有操作，才执行关机或显示睡眠动画
-            
-            // 板级逻辑：检查是否在轮播模式下，如果是则继续计时而不是关机
-            bool in_video_cycling = (display_->GetDisplayMode() == EyeDisplay::DisplayMode::VIDEO_CYCLING);
-            if (in_video_cycling && power_save_timer_->IsInSleepMode()) {
-                // 在轮播模式下，检查是否有用户操作
-                if (has_user_interaction_) {
-                    ESP_LOGI(TAG, "轮播模式下检测到用户操作，重置定时器");
-                    power_save_timer_->ResetTimer();
-                    has_user_interaction_ = false;
-                } else {
-                    // 没有操作，继续计时（不执行关机，等待下次检查）
-                    ESP_LOGI(TAG, "轮播模式下继续计时，等待关机条件");
-                    // 重要：即使在睡眠模式下也要重置定时器，防止超时
-                    power_save_timer_->ResetTimer();
+            ESP_LOGE(TAG, "关机请求");
+            Application::GetInstance().QuitTalking();
+
+            Application::GetInstance().ResetDecoder();
+            Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
+            vTaskDelay(pdMS_TO_TICKS(3000));
+            if (IsCharging()) {
+                // 关掉背光
+                auto backlight = GetBacklight();
+                if (backlight != nullptr) {
+                    backlight->SetBrightness(0, false);
                 }
-                return;  // 轮播模式下不执行关机逻辑
-            }
-            
-            // 非轮播模式或未进入睡眠模式，执行原有的关机逻辑
-            if (!has_user_interaction_) {
-                // 检查是否在充电
-                bool is_charging = IsCharging();
-                if (is_charging) {
-                    // 充电时：显示充电动画（不轮播），进入睡眠
-                    ESP_LOGI(TAG, "第二个定时器触发，充电中，进入睡眠模式（显示充电动画）");
-                    // 设置标志，表示是第二个定时器触发的睡眠
-                    is_second_timer_sleep_ = true;
-                    Application::GetInstance().QuitTalking();
-                    // 确保不是轮播模式，显示充电动画
-                    if(display_->GetDisplayMode() == EyeDisplay::DisplayMode::VIDEO_CYCLING){
-                        display_->ToggleVideoCyclingMode();  // 退出轮播模式
-                    }
-                    display_->SetEmotion("Charging");  // 显示充电动画
-                    Application::GetInstance().EnterSleepMode();
-                } else {
-                    // 未充电时：播放关机音频后直接关机
-                    ESP_LOGI(TAG, "第二个定时器触发，未充电，准备播放关机音频");
-                    auto codec = GetAudioCodec();
-                    codec->EnableOutput(true);
-                    Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
-                    // 等待音频播放完成
-                    vTaskDelay(pdMS_TO_TICKS(3000));
-                    ESP_LOGI(TAG, "第二个定时器触发，未充电，直接关机");
-                    PowerOff();
-                }
+                return;
             } else {
-                // 有操作，重置定时器
-                ESP_LOGI(TAG, "第二个定时器触发，但检测到用户操作，重置定时器");
-                power_save_timer_->ResetTimer();
-                has_user_interaction_ = false;
+                PowerOff();
             }
         });
         power_save_timer_->SetEnabled(true);
     }
 
     virtual void ResetPowerSaveTimer() {
+        is_charging_sleep_ = false;
         if (power_save_timer_) {
             power_save_timer_->ResetTimer();
         }
@@ -196,105 +143,14 @@ private:
     };
 
     virtual void WakeUpPowerSaveTimer() {
+        is_charging_sleep_ = false;
         if (power_save_timer_) {
             power_save_timer_->SetEnabled(true);
             power_save_timer_->WakeUp();
         }
-        // 板级逻辑：唤醒时停止轮播模式睡眠定时器
-        StopVideoCyclingSleepTimer();
     };
     
-    // 板级逻辑：启动轮播模式下的睡眠计时定时器
-    void StartVideoCyclingSleepTimer() {
-        if (video_cycling_sleep_timer_ != nullptr) {
-            return;  // 已经启动
-        }
-        
-        video_cycling_sleep_ticks_ = 0;
-        esp_timer_create_args_t timer_args = {
-            .callback = [](void* arg) {
-                auto* self = static_cast<MovecallMojiESP32S3*>(arg);
-                self->VideoCyclingSleepTimerCallback();
-            },
-            .arg = this,
-            .dispatch_method = ESP_TIMER_TASK,
-            .name = "video_cycling_sleep",
-            .skip_unhandled_events = true,
-        };
-        ESP_ERROR_CHECK(esp_timer_create(&timer_args, &video_cycling_sleep_timer_));
-        ESP_ERROR_CHECK(esp_timer_start_periodic(video_cycling_sleep_timer_, 1000000));  // 每秒触发一次
-        ESP_LOGI(TAG, "轮播模式睡眠计时定时器已启动");
-    }
     
-    // 板级逻辑：停止轮播模式下的睡眠计时定时器
-    void StopVideoCyclingSleepTimer() {
-        if (video_cycling_sleep_timer_ != nullptr) {
-            esp_timer_stop(video_cycling_sleep_timer_);
-            esp_timer_delete(video_cycling_sleep_timer_);
-            video_cycling_sleep_timer_ = nullptr;
-            video_cycling_sleep_ticks_ = 0;
-            ESP_LOGI(TAG, "轮播模式睡眠计时定时器已停止");
-        }
-    }
-    
-    // 板级逻辑：轮播模式睡眠计时定时器回调
-    void VideoCyclingSleepTimerCallback() {
-        // 检查是否仍在轮播模式和睡眠模式
-        if (display_->GetDisplayMode() != EyeDisplay::DisplayMode::VIDEO_CYCLING || 
-            !power_save_timer_->IsInSleepMode()) {
-            // 不在轮播模式或已退出睡眠模式，停止定时器
-            StopVideoCyclingSleepTimer();
-            return;
-        }
-        
-        // 检查是否有用户操作
-        if (has_user_interaction_) {
-            ESP_LOGI(TAG, "轮播模式下检测到用户操作，重置定时器");
-            video_cycling_sleep_ticks_ = 0;
-            has_user_interaction_ = false;
-            return;
-        }
-        
-        // 继续计时
-        video_cycling_sleep_ticks_++;
-        
-            // 检查是否满足关机条件
-            if (video_cycling_sleep_ticks_ >= VIDEO_CYCLING_SLEEP_SHUTDOWN_SECONDS) {
-                ESP_LOGI(TAG, "轮播模式睡眠计时达到关机条件，执行关机");
-                StopVideoCyclingSleepTimer();
-                
-                // 调用原有的关机逻辑
-                if (IsCharging()) {
-                    // 充电时：显示充电动画（不轮播），保持睡眠状态
-                    ESP_LOGI(TAG, "轮播模式睡眠计时触发，充电中，显示充电动画");
-                    // 设置标志，表示是第二个定时器触发的睡眠
-                    is_second_timer_sleep_ = true;
-                    Application::GetInstance().QuitTalking();
-                    if(display_->GetDisplayMode() == EyeDisplay::DisplayMode::VIDEO_CYCLING){
-                        display_->ToggleVideoCyclingMode();  // 退出轮播模式
-                    }
-                    display_->SetEmotion("Charging");  // 显示充电动画
-                    // 注意：设备已经在睡眠模式了（第一个定时器已触发），不需要再调用 EnterSleepMode()
-                    // 但是需要播放音频提醒用户
-                    ESP_LOGI(TAG, "轮播模式睡眠计时触发，充电中，播放音频提醒");
-                    auto codec = GetAudioCodec();
-                    codec->EnableOutput(true);
-                    Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
-                    // 重要：充电状态下不应该继续运行轮播定时器，已经停止
-                    return;
-                } else {
-                    // 未充电时：播放关机音频后直接关机
-                    ESP_LOGI(TAG, "轮播模式睡眠计时触发，未充电，准备播放关机音频");
-                    auto codec = GetAudioCodec();
-                    codec->EnableOutput(true);
-                    Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
-                    // 等待音频播放完成
-                    vTaskDelay(pdMS_TO_TICKS(3000));
-                    ESP_LOGI(TAG, "轮播模式睡眠计时触发，未充电，直接关机");
-                    PowerOff();
-                }
-            }
-    }
 
 
     static void lis2hh12_task(void* arg) {
@@ -309,9 +165,10 @@ private:
         
         // 方向检测阈值（使用变化量检测，类似眩晕检测）
         // 使用raw值的变化量，避免静止状态误触发
-        const int16_t x_turn_threshold = 900;   // X轴变化量超过此值判断为转向（与前后阈值一致）
+        // 降低阈值提高灵敏度：从900
+        const int16_t x_turn_threshold = 900;   // X轴变化量超过此值判断为转向
         const int16_t y_forward_threshold = 900;  // Y轴变化量超过此值且为正向变化判断为前进
-        // const int16_t y_backward_threshold = 900; // Y轴变化量超过此值且为负向变化判断为后退（暂未使用）
+        // const int16_t y_backward_threshold = 600; // Y轴变化量超过此值且为负向变化判断为后退（暂未使用）
         
         // 方向检测状态
         int16_t last_x_raw = 0;  // 初始化为0，第一次读取后会更新
@@ -321,7 +178,7 @@ private:
         
         // 方向检测计数（类似摇晃检测）
         int direction_count = 0;
-        const int direction_count_threshold = 3; // 连续3次检测到变化才触发
+        const int direction_count_threshold = 2; // 降低到连续2次检测到变化就触发（提高灵敏度）
         const int direction_count_decay = 1;     // 每次没检测到就-1
         const char* last_detected_direction = nullptr; // 上次检测到的方向，用于判断方向是否改变
         
@@ -405,17 +262,33 @@ private:
                 last_detected_direction = detected_emotion;
                 direction_count++;
                 
-                // 检查是否达到触发阈值且已过冷却时间
-                if (direction_count >= direction_count_threshold && 
-                    current_time - board->last_direction_time_ >= direction_cooldown) {
-                    // 方向检测（前后左右）只能在轮播模式下触发
-                    auto display_mode = board->display_->GetDisplayMode();
-                    if (display_mode != EyeDisplay::DisplayMode::VIDEO_CYCLING) {
-                        // 不是轮播模式，跳过方向检测触发
-                        direction_count = 0;
-                        board->last_direction_time_ = current_time;
-                        continue;
+                // 检查是否达到触发阈值
+                // 如果是不同方向，可以立即打断（跳过冷却时间）
+                // 如果是相同方向，需要检查冷却时间
+                bool can_trigger = false;
+                if (direction_count >= direction_count_threshold) {
+                    if (board->last_triggered_direction_ == nullptr || 
+                        strcmp(detected_emotion, board->last_triggered_direction_) != 0) {
+                        // 不同方向，可以立即触发（打断）
+                        can_trigger = true;
+                        ESP_LOGI("LIS2HH12", "不同方向触发，立即打断: %s -> %s", 
+                                board->last_triggered_direction_ ? board->last_triggered_direction_ : "无", 
+                                detected_emotion);
+                    } else if (current_time - board->last_direction_time_ >= direction_cooldown) {
+                        // 相同方向，检查冷却时间
+                        can_trigger = true;
                     }
+                }
+                
+                if (can_trigger) {
+                    // 方向检测（前后左右）只能在轮播模式下触发
+                    // auto display_mode = board->display_->GetDisplayMode();
+                    // if (display_mode != EyeDisplay::DisplayMode::VIDEO_CYCLING) {
+                    //     // 不是轮播模式，跳过方向检测触发
+                    //     direction_count = 0;
+                    //     board->last_direction_time_ = current_time;
+                    //     continue;
+                    // }
                     
                     ESP_LOGI("LIS2HH12", "🔄 陀螺仪触发: 方向=%s, X轴=%d, Y轴=%d, 表情=%s", 
                              direction, x_raw, y_raw, detected_emotion);
@@ -484,6 +357,7 @@ private:
                     // 重置计数和更新触发时间
                     direction_count = 0;
                     board->last_direction_time_ = current_time;
+                    board->last_triggered_direction_ = detected_emotion;  // 记录本次触发的方向
                 }
             } else {
                 // 没有检测到方向变化，减少计数（类似摇晃检测的衰减）
@@ -676,7 +550,7 @@ private:
             }
             
             last_total_accel = total_accel;
-            vTaskDelay(pdMS_TO_TICKS(100)); // 100ms采样间隔
+            vTaskDelay(pdMS_TO_TICKS(50)); // 缩短采样间隔到50ms，提高检测频率和灵敏度
         }
     }
 
@@ -866,13 +740,6 @@ private:
                 last_touch_time_ = current_time; // 更新上次触发时间
 
                 //切换表情
-                if (CheckAndHandleEnterSleepMode()) {
-                    // 交给休眠逻辑托管
-                    ESP_LOGI(TAG, "触摸唤醒");
-                    // 注意：按钮唤醒时不应该自动进入聆听模式
-                    // 只有在检测到唤醒词时，才会通过 WakeWordInvoke() 或 OnWakeWordDetected() 进入聆听模式
-                    return;
-                }
                 display_->SetEmotion("loving");
                 if (ChannelIsOpen()) {
                     Application::GetInstance().SendTextToAI("用户正在抚摸你");
@@ -886,20 +753,15 @@ private:
         });
 
         boot_button_.OnClick([this]() {
+            WakeUpPowerSaveTimer();
             if (Application::GetInstance().IsTmpFactoryTestMode()) {
                 // 通过按键测试
                 display_->UpdateTestItem("key", 1);
                 return;
             }
 
-            if (CheckAndHandleEnterSleepMode()) {
-                // 交给休眠逻辑托管
-                ESP_LOGI(TAG, "长按唤醒");
-                // 注意：按钮唤醒时不应该自动进入聆听模式
-                // 只有在检测到唤醒词时，才会通过 WakeWordInvoke() 或 OnWakeWordDetected() 进入聆听模式
-                return;
-            }
-            
+            this->GetBacklight()->RestoreBrightness();
+
             // 移除轮播模式下的 ToggleCyclingLock() 调用，让 OnRepeatDone 处理所有点击逻辑
             // 包括轮播模式下的锁定/解锁操作
         });
@@ -917,12 +779,16 @@ private:
                 ESP_LOGI(TAG, "首次上电5秒内，忽略长按操作");
             } else {
                 ESP_LOGI(TAG, "执行关机操作");
-                // vTaskDelay(pdMS_TO_TICKS(200));
-                // auto codec = GetAudioCodec();
-                // codec->EnableOutput(true);
-                // Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
-                this->GetBacklight()->SetBrightness(0, false);
-                need_power_off_ = true;
+                if (!is_charging_sleep_) {
+                    // 避免重复执行关机操作
+                    Application::GetInstance().ResetDecoder();
+                    Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
+                    // this->GetBacklight()->SetBrightness(0, false);
+                    is_charging_sleep_ = true;
+
+                    need_power_off_ = true;
+                }
+                
             }
         });
         boot_button_.OnPressUp([this]() {
@@ -936,16 +802,17 @@ private:
                 xTaskCreate([](void* arg) {
                     auto* board = static_cast<MovecallMojiESP32S3*>(arg);
                     board->display_->SetEmotion("neutral");
+                  
 
                     if (board->IsCharging()) {
                         // 充电中，进入睡眠模式（会自动切换到轮播模式）
                         // 进入睡眠状态前，先切换到轮播模式
+                        Application::GetInstance().QuitTalking();
                         if(board->display_->GetDisplayMode() != EyeDisplay::DisplayMode::VIDEO_CYCLING){
                             ESP_LOGI("MovecallMojiESP32S3", "长按按键（充电中），进入轮播离线模式");
-                            Application::GetInstance().QuitTalking();
                             board->display_->ToggleVideoCyclingMode();
                         }
-                        Application::GetInstance().EnterSleepMode();
+                        // Application::GetInstance().EnterSleepMode();
                     } else {
                         // 没有充电，关机
                         board->PowerOff();
@@ -977,7 +844,7 @@ private:
                     }
                     // 切换锁定状态（锁定当前视频/继续轮播）
                     display_->ToggleCyclingLock();
-                } else {
+                } else if (Application::GetInstance().GetDeviceState() == kDeviceStateSpeaking) {
                     // 非轮播模式：切换聊天状态
                     auto& app = Application::GetInstance();
                     app.ToggleChatState();
@@ -1000,32 +867,18 @@ private:
         DeviceStateEventManager::GetInstance().RegisterStateChangeCallback(
             [this](DeviceState prev, DeviceState curr) {
                 ESP_LOGI(TAG, "[回调] 设备状态变化: %d -> %d, kDeviceStateSleeping=%d", prev, curr, kDeviceStateSleeping);
-                
-                // 当设备进入睡眠状态时，停止轮播模式定时器
-                bool is_sleeping = (curr == kDeviceStateSleeping || curr == 9);
-                if (is_sleeping) {
-                    ESP_LOGI(TAG, "[回调] 设备进入睡眠状态，停止轮播模式睡眠计时定时器");
-                    StopVideoCyclingSleepTimer();
-                }
+        
                 
                 // 当设备状态变为空闲状态时，切换到轮播模式
                 if (curr == kDeviceStateIdle) {
                     if (display_ == nullptr) {
                         return;
                     }
-                    // 如果是从睡眠状态进入空闲状态，不需要再次切换（已经在睡眠状态时切换过了）
-                    bool is_from_sleeping = (prev == kDeviceStateSleeping || prev == 9);
-                    if (is_from_sleeping) {
-                        ESP_LOGI(TAG, "[回调] 从睡眠状态进入空闲状态，跳过轮播切换（已在睡眠状态切换过）");
-                        // 注意：从睡眠状态唤醒后，不应该自动进入聆听模式
-                        // 只有在检测到唤醒词时，才会通过 WakeWordInvoke() 或 OnWakeWordDetected() 进入聆听模式
-                        return;
-                    }
                     ESP_LOGI(TAG, "[回调] 设备进入空闲状态，切换到轮播模式");
                     auto current_mode = display_->GetDisplayMode();
                     if (current_mode != EyeDisplay::DisplayMode::VIDEO_CYCLING) {
                         ESP_LOGI(TAG, "[回调] 切换到轮播模式");
-                        Application::GetInstance().QuitTalking();
+                        // Application::GetInstance().QuitTalking();
                         display_->ToggleVideoCyclingMode();
                     }
                     // 第一个定时器触发的睡眠，音频已在OnEnterSleepMode中播放，这里不需要再播放
@@ -1038,148 +891,6 @@ private:
                         }
                     }, "ensure_video_cycling_after_idle");
                     return;
-                }
-                
-                // 当设备状态变为睡眠状态时，根据标志决定是否切换到轮播模式，并显示相应表情
-                // 注意：is_sleeping 已在上面声明，这里直接使用
-                if (is_sleeping) {
-                    if (display_ == nullptr) {
-                        return;
-                    }
-                    
-                    // 如果是第二个定时器触发的睡眠，已经设置了"Charging"表情，跳过这里的设置和音频播放
-                    if (is_second_timer_sleep_) {
-                        ESP_LOGI(TAG, "[回调] 第二个定时器触发的睡眠，已设置充电动画（吃电池表情），跳过表情设置和音频播放");
-                        auto backlight = GetBacklight();
-                        if (backlight) {
-                            backlight->SetBrightness(20, false);  // 充电时降低亮度
-                        }
-                        is_second_timer_sleep_ = false;  // 清除标志
-                        // 跳过后续的轮播模式切换逻辑，因为已经在OnShutdownRequest中处理了
-                        return;
-                    }
-                    
-                    // 板级逻辑：检查电量和充电状态,决定显示哪个表情
-                    int level = 0;
-                    bool charging = false;
-                    bool discharging = false;
-                    bool has_battery = GetBatteryLevel(level, charging, discharging);
-                    auto backlight = GetBacklight();
-                    
-                    // 只有在特定条件下才显示充电表情
-                    bool should_show_charging_emotion = false;
-                    if (has_battery) {
-                        // 只有在第二个定时器触发时（即通过OnShutdownRequest）才显示充电表情
-                        // 这里我们只处理正常的睡眠状态显示
-                        if (level < 25 && !charging) {
-                            // 低电量(未充电),显示吃电池表情
-                            ESP_LOGI(TAG, "[回调] 低电量进入睡眠模式(电量: %d%%),显示吃电池表情", level);
-                            display_->SetEmotion("Charging");
-                            // 低电量时关闭背光
-                            if (backlight) {
-                                backlight->SetBrightness(0);
-                            }
-                            should_show_charging_emotion = true;
-                        } else {
-                            // 正常情况显示睡觉表情
-                            ESP_LOGI(TAG, "[回调] 进入睡眠模式(电量: %d%%, 充电: %d),显示睡觉表情", level, charging);
-                            display_->SetEmotion("sleepy");
-                            // 根据充电状态设置背光亮度
-                            if (backlight) {
-                                if (charging) {
-                                    // 充电时降低亮度
-                                    backlight->SetBrightness(20, false);
-                                } else {
-                                    // 非充电时恢复正常亮度
-                                    backlight->RestoreBrightness();
-                                }
-                            }
-                        }
-                    } else {
-                        // 无法获取电量信息,默认显示睡觉表情
-                        display_->SetEmotion("sleepy");
-                        // 无法获取电量信息时根据充电状态设置背光
-                        if (backlight) {
-                            if (charging) {
-                                backlight->SetBrightness(20, false);
-                            } else {
-                                backlight->RestoreBrightness();
-                            }
-                        }
-                    }
-                    
-                    // 注意：音频播放由 Application::EnterSleepMode 统一处理，这里不重复播放
-                    
-                    // 如果是第一个定时器触发的睡眠（sleep_with_video_cycling_=true），确保是轮播模式
-                    if (sleep_with_video_cycling_) {
-                        ESP_LOGI(TAG, "[回调] 第一个定时器触发的睡眠，确保轮播模式");
-                        auto current_mode = display_->GetDisplayMode();
-                        if (current_mode != EyeDisplay::DisplayMode::VIDEO_CYCLING) {
-                            ESP_LOGI(TAG, "[回调] 切换到轮播模式");
-                            display_->ToggleVideoCyclingMode();
-                        }
-                        // 注意：EnterSleepMode 中的 SetEmotion 会异步执行，但我们在 Application::Schedule 之后
-                        // 通过 Application::Schedule 来延迟确保轮播模式，避免 SetEmotion 退出轮播
-                        Application::GetInstance().Schedule([this]() {
-                            if (display_ != nullptr && 
-                                display_->GetDisplayMode() != EyeDisplay::DisplayMode::VIDEO_CYCLING) {
-                                ESP_LOGI(TAG, "[回调] EnterSleepMode后确保轮播模式");
-                                display_->ToggleVideoCyclingMode();
-                            }
-                            // 第一个定时器触发时，如果是轮播模式，恢复屏幕亮度（保持显示）
-                            if (display_ != nullptr && 
-                                display_->GetDisplayMode() == EyeDisplay::DisplayMode::VIDEO_CYCLING) {
-                                auto backlight = GetBacklight();
-                                if (backlight != nullptr) {
-                                    ESP_LOGI(TAG, "[回调] 轮播模式下进入睡眠，恢复屏幕亮度");
-                                    backlight->RestoreBrightness();
-                                }
-                            }
-                            sleep_with_video_cycling_ = false;  // 清除标志
-                        }, "ensure_video_cycling_after_sleep");
-                    } else {
-                        // 其他情况（如启动时直接进入睡眠），检查是否应该切换到轮播模式
-                        // 如果是第二个定时器触发的睡眠（显示充电表情），不应该切换到轮播模式
-                        if (is_second_timer_sleep_) {
-                            ESP_LOGI(TAG, "[回调] 第二个定时器触发的睡眠（显示充电表情），不切换到轮播模式");
-                            is_second_timer_sleep_ = false;  // 清除标志
-                            return;  // 直接返回，不执行后续逻辑
-                        }
-                        
-                        // 其他情况（如启动时直接进入睡眠），也切换到轮播模式
-                        ESP_LOGI(TAG, "[回调] 其他情况进入睡眠状态，切换到轮播模式");
-                        auto current_mode = display_->GetDisplayMode();
-                        if (current_mode != EyeDisplay::DisplayMode::VIDEO_CYCLING) {
-                            ESP_LOGI(TAG, "[回调] 切换到轮播模式");
-                            Application::GetInstance().QuitTalking();
-                            display_->ToggleVideoCyclingMode();
-                        }
-                        // 轮播模式下恢复背光亮度
-                        if (display_ != nullptr && 
-                            display_->GetDisplayMode() == EyeDisplay::DisplayMode::VIDEO_CYCLING) {
-                            if (backlight != nullptr) {
-                                ESP_LOGI(TAG, "[回调] 轮播模式下进入睡眠，恢复屏幕亮度");
-                                backlight->RestoreBrightness();
-                            }
-                        }
-                        // 使用 Application::Schedule 来延迟确保轮播模式，避免 SetEmotion 退出轮播
-                        Application::GetInstance().Schedule([this]() {
-                            if (display_ != nullptr && 
-                                display_->GetDisplayMode() != EyeDisplay::DisplayMode::VIDEO_CYCLING) {
-                                ESP_LOGI(TAG, "[回调] EnterSleepMode后确保轮播模式");
-                                display_->ToggleVideoCyclingMode();
-                            }
-                            // 确保轮播模式下背光是开启的
-                            if (display_ != nullptr && 
-                                display_->GetDisplayMode() == EyeDisplay::DisplayMode::VIDEO_CYCLING) {
-                                auto backlight = GetBacklight();
-                                if (backlight != nullptr) {
-                                    ESP_LOGI(TAG, "[回调] 确保轮播模式下背光开启");
-                                    backlight->RestoreBrightness();
-                                }
-                            }
-                        }, "ensure_video_cycling_after_sleep_other");
-                    }
                 }
             }
         );
@@ -1400,34 +1111,27 @@ private:
                 ESP_LOGI(TAG, "检测到开始充电");
                 // 降低发热                
                 GetBacklight()->SetBrightness(5, false);
+
+                // 触发一次吃电池表情
+                display_->SetEmotion("Charging");
                 
                 // 显示充电环（隐藏背景颜色，只显示进度条）
                 if (display_ != nullptr) {
                     display_->ShowBatteryLevel(false);  // false=隐藏背景颜色
                 }
                 
-                // 重要：充电时停止轮播定时器
-                StopVideoCyclingSleepTimer();
                 
             } else {
                 // 充电停止时的处理逻辑
                 ESP_LOGI(TAG, "检测到停止充电");
-
+                if (is_charging_sleep_) {
+                    // 直接关机
+                    PowerOff();
+                    return;
+                }
                 // 隐藏充电环
                 if (display_ != nullptr) {
                     display_->HiddenBatteryLevel();
-                }
-
-                if (this->is_charging_sleep_) {
-                    // 充电停止时，不关机，而是进入轮播离线模式
-                    ESP_LOGI(TAG, "充电停止，进入轮播离线模式");
-                    // 进入睡眠状态前，先切换到轮播模式
-                    if(display_->GetDisplayMode() != EyeDisplay::DisplayMode::VIDEO_CYCLING){
-                        Application::GetInstance().QuitTalking();
-                        display_->ToggleVideoCyclingMode();
-                    }
-                    Application::GetInstance().EnterSleepMode();
-                    is_charging_sleep_ = false;
                 }
             }
 
@@ -1545,16 +1249,6 @@ public:
 
         GetAudioCodec()->EnableOutput(true);
         Application::GetInstance().PlaySound(Lang::Sounds::P3_SUCCESS);
-    }
-
-    bool CheckAndHandleEnterSleepMode() {
-        auto& app = Application::GetInstance();
-        if (app.GetDeviceState() == kDeviceStateSleeping) {
-            // 如果休眠中
-            app.ExitSleepMode();
-            return true;
-        }
-        return false;
     }
 
     static void RestoreBacklightTask(void* arg) {

@@ -86,7 +86,7 @@ EyeDisplay::EyeDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_
         .io_handle = panel_io_,
         .panel_handle = panel_,
         .control_handle = nullptr,
-        .buffer_size = static_cast<uint32_t>(width_ * 40),
+        .buffer_size = static_cast<uint32_t>(width_ * 20),
         .double_buffer = true,
         .trans_size = 0,
         .hres = static_cast<uint32_t>(width_),

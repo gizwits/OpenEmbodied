@@ -972,6 +972,8 @@ void Application::OnWakeWordDetected() {
     if (!protocol_) {
         return;
     }
+    ESP_LOGI(TAG, "OnWakeWordDetected", device_state_);
+
 
     if (device_state_ == kDeviceStateIdle) {
         ResetDecoder();

@@ -211,6 +211,12 @@ void AudioService::Stop() {
 
 #ifndef CONFIG_USE_EYE_STYLE_VB6824
 bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples) {
+    // 检查 codec_ 是否有效
+    if (codec_ == nullptr) {
+        ESP_LOGW(TAG, "ReadAudioData: codec_ is null");
+        return false;
+    }
+    
     if (!codec_->input_enabled()) {
         codec_->EnableInput(true);
         esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
@@ -266,6 +272,12 @@ bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, in
 #else
 // opus 编码
 bool AudioService::ReadAudioData(std::vector<uint8_t>& opus, int sample_rate, int samples) {
+    // 检查 codec_ 是否有效
+    if (codec_ == nullptr) {
+        ESP_LOGW(TAG, "ReadAudioData: codec_ is null");
+        return false;
+    }
+    
     if (!codec_->input_enabled()) {
         codec_->EnableInput(true);
         esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
