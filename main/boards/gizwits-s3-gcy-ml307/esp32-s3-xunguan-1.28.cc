@@ -610,7 +610,7 @@ private:
 
     // 更新MCU MUTE信号
     void UpdateMuteSignal() {
-        int hpr_level = gpio_get_level(HPR_SIGN_PIN);
+        int hpr_level = !gpio_get_level(HPR_SIGN_PIN);
         // HPR-SIGN为高时，有耳机插入，输出MCU MUTE为高
         // HPR-SIGN为低时，无耳机插入，输出MCU MUTE为低
         gpio_set_level(MCU_MUTE_PIN, hpr_level);
