@@ -54,8 +54,6 @@
 
 #define TOUCH_BUTTON_GPIO GPIO_NUM_46
 
-#define CHARGING_PIN     GPIO_NUM_11   // CHRG pin
-#define STANDBY_PIN      GPIO_NUM_3    // STDBY pin
 
 #define BAT_ADC_CHANNEL  ADC_CHANNEL_1  // Battery voltage ADC channel (ADC2_CH1 -> ESP_IO12)
 #define BAT_ADC_ATTEN    ADC_ATTEN_DB_12 // ADC attenuation (12dB, 与充电检测ADC一致)
