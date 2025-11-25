@@ -354,7 +354,7 @@ private:
     lv_image_dsc_t video_img_dsc_ = {};  // 视频图像描述符
     uint8_t* first_frame_buf_ = nullptr;  // 第一帧缓冲区（用于避免闪烁）
     bool video_img_foreground_ = false;  // 视频图像是否已经在最前面（用于优化，避免重复调用move_foreground）
-    static constexpr uint32_t kVideoFrameDelayMs = 100;  // 1000/15=66.66ms
+    static constexpr uint32_t kVideoFrameDelayMs = 80;  // 1000/15=66.66ms
     static constexpr uint32_t kVideoFlashBaseAddress = 0x000000;  // Flash 视频数据基地址
 };
 

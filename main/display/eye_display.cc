@@ -1653,7 +1653,7 @@ void EyeDisplay::StopVideoPlayback() {
 }
 
 void EyeDisplay::PlayVideoGroup(int index) {
-    ESP_LOGI(TAG, "PlayVideoGroup called with index=%d", index);
+    // ESP_LOGI(TAG, "PlayVideoGroup called with index=%d", index);
     
     auto& flash = W25Q64Flash::GetInstance();
     if (!flash.IsInitialized()) {

@@ -88,7 +88,7 @@ private:
 
     void InitializePowerSaveTimer() {
         // 使用宏定义配置定时器时间
-        power_save_timer_ = new PowerSaveTimer(-1, 30 , 60);
+        power_save_timer_ = new PowerSaveTimer(-1, 20 * 60 , 30 * 60);
         power_save_timer_->OnEnterSleepMode([this]() {
             if (is_charging_sleep_) {
                 return;
@@ -165,9 +165,8 @@ private:
         
         // 方向检测阈值（使用变化量检测，类似眩晕检测）
         // 使用raw值的变化量，避免静止状态误触发
-        // 降低阈值提高灵敏度：从900
-        const int16_t x_turn_threshold = 900;   // X轴变化量超过此值判断为转向
-        const int16_t y_forward_threshold = 900;  // Y轴变化量超过此值且为正向变化判断为前进
+        const int16_t x_turn_threshold = 1200;   // X轴变化量超过此值判断为转向
+        const int16_t y_forward_threshold = 1200;  // Y轴变化量超过此值且为正向变化判断为前进
         // const int16_t y_backward_threshold = 600; // Y轴变化量超过此值且为负向变化判断为后退（暂未使用）
         
         // 方向检测状态
@@ -311,7 +310,7 @@ private:
                         
                         // 触发表情（会切换到固定表情模式）
                         board->display_->SetEmotion(detected_emotion);
-                        ESP_LOGI("LIS2HH12", "已触发表情: %s (轮播模式，5秒后恢复轮播)", detected_emotion);
+                        // ESP_LOGI("LIS2HH12", "已触发表情: %s (轮播模式，5秒后恢复轮播)", detected_emotion);
                         
                         // 创建或重启恢复定时器（5秒后恢复轮播）
                         if (board->gyro_emotion_restore_timer_ == nullptr) {
@@ -433,7 +432,7 @@ private:
                                 
                                 // 触发表情
                                 board->display_->SetEmotion("vertigo");
-                                ESP_LOGI("LIS2HH12", "已触发表情: vertigo (固定表情模式，5秒后恢复)");
+                                // ESP_LOGI("LIS2HH12", "已触发表情: vertigo (固定表情模式，5秒后恢复)");
                                 
                                 // 创建或重启恢复定时器（5秒后恢复）
                                 // 注意：如果定时器已经存在（由方向检测创建），直接使用，不重新创建
@@ -489,7 +488,7 @@ private:
                                 
                                 // 触发表情（会切换到固定表情模式）
                                 board->display_->SetEmotion("vertigo");
-                                ESP_LOGI("LIS2HH12", "已触发表情: vertigo (轮播模式，5秒后恢复轮播)");
+                                // ESP_LOGI("LIS2HH12", "已触发表情: vertigo (轮播模式，5秒后恢复轮播)");
                                 
                                 // 创建或重启恢复定时器（5秒后恢复轮播）
                                 // 注意：如果定时器已经存在（由方向检测或固定表情模式下的摇晃检测创建），直接使用，不重新创建
@@ -741,6 +740,7 @@ private:
                     // 避免重复执行关机操作
                     Application::GetInstance().ResetDecoder();
                     Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
+                    vTaskDelay(pdMS_TO_TICKS(2000));
                     // this->GetBacklight()->SetBrightness(0, false);
                     is_charging_sleep_ = true;
 

@@ -71,6 +71,10 @@ private:
     adc_oneshot_unit_handle_t charging_detect_adc_handle_ = nullptr;
     bool charging_detect_adc_initialized_ = false;
     
+    // 充电检测ADC校准句柄
+    adc_cali_handle_t charging_detect_cali_handle_ = nullptr;
+    bool charging_detect_cali_inited_ = false;
+    
     // VDD电压检测相关（仅用于判断充电状态）
     int charging_adc_value_ = 0;  // 三次采集平均值
     
@@ -221,23 +225,52 @@ private:
         ESP_LOGD("PowerManager", "🔋 充电检测ADC%d次采集平均值: %d", ADC_SAMPLE_COUNT, charging_adc_value_);
     }
     
-    // 检查充电状态（仅判断充电/未充电，不计算电量）
+    // 获取充电检测电压（mV）
+    uint32_t GetChargingDetectVoltage() {
+        // 计算经校准后的电压（mV）
+        int mv = charging_adc_value_;
+        if (charging_detect_cali_inited_ && charging_detect_cali_handle_ != nullptr) {
+            (void)adc_cali_raw_to_voltage(charging_detect_cali_handle_, charging_adc_value_, &mv);
+        } else {
+            // 如果没有校准，使用原始换算（12位ADC，12dB衰减，最大2.6V）
+            // ADC值范围0-4095，对应0-2600mV
+            mv = (charging_adc_value_ * 2600) / 4095;
+        }
+        return (uint32_t)mv;
+    }
+    
+    // 检查充电状态（根据电压值判断：充电中<1.0V, 充满1.0-1.5V, 没充电>1.5V）
     void CheckChargingStatus() {
-        // ADC值已在CheckBatteryStatus中统一打印，这里不再单独打印
-        
         bool previous_charging = is_charging_;
         
-        // 判断充电状态：使用ADC2_CH2的值
-        // ADC值 > 3000 -> 未充电（电池供电）
-        // ADC值 <= 3000 -> 充电中（USB供电）
-        const int CHARGING_ADC_THRESHOLD = 3000;
+        // 将ADC值转换为电压值（mV）
+        uint32_t voltage_mv = GetChargingDetectVoltage();
+        
+        // 根据电压值判断充电状态（考虑误差 ±0.1V）
+        // 充电中: 0.8V (考虑误差: < 1.0V = < 1000mV)
+        // 充满: 1.3V (考虑误差: 1.0V - 1.5V = 1000mV - 1500mV)
+        // 没充电: 1.65V (考虑误差: > 1.5V = > 1500mV)
         bool candidate_charging = false;
-        if (charging_adc_value_ > CHARGING_ADC_THRESHOLD) {
-            // ADC值高，表示未充电（电池供电）
-            candidate_charging = false;
-        } else {
-            // ADC值低，表示充电中（USB供电）
+        bool is_full_charged = false;
+        
+        if (voltage_mv < 1000) {
+            // 电压 < 1.0V，表示充电中
             candidate_charging = true;
+            is_full_charged = false;
+        } else if (voltage_mv <= 1400) {
+            // 电压 1.0V - 1.5V，表示充满
+            candidate_charging = true;
+            is_full_charged = true;
+        } else {
+            // 电压 > 1.5V，表示没充电
+            candidate_charging = false;
+            is_full_charged = false;
+        }
+        
+        // 如果充满电，设置电量为100
+        if (is_full_charged && battery_level_ < 100) {
+            battery_level_ = 100;
+            ESP_LOGI("PowerManager", "🔋 检测到充满电，设置电量为100%%");
         }
         
         // 防抖机制：需要连续多次检测到相同状态才切换
@@ -258,10 +291,10 @@ private:
             // 只有连续检测到相同状态达到防抖次数，才真正切换状态
             if (charging_state_count_ >= CHARGING_STATE_DEBOUNCE_COUNT) {
                 is_charging_ = charging_state_candidate_;
-                ESP_LOGI("PowerManager", "🔋 充电状态变化: %s -> %s (ADC2_CH2值: %d, 阈值: %d, 连续检测%d次)", 
+                ESP_LOGI("PowerManager", "🔋 充电状态变化: %s -> %s (电压: %lumV, ADC值: %d, 连续检测%d次)", 
                          previous_charging ? "充电中" : "未充电", 
                          is_charging_ ? "充电中" : "未充电", 
-                         charging_adc_value_, CHARGING_ADC_THRESHOLD, charging_state_count_);
+                         voltage_mv, charging_adc_value_, charging_state_count_);
                 if (charging_status_callback_) {
                     charging_status_callback_(is_charging_);
                 }
@@ -431,6 +464,21 @@ private:
         charging_detect_adc_initialized_ = true;
         ESP_LOGI("PowerManager", "✅ ADC2_CH2初始化成功，用于检测VDD电压, unit=%d, channel=%d", 
                  CHARGING_DETECT_ADC_UNIT, CHARGING_DETECT_ADC_CHANNEL);
+        
+        // 创建充电检测ADC校准（曲线拟合方案，ESP32-S3使用curve_fitting）
+        adc_cali_curve_fitting_config_t charging_detect_cali_config = {
+            .unit_id = CHARGING_DETECT_ADC_UNIT,
+            .atten = CHARGING_DETECT_ADC_ATTEN,
+            .bitwidth = ADC_BITWIDTH_12,
+        };
+        if (adc_cali_create_scheme_curve_fitting(&charging_detect_cali_config, &charging_detect_cali_handle_) == ESP_OK) {
+            charging_detect_cali_inited_ = true;
+            ESP_LOGI("PowerManager", "充电检测ADC校准已启用（curve fitting）");
+        } else {
+            charging_detect_cali_inited_ = false;
+            charging_detect_cali_handle_ = nullptr;
+            ESP_LOGW("PowerManager", "充电检测ADC校准不可用，改用原始raw换算");
+        }
     }
     
 
@@ -523,6 +571,12 @@ public:
             adc_cali_delete_scheme_curve_fitting(cali_handle_);
             cali_handle_ = nullptr;
             cali_inited_ = false;
+        }
+        // 清理充电检测ADC校准句柄
+        if (charging_detect_cali_inited_ && charging_detect_cali_handle_) {
+            adc_cali_delete_scheme_curve_fitting(charging_detect_cali_handle_);
+            charging_detect_cali_handle_ = nullptr;
+            charging_detect_cali_inited_ = false;
         }
     }
 
