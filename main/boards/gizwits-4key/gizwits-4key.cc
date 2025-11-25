@@ -154,22 +154,23 @@ private:
         static int first_level = gpio_get_level(BOOT_BUTTON_GPIO);
         boot_button_.OnClick([this]() {
             // 只有充电导致的静默启动才禁用按键，异常重启的静默启动允许按键工作
-            if (silent_startup_from_board_) {
-                ESP_LOGI(TAG, "充电静默启动状态，短按 BOOT 不执行操作");
-                return;
-            }
+            // if (silent_startup_from_board_) {
+            //     ESP_LOGI(TAG, "充电静默启动状态，短按 BOOT 不执行操作");
+            //     return;
+            // }
             WakeUp();
         }); 
         boot_button_.OnPressRepeat([this](uint16_t count) {
             ESP_LOGI(TAG, "boot_button_.OnPressRepeat");
             // 只有充电导致的静默启动才禁用按键，异常重启的静默启动允许按键工作
-            if (silent_startup_from_board_) {
-                ESP_LOGI(TAG, "充电静默启动状态，忽略重复按键");
-                return;
-            }
+            
             if(count >= 5){
                 ResetWifiConfiguration();
             } else {
+                // if (silent_startup_from_board_) {
+                //     ESP_LOGI(TAG, "充电静默启动状态，忽略重复按键");
+                //     return;
+                // }
                 Application::GetInstance().ToggleChatState();
             }
         });
@@ -226,6 +227,7 @@ private:
                 auto codec = GetAudioCodec();
                 codec->EnableOutput(true);
                 Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
+                vTaskDelay(pdMS_TO_TICKS(2000));
                 need_power_off_ = true;
             }
         });
@@ -250,32 +252,37 @@ private:
         ESP_LOGI(TAG, "chat_mode: %d", chat_mode);
 
         if (chat_mode == 0) {
-            rec_button_.OnPressDown([this]() {
-                // 只有充电导致的静默启动才禁用按键，异常重启的静默启动允许按键工作
-                if (silent_startup_from_board_) {
-                    ESP_LOGI(TAG, "充电静默启动状态，短按 REC 不执行操作");
-                    return;
-                }
-                WakeUp();
-                ESP_LOGI(TAG, "rec_button_.OnPressDown");
-                Application::GetInstance().StartListening();
-            });
+            // 先注册 OnPressUp，确保事件能被正确捕获
             rec_button_.OnPressUp([this]() {
-                // 只有充电导致的静默启动才禁用按键，异常重启的静默启动允许按键工作
-                if (silent_startup_from_board_) {
-                    ESP_LOGI(TAG, "充电静默启动状态，松开 REC 不执行操作");
-                    return;
-                }
                 ESP_LOGI(TAG, "rec_button_.OnPressUp");
+                // 只有充电导致的静默启动才禁用按键，异常重启的静默启动允许按键工作
+                // if (silent_startup_from_board_) {
+                //     ESP_LOGI(TAG, "充电静默启动状态，松开 REC 不执行操作");
+                //     return;
+                // }
                 Application::GetInstance().StopListening();
             });
+            rec_button_.OnPressDown([this]() {
+                ESP_LOGI(TAG, "rec_button_.OnPressDown");
+                // 只有充电导致的静默启动才禁用按键，异常重启的静默启动允许按键工作
+                // if (silent_startup_from_board_) {
+                //     ESP_LOGI(TAG, "充电静默启动状态，短按 REC 不执行操作");
+                //     return;
+                // }
+                WakeUp();
+                Application::GetInstance().StartListening();
+            });
         } else {
+            rec_button_.OnPressUp([this]() {
+                ESP_LOGI(TAG, "rec_button_.OnPressUp");
+            });
+
             rec_button_.OnPressDown([this]() {
                 // 只有充电导致的静默启动才禁用按键，异常重启的静默启动允许按键工作
-                if (silent_startup_from_board_) {
-                    ESP_LOGI(TAG, "充电静默启动状态，短按 REC 不执行操作");
-                    return;
-                }
+                // if (silent_startup_from_board_) {
+                //     ESP_LOGI(TAG, "充电静默启动状态，短按 REC 不执行操作");
+                //     return;
+                // }
                 ESP_LOGI(TAG, "rec_button_.OnPressDown");
                 WakeUp();
                 Application::GetInstance().ToggleChatState();
@@ -284,10 +291,10 @@ private:
         
         volume_up_button_.OnPressDown([this]() {
             // 只有充电导致的静默启动才禁用按键，异常重启的静默启动允许按键工作
-            if (silent_startup_from_board_) {
-                ESP_LOGI(TAG, "充电静默启动状态，短按音量+不执行操作");
-                return;
-            }
+            // if (silent_startup_from_board_) {
+            //     ESP_LOGI(TAG, "充电静默启动状态，短按音量+不执行操作");
+            //     return;
+            // }
             WakeUp();
             ESP_LOGI(TAG, "volume_up_button_.OnClick");
             auto codec = GetAudioCodec();
@@ -296,20 +303,20 @@ private:
         });
         volume_up_button_.OnLongPress([this]() {
             // 只有充电导致的静默启动才禁用按键，异常重启的静默启动允许按键工作
-            if (silent_startup_from_board_) {
-                ESP_LOGI(TAG, "充电静默启动状态，长按音量+不执行操作");
-                return;
-            }
+            // if (silent_startup_from_board_) {
+            //     ESP_LOGI(TAG, "充电静默启动状态，长按音量+不执行操作");
+            //     return;
+            // }
             ESP_LOGI(TAG, "volume_up_button_.OnLongPress");
             CheckDualLongPress();
         });
 
         volume_down_button_.OnPressDown([this]() {
             // 只有充电导致的静默启动才禁用按键，异常重启的静默启动允许按键工作
-            if (silent_startup_from_board_) {
-                ESP_LOGI(TAG, "充电静默启动状态，短按音量-不执行操作");
-                return;
-            }
+            // if (silent_startup_from_board_) {
+            //     ESP_LOGI(TAG, "充电静默启动状态，短按音量-不执行操作");
+            //     return;
+            // }
             WakeUp();
             ESP_LOGI(TAG, "volume_down_button_.OnClick");
             auto codec = GetAudioCodec();
@@ -318,10 +325,10 @@ private:
         });
         volume_down_button_.OnLongPress([this]() {
             // 只有充电导致的静默启动才禁用按键，异常重启的静默启动允许按键工作
-            if (silent_startup_from_board_) {
-                ESP_LOGI(TAG, "充电静默启动状态，长按音量-不执行操作");
-                return;
-            }
+            // if (silent_startup_from_board_) {
+            //     ESP_LOGI(TAG, "充电静默启动状态，长按音量-不执行操作");
+            //     return;
+            // }
             ESP_LOGI(TAG, "volume_down_button_.OnLongPress");
             CheckDualLongPress();
         });
@@ -454,7 +461,7 @@ private:
 public:
     GizwitsDevBoard() : boot_button_(BOOT_BUTTON_GPIO),
     volume_up_button_(VOLUME_UP_BUTTON_GPIO), volume_down_button_(VOLUME_DOWN_BUTTON_GPIO),
-    rec_button_(REC_BUTTON_GPIO) {
+    rec_button_(REC_BUTTON_GPIO, false, 0, 100) {  // 设置 short_press_time=100ms 以支持 OnPressUp 事件
         // 记录上电时间
         power_on_time_ = esp_timer_get_time() / 1000; // 转换为毫秒
         ESP_LOGI(TAG, "设备启动，上电时间戳: %lld ms", power_on_time_);
@@ -514,16 +521,6 @@ public:
                     silent_startup_from_board_ = true;
                 }
             }
-        }
-        ESP_LOGI(TAG, "silent_startup_from_board_ 最终值: %d", silent_startup_from_board_);
-        
-        // 如果是静默启动，确保 LED 关闭
-        if (silent_startup_from_board_) {
-            gpio_set_level(BUILTIN_SINGLE_LED_GPIO, 0);
-            if (GetLed()) {
-                GetLed()->TurnOff();
-            }
-            ESP_LOGI(TAG, "静默启动，关闭 LED");
         }
         
         InitializeDataPointManager();
@@ -676,15 +673,15 @@ public:
     // 返回是否需要在充电时静默启动
     virtual bool NeedSilentStartup() override {
         // 检查NVS标志或充电状态
-        if (silent_startup_from_board_) {
-            return true;
-        }
+        // if (silent_startup_from_board_) {
+        //     return true;
+        // }
         
-        // 检查USB插入或深度睡眠唤醒
-        auto reset_reason = esp_reset_reason();
-        if (reset_reason == ESP_RST_USB || reset_reason == ESP_RST_DEEPSLEEP) {
-            return true;
-        }
+        // // 检查USB插入或深度睡眠唤醒
+        // auto reset_reason = esp_reset_reason();
+        // if (reset_reason == ESP_RST_USB || reset_reason == ESP_RST_DEEPSLEEP) {
+        //     return true;
+        // }
         
         return false;
     }
