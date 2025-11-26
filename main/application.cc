@@ -730,6 +730,13 @@ void Application::Start() {
         display->SetEmotion("sleepy");
     }
 
+    if (Board::GetInstance().NeedForceConnect()) {
+        Schedule([this]() {
+            ToggleChatState();
+        }); 
+    }
+
+
     // Print heap stats
     SystemInfo::PrintHeapStats();
 

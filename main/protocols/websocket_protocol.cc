@@ -829,11 +829,32 @@ bool WebsocketProtocol::OpenAudioChannel() {
 #endif
     message += "\"input_audio_buffer.speech_stopped\"";
     message += "],";
+    
+    // 获取打断关键词列表
+    auto interrupt_keywords = Board::GetInstance().GetInterruptKeywords();
+    
     if (chat_mode != 0) {
         message += "\"turn_detection\": {";
         message += "\"type\": \"server_vad\",";  // 判停类型，client_vad/server_vad，默认为 client_vad
         message += "\"prefix_padding_ms\": 300,"; // server_vad模式下，VAD 检测到语音之前要包含的音频量，单位为 ms。默认为 600ms
         message += "\"silence_duration_ms\": 500"; // server_vad模式下，检测语音停止的静音持续时间，单位为 ms。默认为 800ms
+        
+        // 如果存在关键词，添加 interrupt_config
+        if (!interrupt_keywords.empty()) {
+            message += ",";
+            message += "\"interrupt_config\":{";
+            message += "\"mode\":\"keyword_contains\",";
+            message += "\"keywords\":[";
+            for (size_t i = 0; i < interrupt_keywords.size(); i++) {
+                message += "\"" + interrupt_keywords[i] + "\"";
+                if (i < interrupt_keywords.size() - 1) {
+                    message += ",";
+                }
+            }
+            message += "]";
+            message += "}";
+        }
+        
         message += "},";
     }
     message += "\"chat_config\":{";
@@ -858,7 +879,23 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "\"channel\":1,";
     message += "\"bit_depth\":16";
     message += "},";
-    message += "\"asr_config\":{\"user_language\":\"" + user_language + "\"},";
+    message += "\"asr_config\":{";
+    message += "\"user_language\":\"" + user_language + "\"";
+    
+    // 如果存在关键词，添加 hot_words
+    if (!interrupt_keywords.empty()) {
+        message += ",";
+        message += "\"hot_words\":[";
+        for (size_t i = 0; i < interrupt_keywords.size(); i++) {
+            message += "\"" + interrupt_keywords[i] + "\"";
+            if (i < interrupt_keywords.size() - 1) {
+                message += ",";
+            }
+        }
+        message += "]";
+    }
+    
+    message += "},";
     message += "\"output_audio\":{";
     message += "\"codec\":\"" + codec + "\",";
     message += "\"opus_config\":{";

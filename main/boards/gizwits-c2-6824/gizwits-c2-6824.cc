@@ -240,6 +240,15 @@ public:
         return &audio_codec;
     }
 
+    virtual std::vector<std::string> GetInterruptKeywords() override {
+        return {"帷幕开了"};
+    }
+
+
+    virtual bool NeedForceConnect() override {
+        return true;
+    }
+
     void SetPowerSaveTimer(bool enable) {
         power_save_timer_->SetEnabled(enable);
     }
