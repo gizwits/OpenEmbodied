@@ -623,6 +623,11 @@ void Application::Start() {
                     Schedule([this]() {
                         Reboot();
                     }, "OnIncomingJson_System_Reboot");
+                } else if (strcmp(command->valuestring, "agent_switched") == 0) {
+                    // 切换智能体
+                    Schedule([this]() {
+                        SetDeviceState(kDeviceStateListening);
+                    }, "OnIncomingJson_System_AgentSwitched");
                 } else {
                     ESP_LOGW(TAG, "Unknown system command: %s", command->valuestring);
                 }
