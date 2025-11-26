@@ -349,6 +349,7 @@ void Application::Start() {
     auto reset_reason = esp_reset_reason();
     ESP_LOGI(TAG, "esp_reset_reason: %d", reset_reason);
 
+    Settings settings("wifi", true);
 
 #ifdef CONFIG_DEFAULT_CHAT_MODE
     int default_chat_mode = CONFIG_DEFAULT_CHAT_MODE;
@@ -381,7 +382,6 @@ void Application::Start() {
     }
     ESP_LOGI(TAG, "最终 is_silent_startup_: %d", is_silent_startup_);
     
-    Settings settings("wifi", true);
 
     auto& board = Board::GetInstance();
 
