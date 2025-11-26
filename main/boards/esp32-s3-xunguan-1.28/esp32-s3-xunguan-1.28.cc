@@ -715,6 +715,10 @@ public:
         vTaskDelete(NULL); // 任务结束时删除自己
     }
 
+    virtual bool NeedBlockLowBattery() override {
+        return true;
+    }
+
     virtual Display* GetDisplay() override {
         return display_;
     }
