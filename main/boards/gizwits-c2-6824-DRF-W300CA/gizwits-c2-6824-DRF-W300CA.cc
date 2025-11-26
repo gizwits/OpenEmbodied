@@ -86,6 +86,9 @@ private:
 	
 	// 静默启动标志（充电状态下不自动启动，需要长按BOOT按键）
 	bool silent_startup_from_board_ = false;
+	
+	// 自动关机任务句柄，防止重复创建任务
+	TaskHandle_t auto_poweroff_task_handle_ = nullptr;
 
 	static void BuiltinLedTimerCallback(void* arg) {
 		CustomBoard* self = static_cast<CustomBoard*>(arg);
@@ -1065,7 +1068,15 @@ public:
                             ESP_LOGI(TAG, "电池模式下关机，保存silent_next=0");
                         }
                         // 延迟一小段时间再关机，避免误判
-                        xTaskCreate([](void* arg) {
+                        // 防止重复创建任务：如果任务已存在，先删除旧任务
+                        if (auto_poweroff_task_handle_ != nullptr) {
+                            TaskHandle_t old_handle = auto_poweroff_task_handle_;
+                            auto_poweroff_task_handle_ = nullptr;
+                            vTaskDelete(old_handle);
+                            ESP_LOGW(TAG, "检测到重复的自动关机任务，删除旧任务");
+                        }
+                        
+                        BaseType_t task_result = xTaskCreate([](void* arg) {
                             vTaskDelay(pdMS_TO_TICKS(2000));  // 等待2秒确认
                             CustomBoard* board = static_cast<CustomBoard*>(arg);
                             if (!PowerManager::GetInstance().IsCharging() && board->silent_startup_from_board_) {
@@ -1082,15 +1093,18 @@ public:
                                 vTaskDelay(pdMS_TO_TICKS(3000));
                                 board->run_sleep_mode(false);
                             }
+                            // 清除任务句柄
+                            board->auto_poweroff_task_handle_ = nullptr;
                             vTaskDelete(NULL);
-                        }, "auto_poweroff_task", 2048, this, 5, NULL);  // 减小栈大小：2KB足够（等待+关机操作）
-                    } else {
-                        // 非静默模式下的处理：如果设备处于待机或休眠状态，则自动关机
-                        auto state = Application::GetInstance().GetDeviceState();
-                        if (state == kDeviceStateIdle || state == kDeviceStateSleeping) {
-                            ESP_LOGI(TAG, "🔋 非静默模式下检测到USB已拔掉，设备处于待机/休眠状态，自动关机");
-                            PowerOff();
+                        }, "auto_poweroff_task", 2048, this, 5, &auto_poweroff_task_handle_);  // 减小栈大小：2KB足够（等待+关机操作）
+                        
+                        if (task_result != pdPASS) {
+                            ESP_LOGE(TAG, "创建自动关机任务失败，可能导致内存不足");
+                            auto_poweroff_task_handle_ = nullptr;
                         }
+                    } else {
+                        // 非静默模式下，检测到停止充电也不执行自动关机
+                        ESP_LOGI(TAG, "🔋 非静默模式下检测到USB状态变化（从充电变为非充电），但不执行自动关机");
                     }
                 }
             }
@@ -1402,7 +1416,7 @@ public:
                 };
                 const int nkeys = sizeof(keys)/sizeof(keys[0]);
                 const int steps_per_segment = 60;
-                const TickType_t step_delay = pdMS_TO_TICKS(32);
+                const TickType_t step_delay = pdMS_TO_TICKS(80);
                 int applied_brightness = board->MapAppliedBrightness_(board->GetBrightness_());
                 // 确保低亮度时也能看见（至少30%）
                 if (applied_brightness < 30) applied_brightness = 30;
