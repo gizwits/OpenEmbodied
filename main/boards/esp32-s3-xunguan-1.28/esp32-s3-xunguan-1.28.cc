@@ -1243,6 +1243,10 @@ public:
         gpio_set_level(POWER_GPIO, 0);
     }
 
+    virtual bool NeedBlockLowBattery() override {
+        return true;
+    }
+
     virtual void WakeWordDetected() override {
         ESP_LOGI(TAG, "WakeWordDetected");
         display_->UpdateTestItemStatus("mic", 1);
