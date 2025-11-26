@@ -85,6 +85,48 @@ private:
         {"mic", "麦克风检测", 0},
     };
 
+    void InitializeChargingGpio() {
+        ESP_LOGI(TAG, "开始初始化充电检测IO口: CHARGING_PIN=%d", CHARGING_PIN);
+        
+        gpio_config_t io_conf = {
+            .pin_bit_mask = (1ULL << STANDBY_PIN),
+            .mode = GPIO_MODE_INPUT,
+            .pull_up_en = GPIO_PULLUP_ENABLE,  // 需要上拉，因为这些引脚是开漏输出
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE
+        };
+        esp_err_t ret1 = gpio_config(&io_conf);
+        if (ret1 != ESP_OK) {
+            ESP_LOGE(TAG, "❌ STANDBY_PIN初始化失败: GPIO=%d, 错误: %s (0x%x)", 
+                     STANDBY_PIN, esp_err_to_name(ret1), ret1);
+        } else {
+            ESP_LOGI(TAG, "✅ STANDBY_PIN初始化成功: GPIO=%d", STANDBY_PIN);
+        }
+
+        gpio_config_t io_conf2 = {
+            .pin_bit_mask = (1ULL << CHARGING_PIN),
+            .mode = GPIO_MODE_INPUT,
+            .pull_up_en = GPIO_PULLUP_ENABLE,  // 需要上拉，因为这些引脚是开漏输出
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE
+        };
+        esp_err_t ret2 = gpio_config(&io_conf2);
+        if (ret2 != ESP_OK) {
+            ESP_LOGE(TAG, "❌ CHARGING_PIN初始化失败: GPIO=%d (用于充电检测), 错误: %s (0x%x)", 
+                     CHARGING_PIN, esp_err_to_name(ret2), ret2);
+        } else {
+            ESP_LOGI(TAG, "✅ CHARGING_PIN初始化成功: GPIO=%d (用于充电检测)", CHARGING_PIN);
+        }
+        
+        // 打印最终状态
+        if (ret1 == ESP_OK && ret2 == ESP_OK) {
+            ESP_LOGI(TAG, "✅ 所有充电检测IO口初始化成功");
+        } else {
+            ESP_LOGW(TAG, "⚠️ 充电检测IO口初始化状态: STANDBY_PIN=%s, CHARGING_PIN=%s", 
+                     ret1 == ESP_OK ? "成功" : "失败", ret2 == ESP_OK ? "成功" : "失败");
+        }
+    }
+
 
     void InitializePowerSaveTimer() {
         // 使用宏定义配置定时器时间
@@ -1132,6 +1174,7 @@ public:
         InitializeButtons();
         InitializeIot();
         InitializePowerManager();
+        // InitializeChargingGpio();
         InitializePowerSaveTimer();
         InitializeDeviceStateCallback();  // 注册设备状态变化监听
         // ESP_LOGI(TAG, "ReadADC2_CH1_Oneshot");
