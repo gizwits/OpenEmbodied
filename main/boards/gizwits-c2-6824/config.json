@@ -15,7 +15,7 @@
                 "CONFIG_USE_EYE_STYLE_VB6824=y",
                 "CONFIG_USE_AUDIO_PROCESSOR=n",
                 "CONFIG_USE_AUDIO_CODEC_ENCODE_OPUS=y",
-                "CONFIG_DEFAULT_CHAT_MODE=1"
+                "CONFIG_DEFAULT_CHAT_MODE=2"
             ]
         }
     ]

@@ -730,13 +730,6 @@ void Application::Start() {
         display->SetEmotion("sleepy");
     }
 
-    if (Board::GetInstance().NeedForceConnect()) {
-        Schedule([this]() {
-            ToggleChatState();
-        }); 
-    }
-
-
     // Print heap stats
     SystemInfo::PrintHeapStats();
 
@@ -1251,6 +1244,7 @@ void Application::initGizwitsServer() {
     Settings settings("wifi", true);
 #if CONFIG_USE_GIZWITS_MQTT
     auto& mqtt_client = MqttClient::getInstance();
+    static bool is_first_params_received = false;
     mqtt_client.OnRoomParamsUpdated([this](const RoomParams& params, bool is_mutual) {
         // 判断 protocol_ 是否启动
         // 如果启动了，就断开重新连接
@@ -1286,6 +1280,17 @@ void Application::initGizwitsServer() {
                 ResetDecoder();
                 SetListeningMode(chat_mode_ == 2  ? kListeningModeRealtime : kListeningModeAutoStop);
             }, "initGizwitsServer_OpenAudioChannel");
+        }
+
+        // 第一次 强制连接
+        if (!is_first_params_received) {
+            is_first_params_received = true;
+            if (Board::GetInstance().NeedForceConnect()) {
+                Schedule([this]() {
+                    vTaskDelay(pdMS_TO_TICKS(500));
+                    ToggleChatState();
+                }); 
+            }
         }
     });
 
