@@ -443,7 +443,7 @@ public:
             log_counter = 0;  // 电量变化时重置计数器
         }
         if (should_log) {
-            ESP_LOGI("PowerManager", "电量: %u%%", battery_level_);
+            ESP_LOGI("PowerManager", "电量: %u%% (%s)", battery_level_, is_charging_ ? "充电中" : "未充电");
         }
     }
 
