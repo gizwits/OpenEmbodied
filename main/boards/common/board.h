@@ -6,6 +6,7 @@
 #include <mqtt.h>
 #include <udp.h>
 #include <string>
+#include <vector>
 
 #include "led/led.h"
 #include "backlight.h"
@@ -72,7 +73,7 @@ public:
 #ifdef CONFIG_IDF_TARGET_ESP32C2
         return 17;
 #else
-        return 25;
+        return 20;
 #endif
     }
     // 是否要 bo 一下
@@ -107,20 +108,25 @@ public:
     virtual void EnterDeepSleepIfNotCharging() { }
     virtual bool GetNeedPlayPrologue() { return false; }
     virtual bool NeedPlayProcessVoiceWithLife() { return false; }
+    virtual bool NeedForceConnect() { return false; }
     // 充电状态是否静默启动
     virtual bool NeedSilentStartup() { return false; }
     virtual bool NeedBlockLowBattery() { return false; }
     virtual void WakeWordDetected() {};
     virtual int GetBatteryCheckTimeOffset() { return 30; }
+    virtual std::string GetImei() const { return ""; }
     
     // 数据点相关方法
     virtual const char* GetGizwitsProtocolJson() const { return nullptr; }
     virtual size_t GetDataPointCount() const { return 0; }
-    virtual bool GetDataPointValue(const std::string& name, int& value) const { return false; }
-    virtual bool SetDataPointValue(const std::string& name, int value) { return false; }
+    virtual bool GetDataPointValue(const std::string& name, uint32_t& value) const { return false; }
+    virtual bool SetDataPointValue(const std::string& name, uint32_t value) { return false; }
     virtual void GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) { data_size = 0; }
-    virtual void ProcessDataPointValue(const std::string& name, int value) {}
+    virtual void ProcessDataPointValue(const std::string& name, uint32_t value) {}
     virtual void ProcessBinaryDataPointValue(const std::string& name, const uint8_t* data, size_t data_len) {}
+    
+    // 获取打断关键词列表，用于 interrupt_config 和 hot_words
+    virtual std::vector<std::string> GetInterruptKeywords() { return {}; }
 
 };
 

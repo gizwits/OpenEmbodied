@@ -16,16 +16,16 @@ public:
     virtual size_t GetDataPointCount() const;
     
     // 获取数据点值
-    virtual bool GetDataPointValue(const std::string& name, int& value) const;
+    virtual bool GetDataPointValue(const std::string& name, uint32_t& value) const;
     
     // 设置数据点值
-    virtual bool SetDataPointValue(const std::string& name, int value);
+    virtual bool SetDataPointValue(const std::string& name, uint32_t value);
     
     // 生成上报数据
     virtual void GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size);
     
     // 处理数据点值
-    virtual void ProcessDataPointValue(const std::string& name, int value);
+    virtual void ProcessDataPointValue(const std::string& name, uint32_t value);
     
     // 处理二进制数据点值
     virtual void ProcessBinaryDataPointValue(const std::string& name, const uint8_t* data, size_t data_len);

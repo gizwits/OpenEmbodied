@@ -3,21 +3,40 @@
 
 #include <driver/gpio.h>
 #include <esp_adc/adc_oneshot.h>
+#include <esp_adc/adc_cali.h>
+#include <esp_adc/adc_cali_scheme.h>
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <functional>
+#include "config.h"
+
+// VBAT 缩放系数（默认1:1分压→×2）。如硬件分压不同，可在外部覆盖
+#ifndef VBAT_SCALE_NUM
+#define VBAT_SCALE_NUM 2
+#endif
+#ifndef VBAT_SCALE_DEN
+#define VBAT_SCALE_DEN 1
+#endif
 
 class PowerManager {
 private:
-    // 电池电量区间-分压电阻为2个100k
-    static constexpr struct {
-        uint16_t adc;
-        uint8_t level;
-    } BATTERY_LEVELS[] = {{1980, 0}, {2519, 100}};
-    static constexpr size_t BATTERY_LEVELS_COUNT = 2;
+    // 放电曲线（单位: mV，使用 1:1 分压，故 VBAT ≈ 原始ADC电压*2 的估算）
+    static constexpr struct VoltageSocPair {
+        uint16_t mv;
+        uint8_t soc;
+    } DISCHARGE_CURVE[] = {
+        {4140, 100}, {4104, 95}, {4068, 90}, {4032, 85}, {3996, 80},
+        {3960, 75}, {3924, 70}, {3888, 65}, {3852, 60}, {3829, 55},
+        {3808, 50}, {3787, 45}, {3766, 40}, {3745, 35}, {3724, 30},
+        {3703, 25}, {3672, 20}, {3570, 15}, {3420, 10}, {3220, 5},
+        {3000, 0}
+    };
+    static constexpr size_t DISCHARGE_CURVE_COUNT = sizeof(DISCHARGE_CURVE) / sizeof(DISCHARGE_CURVE[0]);
     static constexpr size_t ADC_VALUES_COUNT = 10;
 
     esp_timer_handle_t timer_handle_ = nullptr;
     gpio_num_t charging_pin_;
+    gpio_num_t standby_pin_;
     gpio_num_t bat_led_pin_;
     adc_unit_t adc_unit_;
     adc_channel_t adc_channel_;
@@ -27,41 +46,42 @@ private:
     uint8_t battery_level_ = 100;
     bool is_charging_ = false;
 
-    static constexpr uint8_t MAX_CHANGE_COUNT = 8;
-    static constexpr uint32_t TIME_LIMIT = 2000000; // 2 seconds in microseconds
-
-    uint8_t change_count_ = 0;  // 记录状态变化次数
-    uint64_t last_change_time_ = 0;  // 最后一次状态变化的时间戳（微秒）
+    // 去除旧的充电状态抖动/滞回统计变量
 
     adc_oneshot_unit_handle_t adc_handle_;
+    adc_cali_handle_t adc_cali_handle_ = nullptr;
+    bool adc_calibrated_ = false;
+
+    // 最近一次估算电池电压(mV)
+    uint32_t last_vbat_mv_ = 0;
+
+    // 充电状态改变回调函数
+    std::function<void(bool)> charging_status_callback_ = nullptr;
 
     void CheckBatteryStatus() {
-        uint64_t current_time = esp_timer_get_time(); // 获取当前时间（微秒）
+        // 更新ADC平均与电量
+        uint32_t average_adc = ReadBatteryAdcData();
 
-        // 如果时间间隔超过2秒，则重置状态变化计数
-        if (current_time - last_change_time_ > TIME_LIMIT) {
-            change_count_ = 0;
+        // 充电状态判定：通过 GPIO 引脚读取
+        bool new_is_charging = false;
+        if (charging_pin_ != GPIO_NUM_NC && standby_pin_ != GPIO_NUM_NC) {
+            // 使用 CHARGING_PIN 和 STANDBY_PIN 判断充电状态
+            // 如果任何一个引脚为低电平（0），表示正在充电
+            int chrg = gpio_get_level(charging_pin_);
+            int standby = gpio_get_level(standby_pin_);
+            new_is_charging = (chrg == 0 || standby == 0);
+        } else {
+            // 如果没有配置 GPIO 引脚，回退到电压阈值判断
+            static constexpr uint32_t BATTERY_CHARGING_THRESHOLD_MV = 4400;
+            new_is_charging = (last_vbat_mv_ >= BATTERY_CHARGING_THRESHOLD_MV);
         }
-
-        if (change_count_ < MAX_CHANGE_COUNT) {
-            bool new_is_charging = gpio_get_level(bat_led_pin_) != 0;  // 检查LED引脚状态
-
-            // 判断充电引脚状态
-            if (new_is_charging) {
-                new_is_charging = gpio_get_level(charging_pin_) == 1;
-            }
-
-            // 如果状态有变化
-            if (new_is_charging != is_charging_) {
-                is_charging_ = new_is_charging;
-                change_count_++;  // 增加变化次数
-                last_change_time_ = current_time;  // 更新最后变化时间
-            }
+        
+        if (new_is_charging != is_charging_) {
+            is_charging_ = new_is_charging;
+            if (charging_status_callback_) charging_status_callback_(is_charging_);
         }
-
-        ReadBatteryAdcData();
     }
-    void ReadBatteryAdcData() {
+    uint32_t ReadBatteryAdcData() {
         int adc_value;
         ESP_ERROR_CHECK(adc_oneshot_read(adc_handle_, adc_channel_, &adc_value));
 
@@ -77,43 +97,94 @@ private:
         }
         average_adc /= adc_values_count_;
 
-        CalculateBatteryLevel(average_adc);
+        // 估算电压并计算电量
+        // 将平均原始ADC值转换为mV（使用eFuse校准），再换算VBAT
+        int voltage_mv = 0;
+        if (adc_calibrated_) {
+            if (adc_cali_raw_to_voltage(adc_cali_handle_, (int)average_adc, &voltage_mv) != ESP_OK) {
+                voltage_mv = 0;
+            }
+        } else {
+            // 无校准可用，使用经验近似：按12bit和11dB衰减估算，Vref约1100mV → 粗略比例
+            // 这个分支仅作为兜底，精度有限
+            voltage_mv = (int)((average_adc * 1100UL) / 4095UL);
+        }
 
+        uint32_t vbat_mv = (uint32_t)((int64_t)voltage_mv * VBAT_SCALE_NUM / VBAT_SCALE_DEN);
+        last_vbat_mv_ = vbat_mv;
+        uint8_t old_level = battery_level_;
+        CalculateBatteryLevel(vbat_mv);
 
-        // ESP_LOGI("PowerManager", "ADC值: %d 平均值: %ld 电量: %u%%", adc_value, average_adc,
-        //          battery_level_);
+        static uint16_t log_counter = 0;
+        bool should_log = (battery_level_ != old_level);
+        if (!should_log) {
+            log_counter++;
+            // 每200次（约20秒）打印一次，确保定期输出
+            if (log_counter >= 200) {
+                should_log = true;
+                log_counter = 0;
+            }
+        } else {
+            log_counter = 0;  // 电量变化时重置计数器
+        }
+        
+        if (should_log) {
+            ESP_LOGI("PowerManager", "电量: %u%%", battery_level_);
+        }
+        // ESP_LOGI("PowerManager", "平均ADC值: %u mV 电池电压: %u mV", average_adc, last_vbat_mv_);
+        return average_adc;
     }
 
-    void CalculateBatteryLevel(uint32_t average_adc) {
-        if (average_adc <= BATTERY_LEVELS[0].adc) {
-            battery_level_ = 0;
-        } else if (average_adc >= BATTERY_LEVELS[BATTERY_LEVELS_COUNT - 1].adc) {
-            battery_level_ = 100;
-        } else {
-            float ratio = static_cast<float>(average_adc - BATTERY_LEVELS[0].adc) /
-                          (BATTERY_LEVELS[1].adc - BATTERY_LEVELS[0].adc);
-            battery_level_ = ratio * 100;
+    void CalculateBatteryLevel(uint32_t vbat_mv) {
+        // 最近邻查表
+        uint16_t closest_mv = DISCHARGE_CURVE[0].mv;
+        uint8_t closest_soc = DISCHARGE_CURVE[0].soc;
+        uint32_t min_diff = (vbat_mv > closest_mv) ? (vbat_mv - closest_mv) : (closest_mv - vbat_mv);
+        for (size_t i = 1; i < DISCHARGE_CURVE_COUNT; i++) {
+            uint16_t mv = DISCHARGE_CURVE[i].mv;
+            uint32_t diff = (vbat_mv > mv) ? (vbat_mv - mv) : (mv - vbat_mv);
+            if (diff < min_diff) {
+                min_diff = diff;
+                closest_mv = mv;
+                closest_soc = DISCHARGE_CURVE[i].soc;
+            }
         }
+        battery_level_ = closest_soc;
     }
 
 public:
-    PowerManager(gpio_num_t charging_pin, gpio_num_t bat_led_pin, adc_unit_t adc_unit = ADC_UNIT_2,
+    PowerManager(gpio_num_t charging_pin, gpio_num_t standby_pin, gpio_num_t bat_led_pin, adc_unit_t adc_unit = ADC_UNIT_2,
                  adc_channel_t adc_channel = ADC_CHANNEL_3)
-        : charging_pin_(charging_pin), bat_led_pin_(bat_led_pin), adc_unit_(adc_unit), adc_channel_(adc_channel) {
+        : charging_pin_(charging_pin), standby_pin_(standby_pin), bat_led_pin_(bat_led_pin), adc_unit_(adc_unit), adc_channel_(adc_channel) {
 
-        // 配置充电引脚
         gpio_config_t io_conf = {};
-        io_conf.intr_type = GPIO_INTR_DISABLE;
-        io_conf.mode = GPIO_MODE_INPUT;
-        io_conf.pin_bit_mask = (1ULL << charging_pin_);
-        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-        io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
-        gpio_config(&io_conf);
 
-        // 配置状态引脚
-        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-        io_conf.pin_bit_mask = (1ULL << bat_led_pin_);
-        gpio_config(&io_conf);
+        if (charging_pin_ != GPIO_NUM_NC) {
+            // 配置充电引脚
+            io_conf.intr_type = GPIO_INTR_DISABLE;
+            io_conf.mode = GPIO_MODE_INPUT;
+            io_conf.pin_bit_mask = (1ULL << charging_pin_);
+            io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+            io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+            gpio_config(&io_conf);
+        }
+
+        if (standby_pin_ != GPIO_NUM_NC) {
+            // 配置待机引脚
+            io_conf.intr_type = GPIO_INTR_DISABLE;
+            io_conf.mode = GPIO_MODE_INPUT;
+            io_conf.pin_bit_mask = (1ULL << standby_pin_);
+            io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+            io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+            gpio_config(&io_conf);
+        }
+
+        if (bat_led_pin_ != GPIO_NUM_NC) {
+            // 配置状态引脚
+            io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+            io_conf.pin_bit_mask = (1ULL << bat_led_pin_);
+            gpio_config(&io_conf);
+        }
 
         // 定时器配置
         esp_timer_create_args_t timer_args = {
@@ -128,7 +199,7 @@ public:
             .skip_unhandled_events = true,
         };
         ESP_ERROR_CHECK(esp_timer_create(&timer_args, &timer_handle_));
-        ESP_ERROR_CHECK(esp_timer_start_periodic(timer_handle_, 500000));  // 5秒
+        ESP_ERROR_CHECK(esp_timer_start_periodic(timer_handle_, 100000));  // 5秒
 
         // 初始化ADC
         InitializeAdc();
@@ -147,6 +218,21 @@ public:
         };
 
         ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle_, adc_channel_, &chan_config));
+
+        // 创建校准句柄（使用 curve fitting 方案，参考指定项目兼容性）
+        adc_cali_curve_fitting_config_t cali_cfg_cf = {
+            .unit_id = adc_unit_,
+            .atten = ADC_ATTEN_DB_12,
+            .bitwidth = ADC_BITWIDTH_12,
+        };
+        if (adc_cali_create_scheme_curve_fitting(&cali_cfg_cf, &adc_cali_handle_) == ESP_OK) {
+            adc_calibrated_ = true;
+            ESP_LOGI("PowerManager", "ADC 标定已启用（curve fitting）");
+        } else {
+            adc_cali_handle_ = nullptr;
+            adc_calibrated_ = false;
+            ESP_LOGW("PowerManager", "ADC 标定不可用，改用原始raw换算");
+        }
     }
 
     ~PowerManager() {
@@ -157,6 +243,9 @@ public:
         if (adc_handle_) {
             adc_oneshot_del_unit(adc_handle_);
         }
+        if (adc_calibrated_ && adc_cali_handle_) {
+            adc_cali_delete_scheme_curve_fitting(adc_cali_handle_);
+        }
     }
 
     bool IsCharging() { return is_charging_; }
@@ -166,6 +255,21 @@ public:
     // 立即检测一次电量
     void CheckBatteryStatusImmediately() {
         CheckBatteryStatus();
+    }
+
+    // 设置充电状态改变回调函数
+    void SetChargingStatusCallback(std::function<void(bool)> callback) {
+        charging_status_callback_ = callback;
+    }
+    void EnterDeepSleepIfNotCharging() {
+        ESP_LOGI("PowerManager", "EnterDeepSleepIfNotCharging");
+        if (!is_charging_) {
+            // 非充电：直接拉低保持脚，真正关机
+            gpio_set_level(POWER_HOLD_GPIO, 0);
+        } else {
+            // 充电：保持上电（不关机不深睡），与 C2 行为一致，由上层决定是否重启进入静默
+            ESP_LOGI("PowerManager", "充电中，保持上电");
+        }
     }
 };
 #endif  // __POWER_MANAGER_H__

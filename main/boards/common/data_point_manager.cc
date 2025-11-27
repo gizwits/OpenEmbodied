@@ -227,7 +227,7 @@ size_t DataPointManager::GetDataPointCount() const {
 }
 
 // 标准实现：获取数据点值
-bool DataPointManager::GetDataPointValue(const std::string& name, int& value) const {
+bool DataPointManager::GetDataPointValue(const std::string& name, uint32_t& value) const {
     if (name == "switch") {
         value = 1; // 开关状态，固定为1
         return true;
@@ -309,26 +309,35 @@ bool DataPointManager::GetDataPointValue(const std::string& name, int& value) co
 }
 
 // 标准实现：设置数据点值
-bool DataPointManager::SetDataPointValue(const std::string& name, int value) {
-    // 写入缓存与存储
-    cache_[name] = value;
+bool DataPointManager::SetDataPointValue(const std::string& name, uint32_t value) {
+    // 写入缓存（如果值在 int 范围内）
+    if (value <= static_cast<uint32_t>(INT32_MAX)) {
+        cache_[name] = static_cast<int>(value);
+    } else {
+        cache_[name] = -1;
+    }
+    
     // 使用 NVS 进行持久化
     Settings settings("datapoint", true);
-    settings.SetInt(name, value);
+    if (value > static_cast<uint32_t>(INT32_MAX)) {
+        settings.SetString(name, std::to_string(value));
+    } else {
+        settings.SetInt(name, static_cast<int32_t>(value));
+    }
 
     if (name == "chat_mode") {
         if (set_chat_mode_callback_) {
-            set_chat_mode_callback_(value);
+            set_chat_mode_callback_(static_cast<int>(value));
             return true;
         }
     } else if (name == "volume_set") {
         if (set_volume_callback_) {
-            set_volume_callback_(value);
+            set_volume_callback_(static_cast<int>(value));
             return true;
         }
     } else if (name == "brightness") {
         if (set_brightness_callback_) {
-            set_brightness_callback_(value);
+            set_brightness_callback_(static_cast<int>(value));
             return true;
         }
     }
@@ -432,8 +441,8 @@ void DataPointManager::GenerateReportData(uint8_t* buffer, size_t buffer_size, s
 }
 
 // 标准实现：处理数据点值
-void DataPointManager::ProcessDataPointValue(const std::string& name, int value) {
-    ESP_LOGI(TAG, "ProcessDataPointValue: %s = %d", name.c_str(), value);
+void DataPointManager::ProcessDataPointValue(const std::string& name, uint32_t value) {
+    ESP_LOGI(TAG, "ProcessDataPointValue: %s = %u", name.c_str(), value);
     
     // ssid 是 binary 类型，不能通过 int 处理
     if (name == "ssid") {

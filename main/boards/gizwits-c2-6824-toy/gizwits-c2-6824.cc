@@ -388,7 +388,7 @@ public:
 
         audio_codec.OnWakeUp([this](const std::string& command) {
             ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());
-            if (command == "小智小智" || command == "你好小智" || command.find("小云") != std::string::npos){
+            if (command == "小智小智" || command == "你好小智" || command == "你好冬冬" || command.find("小云") != std::string::npos){
                 ESP_LOGE(TAG, "vb6824 recv cmd: %d", Application::GetInstance().GetDeviceState());
                 Application::GetInstance().WakeWordInvoke("你好小智");
             } else if (command == "开始配网") {
@@ -529,11 +529,11 @@ public:
         return DataPointManager::GetInstance().GetDataPointCount();
     }
 
-    bool GetDataPointValue(const std::string& name, int& value) const override {
+    bool GetDataPointValue(const std::string& name, uint32_t& value) const override {
         return DataPointManager::GetInstance().GetDataPointValue(name, value);
     }
 
-    bool SetDataPointValue(const std::string& name, int value) override {
+    bool SetDataPointValue(const std::string& name, uint32_t value) override {
         return DataPointManager::GetInstance().SetDataPointValue(name, value);
     }
 
@@ -541,7 +541,7 @@ public:
         DataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
     }
 
-    void ProcessDataPointValue(const std::string& name, int value) override {
+    void ProcessDataPointValue(const std::string& name, uint32_t value) override {
         DataPointManager::GetInstance().ProcessDataPointValue(name, value);
     }
 

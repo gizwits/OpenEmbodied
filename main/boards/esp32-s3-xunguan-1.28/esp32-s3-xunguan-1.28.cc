@@ -739,6 +739,10 @@ public:
         return true;
     }
 
+    virtual bool NeedBlockLowBattery() override {
+        return true;
+    }
+
     virtual AudioCodec* GetAudioCodec() override {
         static BoxAudioCodec audio_codec(
             i2c_bus_, 

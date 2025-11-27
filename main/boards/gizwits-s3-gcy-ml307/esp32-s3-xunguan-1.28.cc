@@ -7,7 +7,7 @@
 
 #include "iot/thing_manager.h"
 #include "power_manager.h"
-#include "data_point_manager.h"
+#include "gc_data_point_manager.h"
 
 #include "assets/lang_config.h"
 #include "font_awesome_symbols.h"
@@ -20,6 +20,7 @@
 
 #include <wifi_station.h>
 #include "power_save_timer.h"
+#include "settings.h"
 #include <esp_log.h>
 #include <esp_efuse_table.h>
 #include <driver/i2c_master.h>
@@ -31,6 +32,8 @@
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_timer.h"
+#include <time.h>
+#include <sys/time.h>
 
 #include <math.h>
 
@@ -56,6 +59,7 @@ private:
     PowerManager* power_manager_;
     PowerSaveTimer* power_save_timer_;
     bool is_charging_sleep_ = false;
+    esp_timer_handle_t alarm_check_timer_ = nullptr;  // 闹钟检查定时器
 
     // std::vector<TestItem> test_items = {
     //     {"lcd", "LCD测试", 1},
@@ -74,8 +78,8 @@ private:
 
 
     void InitializeDataPointManager() {
-        // 设置 DataPointManager 的回调函数
-        DataPointManager::GetInstance().SetCallbacks(
+        // 设置 GCDataPointManager 的回调函数
+        GCDataPointManager::GetInstance().SetCallbacks(
             [this]() -> bool { return false; }, // IsCharging - toy 版本可能没有充电功能
             []() -> int { return Application::GetInstance().GetChatMode(); },
             [](int value) { Application::GetInstance().SetChatMode(value); },
@@ -97,7 +101,26 @@ private:
             [this]() -> int { return 100; }, // 固定亮度 100%
             [this](int value) { 
                 this->GetBacklight()->SetBrightness(value, true);
-            }
+            },
+            [this](const std::string& url) {
+                display_->DownloadBackgroundImage(url);
+            },
+            [this](const std::string& url) {
+                // 创建结构体来传递 board 和 url
+                display_->DownloadBackgroundVideo(url);
+            },
+            // 新增数据点的回调函数
+            []() -> bool { return true; }, // get_switch_callback - 默认开启
+            [](bool value) { /* TODO: 实现开关功能 */ }, // set_switch_callback
+            []() -> bool { return true; }, // get_wakeup_word_callback - 默认开启
+            [](bool value) { /* TODO: 实现唤醒词开关功能 */ }, // set_wakeup_word_callback
+            []() -> int { return 0; }, // get_alert_tone_language_callback - 0=中文
+            [](int value) { /* TODO: 实现提示音语言切换功能 */ }, // set_alert_tone_language_callback
+            []() -> int { return 0; }, // get_speed_callback - 默认语速0
+            [](int value) { /* TODO: 实现语速设置功能 */ }, // set_speed_callback
+            [](int index) -> uint32_t { return 0; }, // get_timer_callback - 默认返回0
+            [](int index, uint32_t value) { /* TODO: 实现闹钟设置功能 */ }, // set_timer_callback
+            [](int index, const std::string& text) { /* TODO: 实现闹钟文字提示设置功能 */ } // set_tts_callback
         );
     }
 
@@ -105,7 +128,7 @@ private:
     void InitializePowerSaveTimer() {
         // 20 分钟进休眠
         // 30 分钟 关机
-        power_save_timer_ = new PowerSaveTimer(-1, 60 * 20, 60 * 30);
+        power_save_timer_ = new PowerSaveTimer(-1, 60 * 5, 60 * 10);
         // power_save_timer_ = new PowerSaveTimer(-1, 20 * 1, 60 * 2);
         power_save_timer_->OnEnterSleepMode([this]() {
             ESP_LOGE(TAG, "Enabling sleep mode");
@@ -114,7 +137,8 @@ private:
                 is_charging_sleep_ = true;
                 Application::GetInstance().Schedule([this]() {
                     Application::GetInstance().QuitTalking();
-                    Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
+                    this->GetBacklight()->SetBrightness(0, false);
+                    // Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
 
                     // 在这个场景里要切换成睡觉表情 
                     // display_->SetEmotion("sleepy");
@@ -122,7 +146,9 @@ private:
 
             } else {
                 // 关闭 wifi，进入待机模式
-                Application::GetInstance().EnterSleepMode();
+                // Application::GetInstance().EnterSleepMode();
+                // 直接关机
+                PowerOff();
             }
         });
         power_save_timer_->OnExitSleepMode([this]() {
@@ -139,6 +165,276 @@ private:
         power_save_timer_->SetEnabled(true);
     }
 
+    // 打印 Unicode 文本（支持 UTF-8 和 UTF-16），返回解码后的 UTF-8 文本
+    std::string PrintUnicodeText(const std::string& text, const char* label = "文本") {
+        if (text.empty()) {
+            return "";
+        }
+        
+        // 如果是 UTF-16，固定使用 BE 解码（如果有 BOM 则按 BOM 指示）
+        if (text.length() >= 2 && (text.length() % 2 == 0)) {
+            bool is_le = false;
+            size_t start = 0;
+            
+            // 检查 BOM: FE FF (UTF-16 BE) 或 FF FE (UTF-16 LE)
+            if (text.length() >= 2) {
+                uint8_t b0 = static_cast<uint8_t>(text[0]);
+                uint8_t b1 = static_cast<uint8_t>(text[1]);
+                
+                if ((b0 == 0xFE && b1 == 0xFF) || (b0 == 0xFF && b1 == 0xFE)) {
+                    is_le = (b0 == 0xFF && b1 == 0xFE);
+                    start = 2;  // 跳过 BOM
+                }
+            }
+            
+            std::string utf8_text;
+            
+            for (size_t j = start; j + 1 < text.length(); j += 2) {
+                uint16_t code_point;
+                if (is_le) {
+                    // UTF-16 LE
+                    code_point = static_cast<uint8_t>(text[j]) | 
+                                 (static_cast<uint8_t>(text[j + 1]) << 8);
+                } else {
+                    // UTF-16 BE（默认）
+                    code_point = (static_cast<uint8_t>(text[j]) << 8) | 
+                                 static_cast<uint8_t>(text[j + 1]);
+                }
+                
+                if (code_point == 0) {
+                    break;
+                }
+                
+                // 转换为 UTF-8
+                if (code_point < 0x80) {
+                    utf8_text += static_cast<char>(code_point);
+                } else if (code_point < 0x800) {
+                    utf8_text += static_cast<char>(0xC0 | (code_point >> 6));
+                    utf8_text += static_cast<char>(0x80 | (code_point & 0x3F));
+                } else {
+                    utf8_text += static_cast<char>(0xE0 | (code_point >> 12));
+                    utf8_text += static_cast<char>(0x80 | ((code_point >> 6) & 0x3F));
+                    utf8_text += static_cast<char>(0x80 | (code_point & 0x3F));
+                }
+            }
+            
+            if (!utf8_text.empty()) {
+                return utf8_text;  // 返回解码后的 UTF-8 文本
+            }
+        }
+        
+        // 如果不是 UTF-16 或解码失败，返回原始文本（可能是 UTF-8）
+        return text;
+    }
+
+    // 检查闹钟并执行提醒
+    void CheckAlarms() {
+        time_t now;
+        time(&now);
+        
+        // 获取当前时间
+        struct tm timeinfo;
+        localtime_r(&now, &timeinfo);
+        
+        ESP_LOGI(TAG, "═══════════════════════════════════════");
+        ESP_LOGI(TAG, "⏰ 开始检查闹钟");
+        ESP_LOGI(TAG, "当前时间: %04d-%02d-%02d %02d:%02d:%02d (时间戳: %ld)",
+                 timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
+                 timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec, now);
+        
+        // 检查 timer1-timer10
+        for (int i = 1; i <= 10; i++) {
+            std::string timer_name = "timer" + std::to_string(i);
+            uint32_t timer_value = 0;
+            bool from_cache = false;
+            
+            // ESP_LOGI(TAG, "─────────────────────────────────────");
+            // ESP_LOGI(TAG, "检查 timer%d (%s)", i, timer_name.c_str());
+            
+            // 从缓存或存储中获取闹钟时间戳
+            int cached_int_value = 0;
+            if (GCDataPointManager::GetInstance().GetCachedDataPoint(timer_name, cached_int_value)) {
+                from_cache = true;
+                // 如果缓存值是 -1，说明原始值超过了 int32_t 范围，需要从字符串读取
+                if (cached_int_value == -1) {
+                    Settings settings("datapoint", false);
+                    std::string str_val = settings.GetString(timer_name, "");
+                    if (!str_val.empty()) {
+                        try {
+                            timer_value = std::stoul(str_val);
+                            // ESP_LOGI(TAG, "  ✓ 从缓存(-1标记)和NVS字符串读取 timer_value: %s -> %u (0x%08X)", 
+                            //          str_val.c_str(), timer_value, timer_value);
+                        } catch (const std::exception& e) {
+                            ESP_LOGW(TAG, "  ✗ 字符串转换失败: %s", e.what());
+                        }
+                    }
+                } else {
+                    timer_value = static_cast<uint32_t>(cached_int_value);
+                    // ESP_LOGI(TAG, "  ✓ 从缓存读取 timer_value: %u (0x%08X)", timer_value, timer_value);
+                }
+            } else {
+                // 如果缓存中没有，尝试从存储读取
+                Settings settings("datapoint", false);
+                int32_t int_val = settings.GetInt(timer_name, -1);
+                // ESP_LOGI(TAG, "  ✓ 从NVS读取 timer_value (int): %d (0x%08X)", int_val, int_val);
+                
+                // 如果 int 读取失败或值可能被截断，尝试从字符串读取
+                if (int_val == -1 || int_val == 0) {
+                    std::string str_val = settings.GetString(timer_name, "");
+                    if (!str_val.empty()) {
+                        try {
+                            timer_value = std::stoul(str_val);
+                            // ESP_LOGI(TAG, "  ✓ 从NVS字符串读取 timer_value: %s -> %u (0x%08X)", 
+                            //          str_val.c_str(), timer_value, timer_value);
+                        } catch (const std::exception& e) {
+                            ESP_LOGW(TAG, "  ✗ 字符串转换失败: %s", e.what());
+                        }
+                    } else if (int_val == 0) {
+                        timer_value = 0;
+                    }
+                } else {
+                    // 检查 int 值是否可能被截断（如果原始值超过 INT32_MAX，应该存储为字符串）
+                    timer_value = static_cast<uint32_t>(int_val);
+                    // ESP_LOGI(TAG, "  ✓ 使用NVS int值 timer_value: %u (0x%08X)", timer_value, timer_value);
+                }
+            }
+            
+            if (timer_value == 0) {
+                // ESP_LOGI(TAG, "  → timer%d 未设置，跳过", i);
+                continue; // 未设置的闹钟跳过
+            }
+            
+            // timer_value 是完整的时间戳（包括日期和时间）
+            // ESP_LOGI(TAG, "  原始 timer_value: %u (0x%08X)", timer_value, timer_value);
+            time_t alarm_t = static_cast<time_t>(timer_value);
+            // ESP_LOGI(TAG, "  转换后 alarm_t: %ld (0x%016lX)", alarm_t, alarm_t);
+            
+            struct tm alarm_timeinfo;
+            localtime_r(&alarm_t, &alarm_timeinfo);
+            // ESP_LOGI(TAG, "  闹钟完整时间戳: %ld", alarm_t);
+            // ESP_LOGI(TAG, "  闹钟日期时间: %04d-%02d-%02d %02d:%02d:%02d",
+            //          alarm_timeinfo.tm_year + 1900, alarm_timeinfo.tm_mon + 1, alarm_timeinfo.tm_mday,
+            //          alarm_timeinfo.tm_hour, alarm_timeinfo.tm_min, alarm_timeinfo.tm_sec);
+            
+            // 直接比较完整时间戳（允许30秒误差）
+            const int TIME_TOLERANCE_SECONDS = 30;
+            int64_t time_diff = static_cast<int64_t>(now) - static_cast<int64_t>(alarm_t);
+            int64_t abs_time_diff = (time_diff < 0) ? -time_diff : time_diff;
+            
+            // ESP_LOGI(TAG, "  当前时间戳: %ld", now);
+            // ESP_LOGI(TAG, "  闹钟时间戳: %ld", alarm_t);
+            // ESP_LOGI(TAG, "  时间差: %lld 秒 (阈值: %d 秒)", time_diff, TIME_TOLERANCE_SECONDS);
+            
+            // 获取并打印对应的 TTS 文本（无论是否触发都打印）
+            std::string tts_name = "tts" + std::to_string(i);
+            Settings settings("datapoint", false);
+            std::string tts_text_raw = settings.GetString(tts_name, "");
+            std::string tts_text = "";  // 解码后的文本
+            
+            if (!tts_text_raw.empty()) {
+                // 使用封装的方法打印 Unicode 文本，并获取解码后的文本
+                tts_text = PrintUnicodeText(tts_text_raw, "TTS文本");
+            } else {
+                // ESP_LOGI(TAG, "     TTS文本: (未设置)");
+            }
+            
+            // 如果闹钟时间已经过期（超过阈值），跳过
+            if (time_diff > TIME_TOLERANCE_SECONDS) {
+                // ESP_LOGI(TAG, "  → timer%d 已过期 (时间差 %lld 秒 > 阈值 %d 秒)", 
+                //          i, time_diff, TIME_TOLERANCE_SECONDS);
+                continue;
+            }
+            
+            // 如果闹钟时间在未来（超过阈值），还未到时间
+            if (time_diff < -TIME_TOLERANCE_SECONDS) {
+                // ESP_LOGI(TAG, "  → timer%d 未到时间 (时间差 %lld 秒 < -阈值 %d 秒)", 
+                //          i, time_diff, -TIME_TOLERANCE_SECONDS);
+                continue;
+            }
+            
+            // 在误差范围内，触发闹钟
+            if (abs_time_diff <= TIME_TOLERANCE_SECONDS) {
+                // ESP_LOGI(TAG, "  ⚡ 闹钟 timer%d 触发！", i);
+                // ESP_LOGI(TAG, "     当前时间: %04d-%02d-%02d %02d:%02d:%02d (时间戳: %ld)",
+                //          timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
+                //          timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec, now);
+                // ESP_LOGI(TAG, "     闹钟时间: %04d-%02d-%02d %02d:%02d:%02d (时间戳: %ld)",
+                //          alarm_timeinfo.tm_year + 1900, alarm_timeinfo.tm_mon + 1, alarm_timeinfo.tm_mday,
+                //          alarm_timeinfo.tm_hour, alarm_timeinfo.tm_min, alarm_timeinfo.tm_sec, alarm_t);
+                // ESP_LOGI(TAG, "     时间差: %lld 秒", time_diff);
+                
+                // TTS 文本已经在上面打印过了，这里只需要处理播放逻辑
+                if (!tts_text.empty()) {
+                    Application::GetInstance().ToggleChatState();
+                    Application::GetInstance().Schedule([this, tts_text]() {
+                        // 临时禁用音频上传，避免闹钟播放时上传麦克风音频
+                        ESP_LOGI(TAG, "     临时禁用音频上传，准备播放闹钟提醒");
+                        Application::GetInstance().SetAudioUploadEnabled(false);
+                        
+                        // 等待连接成功
+                        vTaskDelay(pdMS_TO_TICKS(2000));
+
+                        Application::GetInstance().SetDeviceState(kDeviceStateSpeaking);
+                        ESP_LOGI(TAG, "     播放闹钟提醒: %s", tts_text.c_str());
+                        Application::GetInstance().GenerateTTSFromText(tts_text);
+                        
+                        // 发送完 TTS 请求后，延迟一段时间再恢复音频上传
+                        // 给 TTS 音频一些时间开始播放，避免立即恢复上传导致干扰
+                        vTaskDelay(pdMS_TO_TICKS(5000));
+                        ESP_LOGI(TAG, "     恢复音频上传");
+                        Application::GetInstance().SetAudioUploadEnabled(true);
+                    }, "PlayTTS_Alarm");
+                } else {
+                    ESP_LOGI(TAG, "     闹钟 timer%d 触发，但未设置提醒文本", i);
+                    // 可以播放默认提示音
+                    Application::GetInstance().Schedule([this, tts_text]() {
+                        Application::GetInstance().ResetDecoder();
+                        vTaskDelay(pdMS_TO_TICKS(1000));
+                        Application::GetInstance().PlaySound(Lang::Sounds::P3_SUCCESS);
+                    });
+                    // Application::GetInstance().PlaySound(Lang::Sounds::P3_ALARM);
+                }
+            } else {
+                // ESP_LOGI(TAG, "  → timer%d 未到时间 (时间差 %d 秒 > 阈值 %d 秒)", 
+                //          i, time_diff, TIME_TOLERANCE_SECONDS);
+            }
+        }
+        ESP_LOGI(TAG, "═══════════════════════════════════════");
+    }
+
+    // 闹钟检查定时器回调
+    static void AlarmCheckTimerCallback(void* arg) {
+        auto* self = static_cast<MovecallMojiESP32S3*>(arg);
+        self->CheckAlarms();
+    }
+
+    void InitializeAlarmCheckTimer() {
+        esp_timer_create_args_t timer_args = {
+            .callback = AlarmCheckTimerCallback,
+            .arg = this,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "alarm_check_timer",
+            .skip_unhandled_events = true,
+        };
+        
+        esp_err_t ret = esp_timer_create(&timer_args, &alarm_check_timer_);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "创建闹钟检查定时器失败: %s", esp_err_to_name(ret));
+            return;
+        }
+        
+        // 每30秒检查一次
+        ret = esp_timer_start_periodic(alarm_check_timer_, 30 * 1000000ULL); // 30秒 = 30 * 1000000 微秒
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "启动闹钟检查定时器失败: %s", esp_err_to_name(ret));
+            esp_timer_delete(alarm_check_timer_);
+            alarm_check_timer_ = nullptr;
+            return;
+        }
+        
+        ESP_LOGI(TAG, "闹钟检查定时器已启动，每30秒检查一次");
+    }
+
     virtual void ResetPowerSaveTimer() {
         if (power_save_timer_) {
             power_save_timer_->ResetTimer();
@@ -146,6 +442,7 @@ private:
     };
 
     virtual void WakeUpPowerSaveTimer() {
+        is_charging_sleep_ = false;
         if (power_save_timer_) {
             power_save_timer_->SetEnabled(true);
             power_save_timer_->WakeUp();
@@ -313,7 +610,7 @@ private:
 
     // 更新MCU MUTE信号
     void UpdateMuteSignal() {
-        int hpr_level = gpio_get_level(HPR_SIGN_PIN);
+        int hpr_level = !gpio_get_level(HPR_SIGN_PIN);
         // HPR-SIGN为高时，有耳机插入，输出MCU MUTE为高
         // HPR-SIGN为低时，无耳机插入，输出MCU MUTE为低
         gpio_set_level(MCU_MUTE_PIN, hpr_level);
@@ -357,7 +654,9 @@ private:
                 // 交给休眠逻辑托管
                 return;
             }
+            
 
+            GetBacklight()->RestoreBrightness();
 
             auto& app = Application::GetInstance();
             app.ToggleChatState();
@@ -378,10 +677,6 @@ private:
                 ESP_LOGI(TAG, "首次上电5秒内，忽略长按操作");
             } else {
                 ESP_LOGI(TAG, "执行关机操作");
-                // vTaskDelay(pdMS_TO_TICKS(200));
-                // auto codec = GetAudioCodec();
-                // codec->EnableOutput(true);
-                // Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
                 this->GetBacklight()->SetBrightness(0, false);
                 need_power_off_ = true;
             }
@@ -391,16 +686,20 @@ private:
             ESP_LOGI(TAG, "boot_button_.OnPressUp");
             if (need_power_off_) {
                 need_power_off_ = false;
+                is_charging_sleep_ = true;
+                ESP_LOGI(TAG, "设置休眠标志");
+
                 // 使用静态函数来避免lambda捕获问题
                 xTaskCreate([](void* arg) {
                     auto* board = static_cast<MovecallMojiESP32S3*>(arg);
                     board->display_->SetEmotion("neutral");
+                    Application::GetInstance().QuitTalking();
+
 
                     if (board->IsCharging()) {
                         // 充电中，只关闭背光
                         board->GetBacklight()->SetBrightness(0, false);
-                        board->is_charging_sleep_ = true;
-                        Application::GetInstance().QuitTalking();
+                        // is_charging_sleep_ 已经在创建Task之前设置了
                     } else {
                         // 没有充电，关机
                         board->PowerOff();
@@ -425,11 +724,18 @@ private:
 
         break_button_.OnClick([this]() {
             ESP_LOGI(TAG, "break_button_.OnClick");
+            // 休眠模式只有开关可以启动
+            if (is_charging_sleep_) {
+                return;
+            }
             Application::GetInstance().ToggleChatState();
         });
         
         // Volume up button - short press to increase volume
         volume_up_button_.OnPressDown([this]() {
+            if (is_charging_sleep_) {
+                return;
+            }
             auto codec = GetAudioCodec();
             auto volume = codec->output_volume() + 10;
             if (volume > 100) {
@@ -441,6 +747,9 @@ private:
         
         // Volume down button - short press to decrease volume
         volume_down_button_.OnPressDown([this]() {
+            if (is_charging_sleep_) {
+                return;
+            }
             auto codec = GetAudioCodec();
             auto volume = codec->output_volume() - 10;
             if (volume < 0) {
@@ -504,17 +813,10 @@ private:
         // 注册充电状态改变回调
         power_manager_->SetChargingStatusCallback([this](bool is_charging) {
             ESP_LOGI(TAG, "充电状态改变: %s", is_charging ? "开始充电" : "停止充电");
-            // XunguanDisplay* xunguan_display = static_cast<XunguanDisplay*>(GetDisplay());
             if (is_charging) {
-                // 充电开始时的处理逻辑
                 ESP_LOGI(TAG, "检测到开始充电");
-                // 降低发热                
-                // GetBacklight()->SetBrightness(5, false);
-                
             } else {
-                // 充电停止时的处理逻辑
                 ESP_LOGI(TAG, "检测到停止充电");
-                
                 if (this->is_charging_sleep_) {
                     ESP_LOGI(TAG, "充电停止，关机");
                     PowerOff();
@@ -522,8 +824,8 @@ private:
             }
 
             // 通知 mqtt 
-            auto& mqtt_client = MqttClient::getInstance();
-            mqtt_client.ReportTimer();
+            // auto& mqtt_client = MqttClient::getInstance();
+            // mqtt_client.ReportTimer();
 
         });
     }
@@ -550,7 +852,14 @@ public:
         InitializeHeadphoneDetection();
         InitializeChargingGpio();
         InitializeGpio(POWER_GPIO, true);
-        InitializeGpio(ML307_EN, true);
+        // 根据网络类型设置ML307_EN：Wi-Fi模式时禁用4G模块，4G模式时启用
+        if (GetNetworkType() == NetworkType::WIFI) {
+            InitializeGpio(ML307_EN, false);  // 禁用4G模块
+            ESP_LOGI(TAG, "Wi-Fi模式，禁用4G模块 (ML307_EN = LOW)");
+        } else {
+            InitializeGpio(ML307_EN, true);   // 启用4G模块
+            ESP_LOGI(TAG, "4G模式，启用4G模块 (ML307_EN = HIGH)");
+        }
         InitializeSpi();
         InitializeSt7789Display();
         
@@ -559,6 +868,7 @@ public:
         InitializePowerManager();
         InitializePowerSaveTimer();
         InitializeDataPointManager();
+        InitializeAlarmCheckTimer();
         // ESP_LOGI(TAG, "ReadADC2_CH1_Oneshot");
         // ReadADC2_CH1_Oneshot();
         if (power_manager_) {
@@ -703,22 +1013,23 @@ public:
     }
     
     virtual int GetMaxFrameNum() override { 
-        return 17;
+        return 20;
     }
 
-
     virtual bool IsCharging() override {
-        int chrg = gpio_get_level(CHARGING_PIN);
-        int standby = gpio_get_level(STANDBY_PIN);
-        // return false;
-        return chrg == 0 || standby == 0;
+        // int chrg = gpio_get_level(CHARGING_PIN);
+        // int standby = gpio_get_level(STANDBY_PIN);
+        // // return false;
+        // return chrg == 0 || standby == 0;
+        return power_manager_->IsCharging();
     }
 
     virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
         charging = IsCharging();
         discharging = !charging;
+        // level = 1;
         level = power_manager_->GetBatteryLevel();
-        ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
+        // ESP_LOGI(TAG, "level: %d, charging: %d, discharging: %d", level, charging, discharging);
         return true;
     }
 
@@ -729,31 +1040,31 @@ public:
 
     // 数据点相关方法实现
     const char* GetGizwitsProtocolJson() const override {
-        return DataPointManager::GetInstance().GetGizwitsProtocolJson();
+        return GCDataPointManager::GetInstance().GetGizwitsProtocolJson();
     }
 
     size_t GetDataPointCount() const override {
-        return DataPointManager::GetInstance().GetDataPointCount();
+        return GCDataPointManager::GetInstance().GetDataPointCount();
     }
 
-    bool GetDataPointValue(const std::string& name, int& value) const override {
-        return DataPointManager::GetInstance().GetDataPointValue(name, value);
+    bool GetDataPointValue(const std::string& name, uint32_t& value) const override {
+        return GCDataPointManager::GetInstance().GetDataPointValue(name, value);
     }
 
-    bool SetDataPointValue(const std::string& name, int value) override {
-        return DataPointManager::GetInstance().SetDataPointValue(name, value);
+    bool SetDataPointValue(const std::string& name, uint32_t value) override {
+        return GCDataPointManager::GetInstance().SetDataPointValue(name, value);
     }
 
     void GenerateReportData(uint8_t* buffer, size_t buffer_size, size_t& data_size) override {
-        DataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
+        GCDataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
     }
 
-    void ProcessDataPointValue(const std::string& name, int value) override {
-        DataPointManager::GetInstance().ProcessDataPointValue(name, value);
+    void ProcessDataPointValue(const std::string& name, uint32_t value) override {
+        GCDataPointManager::GetInstance().ProcessDataPointValue(name, value);
     }
 
     void ProcessBinaryDataPointValue(const std::string& name, const uint8_t* data, size_t data_len) override {
-        DataPointManager::GetInstance().ProcessBinaryDataPointValue(name, data, data_len);
+        GCDataPointManager::GetInstance().ProcessBinaryDataPointValue(name, data, data_len);
     }
 };
 

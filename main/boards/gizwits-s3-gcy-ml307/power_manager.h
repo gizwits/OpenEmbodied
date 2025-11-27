@@ -13,7 +13,15 @@ private:
     static constexpr struct {
         uint16_t adc;
         uint8_t level;
-    } BATTERY_LEVELS[] = {{1750, 0}, {2010, 100}};
+    } BATTERY_LEVELS[] = {
+        {1650, 0}, 
+        {1700, 10},
+        {1750, 25},
+        {1850, 50},
+        {1900, 75},
+        {1950, 90},
+        {2010, 100}
+    };
     static constexpr size_t BATTERY_LEVELS_COUNT = 2;
     static constexpr size_t ADC_VALUES_COUNT = 10;
 
@@ -27,6 +35,8 @@ private:
     size_t adc_values_count_ = 0;
     uint8_t battery_level_ = 100;
     bool is_charging_ = false;
+    uint32_t average_adc_ = 0;
+
 
     static constexpr uint8_t MAX_CHANGE_COUNT = 8;
     static constexpr uint32_t TIME_LIMIT = 2000000; // 2 seconds in microseconds
@@ -47,29 +57,19 @@ private:
             change_count_ = 0;
         }
 
-        if (change_count_ < MAX_CHANGE_COUNT) {
-            bool new_is_charging = gpio_get_level(bat_led_pin_) != 0;  // 检查LED引脚状态
-
-            // 判断充电引脚状态
-            if (new_is_charging) {
-                new_is_charging = gpio_get_level(charging_pin_) == 1;
-            }
-
-            // 如果状态有变化
-            if (new_is_charging != is_charging_) {
-                bool old_charging_status = is_charging_;
-                is_charging_ = new_is_charging;
-                change_count_++;  // 增加变化次数
-                last_change_time_ = current_time;  // 更新最后变化时间
-                
-                // 调用充电状态改变回调
-                if (charging_status_callback_) {
-                    charging_status_callback_(is_charging_);
-                }
-            }
-        }
+       
 
         ReadBatteryAdcData();
+
+        if (change_count_ < MAX_CHANGE_COUNT) {
+            // 充电状态判定：无滞回/无保持
+            static constexpr uint32_t BATTERY_CHARGING_THRESHOLD_MV = 2500;
+            bool new_is_charging = (average_adc_ >= BATTERY_CHARGING_THRESHOLD_MV);
+            if (new_is_charging != is_charging_) {
+                is_charging_ = new_is_charging;
+                if (charging_status_callback_) charging_status_callback_(is_charging_);
+            }
+        }
     }
     void ReadBatteryAdcData() {
         int adc_value;
@@ -81,16 +81,16 @@ private:
             adc_values_count_++;
         }
 
-        uint32_t average_adc = 0;
+        average_adc_ = 0;
         for (size_t i = 0; i < adc_values_count_; i++) {
-            average_adc += adc_values_[i];
+            average_adc_ += adc_values_[i];
         }
-        average_adc /= adc_values_count_;
+        average_adc_ /= adc_values_count_;
 
-        CalculateBatteryLevel(average_adc);
+        CalculateBatteryLevel(average_adc_);
 
 
-        // ESP_LOGI("PowerManager", "ADC值: %d 平均值: %ld 电量: %u%%", adc_value, average_adc,
+        // ESP_LOGI("PowerManager", "ADC值: %d 平均值: %ld 电量: %u%%", adc_value, average_adc_,
         //          battery_level_);
     }
 

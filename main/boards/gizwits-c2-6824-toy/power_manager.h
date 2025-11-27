@@ -137,8 +137,8 @@ private:
 
         // 打印平均ADC值、电压和电量
         uint32_t voltage = average_adc * 2;
-        ESP_LOGI("PowerManager", "ADC平均值: %lu, 电压: %lu mV, 电量: %u%%", 
-                 average_adc, voltage, battery_level_);
+        // ESP_LOGI("PowerManager", "ADC平均值: %lu, 电压: %lu mV, 电量: %u%%", 
+        //          average_adc, voltage, battery_level_);
 
         // if(times++ % 50 == 0){
         //     ESP_LOGI("PowerManager", "adc: %d adc_avg: %ld, VBAT: %ld, battery_level_: %u%%", 

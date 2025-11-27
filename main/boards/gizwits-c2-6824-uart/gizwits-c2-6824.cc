@@ -422,11 +422,11 @@ public:
         return UartDataPointManager::GetInstance().GetDataPointCount();
     }
 
-    bool GetDataPointValue(const std::string& name, int& value) const override {
+    bool GetDataPointValue(const std::string& name, uint32_t& value) const override {
         return UartDataPointManager::GetInstance().GetDataPointValue(name, value);
     }
 
-    bool SetDataPointValue(const std::string& name, int value) override {
+    bool SetDataPointValue(const std::string& name, uint32_t value) override {
         return UartDataPointManager::GetInstance().SetDataPointValue(name, value);
     }
 
@@ -434,7 +434,7 @@ public:
         UartDataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
     }
 
-    void ProcessDataPointValue(const std::string& name, int value) override {
+    void ProcessDataPointValue(const std::string& name, uint32_t value) override {
         UartDataPointManager::GetInstance().ProcessDataPointValue(name, value);
     }
 

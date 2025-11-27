@@ -65,7 +65,9 @@ void WifiBoard::EnterWifiConfigMode() {
     auto& wifi_config = WifiConfiguration::GetInstance();
     wifi_config.RegisterCallback(OnWifiConfigEvent);
 
-    wifi_config.Initialize(Auth::getInstance().getProductKey(), "XPG-GAgent");
+    auto product_key = Auth::getInstance().getProductKey();
+    ESP_LOGI(TAG, "Product key: %s", product_key.c_str());
+    wifi_config.Initialize(product_key.c_str(), "XPG-GAgent");
 
     CheckTmpFactoryTestModeWithWifiConfig();
 

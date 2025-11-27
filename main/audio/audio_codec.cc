@@ -76,6 +76,7 @@ void AudioCodec::SetOutputVolume(int volume) {
             Application::GetInstance().Schedule([this]() {
                 // 提示最大声
                 auto codec = Board::GetInstance().GetAudioCodec();
+                Application::GetInstance().ResetDecoder();
                 codec->EnableOutput(true);
                 Application::GetInstance().PlaySound(Lang::Sounds::P3_VOICE_MAX);
             });
@@ -85,8 +86,9 @@ void AudioCodec::SetOutputVolume(int volume) {
         if (canPlaySound && is_first_set == false) { 
             Application::GetInstance().Schedule([this]() {
             // 提示最小声
-            auto codec = Board::GetInstance().GetAudioCodec();
-            codec->EnableOutput(true);
+                auto codec = Board::GetInstance().GetAudioCodec();
+                Application::GetInstance().ResetDecoder();
+                codec->EnableOutput(true);
                 Application::GetInstance().PlaySound(Lang::Sounds::P3_VOICE_MIN);
             });
         }
@@ -95,6 +97,7 @@ void AudioCodec::SetOutputVolume(int volume) {
             Application::GetInstance().Schedule([this]() {
                 // 播放提示音
                 auto codec = Board::GetInstance().GetAudioCodec();
+                Application::GetInstance().ResetDecoder();
                 codec->EnableOutput(true);
                 Application::GetInstance().PlaySound(Lang::Sounds::P3_BO);
             });

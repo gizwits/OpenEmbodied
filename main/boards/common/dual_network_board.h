@@ -49,6 +49,7 @@ public:
     virtual void SetPowerSaveMode(bool enabled) override;
     virtual std::string GetBoardJson() override;
     virtual std::string GetDeviceStatusJson() override;
+    virtual std::string GetImei() const override;
 };
 
 #endif // DUAL_NETWORK_BOARD_H 

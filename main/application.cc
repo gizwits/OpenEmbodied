@@ -244,6 +244,14 @@ void Application::DismissAlert() {
 void Application::ToggleChatState() {
     Board::GetInstance().WakeUpPowerSaveTimer();
 
+    // 清空字幕
+    auto display = Board::GetInstance().GetDisplay();
+    if (display) {
+        display->SetChatMessage("system", "");
+        display->SetChatMessage("user", "");
+        display->SetChatMessage("assistant", "");
+    }
+
     if (player_.IsDownloading()) {
         CancelPlayMusic();
         return;
@@ -364,6 +372,18 @@ void Application::StopListening() {
 void Application::Start() {
     auto reset_reason = esp_reset_reason();
     ESP_LOGI(TAG, "esp_reset_reason: %d", reset_reason);
+
+
+    // 这段必须在 board 初始化前
+    Settings settings("wifi", true);
+
+#ifdef CONFIG_DEFAULT_CHAT_MODE
+    int default_chat_mode = CONFIG_DEFAULT_CHAT_MODE;
+    chat_mode_ = settings.GetInt("chat_mode", default_chat_mode); // 0=按键说话, 1=唤醒词, 2=自然对话
+#else
+    chat_mode_ = settings.GetInt("chat_mode", 1); // 0=按键说话, 1=唤醒词, 2=自然对话
+#endif
+    // 这段必须在 board 初始化前
     
     // 判断重启类型：ESP_RST_POWERON(1)、ESP_RST_EXT(2)、ESP_RST_SW(3) 为正常重启
     is_normal_reset_ = (reset_reason == ESP_RST_POWERON || 
@@ -388,15 +408,6 @@ void Application::Start() {
         is_silent_startup_ = true;
     }
     ESP_LOGI(TAG, "最终 is_silent_startup_: %d", is_silent_startup_);
-    
-    Settings settings("wifi", true);
-
-#ifdef CONFIG_DEFAULT_CHAT_MODE
-    int default_chat_mode = CONFIG_DEFAULT_CHAT_MODE;
-    chat_mode_ = settings.GetInt("chat_mode", default_chat_mode); // 0=按键说话, 1=唤醒词, 2=自然对话
-#else
-    chat_mode_ = settings.GetInt("chat_mode", 1); // 0=按键说话, 1=唤醒词, 2=自然对话
-#endif
 
 
     auto& board = Board::GetInstance();
@@ -480,19 +491,23 @@ void Application::Start() {
     }
 
     // Initialize NTP client
-    auto& ntp_client = NtpClient::GetInstance();
-    esp_err_t ntp_ret = ntp_client.Init();
-    if (ntp_ret == ESP_OK) {
-        ESP_LOGI(TAG, "Waiting for network to be fully ready before NTP sync...");
-        ntp_client.StartSync();
-        Schedule([]() {
-            auto& ntp_client = NtpClient::GetInstance();
-            ntp_client.ProcessSync();
-        }, "NTP_ProcessSync");
-        ESP_LOGI(TAG, "NTP client initialized and started");
-    } else {
-        ESP_LOGE(TAG, "Failed to initialize NTP client: %s", esp_err_to_name(ntp_ret));
+    if (Board::GetInstance().GetNetworkType() == NetworkType::WIFI) {
+        auto& ntp_client = NtpClient::GetInstance();
+        esp_err_t ntp_ret = ntp_client.Init();
+        if (ntp_ret == ESP_OK) {
+            ESP_LOGI(TAG, "Waiting for network to be fully ready before NTP sync...");
+            ntp_client.StartSync();
+            Schedule([]() {
+                auto& ntp_client = NtpClient::GetInstance();
+                ntp_client.ProcessSync();
+            }, "NTP_ProcessSync");
+            ESP_LOGI(TAG, "NTP client initialized and started");
+        } else {
+            ESP_LOGE(TAG, "Failed to initialize NTP client: %s", esp_err_to_name(ntp_ret));
+        }
     }
+    
+
     // Update the status bar immediately to show the network state
     display->UpdateStatusBar(true);
     
@@ -521,9 +536,14 @@ void Application::Start() {
         last_error_message_ = message;
     });
     protocol_->OnIncomingAudio([this](AudioStreamPacket&& packet) {
+        // ESP_LOGI(TAG, "OnIncomingAudio: packet_size=%zu, device_state=%d", 
+        //          packet.payload.size(), device_state_);
         if (device_state_ == kDeviceStateSpeaking) {
             auto packet_ptr = std::make_unique<AudioStreamPacket>(std::move(packet));
-            audio_service_.PushPacketToDecodeQueue(std::move(packet_ptr));
+            bool pushed = audio_service_.PushPacketToDecodeQueue(std::move(packet_ptr), false);
+            // ESP_LOGI(TAG, "Pushed audio packet to decode queue: %s", pushed ? "success" : "failed");
+        } else {
+            ESP_LOGW(TAG, "Ignoring audio packet, device_state is not Speaking (current: %d)", device_state_);
         }
     });
     protocol_->OnAudioChannelOpened([this, codec, &board, display]() {
@@ -536,6 +556,12 @@ void Application::Start() {
         
         // Notify display that socket is connected
         display->SetSocketConnected(true);
+
+        // Schedule([this]() {
+        //     vTaskDelay(pdMS_TO_TICKS(5000));
+        //     SetDeviceState(kDeviceStateSpeaking);
+        //     GenerateTTSFromText("你是谁");
+        // }, "GenerateTTSFromText_Hello");
     });
     protocol_->OnAudioChannelClosed([this, &board, display](bool is_clean) {
         ESP_LOGW("OnAudioChannelClosed", "is_clean: %d", is_clean);
@@ -620,29 +646,35 @@ void Application::Start() {
                 }
                 if (cJSON_IsString(text)) {
 #ifndef CONFIG_IDF_TARGET_ESP32C2
-                    ESP_LOGI(TAG, "<< %s", text->valuestring);
+                    // ESP_LOGI(TAG, "<< %s", text->valuestring);
                     Schedule([this, display, message = std::string(text->valuestring)]() {
                         display->SetChatMessage("assistant", message.c_str());
-                    }, "OnIncomingJson_TTS_SentenceStart");
+                    });
 #endif
                 }
             }
-        } else if (strcmp(type->valuestring, "stt") == 0) {
+        }  else if (strcmp(type->valuestring, "firstaudio") == 0) {
+            ESP_LOGI(TAG, "firstaudio");
+            Schedule([this]() {
+                // 音画同步，这个事件才是最准确的
+                DeviceStateEventManager::GetInstance().PostStateChangeEvent(device_state_, kDeviceStateRealSpeaking);
+            }, "OnIncomingJson_FirstAudio");
+        }  else if (strcmp(type->valuestring, "stt") == 0) {
             auto text = cJSON_GetObjectItem(root, "text");
 
 
-            Schedule([this]() {
-                if (device_state_ != kDeviceStateListening) {
-                    SetDeviceState(kDeviceStateListening);
-                }
-            }, "OnIncomingJson_STT_SentenceStart_SetListening");
+            // Schedule([this]() {
+            //     if (device_state_ != kDeviceStateListening) {
+            //         SetDeviceState(kDeviceStateListening);
+            //     }
+            // });
 
 
             if (cJSON_IsString(text)) {
                 // ESP_LOGI(TAG, ">> %s", text->valuestring);
                 Schedule([this, display, message = std::string(text->valuestring)]() {
                     display->SetChatMessage("user", message.c_str());
-                }, "OnIncomingJson_STT_SentenceStart");
+                });
             }
         } else if (strcmp(type->valuestring, "llm") == 0) {
             auto emotion = cJSON_GetObjectItem(root, "emotion");
@@ -808,9 +840,11 @@ void Application::MainEventLoop() {
         loop_counter++;
 
         // Process NTP sync - 每10次循环执行一次
-        if (loop_counter % 10 == 0) {
-            auto& ntp_client = NtpClient::GetInstance();
-            ntp_client.ProcessSync();
+        if (Board::GetInstance().GetNetworkType() == NetworkType::WIFI) {
+            if (loop_counter % 10 == 0) {
+                auto& ntp_client = NtpClient::GetInstance();
+                ntp_client.ProcessSync();
+            }
         }
 
         
@@ -1210,6 +1244,7 @@ void Application::initGizwitsServer() {
     Settings settings("wifi", true);
 #if CONFIG_USE_GIZWITS_MQTT
     auto& mqtt_client = MqttClient::getInstance();
+    static bool is_first_params_received = false;
     mqtt_client.OnRoomParamsUpdated([this](const RoomParams& params, bool is_mutual) {
         // 判断 protocol_ 是否启动
         // 如果启动了，就断开重新连接
@@ -1245,6 +1280,17 @@ void Application::initGizwitsServer() {
                 ResetDecoder();
                 SetListeningMode(chat_mode_ == 2  ? kListeningModeRealtime : kListeningModeAutoStop);
             }, "initGizwitsServer_OpenAudioChannel");
+        }
+
+        // 第一次 强制连接
+        if (!is_first_params_received) {
+            is_first_params_received = true;
+            if (Board::GetInstance().NeedForceConnect()) {
+                Schedule([this]() {
+                    vTaskDelay(pdMS_TO_TICKS(500));
+                    ToggleChatState();
+                }); 
+            }
         }
     });
 
@@ -1497,9 +1543,11 @@ void Application::PlayMusic(const char* url) {
         url_str = "http:" + url_str.substr(6);
     }
     // 新增：如果以 .mp3 结尾，替换为 .p3
+#ifndef CONFIG_IDF_TARGET_ESP32S3
     if (url_str.size() >= 4 && url_str.substr(url_str.size() - 4) == ".mp3") {
         url_str.replace(url_str.size() - 4, 4, ".p3");
     }
+#endif
     QuitTalking();
 
     // 设置数据包回调：快速发送数据，不阻塞
@@ -1683,4 +1731,16 @@ void Application::AppendRecordedAudioData(const uint8_t* data, size_t size) {
         return;
     }
     recorded_audio_data_.insert(recorded_audio_data_.end(), data, data + size);
+}
+
+void Application::GenerateTTSFromText(const std::string& text) {
+    if (protocol_ && protocol_->IsAudioChannelOpened()) {
+        protocol_->GenerateTTSFromText(text);
+    }
+}
+
+void Application::SetAudioUploadEnabled(bool enabled) {
+    if (protocol_) {
+        protocol_->SetAudioUploadEnabled(enabled);
+    }
 }
