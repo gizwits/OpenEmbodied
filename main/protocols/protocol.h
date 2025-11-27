@@ -8,9 +8,10 @@
 #include <vector>
 #include <esp_timer.h>
 
+#define IGNORE_FIRST_PACKETS 4
 
 #if CONFIG_IDF_TARGET_ESP32S3
-#define MAX_CACHED_PACKETS 0
+#define MAX_CACHED_PACKETS 6
 #else
 #define MAX_CACHED_PACKETS 4
 #endif

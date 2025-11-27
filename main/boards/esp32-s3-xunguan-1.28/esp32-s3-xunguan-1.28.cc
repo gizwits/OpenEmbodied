@@ -85,7 +85,8 @@ private:
 
             } else {
                 // 关闭 wifi，进入待机模式
-                Application::GetInstance().EnterSleepMode();
+                // Application::GetInstance().EnterSleepMode();
+                PowerOff();
             }
         });
         power_save_timer_->OnExitSleepMode([this]() {
@@ -344,11 +345,11 @@ private:
             }
 
 
-            if (CheckAndHandleEnterSleepMode()) {
-                // 交给休眠逻辑托管
-                ESP_LOGI(TAG, "长按唤醒");
-                return;
-            }
+            // if (CheckAndHandleEnterSleepMode()) {
+            //     // 交给休眠逻辑托管
+            //     ESP_LOGI(TAG, "长按唤醒");
+            //     return;
+            // }
             auto& app = Application::GetInstance();
             // if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
             //     InnerResetWifiConfiguration();

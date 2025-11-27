@@ -194,24 +194,26 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 
                 // Implement packet caching logic
                 if (is_first_packet_) {
-                    // Send TTS start event for first packet
-                    char message_buffer[256];
-                    snprintf(message_buffer, sizeof(message_buffer), 
-                        "{\"type\":\"tts\",\"state\":\"start\"}");
-                       
-                    auto message_json = cJSON_Parse(message_buffer);
-                    if (message_json) {
-                        on_incoming_json_(message_json);
-                        cJSON_Delete(message_json);
-                    }
                     is_first_packet_ = false;
                     // Start caching mode, cache MAX_CACHED_PACKETS packets first
                     cached_packet_count_ = 0;
                     packet_cache_.clear();
                 }
                 
+#ifdef CONFIG_BOARD_TYPE_ESP32S3_XUNGUAN_AMOLED_1_28
+                // 测试：丢弃前4个音频包
+                // 可能百度有坑，前三个包会带上之前说的话，所以需要丢弃
+                if (cached_packet_count_ < IGNORE_FIRST_PACKETS) {
+                    // 丢弃前5个包
+                    cached_packet_count_++;
+                    ESP_LOGI(TAG, "[TEST] Discarding packet %d/5", cached_packet_count_);
+                    return;  // 直接返回，不处理这个包
+                }
+#endif
+
+                
                 if (cached_packet_count_ < MAX_CACHED_PACKETS) {
-                    // Still in caching phase, add to cache
+                    // Still in caching phase, add to cache (从第6个包开始缓存)
                     packet_cache_.push_back(packet);
                     cached_packet_count_++;
                     ESP_LOGD(TAG, "Caching packet %d/%d", cached_packet_count_, MAX_CACHED_PACKETS);
@@ -247,6 +249,15 @@ bool WebsocketProtocol::OpenAudioChannel() {
             if (cJSON_IsString(type)) {
                 if (strcmp(type->valuestring, "hello") == 0) {
                     ParseServerHello(root);
+                } else if (strcmp(type->valuestring, "stt") == 0) {
+                    char message_buffer[256];
+                    snprintf(message_buffer, sizeof(message_buffer), 
+                        "{\"type\":\"tts\",\"state\":\"pre_start\"}");
+                    auto message_json = cJSON_Parse(message_buffer);
+                    if (message_json) {
+                        on_incoming_json_(message_json);
+                        cJSON_Delete(message_json);
+                    }
                 } else if (strcmp(type->valuestring, "tts") == 0) {
                     // Handle TTS events
                     auto state = cJSON_GetObjectItem(root, "state");
@@ -269,15 +280,6 @@ bool WebsocketProtocol::OpenAudioChannel() {
                             packet_cache_.clear();
                             ESP_LOGD(TAG, "Caching state reset");
 
-                            // 同时发送多一个pre_start 事件 兼容coze 逻辑
-                            char message_buffer[256];
-                            snprintf(message_buffer, sizeof(message_buffer), 
-                                "{\"type\":\"tts\",\"state\":\"pre_start\"}");
-                            auto message_json = cJSON_Parse(message_buffer);
-                            if (message_json) {
-                                on_incoming_json_(message_json);
-                                cJSON_Delete(message_json);
-                            }
                         } else if (strcmp(state->valuestring, "stop") == 0) {
                             ESP_LOGI(TAG, "TTS stop event detected");
                             tts_start_received_ = false;  // 重置状态，允许下一次 start

@@ -20,7 +20,7 @@
                 "CONFIG_CUSTOM_TENANT_ID=\"1985610720722112513\"",
                 "CONFIG_PROTOCOL_TYPE_XIAOZHI=y",
                 "CONFIG_USE_DEVICE_AEC=y",
-                "CONFIG_DEFAULT_CHAT_MODE=\"2\""
+                "CONFIG_DEFAULT_CHAT_MODE=2"
             ]
         }
     ]
