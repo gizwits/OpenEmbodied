@@ -816,6 +816,8 @@ if (mqtt_client.isInitialized()) {
             if (!CheckBatteryLevel() && Board::GetInstance().NeedBlockLowBattery()) {
                 // 电池电量不足且需要阻止低电量运行，执行关机操作
                 ESP_LOGW(TAG, "Low battery detected during operation, shutting down...");
+                // 等念完台词
+                vTaskDelay(pdMS_TO_TICKS(3000));
                 Board::GetInstance().PowerOff();
             }
             last_battery_check_time_ = now;
