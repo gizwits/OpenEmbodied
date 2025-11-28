@@ -94,6 +94,13 @@ void WebsocketProtocol::CloseAudioChannel() {
     tts_start_received_ = false;  // 重置 TTS start 状态
     ESP_LOGD(TAG, "Packet cache cleared");
     
+    // 标记为客户端主动关闭，避免触发错误处理
+    if (websocket_ != nullptr) {
+        ws_client_initiated_close_ = true;
+        ESP_LOGI(TAG, "WS Close() called by client");
+        websocket_->Close();
+    }
+    
     websocket_.reset();
 }
 
@@ -112,6 +119,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
     }
 
     error_occurred_ = false;
+    ws_client_initiated_close_ = false;  // 重置客户端主动关闭标志
     
     // Initialize caching variables for new connection (inlined logic)
     packet_cache_.clear();
@@ -303,9 +311,18 @@ bool WebsocketProtocol::OpenAudioChannel() {
     });
 
     websocket_->OnDisconnected([this](bool is_clean) {
-        ESP_LOGI(TAG, "Websocket disconnected");
+        int64_t t_us = esp_timer_get_time();
+        bool was_client = ws_client_initiated_close_;
+        ws_client_initiated_close_ = false;  // 重置标志
+        
+        // 如果是客户端主动关闭，应该被视为正常断开
+        bool should_treat_as_clean = is_clean || was_client;
+        
+        ESP_LOGI(TAG, "Websocket disconnected (client_initiated=%d, is_clean=%d) t_us=%lld", 
+                 was_client, is_clean, (long long)t_us);
+        
         if (on_audio_channel_closed_ != nullptr) {
-            on_audio_channel_closed_(is_clean);
+            on_audio_channel_closed_(should_treat_as_clean);
         }
     });
 
