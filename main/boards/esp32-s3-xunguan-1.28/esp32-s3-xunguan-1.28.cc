@@ -720,6 +720,9 @@ public:
         vTaskDelete(NULL); // 任务结束时删除自己
     }
 
+    virtual bool NeedLocalWelcome() override {
+        return true;
+    }
     virtual bool NeedBlockLowBattery() override {
         return true;
     }

@@ -515,6 +515,12 @@ void Application::Start() {
         }
         MqttClient::getInstance().sendTraceLog("info", "socket 通道打开");
 
+        if (board.NeedLocalWelcome()) {
+            Schedule([this]() {
+                PlaySound(Lang::Sounds::P3_IM_HERE);
+            }, "OnAudioChannelOpened_LocalWelcome");
+        }
+
     });
     protocol_->OnAudioChannelClosed([this, &board](bool is_clean) {
         ESP_LOGW("OnAudioChannelClosed", "is_clean: %d", is_clean);
