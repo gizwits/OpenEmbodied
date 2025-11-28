@@ -204,7 +204,6 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 // 测试：丢弃前4个音频包
                 // 可能百度有坑，前三个包会带上之前说的话，所以需要丢弃
                 if (cached_packet_count_ < IGNORE_FIRST_PACKETS) {
-                    // 丢弃前5个包
                     cached_packet_count_++;
                     ESP_LOGI(TAG, "[TEST] Discarding packet %d/5", cached_packet_count_);
                     return;  // 直接返回，不处理这个包
@@ -404,43 +403,15 @@ bool WebsocketProtocol::IsAudioCanEnterSleepMode() const {
     return websocket_ != nullptr && websocket_->IsConnected() && !error_occurred_ && !IsTimeout();
 }
 
-void WebsocketProtocol::SendTextToAI(const std::string& text) {
-    // Create event ID
-    char event_id[32];
-    uint32_t random_value = esp_random();
-    snprintf(event_id, sizeof(event_id), "%lu", random_value);
-
-    // Build message
-    char message[512];
-    snprintf(message, sizeof(message),
-        "{\"id\":\"%s\",\"event_type\":\"conversation.message.create\",\"data\":{\"role\":\"user\",\"content_type\":\"text\",\"content\":\"%s\"}}",
-        event_id, text.c_str());
-
-    SendText(message);
+void WebsocketProtocol::SendTextToAI(const std::string& message) {
+    std::string json = "{\"session_id\":\"" + session_id_ + 
+    "\",\"type\":\"listen\",\"state\":\"detect\",\"text\":\"" + message + "\"}";
+    SendText(json);
 }
 
 void WebsocketProtocol::SendStopListening() {
-    if (!websocket_) {
-        return;
-    }
-
-    // Create event ID
-    char event_id[32];
-    uint32_t random_value = esp_random();
-    snprintf(event_id, sizeof(event_id), "%lu", random_value);
-
-    // Build complete message
-    char message[256];
-    snprintf(message, sizeof(message),
-        "{"
-            "\"id\":\"%s\","
-            "\"event_type\":\"input_audio_buffer.complete\","
-            "\"data\":{}"
-        "}", event_id);
-
-    // Send message
-    websocket_->Send(message);
-    ESP_LOGI(TAG, "SendStopListening: %s", message);
+    std::string message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"listen\",\"state\":\"stop\"}";
+    SendText(message);
 }
 
 void WebsocketProtocol::HandleReconnect() {
