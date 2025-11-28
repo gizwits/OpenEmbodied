@@ -86,6 +86,8 @@ private:
             } else {
                 // 关闭 wifi，进入待机模式
                 // Application::GetInstance().EnterSleepMode();
+                Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
+                vTaskDelay(pdMS_TO_TICKS(3000));
                 PowerOff();
             }
         });
@@ -97,6 +99,8 @@ private:
             if (IsCharging()) {
                 // 充电模式下不管
             } else {
+                Application::GetInstance().PlaySound(Lang::Sounds::P3_SLEEP);
+                vTaskDelay(pdMS_TO_TICKS(3000));
                 PowerOff();
             }
         });
