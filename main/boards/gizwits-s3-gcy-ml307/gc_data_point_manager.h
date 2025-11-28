@@ -55,7 +55,9 @@ public:
         std::function<void(int)> set_speed_callback,
         std::function<uint32_t(int)> get_timer_callback,  // 参数为timer索引(1-10)
         std::function<void(int, uint32_t)> set_timer_callback,  // 参数为timer索引(1-10)和值
-        std::function<void(int, const std::string&)> set_tts_callback  // 参数为tts索引(1-10)和文本
+        std::function<void(int, const std::string&)> set_tts_callback,  // 参数为tts索引(1-10)和文本
+        std::function<int()> get_wake_word_index_callback,  // 获取唤醒词索引
+        std::function<void(int)> set_wake_word_index_callback  // 设置唤醒词索引
     );
 
     // 初始化：从存储加载并应用缓存的数据点
@@ -66,6 +68,9 @@ public:
 
     // 设置缓存但不触发回调（用于内部恢复时调用回调前的缓存同步）
     void SetCachedDataPoint(const std::string& name, int value);
+    
+    // 获取当前唤醒词索引
+    int GetCurrentWakeWordIndex() const { return current_wake_word_index_; }
 
 protected:
     GCDataPointManager() = default;
@@ -97,7 +102,12 @@ protected:
     std::function<uint32_t(int)> get_timer_callback_;  // 参数为timer索引(1-10)
     std::function<void(int, uint32_t)> set_timer_callback_;  // 参数为timer索引(1-10)和值
     std::function<void(int, const std::string&)> set_tts_callback_;  // 参数为tts索引(1-10)和文本
+    std::function<int()> get_wake_word_index_callback_;  // 获取唤醒词索引
+    std::function<void(int)> set_wake_word_index_callback_;  // 设置唤醒词索引
 
     // 简单的内存缓存
     std::map<std::string, int> cache_;
+    
+    // 当前唤醒词索引
+    int current_wake_word_index_ = 0;
 };

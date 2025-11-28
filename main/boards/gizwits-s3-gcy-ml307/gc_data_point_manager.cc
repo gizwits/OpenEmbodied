@@ -712,6 +712,13 @@ bool GCDataPointManager::GetDataPointValue(const std::string& name, uint32_t& va
             value = 0;
         }
         return true;
+    } else if (name == "wake_word_index") {
+        if (get_wake_word_index_callback_) {
+            value = get_wake_word_index_callback_();
+        } else {
+            value = 0; // 默认值
+        }
+        return true;
     } else if (name == "brightness") {
         if (get_brightness_callback_) {
             value = get_brightness_callback_();
@@ -802,6 +809,10 @@ bool GCDataPointManager::SetDataPointValue(const std::string& name, uint32_t val
             set_brightness_callback_(static_cast<int>(value));
             return true;
         }
+    } else if (name == "wake_word_index") {
+        // wake_word_index 是只读数据点，不允许设置
+        ESP_LOGW(TAG, "wake_word_index is readonly, cannot be set");
+        return false;
     } else if (name.find("timer") == 0 && name.length() > 5) {
         // 处理 timer1-timer10
         std::string timer_num_str = name.substr(5); // 提取数字部分
@@ -824,7 +835,7 @@ void GCDataPointManager::GenerateReportData(uint8_t* buffer, size_t buffer_size,
     buffer[3] = 0x03;
     
     // mqtt 可变长度
-    buffer[4] = 0x73;
+    buffer[4] = 0x13;
     // flag
     buffer[5] = 0x00;
     // 命令标识
@@ -840,8 +851,11 @@ void GCDataPointManager::GenerateReportData(uint8_t* buffer, size_t buffer_size,
     // 数据类型
     buffer[12] = 0x14;
     // flag
-    buffer[13] = 0x03;
-    buffer[14] = 0xff;
+    buffer[13] = 0x0;
+    buffer[14] = 0x0;
+    buffer[15] = 0x0;
+    buffer[16] = 0x5;
+    buffer[17] = 0xff;
 
     // 状态字节
     uint8_t status = 0;
@@ -872,59 +886,44 @@ void GCDataPointManager::GenerateReportData(uint8_t* buffer, size_t buffer_size,
         status |= (get_chat_mode_callback_() & 0x03) << 5; // 2 bits
     }
     
-    buffer[15] = status;
+    buffer[18] = status;
 
     // 电量
     if (get_battery_level_callback_) {
-        buffer[16] = get_battery_level_callback_();
+        buffer[19] = get_battery_level_callback_();
     } else {
-        buffer[16] = 0;
+        buffer[19] = 0;
     }
 
     // 音量
     if (get_volume_callback_) {
-        buffer[17] = get_volume_callback_();
+        buffer[20] = get_volume_callback_();
     } else {
-        buffer[17] = 0;
+        buffer[20] = 0;
     }
 
     // RSSI
     if (get_rssi_callback_) {
-        buffer[18] = get_rssi_callback_();
+        buffer[21] = get_rssi_callback_();
     } else {
-        buffer[18] = 0;
+        buffer[21] = 0;
     }
 
     // 亮度
     if (get_brightness_callback_) {
-        buffer[19] = get_brightness_callback_();
+        buffer[22] = get_brightness_callback_();
     } else {
-        buffer[19] = 0;
-    }
-    
-    // 注意：speed 和 timer 数据点在上报数据包中的位置需要根据实际协议格式确定
-    // 当前 GenerateReportData 保持原有数据包结构，新数据点通过 GetDataPointValue 获取
-
-    // 获取 ssid
-    std::string ssid = WifiStation::GetInstance().GetSsid();
-    if (ssid.length() > 100) {
-        ssid = ssid.substr(0, 100);
-    }
-    
-    // 总是复制SSID数据，长度不够100字节的部分用0填充
-    if (ssid.length() > 0) {
-        memcpy(buffer + 20, ssid.c_str(), ssid.length());
-    }
-    
-    // 用0填充剩余空间到100字节
-    if (ssid.length() < 100) {
-        memset(buffer + 20 + ssid.length(), 0, 100 - ssid.length());
+        buffer[22] = 0;
     }
 
-    data_size = 20 + 100;  // 固定为120字节
+    if (get_wake_word_index_callback_) {
+        buffer[23] = get_wake_word_index_callback_();
+    } else {
+        buffer[23] = 0;
+    }
+
+    data_size = 24;
     
-    ESP_LOGD(TAG, "SSID length: %zu, padded to 100 bytes, total data size: %zu", 
-             ssid.length(), data_size);
 }
 
 // 标准实现：处理数据点值
@@ -937,6 +936,20 @@ void GCDataPointManager::ProcessDataPointValue(const std::string& name, uint32_t
     } else if (name == "video_bg") {
         return;
     } else if (name == "ssid") {
+        return;
+    } else if (name == "wake_word_index") {
+        // wake_word_index 是只读数据点，但服务器可能会发送更新值
+        // 更新 current_wake_word_index_ 和缓存
+        current_wake_word_index_ = static_cast<int>(value);
+        cache_["wake_word_index"] = current_wake_word_index_;
+        // 保存到存储
+        Settings settings("datapoint", true);
+        settings.SetInt("wake_word_index", current_wake_word_index_);
+        // 调用回调函数更新唤醒词索引
+        if (set_wake_word_index_callback_) {
+            set_wake_word_index_callback_(current_wake_word_index_);
+        }
+        ESP_LOGI(TAG, "Updated wake_word_index: %d", current_wake_word_index_);
         return;
     }
 
@@ -1093,7 +1106,9 @@ void GCDataPointManager::SetCallbacks(
     std::function<void(int)> set_speed_callback,
     std::function<uint32_t(int)> get_timer_callback,
     std::function<void(int, uint32_t)> set_timer_callback,
-    std::function<void(int, const std::string&)> set_tts_callback
+    std::function<void(int, const std::string&)> set_tts_callback,
+    std::function<int()> get_wake_word_index_callback,
+    std::function<void(int)> set_wake_word_index_callback
 ) {
     is_charging_callback_ = is_charging_callback;
     get_chat_mode_callback_ = get_chat_mode_callback;
@@ -1118,6 +1133,8 @@ void GCDataPointManager::SetCallbacks(
     get_timer_callback_ = get_timer_callback;
     set_timer_callback_ = set_timer_callback;
     set_tts_callback_ = set_tts_callback;
+    get_wake_word_index_callback_ = get_wake_word_index_callback;
+    set_wake_word_index_callback_ = set_wake_word_index_callback;
 }
 
 void GCDataPointManager::InitFromStorage() {
@@ -1205,6 +1222,25 @@ void GCDataPointManager::InitFromStorage() {
             cache_[timer_name] = v;
             set_timer_callback_(i, timer_value);
         }
+    }
+    
+    // wake_word_index (只读数据点，从存储中读取并保存到 current_wake_word_index_)
+    v = settings.GetInt("wake_word_index", -1);
+    if (v != -1) {
+        current_wake_word_index_ = v;
+        cache_["wake_word_index"] = v;
+        // 调用回调函数初始化唤醒词索引
+        if (set_wake_word_index_callback_) {
+            set_wake_word_index_callback_(current_wake_word_index_);
+        }
+        ESP_LOGI(TAG, "Loaded wake_word_index from storage: %d", current_wake_word_index_);
+    } else {
+        current_wake_word_index_ = 0; // 默认值
+        // 调用回调函数初始化唤醒词索引（使用默认值）
+        if (set_wake_word_index_callback_) {
+            set_wake_word_index_callback_(current_wake_word_index_);
+        }
+        ESP_LOGD(TAG, "wake_word_index not found in storage, using default: 0");
     }
 }
 

@@ -50,6 +50,7 @@ private:
     Button reset_button_;
     Button break_button_;
     SpiLcdDisplay* display_;
+    int current_wake_word_index_ = 0;
 
     bool need_power_off_ = false;
     VbAduioCodec audio_codec;
@@ -122,8 +123,20 @@ private:
             [](int value) { /* TODO: 实现语速设置功能 */ }, // set_speed_callback
             [](int index) -> uint32_t { return 0; }, // get_timer_callback - 默认返回0
             [](int index, uint32_t value) { /* TODO: 实现闹钟设置功能 */ }, // set_timer_callback
-            [](int index, const std::string& text) { /* TODO: 实现闹钟文字提示设置功能 */ } // set_tts_callback
+            [](int index, const std::string& text) { /* TODO: 实现闹钟文字提示设置功能 */ }, // set_tts_callback
+            []() -> int { 
+                // 从 GCDataPointManager 获取当前唤醒词索引
+                return GCDataPointManager::GetInstance().GetCurrentWakeWordIndex();
+            }, // get_wake_word_index_callback
+            [this](int value) { 
+                ESP_LOGI("Board", "Wake word index updated to: %d", value);
+                this->current_wake_word_index_ = value;
+            } // set_wake_word_index_callback
         );
+        
+        // 初始化完成后，从 GCDataPointManager 获取当前唤醒词索引值
+        current_wake_word_index_ = GCDataPointManager::GetInstance().GetCurrentWakeWordIndex();
+        ESP_LOGI(TAG, "Initialized current_wake_word_index_: %d", current_wake_word_index_);
     }
 
 
@@ -895,13 +908,28 @@ public:
                 ESP_LOGI(TAG, "静默启动状态，忽略唤醒词: %s", command.c_str());
                 return;
             }
+
+            // 只对 current_wake_word_index_ 对应的唤醒词起作用
+            if (current_wake_word_index_ >= 0 && current_wake_word_index_ < static_cast<int>(wake_words_.size())) {
+                std::string current_wake_word = wake_words_[current_wake_word_index_];
+                if (command == current_wake_word) {
+                    ESP_LOGI(TAG, "检测到当前唤醒词[%d]: %s", current_wake_word_index_, current_wake_word.c_str());
+                    ESP_LOGE(TAG, "vb6824 recv cmd: %d", app.GetDeviceState());
+                    // if(app.GetDeviceState() != kDeviceStateListening){
+                    // }
+                    app.WakeWordInvoke("你好小智");
+                    return;
+                } else {
+                    ESP_LOGD(TAG, "唤醒词不匹配: 检测到=%s, 当前索引[%d]=%s", 
+                             command.c_str(), current_wake_word_index_, current_wake_word.c_str());
+                }
+            } else {
+                ESP_LOGW(TAG, "唤醒词索引超出范围: %d (总数: %zu)", 
+                         current_wake_word_index_, wake_words_.size());
+            }
             
-            if (IsCommandInList(command, wake_words_)){
-                ESP_LOGE(TAG, "vb6824 recv cmd: %d", app.GetDeviceState());
-                // if(app.GetDeviceState() != kDeviceStateListening){
-                // }
-                app.WakeWordInvoke("你好小智");
-            } else if (IsCommandInList(command, network_config_words_)) {
+            // 网络配置唤醒词不受索引限制
+            if (IsCommandInList(command, network_config_words_)) {
                 InnerResetWifiConfiguration();
             }
         });
