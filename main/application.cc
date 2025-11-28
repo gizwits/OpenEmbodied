@@ -1515,6 +1515,11 @@ void Application::ResetDecoder() {
     audio_service_.ResetDecoder();
 }
 
+bool Application::IsAudioChannelOpened() const {
+    return protocol_ && protocol_->IsAudioChannelOpened();
+}
+
+
 void Application::QuitTalking() {
     // 不要使用这个判断protocol_->IsAudioChannelOpened 
     // 因为长时间没有使用 socket处于超时状态
@@ -1577,7 +1582,7 @@ void Application::PlayMusic(const char* url) {
         args->app->player_.processMP3Stream(args->url.c_str());
         delete args;
         vTaskDelete(NULL);
-    }, "process_mp3_stream", 2048, args, 5, nullptr);
+    }, "process_mp3_stream", 2048 * 2, args, 5, nullptr);
 
 }
 

@@ -105,6 +105,7 @@ public:
     void StopListening();
     void Reboot();
     void ResetDecoder();
+    bool IsAudioChannelOpened() const;
     void PlaySound(const std::string_view& sound);
     void WakeWordInvoke(const std::string& wake_word);
     bool CanEnterSleepMode();

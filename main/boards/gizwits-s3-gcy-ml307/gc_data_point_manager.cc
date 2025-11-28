@@ -161,6 +161,26 @@ const char* GCDataPointManager::GetGizwitsProtocolJson() const {
             "desc": "输出音频的语速，取值范围 [-50, 100]，默认为 0。-50 表示 0.5 倍速，100 表示 2 倍速。"
         },
         {
+            "display_name": "唤醒词 id",
+            "name": "wake_word_index",
+            "data_type": "uint8",
+            "position": {
+                "byte_offset": 0,
+                "unit": "byte",
+                "len": 1,
+                "bit_offset": 0
+            },
+            "uint_spec": {
+                "addition": 0,
+                "max": 255,
+                "ratio": 1,
+                "min": 0
+            },
+            "type": "status_readonly",
+            "id": 10,
+            "desc": ""
+        },
+        {
             "display_name": "闹钟1",
             "name": "timer1",
             "data_type": "uint32",

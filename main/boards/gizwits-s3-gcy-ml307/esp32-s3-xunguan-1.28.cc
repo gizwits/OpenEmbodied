@@ -72,7 +72,9 @@ private:
 
     
     // 唤醒词列表
-    std::vector<std::string> wake_words_ = {"你好小智", "你好小云", "合养精灵", "嗨小火人"};
+    std::vector<std::string> wake_words_ = {
+        "你好小古","哥哥在吗","老师在吗","老公在吗","老婆在吗","宝宝在吗"
+    };
     std::vector<std::string> network_config_words_ = {"开始配网"};
 
 
@@ -365,14 +367,21 @@ private:
                 
                 // TTS 文本已经在上面打印过了，这里只需要处理播放逻辑
                 if (!tts_text.empty()) {
-                    Application::GetInstance().ToggleChatState();
+                    static bool need_wait_connect = false;
+                    if (!Application::GetInstance().IsAudioChannelOpened()) {
+                        need_wait_connect = true;
+                        Application::GetInstance().ToggleChatState();
+                        // 没连接就发起链接
+                    }
                     Application::GetInstance().Schedule([this, tts_text]() {
                         // 临时禁用音频上传，避免闹钟播放时上传麦克风音频
                         ESP_LOGI(TAG, "     临时禁用音频上传，准备播放闹钟提醒");
                         Application::GetInstance().SetAudioUploadEnabled(false);
                         
-                        // 等待连接成功
-                        vTaskDelay(pdMS_TO_TICKS(2000));
+                        if (need_wait_connect) {
+                            // 等待连接成功
+                            vTaskDelay(pdMS_TO_TICKS(2000));
+                        }
 
                         Application::GetInstance().SetDeviceState(kDeviceStateSpeaking);
                         ESP_LOGI(TAG, "     播放闹钟提醒: %s", tts_text.c_str());
@@ -860,6 +869,7 @@ public:
             InitializeGpio(ML307_EN, true);   // 启用4G模块
             ESP_LOGI(TAG, "4G模式，启用4G模块 (ML307_EN = HIGH)");
         }
+
         InitializeSpi();
         InitializeSt7789Display();
         
@@ -985,6 +995,7 @@ public:
     }
 
     static void RestoreBacklightTask(void* arg) {
+        vTaskDelay(pdMS_TO_TICKS(300));
         auto* self = static_cast<MovecallMojiESP32S3*>(arg);
         int level;
         bool charging, discharging;
