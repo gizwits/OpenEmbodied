@@ -770,7 +770,7 @@ bool MqttClient::parseRealtimeAgent(const char* in_str, int in_len, room_params_
     }
     
     // 限制输入长度以避免栈溢出
-    if (in_len > 4096) {
+    if (in_len > 4096 * 2) {
         ESP_LOGE(TAG, "Input too long: %d bytes", in_len);
         return false;
     }
