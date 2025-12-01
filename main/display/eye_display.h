@@ -10,6 +10,10 @@
 #include <freertos/queue.h>
 #include <map>
 
+// 前向声明
+class W25Q64Flash;
+typedef void* jpeg_dec_handle_t;
+
 // 显示元素向上偏移量（像素）
 #define DISPLAY_VERTICAL_OFFSET 20
 
@@ -269,6 +273,14 @@ private:
 
     static void EmotionTask(void* arg);
     void ProcessEmotionChange(const char* emotion);
+    
+    // JPEG 解码辅助函数
+    bool DecodeAndDisplayJPEGFrame(W25Q64Flash& flash,
+                                   jpeg_dec_handle_t jpeg_decoder,
+                                   uint8_t* jpeg_buf, size_t max_jpeg_size,
+                                   uint8_t* rgb_buf, size_t rgb_buf_size,
+                                   uint32_t group_offset, uint32_t frame_idx, uint32_t total_frames,
+                                   const std::vector<uint32_t>* cached_offsets = nullptr);
 
     int ota_progress_ = 0;
 
@@ -354,8 +366,18 @@ private:
     lv_image_dsc_t video_img_dsc_ = {};  // 视频图像描述符
     uint8_t* first_frame_buf_ = nullptr;  // 第一帧缓冲区（用于避免闪烁）
     bool video_img_foreground_ = false;  // 视频图像是否已经在最前面（用于优化，避免重复调用move_foreground）
-    static constexpr uint32_t kVideoFrameDelayMs = 80;  // 1000/15=66.66ms
+    static constexpr uint32_t kVideoFrameDelayMs = 26;  // 1000/30≈33ms，目标30帧/秒
     static constexpr uint32_t kVideoFlashBaseAddress = 0x000000;  // Flash 视频数据基地址
+    
+    // JPEG 解码相关成员变量
+    void* jpeg_decoder_ = nullptr;  // JPEG 解码器句柄
+    uint8_t* jpeg_temp_buf_ = nullptr;  // JPEG 临时缓冲区（用于存储从 Flash 读取的 JPEG 数据）
+    size_t jpeg_temp_buf_size_ = 0;  // JPEG 临时缓冲区大小
+    
+    // 帧率统计（最朴素的方法）
+    uint32_t frame_count_ = 0;
+    int64_t frame_rate_start_time_ = 0;
+    float current_fps_ = 0.0f;
 };
 
 #endif // EYE_DISPLAY_H 

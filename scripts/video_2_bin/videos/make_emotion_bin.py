@@ -14,7 +14,7 @@ if not os.path.isfile(FFMPEG):
 
 TARGET_W, TARGET_H = 240, 240
 # 目标单组大小（约）单位MB：将每个视频组限制在该容量内
-TARGET_MB = 1.4
+TARGET_MB = 10
 # 计算每帧大小与每组最大帧数
 FRAME_SIZE = TARGET_W * TARGET_H * 2  # RGB565 bytes
 MAX_FRAMES_PER_GROUP = max(1, int((TARGET_MB * 1024 * 1024) // FRAME_SIZE))

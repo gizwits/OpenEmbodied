@@ -13,6 +13,8 @@
 // 包含板级配置文件以访问 WiFi 图标
 #include "config.h"
 #include "w25q64_flash.h"
+#include "esp_jpeg_dec.h"
+#include "esp_jpeg_common.h"
 
 LV_FONT_DECLARE(font_awesome_20_4);
 LV_FONT_DECLARE(font_awesome_30_4);
@@ -78,7 +80,7 @@ EyeDisplay::EyeDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_
     ESP_LOGI(TAG, "Initialize LVGL port");
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     port_cfg.task_priority = 1;
-    port_cfg.timer_period_ms = 24;
+    port_cfg.timer_period_ms = 41;
     lvgl_port_init(&port_cfg);
 
     ESP_LOGI(TAG, "Adding LCD screen");
@@ -1175,6 +1177,148 @@ void EyeDisplay::HiddenBatteryLevel() {
     ESP_LOGI(TAG, "Battery indicator hidden");
 }
 
+// JPEG 解码和显示辅助函数
+bool EyeDisplay::DecodeAndDisplayJPEGFrame(W25Q64Flash& flash,
+                                          jpeg_dec_handle_t jpeg_decoder,
+                                          uint8_t* jpeg_buf, size_t max_jpeg_size,
+                                          uint8_t* rgb_buf, size_t rgb_buf_size,
+                                          uint32_t group_offset, uint32_t frame_idx, uint32_t total_frames,
+                                          const std::vector<uint32_t>* cached_offsets) {
+    // 计算当前帧在 Flash 中的位置
+    uint32_t current_offset;
+    
+    // 如果提供了缓存的偏移量，直接使用（性能优化）
+    if (cached_offsets != nullptr && frame_idx < cached_offsets->size()) {
+        current_offset = (*cached_offsets)[frame_idx];
+    } else {
+        // 回退到原来的方法：循环读取前面所有帧的大小
+        current_offset = group_offset;
+        for (uint32_t i = 0; i < frame_idx; i++) {
+            uint32_t frame_size = 0;
+            esp_err_t ret = flash.Read(EyeDisplay::kVideoFlashBaseAddress + current_offset, (uint8_t*)&frame_size, 4);
+            if (ret != ESP_OK) {
+                if (flash.IsLocked()) {
+                    ESP_LOGI(TAG, "Flash locked, waiting...");
+                    while (flash.IsLocked()) {
+                        vTaskDelay(pdMS_TO_TICKS(1000));
+                    }
+                    ret = flash.Read(EyeDisplay::kVideoFlashBaseAddress + current_offset, (uint8_t*)&frame_size, 4);
+                }
+                if (ret != ESP_OK) {
+                    ESP_LOGE(TAG, "Failed to read frame size at offset %u", current_offset);
+                    return false;
+                }
+            }
+            current_offset += 4 + frame_size;  // 跳过大小字段和 JPEG 数据
+        }
+    }
+    
+    // 读取当前帧的大小
+    uint32_t jpeg_size = 0;
+    esp_err_t read_ret = flash.Read(EyeDisplay::kVideoFlashBaseAddress + current_offset, (uint8_t*)&jpeg_size, 4);
+    if (read_ret != ESP_OK) {
+        if (flash.IsLocked()) {
+            ESP_LOGI(TAG, "Flash locked, waiting...");
+            while (flash.IsLocked()) {
+                vTaskDelay(pdMS_TO_TICKS(1000));
+            }
+            read_ret = flash.Read(EyeDisplay::kVideoFlashBaseAddress + current_offset, (uint8_t*)&jpeg_size, 4);
+        }
+        if (read_ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to read JPEG size for frame %u", frame_idx);
+            return false;
+        }
+    }
+    
+    if (jpeg_size == 0 || jpeg_size > max_jpeg_size) {
+        ESP_LOGE(TAG, "Invalid JPEG size: %u (max: %zu)", jpeg_size, max_jpeg_size);
+        return false;
+    }
+    
+    // 读取 JPEG 数据
+    current_offset += 4;
+    read_ret = flash.Read(EyeDisplay::kVideoFlashBaseAddress + current_offset, jpeg_buf, jpeg_size);
+    if (read_ret != ESP_OK) {
+        if (flash.IsLocked()) {
+            ESP_LOGI(TAG, "Flash locked, waiting...");
+            while (flash.IsLocked()) {
+                vTaskDelay(pdMS_TO_TICKS(1000));
+            }
+            read_ret = flash.Read(EyeDisplay::kVideoFlashBaseAddress + current_offset, jpeg_buf, jpeg_size);
+        }
+        if (read_ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to read JPEG data for frame %u", frame_idx);
+            return false;
+        }
+    }
+    
+    // 设置解码 IO（解析头时 outbuf 可以为 NULL）
+    jpeg_dec_io_t dec_io = {
+        .inbuf = jpeg_buf,
+        .inbuf_len = static_cast<int>(jpeg_size),
+        .inbuf_remain = 0,
+        .outbuf = NULL,  // 解析头时不需要输出缓冲区
+        .out_size = 0,
+    };
+    
+    // 解析 JPEG 头
+    jpeg_dec_header_info_t header_info;
+    jpeg_error_t parse_ret = jpeg_dec_parse_header(jpeg_decoder, &dec_io, &header_info);
+    if (parse_ret != JPEG_ERR_OK) {
+        ESP_LOGE(TAG, "JPEG parse header failed for frame %u: %d", frame_idx, parse_ret);
+        return false;
+    }
+    
+    // 验证输出尺寸
+    if (header_info.width != width_ || header_info.height != height_) {
+        ESP_LOGW(TAG, "JPEG size mismatch: %dx%d, expected %dx%d", 
+                 header_info.width, header_info.height, width_, height_);
+    }
+    
+    // 根据解析的头信息计算输出缓冲区大小（RGB565 = width * height * 2）
+    size_t expected_out_size = header_info.width * header_info.height * 2;
+    if (expected_out_size > rgb_buf_size) {
+        ESP_LOGE(TAG, "Output buffer too small: need %zu, have %zu", expected_out_size, rgb_buf_size);
+        return false;
+    }
+    
+    // 设置输出缓冲区并解码 JPEG
+    dec_io.outbuf = rgb_buf;
+    dec_io.out_size = static_cast<int>(expected_out_size);
+    jpeg_error_t decode_ret = jpeg_dec_process(jpeg_decoder, &dec_io);
+    if (decode_ret != JPEG_ERR_OK) {
+        ESP_LOGE(TAG, "JPEG decode failed for frame %u: %d", frame_idx, decode_ret);
+        return false;
+    }
+    
+    // 更新 LVGL 图像
+    if (Lock(50)) {
+        if (video_img_ != nullptr && lv_obj_is_valid(video_img_)) {
+            video_img_dsc_.header.w = width_;
+            video_img_dsc_.header.h = height_;
+            video_img_dsc_.header.cf = LV_COLOR_FORMAT_RGB565;
+            video_img_dsc_.data = rgb_buf;
+            video_img_dsc_.data_size = rgb_buf_size;
+            lv_img_set_src(video_img_, &video_img_dsc_);
+            lv_obj_clear_flag(video_img_, LV_OBJ_FLAG_HIDDEN);
+            
+            // 如果电量环未显示，才把视频移到最前面
+            if (!battery_indicator_showing_ && !video_img_foreground_) {
+                lv_obj_move_foreground(video_img_);
+                video_img_foreground_ = true;
+            } else if (battery_indicator_showing_) {
+                video_img_foreground_ = false;
+            }
+        } else if (video_img_ != nullptr) {
+            video_img_ = nullptr;
+            video_img_foreground_ = false;
+        }
+        Unlock();
+    }
+    
+    return true;
+}
+
 // 视频播放任务（持续运行，监听 index 变化并自动切换视频组）
 void EyeDisplay::VideoPlayTask(void* arg) {
     auto* self = static_cast<EyeDisplay*>(arg);
@@ -1188,7 +1332,10 @@ void EyeDisplay::VideoPlayTask(void* arg) {
         return;
     }
     
-    // Read header: 1 byte count + N*4 bytes frame counts
+    // Read header: JPEG format
+    // [1 byte] group_count
+    // [N * 4 bytes] frame_counts per group
+    // [N * 4 bytes] group offsets
     uint8_t group_count = 0;
     esp_err_t read_ret = flash.Read(EyeDisplay::kVideoFlashBaseAddress, &group_count, 1);
     if (read_ret != ESP_OK) {
@@ -1212,8 +1359,10 @@ void EyeDisplay::VideoPlayTask(void* arg) {
         }
     }
     
+    // Read frame counts
     std::vector<uint32_t> frame_counts(group_count, 0);
-    read_ret = flash.Read(EyeDisplay::kVideoFlashBaseAddress + 1, (uint8_t*)frame_counts.data(), group_count * sizeof(uint32_t));
+    uint32_t header_offset = 1;
+    read_ret = flash.Read(EyeDisplay::kVideoFlashBaseAddress + header_offset, (uint8_t*)frame_counts.data(), group_count * sizeof(uint32_t));
     if (read_ret != ESP_OK) {
         // 如果Flash被锁定，等待解锁
         if (flash.IsLocked()) {
@@ -1224,7 +1373,7 @@ void EyeDisplay::VideoPlayTask(void* arg) {
             }
             ESP_LOGI(TAG, "Flash unlocked, resuming video playback");
             // 重新读取
-            read_ret = flash.Read(EyeDisplay::kVideoFlashBaseAddress + 1, (uint8_t*)frame_counts.data(), group_count * sizeof(uint32_t));
+            read_ret = flash.Read(EyeDisplay::kVideoFlashBaseAddress + header_offset, (uint8_t*)frame_counts.data(), group_count * sizeof(uint32_t));
         }
         if (read_ret != ESP_OK) {
             ESP_LOGE(TAG, "read frame counts failed");
@@ -1235,23 +1384,63 @@ void EyeDisplay::VideoPlayTask(void* arg) {
         }
     }
     
-    // Compute offsets
-    const uint32_t frame_size = self->width_ * self->height_ * 2;
-    uint32_t data_offset = 1 + group_count * sizeof(uint32_t);
-    std::vector<uint32_t> group_base(group_count, 0);
-    uint32_t acc_frames = 0;
-    for (int i = 0; i < group_count; ++i) {
-        group_base[i] = data_offset + acc_frames * frame_size;
-        acc_frames += frame_counts[i];
+    // Read group offsets
+    header_offset += group_count * sizeof(uint32_t);
+    std::vector<uint32_t> group_offsets(group_count, 0);
+    read_ret = flash.Read(EyeDisplay::kVideoFlashBaseAddress + header_offset, (uint8_t*)group_offsets.data(), group_count * sizeof(uint32_t));
+    if (read_ret != ESP_OK) {
+        if (flash.IsLocked()) {
+            ESP_LOGI(TAG, "Flash is locked for erase/write, waiting for unlock...");
+            while (flash.IsLocked()) {
+                vTaskDelay(pdMS_TO_TICKS(1000));
+            }
+            ESP_LOGI(TAG, "Flash unlocked, resuming video playback");
+            read_ret = flash.Read(EyeDisplay::kVideoFlashBaseAddress + header_offset, (uint8_t*)group_offsets.data(), group_count * sizeof(uint32_t));
+        }
+        if (read_ret != ESP_OK) {
+            ESP_LOGE(TAG, "read group offsets failed");
+            self->video_playing_ = false;
+            self->video_task_handle_ = nullptr;
+            vTaskDelete(nullptr);
+            return;
+        }
     }
     
-    // Allocate frame buffer (reused for all groups)
-    uint8_t* buf = (uint8_t*)heap_caps_malloc(frame_size, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-    if (!buf) buf = (uint8_t*)heap_caps_malloc(frame_size, MALLOC_CAP_DMA);
-    if (!buf) buf = (uint8_t*)heap_caps_malloc(frame_size, MALLOC_CAP_INTERNAL);
-    if (!buf) buf = (uint8_t*)malloc(frame_size);
+    // Initialize JPEG decoder
+    jpeg_dec_config_t dec_cfg = DEFAULT_JPEG_DEC_CONFIG();
+    dec_cfg.output_type = JPEG_PIXEL_FORMAT_RGB565_LE;  // RGB565 little-endian for LVGL
+    dec_cfg.scale.width = 0;   // No scaling
+    dec_cfg.scale.height = 0;  // No scaling
+    
+    jpeg_dec_handle_t jpeg_decoder = nullptr;
+    jpeg_error_t jpeg_ret = jpeg_dec_open(&dec_cfg, &jpeg_decoder);
+    if (jpeg_ret != JPEG_ERR_OK) {
+        ESP_LOGE(TAG, "Failed to create JPEG decoder: %d", jpeg_ret);
+        self->video_playing_ = false;
+        self->video_task_handle_ = nullptr;
+        vTaskDelete(nullptr);
+        return;
+    }
+    
+    // Allocate frame buffer for RGB565 output (must be 16-byte aligned)
+    const uint32_t frame_size = self->width_ * self->height_ * 2;  // RGB565
+    uint8_t* buf = (uint8_t*)jpeg_calloc_align(frame_size, 16);
     if (!buf) {
         ESP_LOGE(TAG, "no memory for frame buffer");
+        jpeg_dec_close(jpeg_decoder);
+        self->video_playing_ = false;
+        self->video_task_handle_ = nullptr;
+        vTaskDelete(nullptr);
+        return;
+    }
+    
+    // Allocate JPEG data buffer (max 64KB per frame)
+    const size_t max_jpeg_size = 64 * 1024;
+    uint8_t* jpeg_buf = (uint8_t*)malloc(max_jpeg_size);
+    if (!jpeg_buf) {
+        ESP_LOGE(TAG, "no memory for JPEG buffer");
+        free(buf);
+        jpeg_dec_close(jpeg_decoder);
         self->video_playing_ = false;
         self->video_task_handle_ = nullptr;
         vTaskDelete(nullptr);
@@ -1287,6 +1476,15 @@ void EyeDisplay::VideoPlayTask(void* arg) {
     uint32_t current_frames = 0;
     uint32_t current_idx = 0;
     uint32_t last_idx = UINT32_MAX;  // 记录上一帧的索引，用于检测循环完成
+    
+    // 帧偏移量缓存（避免每次都要循环读取Flash）
+    std::vector<uint32_t> frame_offsets;
+    uint32_t cached_group = UINT32_MAX;
+    
+    // 帧率统计初始化（使用最朴素的方法）
+    self->frame_count_ = 0;
+    self->frame_rate_start_time_ = esp_timer_get_time();
+    self->current_fps_ = 0.0f;
     
     // Main loop: continuously play video, switch group when index changes
     while (self->video_playing_) {
@@ -1351,59 +1549,32 @@ void EyeDisplay::VideoPlayTask(void* arg) {
                 continue;
             }
             
-            ESP_LOGI(TAG, "Switching to video group %d, frames=%u, mode=%d (VIDEO_CYCLING=%d)", 
-                     current_group, (unsigned)current_frames, (int)current_mode, (int)DisplayMode::VIDEO_CYCLING);
-            
-            // Read first frame of new group
-            size_t off0 = EyeDisplay::kVideoFlashBaseAddress + group_base[current_group] + current_idx * frame_size;
-            esp_err_t read_ret = flash.Read(off0, buf, frame_size);
-            if (read_ret != ESP_OK) {
-                // 如果Flash被锁定（正在擦写），进入等待循环，完全停止读取
-                if (flash.IsLocked()) {
-                    ESP_LOGI(TAG, "Flash is locked for erase/write, waiting for unlock...");
-                    // 无限等待Flash解锁（擦除可能需要很长时间）
-                    while (flash.IsLocked()) {
-                        vTaskDelay(pdMS_TO_TICKS(1000));  // 每秒检查一次
-                    }
-                    ESP_LOGI(TAG, "Flash unlocked, resuming video playback");
-                    // Flash已解锁，重新尝试读取
-                    read_ret = flash.Read(off0, buf, frame_size);
-                    if (read_ret != ESP_OK) {
-                        ESP_LOGE(TAG, "read first frame of group %d failed after unlock", current_group);
-                        vTaskDelay(pdMS_TO_TICKS(100));
-                        continue;
-                    }
-                } else {
-                    ESP_LOGE(TAG, "read first frame of group %d failed", current_group);
-                    vTaskDelay(pdMS_TO_TICKS(100));
-                    continue;
+            // 缓存新组的帧偏移量（一次性读取所有帧的大小，避免每次循环读取）
+            frame_offsets.clear();
+            frame_offsets.reserve(current_frames);
+            uint32_t offset = group_offsets[current_group];
+            for (uint32_t i = 0; i < current_frames; i++) {
+                frame_offsets.push_back(offset);
+                uint32_t frame_size_val = 0;
+                esp_err_t ret = flash.Read(EyeDisplay::kVideoFlashBaseAddress + offset, (uint8_t*)&frame_size_val, 4);
+                if (ret != ESP_OK) {
+                    ESP_LOGE(TAG, "Failed to read frame size for caching");
+                    frame_offsets.clear();
+                    break;
                 }
+                offset += 4 + frame_size_val;  // 跳过大小字段和JPEG数据
             }
+            cached_group = current_group;
             
-            // Display first frame
-            if (self->Lock(50)) {
-                if (self->video_img_ != nullptr && lv_obj_is_valid(self->video_img_)) {
-                    self->video_img_dsc_.header.w = self->width_;
-                    self->video_img_dsc_.header.h = self->height_;
-                    self->video_img_dsc_.header.cf = LV_COLOR_FORMAT_RGB565;
-                    self->video_img_dsc_.data = buf;
-                    self->video_img_dsc_.data_size = frame_size;
-                    lv_img_set_src(self->video_img_, &self->video_img_dsc_);
-                    lv_obj_clear_flag(self->video_img_, LV_OBJ_FLAG_HIDDEN);
-                    // 如果电量环未显示，才把视频移到最前面（只在组切换时调用一次）
-                    if (!self->battery_indicator_showing_ && !self->video_img_foreground_) {
-                        lv_obj_move_foreground(self->video_img_);
-                        self->video_img_foreground_ = true;
-                    } else if (self->battery_indicator_showing_) {
-                        self->video_img_foreground_ = false;  // 电量环显示时，视频不在最前面
-                    }
-                    // lv_img_set_src 会自动触发刷新，不需要手动 invalidate
-                } else if (self->video_img_ != nullptr) {
-                    // 对象已被删除，清空指针，下次循环会重新创建
-                    self->video_img_ = nullptr;
-                    self->video_img_foreground_ = false;
-                }
-                self->Unlock();
+            ESP_LOGI(TAG, "Switching to video group %d, frames=%u, cached offsets=%zu", 
+                     current_group, (unsigned)current_frames, frame_offsets.size());
+            
+            // Decode and display first frame of new group
+            const std::vector<uint32_t>* offsets = (!frame_offsets.empty()) ? &frame_offsets : nullptr;
+            if (!self->DecodeAndDisplayJPEGFrame(flash, jpeg_decoder, jpeg_buf, max_jpeg_size, buf, frame_size,
+                                                 group_offsets[current_group], current_idx, current_frames, offsets)) {
+                vTaskDelay(pdMS_TO_TICKS(100));
+                continue;
             }
             
             current_idx = (current_idx + 1) % current_frames;
@@ -1412,56 +1583,37 @@ void EyeDisplay::VideoPlayTask(void* arg) {
         
         // Play current frame
         if (current_frames > 0) {
-            size_t off = EyeDisplay::kVideoFlashBaseAddress + group_base[current_group] + current_idx * frame_size;
-            esp_err_t read_ret = flash.Read(off, buf, frame_size);
-            if (read_ret != ESP_OK) {
-                // 如果Flash被锁定（正在擦写），进入等待循环，完全停止读取
-                if (flash.IsLocked()) {
-                    ESP_LOGI(TAG, "Flash is locked for erase/write, waiting for unlock...");
-                    // 无限等待Flash解锁（擦除可能需要很长时间）
-                    while (flash.IsLocked()) {
-                        vTaskDelay(pdMS_TO_TICKS(1000));  // 每秒检查一次
-                    }
-                    ESP_LOGI(TAG, "Flash unlocked, resuming video playback");
-                    // Flash已解锁，重新尝试读取
-                    read_ret = flash.Read(off, buf, frame_size);
-                    if (read_ret != ESP_OK) {
-                        ESP_LOGE(TAG, "read frame %u of group %d failed after unlock", (unsigned)current_idx, current_group);
-                        vTaskDelay(pdMS_TO_TICKS(100));
-                        continue;
-                    }
-                } else {
-                    ESP_LOGE(TAG, "read frame %u of group %d failed", (unsigned)current_idx, current_group);
-                    vTaskDelay(pdMS_TO_TICKS(100));
-                    continue;
-                }
+            int64_t frame_start = esp_timer_get_time();
+            
+            // 使用缓存的偏移量（如果可用）
+            const std::vector<uint32_t>* offsets = (cached_group == current_group && !frame_offsets.empty()) 
+                                                    ? &frame_offsets : nullptr;
+            
+            if (!self->DecodeAndDisplayJPEGFrame(flash, jpeg_decoder, jpeg_buf, max_jpeg_size, buf, frame_size,
+                                                 group_offsets[current_group], current_idx, current_frames, offsets)) {
+                vTaskDelay(pdMS_TO_TICKS(100));
+                continue;
             }
             
-            // Update LVGL image
-            if (self->Lock(50)) {
-                if (self->video_img_ != nullptr && lv_obj_is_valid(self->video_img_)) {
-                    // 只更新数据指针，其他字段在组切换时已经设置
-                    self->video_img_dsc_.data = buf;
-                    self->video_img_dsc_.data_size = frame_size;
-                    lv_img_set_src(self->video_img_, &self->video_img_dsc_);
-                    // 确保对象可见（只在隐藏时清除标志，避免重复操作）
-                    if (lv_obj_has_flag(self->video_img_, LV_OBJ_FLAG_HIDDEN)) {
-                        lv_obj_clear_flag(self->video_img_, LV_OBJ_FLAG_HIDDEN);
-                    }
-                    // 只在电量环状态变化时才移动前景（避免每帧都调用）
-                    if (!self->battery_indicator_showing_ && !self->video_img_foreground_) {
-                        lv_obj_move_foreground(self->video_img_);
-                        self->video_img_foreground_ = true;
-                    } else if (self->battery_indicator_showing_ && self->video_img_foreground_) {
-                        self->video_img_foreground_ = false;  // 电量环显示时，视频不在最前面
-                    }
-                    // lv_img_set_src 会自动触发刷新，不需要手动 invalidate（减少开销）
-                } else if (self->video_img_ != nullptr) {
-                    // 对象已被删除，清空指针，下次循环会重新创建
-                    self->video_img_ = nullptr;
-                    self->video_img_foreground_ = false;
-                }
-                self->Unlock();
+            int64_t frame_time = esp_timer_get_time() - frame_start;
+            
+            // 帧率统计（最朴素的方法）
+            self->frame_count_++;
+            int64_t now = esp_timer_get_time();
+            int64_t elapsed = now - self->frame_rate_start_time_;
+            if (elapsed >= 1000000) {  // 1秒
+                self->current_fps_ = (self->frame_count_ * 1000000.0f) / elapsed;
+                float avg_frame_time = elapsed / (self->frame_count_ * 1000.0f);  // 平均每帧总时间（ms）
+                ESP_LOGI(TAG, "FPS: %.2f (decode: %.1fms, total: %.1fms, delay: %ums)", 
+                         self->current_fps_, frame_time / 1000.0f, avg_frame_time, self->kVideoFrameDelayMs);
+                self->frame_count_ = 0;
+                self->frame_rate_start_time_ = now;
+            }
+            
+            // 如果单帧处理时间超过延迟时间，说明性能不足
+            if (frame_time > self->kVideoFrameDelayMs * 1000) {
+                ESP_LOGW(TAG, "Frame processing too slow: %.1fms > %ums", 
+                         frame_time / 1000.0f, self->kVideoFrameDelayMs);
             }
             
             // if ((current_idx % 10) == 0) {
@@ -1530,7 +1682,13 @@ void EyeDisplay::VideoPlayTask(void* arg) {
     }
     
     // Cleanup
-    free(buf);
+    if (jpeg_decoder != nullptr) {
+        jpeg_dec_close(jpeg_decoder);
+    }
+    free(jpeg_buf);
+    if (buf != nullptr) {
+        jpeg_free_align(buf);
+    }
     self->video_playing_ = false;
     self->video_task_handle_ = nullptr;
     vTaskDelete(nullptr);
