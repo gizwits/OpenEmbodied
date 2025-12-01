@@ -632,7 +632,8 @@ void Application::Start() {
                 } else if (strcmp(command->valuestring, "agent_switched") == 0) {
                     // 切换智能体
                     Schedule([this]() {
-                        SetDeviceState(kDeviceStateListening);
+                        AbortSpeaking(kAbortReasonNone);
+                        ToggleChatState();
                     }, "OnIncomingJson_System_AgentSwitched");
                 } else {
                     ESP_LOGW(TAG, "Unknown system command: %s", command->valuestring);
