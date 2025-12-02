@@ -31,21 +31,21 @@
 // 软串口配置
 // 用户可以根据需要修改这些配置
 
-// GPIO引脚配置
-#define SOFT_UART_TX_PIN 20  // 发送引脚，可以根据需要修改
-#define SOFT_UART_RX_PIN 19  // 接收引脚，可以根据需要修改
+// 软串口GPIO引脚配置
+#define SOFT_UART_TX_PIN 4  
+#define SOFT_UART_RX_PIN 5   
 
 // 波特率配置
 // 可选值：SOFT_UART_115200, SOFT_UART_230400, SOFT_UART_460800, SOFT_UART_921600
 #define SOFT_UART_BAUDRATE SOFT_UART_115200
 
 // 日志配置
-#define SOFT_UART_LOG_ENABLED 0        // 是否启用软串口日志输出
+#define SOFT_UART_LOG_ENABLED 1        // 是否启用软串口日志输出（已启用）
 #define SOFT_UART_LOG_BUFFER_SIZE 512  // 日志缓冲区大小
 #define SOFT_UART_LOG_PREFIX_SIZE 128  // 日志前缀缓冲区大小
 
 // 调试配置
-#define SOFT_UART_DEBUG_ENABLED 0      // 是否启用调试信息
+#define SOFT_UART_DEBUG_ENABLED 1     // 是否启用调试信息
 
 // 引脚说明：
 // - TX_PIN: 连接到USB转串口模块的RX端，或连接到其他设备的RX端
