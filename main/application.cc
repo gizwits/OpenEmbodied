@@ -632,8 +632,13 @@ void Application::Start() {
                 } else if (strcmp(command->valuestring, "agent_switched") == 0) {
                     // 切换智能体
                     Schedule([this]() {
-                        AbortSpeaking(kAbortReasonNone);
-                        ToggleChatState();
+                        // AbortSpeaking(kAbortReasonNone);
+                        // ToggleChatState();
+                        // 断开当前连接
+                        ResetDecoder();
+                        QuitTalking();
+                        vTaskDelay(pdMS_TO_TICKS(500));
+                        PlaySound(Lang::Sounds::P3_CONFIG_SUCCESS);
                     }, "OnIncomingJson_System_AgentSwitched");
                 } else {
                     ESP_LOGW(TAG, "Unknown system command: %s", command->valuestring);
