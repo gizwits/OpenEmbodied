@@ -1052,7 +1052,7 @@ public:
     }
     
     virtual int GetMaxFrameNum() override { 
-        return 20;
+        return 30;
     }
 
     virtual bool IsCharging() override {

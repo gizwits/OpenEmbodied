@@ -491,20 +491,18 @@ void Application::Start() {
     }
 
     // Initialize NTP client
-    if (Board::GetInstance().GetNetworkType() == NetworkType::WIFI) {
-        auto& ntp_client = NtpClient::GetInstance();
-        esp_err_t ntp_ret = ntp_client.Init();
-        if (ntp_ret == ESP_OK) {
-            ESP_LOGI(TAG, "Waiting for network to be fully ready before NTP sync...");
-            ntp_client.StartSync();
-            Schedule([]() {
-                auto& ntp_client = NtpClient::GetInstance();
-                ntp_client.ProcessSync();
-            }, "NTP_ProcessSync");
-            ESP_LOGI(TAG, "NTP client initialized and started");
-        } else {
-            ESP_LOGE(TAG, "Failed to initialize NTP client: %s", esp_err_to_name(ntp_ret));
-        }
+    auto& ntp_client = NtpClient::GetInstance();
+    esp_err_t ntp_ret = ntp_client.Init();
+    if (ntp_ret == ESP_OK) {
+        ESP_LOGI(TAG, "Waiting for network to be fully ready before NTP sync...");
+        ntp_client.StartSync();
+        Schedule([]() {
+            auto& ntp_client = NtpClient::GetInstance();
+            ntp_client.ProcessSync();
+        }, "NTP_ProcessSync");
+        ESP_LOGI(TAG, "NTP client initialized and started");
+    } else {
+        ESP_LOGE(TAG, "Failed to initialize NTP client: %s", esp_err_to_name(ntp_ret));
     }
     
 
@@ -840,11 +838,9 @@ void Application::MainEventLoop() {
         loop_counter++;
 
         // Process NTP sync - 每10次循环执行一次
-        if (Board::GetInstance().GetNetworkType() == NetworkType::WIFI) {
-            if (loop_counter % 10 == 0) {
-                auto& ntp_client = NtpClient::GetInstance();
-                ntp_client.ProcessSync();
-            }
+        if (loop_counter % 10 == 0) {
+            auto& ntp_client = NtpClient::GetInstance();
+            ntp_client.ProcessSync();
         }
 
         

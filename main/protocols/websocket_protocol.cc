@@ -628,6 +628,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 auto data_json = cJSON_GetObjectItem(root, "data");
                 auto content_json = cJSON_GetObjectItem(data_json, "text");
 
+                ESP_LOGI(TAG, "conversation.audio.sentence_start: %s", content_json->valuestring);
+
                 // Remove newline characters from content
                 std::string content(content_json->valuestring);
                 content.erase(std::remove(content.begin(), content.end(), '\n'), content.end());
