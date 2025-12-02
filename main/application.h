@@ -40,12 +40,12 @@
 #define SOFT_UART_BAUDRATE SOFT_UART_115200
 
 // 日志配置
-#define SOFT_UART_LOG_ENABLED 1        // 是否启用软串口日志输出（已启用）
+#define SOFT_UART_LOG_ENABLED 0        // 是否启用软串口日志输出（已启用）
 #define SOFT_UART_LOG_BUFFER_SIZE 512  // 日志缓冲区大小
 #define SOFT_UART_LOG_PREFIX_SIZE 128  // 日志前缀缓冲区大小
 
 // 调试配置
-#define SOFT_UART_DEBUG_ENABLED 1     // 是否启用调试信息
+#define SOFT_UART_DEBUG_ENABLED 0     // 是否启用调试信息
 
 // 引脚说明：
 // - TX_PIN: 连接到USB转串口模块的RX端，或连接到其他设备的RX端
