@@ -17,7 +17,10 @@
                 "CONFIG_LANGUAGE_ZH_CN_LVLIN=y",
                 "CONFIG_BUTTON_SHORT_PRESS_TIME_MS=500",
                 "CONFIG_TMP_PRODUCT_TEST_WIFI=\"FACTORY_TEST#@#@\"",
-                "CONFIG_TMP_PRODUCT_TEST_WIFI_PASSWORD=\"12345678\""
+                "CONFIG_TMP_PRODUCT_TEST_WIFI_PASSWORD=\"12345678\"",
+                "CONFIG_CONSOLE_UART_NONE=y",
+                "CONFIG_ESP_CONSOLE_NONE=y",
+                "CONFIG_ESP_CONSOLE_UART_NONE=y"
             ]
         }
     ]

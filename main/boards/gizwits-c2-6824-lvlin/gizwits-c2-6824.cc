@@ -1,3 +1,4 @@
+#include "dual_network_board.h"
 #include "wifi_board.h"
 #include "audio/codecs/vb6824_audio_codec.h"
 #include "application.h"
@@ -35,7 +36,7 @@
 #define RESET_WIFI_CONFIGURATION_COUNT 5
 #define SLEEP_TIME_SEC 60 * 3
 // #define SLEEP_TIME_SEC 30
-class CustomBoard : public WifiBoard {
+class CustomBoard : public DualNetworkBoard {
 private:
     Button boot_button_;
     // Button collision_button;
@@ -85,6 +86,13 @@ private:
             sleep_flag_ = true;
             auto& application = Application::GetInstance();
             application.Alert("", "", "", Lang::Sounds::P3_SLEEP);
+        }
+    }
+
+    virtual void RunResetWifiConfiguration() {
+        if (GetNetworkType() == NetworkType::WIFI) {
+            auto& wifi_board = static_cast<WifiBoard&>(GetCurrentBoard());
+            wifi_board.ResetWifiConfiguration();
         }
     }
 
@@ -155,21 +163,33 @@ private:
             LongPressSleepCheck(rec_first_level);
         });
 
-        boot_button_.OnPressRepeat([this](uint16_t count) {
-            ESP_LOGI(TAG, "boot_button_.OnPressRepeat: %d", count);
+        boot_button_.OnPressRepeaDone([this](uint16_t count) {
+            ESP_LOGI(TAG, "boot_button_.OnPressRepeaDone, count: %d", count);
+            if(count == 3){
+                // GPIO7按3次：切换WiFi/4G网络
+                SwitchNetworkType();
+                return;
+            }
             if(count >= RESET_WIFI_CONFIGURATION_COUNT){
-                ResetWifiConfiguration();
+                // GPIO7按5次：进入WiFi配网模式
+                RunResetWifiConfiguration();
             }
         });
         rec_button_->OnPressRepeat([this](uint16_t count) {
             ESP_LOGI(TAG, "rec_button_.OnPressRepeat: %d", count);
+            if(count == 3){
+                // KEY1按3次：切换WiFi/4G网络
+                SwitchNetworkType();
+                return;
+            }
             if(count >= RESET_WIFI_CONFIGURATION_COUNT){
-                ResetWifiConfiguration();
+                // KEY1按5次：进入WiFi配网模式
+                RunResetWifiConfiguration();
             }
         });
 
         boot_button_.OnPressUp([this]() {
-            ESP_LOGI(TAG, "Press up");
+            ESP_LOGI(TAG, "Boot按钮松开 (GPIO7)");
             if(sleep_flag_){
                 sleep_flag_ = false;
                 // 检查是否在充电状态
@@ -198,7 +218,7 @@ private:
             }
         });
         rec_button_->OnPressUp([this]() {
-            ESP_LOGI(TAG, "Press up");
+            ESP_LOGI(TAG, "REC按钮松开 (GPIO1/KEY1)");
             if(sleep_flag_){
                 sleep_flag_ = false;
                 // 检查是否在充电状态
@@ -285,7 +305,7 @@ private:
     }
 
 public:
-    CustomBoard() : boot_button_(BOOT_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO){      
+    CustomBoard() : DualNetworkBoard(ML307_TX_PIN, ML307_RX_PIN, GPIO_NUM_NC, 0, UART_NUM_0), boot_button_(BOOT_BUTTON_GPIO), audio_codec(CODEC_TX_GPIO, CODEC_RX_GPIO){  // default_net_type=0 表示默认WiFi模式      
         power_on_time_ = esp_timer_get_time() / 1000;  // 记录上电时间（毫秒）
 
         InitializePowerManager();
@@ -328,7 +348,7 @@ public:
                 // }
                 Application::GetInstance().WakeWordInvoke("你好小智");
             } else if (IsCommandInList(command, network_config_words_)) {
-                ResetWifiConfiguration();
+                RunResetWifiConfiguration();
             }
         });
 
