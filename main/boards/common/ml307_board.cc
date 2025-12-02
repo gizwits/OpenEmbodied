@@ -8,6 +8,7 @@
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <opus_encoder.h>
+#include <driver/uart.h>
 
 static const char *TAG = "Ml307Board";
 
@@ -24,16 +25,65 @@ void Ml307Board::StartNetwork() {
     auto display = Board::GetInstance().GetDisplay();
     display->SetStatus(Lang::Strings::DETECTING_MODULE);
     ESP_LOGI(TAG, "开始检测ML307模块...");
+    
+    // 如果使用UART_NUM_0，需要先卸载可能被console占用的UART驱动
+    if (uart_num_ == UART_NUM_0) {
+        ESP_LOGI(TAG, "检测到使用UART_NUM_0，检查是否需要接管串口...");
+        ESP_LOGI(TAG, "UART引脚配置: TX=GPIO%d, RX=GPIO%d", tx_pin_, rx_pin_);
+        // 尝试卸载可能被console占用的UART驱动
+        esp_err_t ret = uart_driver_delete(uart_num_);
+        if (ret == ESP_OK) {
+            ESP_LOGI(TAG, "成功卸载UART_NUM_0驱动（可能被console占用）");
+            vTaskDelay(pdMS_TO_TICKS(200));  // 等待驱动完全卸载，增加延迟确保完全释放
+        } else if (ret == ESP_ERR_INVALID_STATE) {
+            ESP_LOGI(TAG, "UART_NUM_0未被占用，可以直接使用");
+        } else {
+            ESP_LOGW(TAG, "卸载UART_NUM_0驱动失败: %s，继续尝试", esp_err_to_name(ret));
+        }
+    }
+    
+    // 添加启动延迟，给模块时间完成初始化（模块一直上电，但需要时间启动）
+    ESP_LOGI(TAG, "等待模块启动（3秒）...");
+    vTaskDelay(pdMS_TO_TICKS(3000));
 
-    while (true) {
-        ESP_LOGI(TAG, "尝试检测ML307模块...");
-        modem_ = AtModem::Detect(tx_pin_, rx_pin_, dtr_pin_, 921600, uart_num_);
+    int retry_count = 0;
+    const int max_retries = 5;
+    
+    while (retry_count < max_retries) {
+        ESP_LOGI(TAG, "尝试检测ML307模块... (第 %d/%d 次)", retry_count + 1, max_retries);
+        ESP_LOGI(TAG, "UART配置: TX=GPIO%d, RX=GPIO%d, UART_NUM=%d", tx_pin_, rx_pin_, uart_num_);
+        // ESP-IDF 5.5.1版本UART波特率计算可能有变化，使用115200更稳定
+        // 注意：AtModem::Detect()内部会自动尝试多个波特率，这里只是初始波特率
+        int baud_rate = 921600;
+        #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)
+            // ESP-IDF 5.5+版本，使用115200作为初始波特率（兼容性更好）
+            baud_rate = 115200;
+            ESP_LOGI(TAG, "ESP-IDF 5.5+版本，使用初始波特率: %d (AtModem会自动尝试其他波特率)", baud_rate);
+        #else
+            ESP_LOGI(TAG, "ESP-IDF 5.4版本，使用初始波特率: %d", baud_rate);
+        #endif
+        modem_ = AtModem::Detect(tx_pin_, rx_pin_, dtr_pin_, baud_rate, uart_num_);
         if (modem_ != nullptr) {
             ESP_LOGI(TAG, "成功检测到ML307模块");
             break;
         }
-        ESP_LOGW(TAG, "未检测到ML307模块，1秒后重试...");
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        retry_count++;
+        if (retry_count < max_retries) {
+            ESP_LOGW(TAG, "未检测到ML307模块，2秒后重试... (剩余 %d 次)", max_retries - retry_count);
+            vTaskDelay(pdMS_TO_TICKS(2000));
+        } else {
+            ESP_LOGE(TAG, "ML307模块检测失败，已尝试 %d 次", max_retries);
+            ESP_LOGE(TAG, "请检查：");
+            ESP_LOGE(TAG, "1. 模块电源是否正常（3.4V-4.2V）");
+            ESP_LOGE(TAG, "2. TX/RX引脚连接是否正确（TX->GPIO%d, RX->GPIO%d）", tx_pin_, rx_pin_);
+            ESP_LOGE(TAG, "3. 模块是否已完全启动");
+            ESP_LOGE(TAG, "4. 串口引脚是否被其他功能占用");
+            ESP_LOGE(TAG, "设备将保持4G模式，但无法连接网络。请按3次按键切换回WiFi模式。");
+            // 继续循环，但不再尝试检测，给用户时间切换
+            while (true) {
+                vTaskDelay(pdMS_TO_TICKS(5000));
+            }
+        }
     }
 
     ESP_LOGI(TAG, "设置网络状态变化回调...");
