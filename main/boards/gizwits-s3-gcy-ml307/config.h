@@ -60,6 +60,10 @@
 #define HPR_SIGN_PIN GPIO_NUM_6   // 耳机插入检测信号
 #define MCU_MUTE_PIN GPIO_NUM_10  // MCU静音控制信号
 
+#define FACTORY_TEST_UART_NUM       UART_NUM_0
+#define FACTORY_TEST_UART_TX_PIN    GPIO_NUM_43
+#define FACTORY_TEST_UART_RX_PIN    GPIO_NUM_44
+
 // 自动生成的螺旋图像数据
 
 // 自动生成的螺旋图像数据
