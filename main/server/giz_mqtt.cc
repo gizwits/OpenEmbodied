@@ -1331,19 +1331,16 @@ void MqttClient::stopTokenRefreshTimer() {
 }
 
 void MqttClient::tokenRefreshTimerCallback(TimerHandle_t xTimer) {
+    // 定时器回调应该尽量简短，避免使用大量栈空间
     MqttClient* client = static_cast<MqttClient*>(pvTimerGetTimerID(xTimer));
-    if (client) {
-        ESP_LOGI(TAG, "Token refresh timer triggered for client: %p", (void*)client);
-        // 发送消息到队列
-        if (client->send_queue_) {
-            mqtt_send_msg_t msg = {0};
-            msg.topic = nullptr;
-            msg.payload = nullptr;
-            msg.payload_len = 0;
-            msg.qos = MQTT_SEND_CONTROL_TOKEN_REFRESH; 
-            xQueueSendToBack(client->send_queue_, &msg, 0);
-        }
-    } else {
-        ESP_LOGE(TAG, "Token refresh timer callback: invalid client pointer");
+    if (client && client->send_queue_) {
+        // 只发送消息到队列，不做其他操作
+        mqtt_send_msg_t msg = {0};
+        msg.topic = nullptr;
+        msg.payload = nullptr;
+        msg.payload_len = 0;
+        msg.qos = MQTT_SEND_CONTROL_TOKEN_REFRESH; 
+        // 使用非阻塞发送，避免在定时器回调中等待
+        xQueueSendToBack(client->send_queue_, &msg, 0);
     }
 }
