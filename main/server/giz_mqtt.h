@@ -83,6 +83,8 @@ typedef struct {
     int qos; // reserved for QoS or control (e.g. MQTT_SEND_CONTROL_ROOMINFO)
 } mqtt_send_msg_t;
 
+#ifdef CONFIG_IDF_TARGET_ESP32S3
+
 // RTC parameters structure
 typedef struct {
     char bot_id[64];
@@ -95,6 +97,23 @@ typedef struct {
     char config[4096];  // 新增：保存 coze_websocket.config 的 JSON 字符串，增加到 1KB
     int expires_in;
 } room_params_t;
+
+#else
+
+// RTC parameters structure
+typedef struct {
+    char bot_id[64];
+    char voice_id[64];
+    char user_id[64];
+    char conv_id[64];
+    char access_token[256];
+    char voice_lang[64];
+    char api_domain[256];
+    char config[1024];  // 新增：保存 coze_websocket.config 的 JSON 字符串，增加到 1KB
+    int expires_in;
+} room_params_t;
+
+#endif
 
 class MqttClient {
 public:

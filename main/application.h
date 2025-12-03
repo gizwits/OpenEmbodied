@@ -32,8 +32,8 @@
 // 用户可以根据需要修改这些配置
 
 // GPIO引脚配置
-#define SOFT_UART_TX_PIN 20  // 发送引脚，可以根据需要修改
-#define SOFT_UART_RX_PIN 19  // 接收引脚，可以根据需要修改
+#define SOFT_UART_TX_PIN 1  // 发送引脚，可以根据需要修改
+#define SOFT_UART_RX_PIN 2  // 接收引脚，可以根据需要修改
 
 // 波特率配置
 // 可选值：SOFT_UART_115200, SOFT_UART_230400, SOFT_UART_460800, SOFT_UART_921600
