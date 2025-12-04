@@ -3,6 +3,7 @@
 #include <nvs.h>
 #include <nvs_flash.h>
 #include <driver/gpio.h>
+#include <driver/uart.h>
 #include <esp_event.h>
 #include <cstring>
 #include <cstdarg>
@@ -14,8 +15,73 @@
 
 #define TAG "main"
 
+// UART1 日志输出配置
+// #define UART1_LOG_NUM           UART_NUM_1
+// #define UART1_LOG_TX_PIN         GPIO_NUM_2  // IO2 作为 TX
+// #define UART1_LOG_RX_PIN         GPIO_NUM_1  // IO1 作为 RX
+// #define UART1_LOG_BAUDRATE       115200
+// #define UART1_LOG_BUF_SIZE       1024
+
 // 全局软串口句柄
 static soft_uart_port_t soft_uart_port = NULL;
+
+// UART1 日志输出回调函数
+// static int uart1_log_callback(const char* format, va_list args)
+// {
+//     char log_buffer[512];
+//     int len = vsnprintf(log_buffer, sizeof(log_buffer), format, args);
+    
+//     if (len > 0 && len < sizeof(log_buffer)) {
+//         // 发送日志内容到 UART1
+//         uart_write_bytes(UART1_LOG_NUM, log_buffer, len);
+//     }
+    
+//     return len;
+// }
+
+// // 初始化 UART1 用于日志输出
+// static esp_err_t init_uart1_log(void)
+// {
+//     // 配置 UART1 参数
+//     uart_config_t uart_config = {
+//         .baud_rate = UART1_LOG_BAUDRATE,
+//         .data_bits = UART_DATA_8_BITS,
+//         .parity = UART_PARITY_DISABLE,
+//         .stop_bits = UART_STOP_BITS_1,
+//         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+//         .source_clk = UART_SCLK_DEFAULT,
+//     };
+    
+//     // 安装 UART 驱动
+//     esp_err_t ret = uart_driver_install(UART1_LOG_NUM, UART1_LOG_BUF_SIZE, 0, 0, NULL, 0);
+//     if (ret != ESP_OK) {
+//         return ret;
+//     }
+    
+//     // 配置 UART 参数
+//     ret = uart_param_config(UART1_LOG_NUM, &uart_config);
+//     if (ret != ESP_OK) {
+//         uart_driver_delete(UART1_LOG_NUM);
+//         return ret;
+//     }
+    
+//     // 设置 UART 引脚
+//     ret = uart_set_pin(UART1_LOG_NUM, UART1_LOG_TX_PIN, UART1_LOG_RX_PIN, 
+//                        UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+//     if (ret != ESP_OK) {
+//         uart_driver_delete(UART1_LOG_NUM);
+//         return ret;
+//     }
+
+//     // 直接发送一条测试消息，方便确认 UART1 TX 是否正常工作
+//     const char *init_test_msg = "UART1 init test\r\n";
+//     uart_write_bytes(UART1_LOG_NUM, init_test_msg, strlen(init_test_msg));
+
+//     // 设置日志输出回调函数，将日志重定向到 UART1
+//     esp_log_set_vprintf(uart1_log_callback);
+    
+//     return ESP_OK;
+// }
 
 #if SOFT_UART_LOG_ENABLED
 
@@ -135,6 +201,15 @@ void cleanup_soft_uart(void)
 
 extern "C" void app_main(void)
 {
+    // 初始化 UART1 用于日志输出（IO1 RX, IO2 TX）
+    // esp_err_t uart1_ret = init_uart1_log();
+    // if (uart1_ret != ESP_OK) {
+    //     // 如果 UART1 初始化失败，使用默认的日志输出
+    //     ESP_LOGE(TAG, "UART1 log initialization failed: %s, using default log output", esp_err_to_name(uart1_ret));
+    // } else {
+    //     ESP_LOGI(TAG, "UART1 log initialized successfully on TX: GPIO%d, RX: GPIO%d, Baudrate: %d", 
+    //              UART1_LOG_TX_PIN, UART1_LOG_RX_PIN, UART1_LOG_BAUDRATE);
+    // }
 
 #if SOFT_UART_LOG_ENABLED
     // 初始化软串口

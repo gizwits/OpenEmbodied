@@ -219,11 +219,11 @@ bool Protocol::IsAudioChannelBusy() const {
 
 
 void Protocol::UpdateRoomParams(const RoomParams& params) {
-    ESP_LOGI(TAG, "Updating WebSocket parameters:");
-    ESP_LOGI(TAG, "  bot_id: %s", params.bot_id.c_str());
-    ESP_LOGI(TAG, "  voice_id: %s", params.voice_id.c_str());
-    ESP_LOGI(TAG, "  conv_id: %s", params.conv_id.c_str());
-    ESP_LOGI(TAG, "  access_token: %s", params.access_token.c_str());
+    // ESP_LOGI(TAG, "Updating WebSocket parameters:");
+    // ESP_LOGI(TAG, "  bot_id: %s", params.bot_id.c_str());
+    // ESP_LOGI(TAG, "  voice_id: %s", params.voice_id.c_str());
+    // ESP_LOGI(TAG, "  conv_id: %s", params.conv_id.c_str());
+    // ESP_LOGI(TAG, "  access_token: %s", params.access_token.c_str());
 
     room_params_ = params;
 }

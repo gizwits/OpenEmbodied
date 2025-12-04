@@ -150,6 +150,22 @@ private:
             }
         });
 
+        power_button_->OnPressUp([this]() {
+            first_level = 1;
+            ESP_LOGI(TAG, "boot_button_.OnPressUp");
+            if (need_power_off_) {
+                need_power_off_ = false;
+                is_sleep_ = true;
+                // NVS标志已经在OnLongPress中设置了，这里直接关机
+                // 检查是否在充电状态
+                bool is_charging = PowerManager::GetInstance().IsCharging();
+                if (is_charging) {
+                } else {
+                    PowerOff();
+                }
+            }
+        });
+
         boot_button_.OnClick([this]() {
             auto &app = Application::GetInstance();
             app.ToggleChatState();

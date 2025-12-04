@@ -84,12 +84,12 @@ void MqttClient::InitAttrsFromJson() {
         a.data_type = data_type && data_type->valuestring ? data_type->valuestring : "";
         g_attrs.push_back(a);
         
-        ESP_LOGI(TAG, "Added attribute: %s (byte_offset=%d, bit_offset=%d, len=%d, unit=%s, data_type=%s)", 
-                 a.name.c_str(), a.byte_offset, a.bit_offset, a.len, a.unit.c_str(), a.data_type.c_str());
+        // ESP_LOGI(TAG, "Added attribute: %s (byte_offset=%d, bit_offset=%d, len=%d, unit=%s, data_type=%s)", 
+        //          a.name.c_str(), a.byte_offset, a.bit_offset, a.len, a.unit.c_str(), a.data_type.c_str());
     }
     
     attr_size_ = (attr_count + 8 - 1) / 8;
-    ESP_LOGI(TAG, "Calculated attr_size_: %d", attr_size_);
+    // ESP_LOGI(TAG, "Calculated attr_size_: %d", attr_size_);
     
     cJSON_Delete(root);
 }
