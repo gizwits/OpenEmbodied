@@ -4,7 +4,7 @@
 #include <driver/gpio.h>
 
 #define BOOT_BUTTON_GPIO        GPIO_NUM_7
-#define BUILTIN_REC_BUTTON_GPIO   GPIO_NUM_8
+#define BUILTIN_POWER_BUTTON_GPIO   GPIO_NUM_8
 // #define BOOT_BUTTON_GPIO        GPIO_NUM_9
 
 
