@@ -1522,8 +1522,7 @@ void Application::QuitTalking() {
     if (protocol_ != nullptr) {
         ESP_LOGI(TAG, "run close audio channel");
         // 先发送中止消息
-        protocol_->SendAbortSpeaking(kAbortReasonNone);
-        
+        ResetDecoder();
         // 关闭音频通道（可能阻塞，但这是必要的清理操作）
         protocol_->CloseAudioChannel();
     }

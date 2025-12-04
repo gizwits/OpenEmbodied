@@ -88,7 +88,7 @@ protected:
     size_t subtitle_scroll_pos_ = 0;
     bool subtitle_scrolling_ = false;
     int64_t subtitle_first_char_time_ms_ = 0;  // Timestamp when first character was displayed (in milliseconds)
-    static constexpr int kSubtitleScrollPeriodMs = 70;  // Scroll period in milliseconds (configurable, smaller = faster)
+    static constexpr int kSubtitleScrollPeriodMs = 75;  // Scroll period in milliseconds (configurable, smaller = faster)
     static constexpr int kSubtitleScrollDelayMs = 1000;  // Delay before starting scroll in milliseconds (2 seconds)
 
     void SetupUI();

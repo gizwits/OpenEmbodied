@@ -29,8 +29,10 @@ struct Player::Impl {
     std::function<void(std::vector<uint8_t>&&)> packet_callback;
     std::function<size_t()> queue_size_callback;  // 查询队列大小的回调
     size_t packets_processed;  // 已处理的数据包数量
+    std::mutex http_mutex_;  // 保护 HTTP 连接的互斥锁
+    Http* current_http_;  // 当前活动的 HTTP 连接指针
 
-    Impl() : buffer_pos(0), buffer_size(0), is_downloading_(false), packets_processed(0) {
+    Impl() : buffer_pos(0), buffer_size(0), is_downloading_(false), packets_processed(0), current_http_(nullptr) {
         buffer = new char[BUFFER_SIZE];
     }
 
@@ -75,13 +77,19 @@ struct Player::Impl {
     }
 
     bool read_chunk(std::unique_ptr<Http>& http) {
+        // 检查是否正在停止
+        if (!is_downloading_) {
+            ESP_LOGI(TAG, "Download stopped, exiting read_chunk");
+            return false;
+        }
+        
         // 如果缓冲区已经有足够的数据，等待处理（基于实际数据量而非固定值）
         if (buffer_pos > MAX_BUFFERED_BYTES) {
             ESP_LOGD(TAG, "Buffer has enough data (%u bytes), waiting...", (unsigned int)buffer_pos);
             vTaskDelay(pdMS_TO_TICKS(10));  // 等待10ms让处理跟上
             // 继续处理缓冲区，不读取新数据
             process_buffer();
-            return true;
+            return is_downloading_;  // 返回是否还在下载
         }
 
         // 确保有足够空间读取下一个chunk
@@ -92,8 +100,14 @@ struct Player::Impl {
             if (buffer_pos + CHUNK_SIZE > BUFFER_SIZE) {
                 ESP_LOGW(TAG, "Buffer nearly full (%u bytes), waiting for processing...", (unsigned int)buffer_pos);
                 vTaskDelay(pdMS_TO_TICKS(10));
-                return true;
+                return is_downloading_;  // 返回是否还在下载
             }
+        }
+
+        // 再次检查是否正在停止（可能在等待期间被停止）
+        if (!is_downloading_) {
+            ESP_LOGI(TAG, "Download stopped before reading chunk");
+            return false;
         }
 
         char chunk[CHUNK_SIZE];
@@ -119,6 +133,14 @@ struct Player::Impl {
     void stop() {
         ESP_LOGI(TAG, "Player stop called, cleaning up...");
         is_downloading_ = false;
+        
+        // 关闭 HTTP 连接
+        std::lock_guard<std::mutex> lock(http_mutex_);
+        if (current_http_) {
+            ESP_LOGI(TAG, "Closing HTTP connection");
+            current_http_->Close();
+            current_http_ = nullptr;
+        }
     }
 
     void setPacketCallback(std::function<void(std::vector<uint8_t>&&)> callback) {
@@ -134,9 +156,19 @@ struct Player::Impl {
         auto network = Board::GetInstance().GetNetwork();
         auto http = network->CreateHttp(4);
         
+        // 保存 HTTP 连接指针，以便 stop() 时可以关闭
+        {
+            std::lock_guard<std::mutex> lock(http_mutex_);
+            current_http_ = http.get();
+        }
+        
         // 设置接收限流回调：直接检查音频解码队列（最准确的限流方式）
         if (queue_size_callback) {
             http->SetCanReceiveCallback([this]() {
+                // 检查是否正在停止
+                if (!is_downloading_) {
+                    return false;
+                }
                 size_t queue_size = queue_size_callback();
                 const size_t max_queue_size = 
 #ifdef CONFIG_IDF_TARGET_ESP32S3
@@ -160,7 +192,10 @@ struct Player::Impl {
         
         if (!http->Open("GET", url)) {
             ESP_LOGE(TAG, "Failed to open HTTP connection");
-            
+            {
+                std::lock_guard<std::mutex> lock(http_mutex_);
+                current_http_ = nullptr;
+            }
             return false;
         }
 
@@ -168,7 +203,10 @@ struct Player::Impl {
         size_t content_length = http->GetBodyLength();
         if (content_length == 0) {
             ESP_LOGE(TAG, "Failed to get content length");
-            
+            {
+                std::lock_guard<std::mutex> lock(http_mutex_);
+                current_http_ = nullptr;
+            }
             return false;
         }
 
@@ -186,6 +224,15 @@ struct Player::Impl {
             // Watchdog::GetInstance().Reset();
         }
 
+        // 关闭 HTTP 连接
+        {
+            std::lock_guard<std::mutex> lock(http_mutex_);
+            if (current_http_) {
+                ESP_LOGI(TAG, "Closing HTTP connection at end of stream");
+                current_http_->Close();
+                current_http_ = nullptr;
+            }
+        }
 
         // 清理缓冲区
         buffer_pos = 0;
