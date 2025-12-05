@@ -811,9 +811,17 @@ private:
         // 强制拉低背光 io
         // gpio_set_level(DISPLAY_BACKLIGHT_PIN, 0);
         // vTaskDelay(pdMS_TO_TICKS(10));
+
+        Application::GetInstance().PlaySound(Lang::Sounds::P3_RESET_SUCCESS);
+        
         if (GetNetworkType() == NetworkType::WIFI) {
             auto& wifi_board = static_cast<WifiBoard&>(GetCurrentBoard());
+            MqttClient::getInstance().sendResetToCloud(); // 发送重置到云端
+            vTaskDelay(pdMS_TO_TICKS(1000));
+
             wifi_board.ResetWifiConfiguration();
+        } else {
+            MqttClient::getInstance().sendResetToCloud(); // 发送重置到云端
         }
     }
 
