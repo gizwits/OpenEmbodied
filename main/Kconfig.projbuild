@@ -111,6 +111,8 @@ choice BOARD_TYPE
         bool "机智云ESP32-C2 6824 ML307"
     config BOARD_TYPE_GIZWITS_C2_6824_LVLIN
         bool "机智云ESP32-C2 6824 绿林"
+    config BOARD_TYPE_GIZWITS_C2_6824_AICH
+        bool "机智云ESP32-C2 6824 AICH"
     config BOARD_TYPE_GIZWITS_C2_6824_TOY
         bool "机智云ESP32-C2 6824 玩具"
     config BOARD_TYPE_GIZWITS_C2_6824_BIRDCAGE
