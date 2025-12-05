@@ -1,0 +1,380 @@
+#include "led_signal.h"
+#include <thread>
+#include <chrono>
+#include "esp_log.h"
+#include "driver/ledc.h"
+#include "power_manager.h"
+#include <wifi_station.h>
+#include "power_save_timer.h"
+
+#define TAG "LedSignal"
+
+#define LEVEL_WORK_TIME_MIN 2
+/*
+红色：常亮代表充电中
+蓝色：常亮代表处于工作状态，闪烁代表未配网或者网络不佳
+绿色：充满电
+优先级：优先显示工作状态，离开工作状态并且处于充电状态后 2 分钟才显示充电状态
+*/
+
+
+// Start of Selection
+
+LedSignal::LedSignal(gpio_num_t red_gpio, ledc_channel_t red_channel, 
+                    gpio_num_t green_gpio, ledc_channel_t green_channel, 
+                    gpio_num_t blue_gpio, ledc_channel_t blue_channel) 
+    : red_led_(new GpioLed(red_gpio, 1, LEDC_TIMER_0, red_channel)),
+      green_led_(new GpioLed(green_gpio, 1, LEDC_TIMER_1, green_channel)),
+      blue_led_(new GpioLed(blue_gpio, 1, LEDC_TIMER_2, blue_channel)) {
+    InitializeLeds();
+}
+
+void LedSignal::SetColor(uint8_t red, uint8_t green, uint8_t blue) {
+    auto setLedState = [](GpioLed* led, uint8_t brightness) {
+        if (led) {
+            if (brightness == 0) {
+                led->TurnOff();
+            } else {
+                led->SetBrightness(brightness);
+                led->TurnOn();
+            }
+        }
+    };
+
+    setLedState(red_led_, red);
+    setLedState(green_led_, green);
+    setLedState(blue_led_, blue);
+}
+
+void LedSignal::SetBrightness(uint8_t brightness) {
+    brightness_ = brightness;
+    if (red_led_) red_led_->SetBrightness(brightness);
+    if (green_led_) green_led_->SetBrightness(brightness);
+    if (blue_led_) blue_led_->SetBrightness(brightness);
+    ESP_LOGI(TAG, "SetBrightness: %d", brightness_);
+}
+
+uint8_t LedSignal::GetBrightness() const {
+    return brightness_;
+}
+
+void LedSignal::InitializeLeds() {
+    if (red_led_) {
+        red_led_->SetBrightness(brightness_);
+        red_led_->TurnOff();
+    }
+    if (green_led_) {
+        green_led_->SetBrightness(brightness_);
+        green_led_->TurnOff();
+    }
+    if (blue_led_) {
+        blue_led_->SetBrightness(brightness_);
+        blue_led_->TurnOff();
+    }
+}
+
+LedSignal::~LedSignal() {
+    delete red_led_;
+    delete green_led_;
+    delete blue_led_;
+}
+
+void LedSignal::CycleColorsWithFade(uint32_t interval_ms, uint8_t max_brightness) {
+
+    if (red_led_ == nullptr && blue_led_ == nullptr) {
+        ESP_LOGE(TAG, "LedSignal: CycleColorsWithFade failed, leds not initialized");
+        return;
+    }
+
+    if(max_brightness > 100) {
+        max_brightness = 100;
+    }
+
+    std::thread([this, interval_ms, max_brightness]() {
+        uint8_t current_color = 0;
+        uint8_t brightness = 1;
+        int8_t fade_direction = 1;
+
+        while (true) {
+            brightness += fade_direction * 5; // 调整步长
+            if (brightness >= max_brightness) {
+                brightness = 0;
+                current_color = (current_color + 1) % 3;
+            }
+
+            const char* color_names[] = {"Red", "Green", "Blue"};
+            uint8_t red = 0, green = 0, blue = 0;
+
+            switch (current_color) {
+                case 0:
+                    red = brightness;
+                    break;
+                case 1:
+                    green = brightness;
+                    break;
+                case 2:
+                    blue = brightness;
+                    break;
+            }
+
+            auto now = std::chrono::steady_clock::now();
+            auto ms_since_epoch = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+            if (ms_since_epoch % 500 < 250) { // 每500ms闪烁一次
+                SetColor(0, 0, 0); // 关闭所有LED
+            } else {
+                SetColor(red, green, blue);
+            }
+
+            ESP_LOGI(TAG, "Current color: %s, Brightness: %d", color_names[current_color], brightness);
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(interval_ms));
+        }
+    }).detach();
+}
+
+void LedSignal::MonitorAndUpdateLedState() {
+    std::thread([this]() {
+        bool was_working = false;
+        bool was_charging = false;
+        bool was_fully_charged = false;
+        auto last_non_working_time = std::chrono::steady_clock::now();
+        uint8_t last_brightness = 0;
+        uint8_t last_red = 0;
+        uint8_t last_green = 0;
+        uint8_t last_blue = 0;
+
+        while (true) {
+            bool is_working = CheckIfWorking();
+            bool is_charging = CheckIfCharging();
+            bool is_battery_low = CheckIfBatteryLow();
+
+            uint8_t red = 0, green = 0, blue = 0;
+            
+            uint8_t rgb_value = brightness_; // 增加亮度权重变量，命名为rgb_value
+            // uint8_t rgb_value = (brightness_ * 255) / 100; // 增加亮度权重变量，命名为rgb_value
+
+            bool need_blink = false;
+
+            if (is_working) {
+                blue = rgb_value; // 蓝色代表处于工作状态
+                last_non_working_time = std::chrono::steady_clock::now();
+            } else {
+                auto now = std::chrono::steady_clock::now();
+                auto duration_since_non_working = std::chrono::duration_cast<std::chrono::seconds>(now - last_non_working_time).count();
+                
+                if (duration_since_non_working < 20) {
+                    blue = rgb_value; // 蓝色闪烁代表非工作状态
+                    need_blink = true;
+                } else {
+                    if (is_battery_low) {
+                        red = rgb_value; // 红色代表电量低
+                        need_blink = true; // 低电量需要闪烁
+                    } else if (is_charging) {
+                        red = rgb_value; // 红色代表充电中
+                    } else {
+                        red = green = blue = 0; // 关闭所有LED
+                    }
+                }
+            }
+
+            if (need_blink) {
+                auto now = std::chrono::steady_clock::now();
+                auto ms_since_epoch = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+                if (ms_since_epoch % 1000 < 500) { // 每1000ms闪烁一次
+                    SetColor(0, 0, 0); // 关闭所有LED
+                } else {
+                    SetColor(red, green, blue);
+                }
+            } else {
+                SetColor(red, green, blue);
+            }
+
+            if(last_brightness != brightness_ || last_red != red || last_green != green || last_blue != blue) {
+                last_brightness = brightness_;
+                last_red = red;
+                last_green = green;
+                last_blue = blue;
+                ESP_LOGI(TAG, "Current RGB values: R=%d, G=%d, B=%d, Brightness=%d", red, green, blue, brightness_);
+            }
+            
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }).detach();
+}
+
+bool LedSignal::CheckIfWorking() {
+    auto& app = Application::GetInstance();
+    
+    // 检查设备状态：如果正在说话（包括播放音乐），认为是工作状态
+    auto device_state = app.GetDeviceState();
+    if (device_state == kDeviceStateSpeaking) {
+        return true;
+    }
+    
+    // 检查 Player：如果正在下载/播放音乐，认为是工作状态
+    if (app.player_.IsDownloading()) {
+        return true;
+    }
+    
+    // 检查音频服务：如果正在播放音频（音乐、AI说话等），认为是工作状态
+    auto& audio_service = app.GetAudioService();
+    if (!audio_service.IsIdle()) {
+        return true;
+    }
+    
+    // 按wifi状态判断，如果ws连不上报非工作状态
+    bool error_occurred = app.HasWebsocketError();
+    bool wifi_connected = WifiStation::GetInstance().IsConnected();
+    bool protocol_opened = app.IsWebsocketWorking();
+    // ESP_LOGI(TAG, "error_occurred: %d, WiFi connected: %s ret %d", 
+    //     error_occurred, wifi_connected ? "true" : "false", error_occurred && wifi_connected);
+    return !error_occurred && wifi_connected && protocol_opened;
+}
+
+bool LedSignal::CheckIfCharging() {
+    return Board::GetInstance().IsCharging();
+}
+
+bool LedSignal::CheckIfBatteryLow() {
+    int level = 0;
+    bool charging = false, discharging = false;
+    Board::GetInstance().GetBatteryLevel(level, charging, discharging);
+    return level < 25;
+}
+
+
+void LedSignal::MonitorAndUpdateLedState_timer() {
+    esp_timer_create_args_t timer_args = {
+        .callback = [](void* arg) {
+            auto led_signal = static_cast<LedSignal*>(arg);
+            led_signal->UpdateLedState();
+        },
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "led_update_timer",
+        .skip_unhandled_events = false,
+    };
+
+    esp_timer_handle_t timer_handle;
+    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &timer_handle));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(timer_handle, 100 * 1000)); // 每100ms更新一次LED状态
+}
+
+// 辅助函数：检查定时器是否进入休眠模式
+static bool CheckPowerSaveTimerSleepMode() {
+    auto* power_save_timer = Board::GetInstance().GetPowerSaveTimer();
+    if (power_save_timer) {
+        return power_save_timer->IsInSleepMode();
+    }
+    return false;
+}
+
+void LedSignal::UpdateLedState() {
+    bool was_working = false;
+    bool was_charging = false;
+    bool was_fully_charged = false;
+    static auto last_non_working_time = std::chrono::steady_clock::now();
+    static uint8_t last_brightness = 0;
+    static uint8_t last_red = 0;
+    static uint8_t last_green = 0;
+    static uint8_t last_blue = 0;
+    static auto wifi_config_start_time = std::chrono::steady_clock::now();
+    static bool was_in_wifi_config_mode = false;
+
+    bool is_working = CheckIfWorking();
+    bool is_charging = CheckIfCharging();
+    bool is_battery_low = CheckIfBatteryLow();
+    bool is_fully_charged = PowerManager::GetInstance().IsFullyCharged();
+    
+    // 更新最后工作状态时间
+    if (is_working) {
+        last_non_working_time = std::chrono::steady_clock::now();
+    }
+
+    // ESP_LOGI(TAG, "is_working: %d, is_charging: %d, is_battery_low: %d, is_fully_charged: %d", 
+    //          is_working, is_charging, is_battery_low, is_fully_charged);
+    uint8_t red = 0, green = 0, blue = 0;
+    uint8_t rgb_value = brightness_; // 增加亮度权重变量，命名为rgb_value
+    bool need_blink = false;
+
+    // 配网模式，或者 wifi 没有连接的情况下 闪烁
+    auto is_wifi_config_mode = Board::GetInstance().IsWifiConfigMode();
+    WifiStation::GetInstance().IsConnected();
+    bool wifi_connected = WifiStation::GetInstance().IsConnected();
+    
+    // 记录配网模式开始时间
+    if (is_wifi_config_mode && !was_in_wifi_config_mode) {
+        wifi_config_start_time = std::chrono::steady_clock::now();
+        was_in_wifi_config_mode = true;
+    } else if (!is_wifi_config_mode) {
+        was_in_wifi_config_mode = false;
+    }
+    
+    // 配网模式下，检查定时器是否已进入休眠模式
+    if (is_wifi_config_mode) {
+        // 检查定时器是否已进入休眠模式（使用辅助函数）
+        bool timer_in_sleep = CheckPowerSaveTimerSleepMode();
+        
+        // 如果定时器已进入休眠，显示充电状态灯（按照正常充电逻辑）
+        if (timer_in_sleep) {
+            // 超过30秒后，按照充电状态显示LED
+            if (is_fully_charged) {
+                green = rgb_value; // 绿色代表充满电
+            } else if (is_charging) {
+                // 充电状态下，即使低电量也显示红色常亮（不闪烁）
+                red = rgb_value; // 红色代表充电中
+            } else if (is_battery_low) {
+                // 未充电且低电量时，红色闪烁
+                red = rgb_value; // 红色代表电量低
+                need_blink = true; // 低电量需要闪烁
+            } else {
+                red = green = blue = 0; // 关闭所有LED
+            }
+        } else {
+            // 30秒内，显示蓝灯闪烁
+            blue = rgb_value; // 蓝色闪烁代表非工作状态
+            need_blink = true;
+        }
+    } else if ((!wifi_connected)) {
+        blue = rgb_value; // 蓝色闪烁代表非工作状态
+        need_blink = true;
+    } else if (is_working) {
+        blue = rgb_value; // 蓝色代表处于工作状态
+        last_non_working_time = std::chrono::steady_clock::now();
+    } else {
+        // 优先检查是否充满电
+        if (is_fully_charged) {
+            green = rgb_value; // 绿色代表充满电
+            // ESP_LOGI(TAG, "[LED状态] 电池已充满，亮绿灯");
+        } else if (is_charging) {
+            // 充电状态下，即使低电量也显示红色常亮（不闪烁）
+            red = rgb_value; // 红色代表充电中
+        } else if (is_battery_low) {
+            // 未充电且低电量时，红色闪烁
+            red = rgb_value; // 红色代表电量低
+            need_blink = true; // 低电量需要闪烁
+        } else {
+            red = green = blue = 0; // 关闭所有LED
+        }
+    }
+
+    if (need_blink) {
+        auto now = std::chrono::steady_clock::now();
+        auto ms_since_epoch = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+        if (ms_since_epoch % 1000 < 500) { // 每1000ms闪烁一次
+            SetColor(0, 0, 0); // 关闭所有LED
+        } else {
+            SetColor(red, green, blue);
+        }
+    } else {
+        SetColor(red, green, blue);
+    }
+
+    if (last_brightness != brightness_ || last_red != red || last_green != green || last_blue != blue) {
+        last_brightness = brightness_;
+        last_red = red;
+        last_green = green;
+        last_blue = blue;
+        ESP_LOGI(TAG, "Current RGB values: R=%d, G=%d, B=%d, Brightness=%d", red, green, blue, brightness_);
+    }
+}

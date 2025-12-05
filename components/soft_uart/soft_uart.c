@@ -170,7 +170,7 @@ static uint32_t baudrate_to_cycles(soft_uart_baudrate_t baudrate)
      */
     switch (baudrate) {
     case SOFT_UART_9600: // ~104.17us per bit
-        return ((CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ * 10417) / 100 - 30);
+        return ((CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ * 10417) / 100 - 35);
     case SOFT_UART_19200: // ~52.08us per bit
         return ((CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ * 5208) / 100 - 30);
     case SOFT_UART_115200: // 115200, 8.63us per bit
