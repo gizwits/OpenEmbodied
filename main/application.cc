@@ -1577,7 +1577,7 @@ void Application::PlayMusic(const char* url) {
         args->app->player_.processMP3Stream(args->url.c_str());
         delete args;
         vTaskDelete(NULL);
-    }, "process_mp3_stream", 2048 * 2, args, 5, nullptr);
+    }, "process_mp3_stream", 2048 * 4, args, 5, nullptr);
 
 }
 

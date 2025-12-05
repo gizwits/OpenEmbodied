@@ -154,6 +154,7 @@ struct Player::Impl {
     bool processMP3Stream(const char* url) {
         ESP_LOGI(TAG, "processMP3Stream: %s", url);
         auto network = Board::GetInstance().GetNetwork();
+        // 增加超时时间到30秒，避免等待HTTP响应头时超时
         auto http = network->CreateHttp(4);
         
         // 保存 HTTP 连接指针，以便 stop() 时可以关闭
@@ -200,18 +201,18 @@ struct Player::Impl {
         }
 
 
-        size_t content_length = http->GetBodyLength();
-        if (content_length == 0) {
-            ESP_LOGE(TAG, "Failed to get content length");
-            {
-                std::lock_guard<std::mutex> lock(http_mutex_);
-                current_http_ = nullptr;
-            }
-            return false;
-        }
+        // size_t content_length = http->GetBodyLength();
+        // if (content_length == 0) {
+        //     ESP_LOGE(TAG, "Failed to get content length");
+        //     {
+        //         std::lock_guard<std::mutex> lock(http_mutex_);
+        //         current_http_ = nullptr;
+        //     }
+        //     return false;
+        // }
 
-        auto status_code = http->GetStatusCode();
-        ESP_LOGI(TAG, "status_code: %d", status_code);
+        // auto status_code = http->GetStatusCode();
+        // ESP_LOGI(TAG, "status_code: %d", status_code);
 
         is_downloading_ = true;
         packets_processed = 0;
