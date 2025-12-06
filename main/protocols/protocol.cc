@@ -166,19 +166,6 @@ void Protocol::UpdateRoomParams(const RoomParams& params) {
 }
 
 void Protocol::SendTextToAI(const std::string& message) {
-    const char *init_message = "{"
-        "\"event_type\":\"conversation.message.create\","
-        "\"data\":{"
-            "\"role\":\"user\","
-            "\"content_type\":\"text\","
-            "\"content\":\"%s\""
-        "}"
-    "}";
-
-    char *init_message_str = (char *)malloc(strlen(init_message) + message.length() + 1);
-    snprintf(init_message_str, strlen(init_message) + message.length() + 1, init_message, message.c_str());
-    SendText(init_message_str);
-    free(init_message_str);
 }
 
 void Protocol::GenerateTTSFromText(const std::string& text) {

@@ -109,7 +109,6 @@ public:
     virtual void EnterDeepSleepIfNotCharging() { }
     virtual bool GetNeedPlayPrologue() { return false; }
     virtual bool NeedPlayProcessVoiceWithLife() { return false; }
-    virtual bool NeedForceConnect() { return false; }
     // 充电状态是否静默启动
     virtual bool NeedSilentStartup() { return false; }
     virtual bool NeedBlockLowBattery() { return false; }

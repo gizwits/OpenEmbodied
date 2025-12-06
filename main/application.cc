@@ -1158,7 +1158,6 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
             // if (protocol_) {
             //     protocol_->SendWakeWordDetected(wake_word); 
             // }
-            auto& board = Board::GetInstance();
             auto backlight = board.GetBacklight();
             if (backlight) {
                 backlight->RestoreBrightness();
