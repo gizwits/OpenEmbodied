@@ -4,7 +4,6 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/event_groups.h>
-#include <esp_sntp.h>
 #include <esp_log.h>
 #include <esp_wifi.h>
 #include <esp_event.h>
@@ -14,6 +13,10 @@
 #include <sys/time.h>
 #include <string>
 #include <functional>
+#include <memory>
+#include <udp.h>
+#include <network_interface.h>
+#include "board.h"
 
 // 阿里云NTP服务器
 #define ALIYUN_NTP_SERVER1 "ntp.aliyun.com"
@@ -97,17 +100,23 @@ private:
     NtpClient(const NtpClient&) = delete;
     NtpClient& operator=(const NtpClient&) = delete;
     
-    // SNTP事件处理函数
-    static void SntpEventHandler(struct timeval *tv);
+    // 构造NTP请求包
+    std::string BuildNtpRequest();
     
-    // 初始化SNTP
-    esp_err_t InitSntp();
+    // 解析NTP响应包
+    bool ParseNtpResponse(const std::string& data, time_t& timestamp);
     
-    // 设置NTP服务器
-    void SetNtpServers();
+    // NTP响应回调
+    void OnNtpResponse(const std::string& data);
+    
+    // 执行NTP同步
+    void PerformSync();
     
     // 同步状态更新
     void UpdateSyncStatus(NtpSyncStatus status, const std::string& message = "");
+    
+    // 检查网络连接状态
+    bool IsNetworkConnected();
     
     // 成员变量
     NtpSyncStatus sync_status_;
@@ -117,6 +126,23 @@ private:
     char timezone_[64];
     bool initialized_;
     EventGroupHandle_t ntp_event_group_;
+    std::unique_ptr<Udp> udp_client_;
+    int current_server_index_;
+    TaskHandle_t sync_task_handle_;
+    
+    // NTP服务器列表
+    static constexpr const char* NTP_SERVERS[] = {
+        ALIYUN_NTP_SERVER1,
+        ALIYUN_NTP_SERVER2,
+        ALIYUN_NTP_SERVER3,
+        ALIYUN_NTP_SERVER4,
+        ALIYUN_NTP_SERVER5,
+        ALIYUN_NTP_SERVER6,
+        ALIYUN_NTP_SERVER7,
+        ALIYUN_NTP_SERVER8
+    };
+    static constexpr int NTP_SERVER_COUNT = 8;
+    static constexpr int NTP_PORT = 123;
     
     // 同步间隔（秒）
     static constexpr int SYNC_INTERVAL_SECONDS = 3600;  // 1小时

@@ -2,17 +2,60 @@
 
 #include <vector>
 #include <algorithm>
+#include <string>
 #include <font_awesome_symbols.h>
 #include <esp_log.h>
 #include <esp_err.h>
 #include <esp_lvgl_port.h>
+#include <esp_partition.h>
+#include <esp_heap_caps.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/timers.h>
 #include "assets/lang_config.h"
 #include <cstring>
+#include <ctime>
+#include <sys/time.h>
 #include "settings.h"
+#include "ntp.h"
+#include "device_state_event.h"
+#include <esp_spiffs.h>
+#include <esp_vfs.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
+#include <lvgl.h>
+#include "../../managed_components/lvgl__lvgl/src/draw/lv_image_decoder_private.h"
 
 #include "board.h"
+#include "application.h"
+#include "device_state.h"
 
 #define TAG "LcdDisplay"
+
+// Initialize LVGL image decoders (PNG and JPG)
+static void InitializeLvglDecoders() {
+#if LV_USE_LODEPNG
+    extern void lv_lodepng_init(void);
+    lv_lodepng_init();
+    ESP_LOGI(TAG, "LODEPNG decoder initialized");
+#endif
+#if LV_USE_TJPGD
+    extern void lv_tjpgd_init(void);
+    lv_tjpgd_init();
+    ESP_LOGI(TAG, "TJPGD decoder initialized");
+#endif
+}
+
+// Background SPIFFS partition configuration
+#define BACKGROUND_PARTITION_LABEL "background"
+#define BACKGROUND_MOUNT_POINT "/background"
+#define BACKGROUND_DRIVE_LETTER 'B'
+
+// External background images
+extern const lv_image_dsc_t bg_1_img;
 
 // Color definitions for dark theme
 #define DARK_BACKGROUND_COLOR       lv_color_hex(0x121212)     // Dark background
@@ -100,6 +143,7 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
 
     ESP_LOGI(TAG, "Initialize LVGL library");
     lv_init();
+    InitializeLvglDecoders();
 
     ESP_LOGI(TAG, "Initialize LVGL port");
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
@@ -113,7 +157,7 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
         .panel_handle = panel_,
         .control_handle = nullptr,
         .buffer_size = static_cast<uint32_t>(width_ * 20),
-        .double_buffer = false,
+        .double_buffer = true,
         .trans_size = 0,
         .hres = static_cast<uint32_t>(width_),
         .vres = static_cast<uint32_t>(height_),
@@ -144,7 +188,15 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
         lv_display_set_offset(display_, offset_x, offset_y);
     }
 
+    // Mount background SPIFFS partition and register LVGL file system driver
+    // Must be called before SetupUI() so that background image can be loaded
+    LoadBackgroundFromSPIFFS();
+    
     SetupUI();
+    // RegisterDeviceStateCallback();
+    
+    // Start resident audio monitor task
+    StartAudioMonitor();
 }
 
 // RGB LCD实现
@@ -162,6 +214,7 @@ RgbLcdDisplay::RgbLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
 
     ESP_LOGI(TAG, "Initialize LVGL library");
     lv_init();
+    InitializeLvglDecoders();
 
     ESP_LOGI(TAG, "Initialize LVGL port");
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
@@ -207,7 +260,15 @@ RgbLcdDisplay::RgbLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
         lv_display_set_offset(display_, offset_x, offset_y);
     }
 
+    // Mount background SPIFFS partition and register LVGL file system driver
+    // Must be called before SetupUI() so that background image can be loaded
+    LoadBackgroundFromSPIFFS();
+    
     SetupUI();
+    RegisterDeviceStateCallback();
+    
+    // Start resident audio monitor task
+    StartAudioMonitor();
 }
 
 MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
@@ -222,6 +283,7 @@ MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel
 
     ESP_LOGI(TAG, "Initialize LVGL library");
     lv_init();
+    InitializeLvglDecoders();
 
     ESP_LOGI(TAG, "Initialize LVGL port");
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
@@ -265,10 +327,34 @@ MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel
         lv_display_set_offset(display_, offset_x, offset_y);
     }
 
+    // Mount background SPIFFS partition and register LVGL file system driver
+    // Must be called before SetupUI() so that background image can be loaded
+    LoadBackgroundFromSPIFFS();
+    
     SetupUI();
+    RegisterDeviceStateCallback();
+    
+    // Start resident audio monitor task
+    StartAudioMonitor();
 }
 
+// Add background_image_ and chat_container_ as member variables (temporary storage)
+static lv_obj_t* background_image_ = nullptr;
+static lv_obj_t* chat_container_ = nullptr;
+
 LcdDisplay::~LcdDisplay() {
+    // Clean up countdown timer first
+    StopCountdown();
+    
+    // Clean up subtitle scroll timer
+    StopSubtitleScroll();
+    
+    // Clean up video playback task
+    StopVideoPlayback();
+    
+    // Clean up audio monitor task
+    StopAudioMonitor();
+    
     // 然后再清理 LVGL 对象
     if (content_ != nullptr) {
         lv_obj_del(content_);
@@ -302,6 +388,10 @@ void LcdDisplay::Unlock() {
     lvgl_port_unlock();
 }
 
+// Forward declaration
+static bool DecodeAndSaveAsRGB565(const char* spiffs_path);
+static lv_image_dsc_t* LoadRGB565FromFile(const char* raw_path);
+
 #if CONFIG_USE_WECHAT_MESSAGE_STYLE
 void LcdDisplay::SetupUI() {
     DisplayLockGuard lock(this);
@@ -327,6 +417,7 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_radius(status_bar_, 0, 0);
     lv_obj_set_style_bg_color(status_bar_, current_theme_.background, 0);
     lv_obj_set_style_text_color(status_bar_, current_theme_.text, 0);
+    lv_obj_set_style_pad_top(status_bar_, 2, 0);  // Add top padding to avoid being cut off
     
     /* Content - Chat area */
     content_ = lv_obj_create(container_);
@@ -368,48 +459,60 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_color(emotion_label_, current_theme_.text, 0);
     lv_label_set_text(emotion_label_, FONT_AWESOME_AI_CHIP);
     lv_obj_set_style_margin_right(emotion_label_, 5, 0); // 添加右边距，与后面的元素分隔
+    lv_obj_set_style_translate_y(emotion_label_, 10, 0);
 
     notification_label_ = lv_label_create(status_bar_);
     lv_obj_set_flex_grow(notification_label_, 1);
     lv_obj_set_style_text_align(notification_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(notification_label_, current_theme_.text, 0);
     lv_label_set_text(notification_label_, "");
+    lv_obj_set_style_pad_left(notification_label_, 20, 0);
+    lv_obj_set_style_pad_right(notification_label_, 20, 0);
     lv_obj_add_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_translate_y(notification_label_, 15, 0);  // 与 status_label_ 保持一致
 
     status_label_ = lv_label_create(status_bar_);
     lv_obj_set_flex_grow(status_label_, 1);
-    lv_label_set_long_mode(status_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    // 使用省略号模式，文字过长时显示省略号而不是被顶上去
+    lv_label_set_long_mode(status_label_, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_align(status_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(status_label_, current_theme_.text, 0);
     lv_label_set_text(status_label_, Lang::Strings::INITIALIZING);
+    lv_obj_set_style_translate_y(status_label_, 15, 0);
     
     mute_label_ = lv_label_create(status_bar_);
     lv_label_set_text(mute_label_, "");
     lv_obj_set_style_text_font(mute_label_, fonts_.icon_font, 0);
     lv_obj_set_style_text_color(mute_label_, current_theme_.text, 0);
+    lv_obj_set_style_translate_y(mute_label_, 10, 0);
 
     network_label_ = lv_label_create(status_bar_);
     lv_label_set_text(network_label_, "");
     lv_obj_set_style_text_font(network_label_, fonts_.icon_font, 0);
     lv_obj_set_style_text_color(network_label_, current_theme_.text, 0);
     lv_obj_set_style_margin_left(network_label_, 5, 0); // 添加左边距，与前面的元素分隔
+    lv_obj_set_style_translate_y(network_label_, 10, 0);
 
     battery_label_ = lv_label_create(status_bar_);
     lv_label_set_text(battery_label_, "");
     lv_obj_set_style_text_font(battery_label_, fonts_.icon_font, 0);
     lv_obj_set_style_text_color(battery_label_, current_theme_.text, 0);
     lv_obj_set_style_margin_left(battery_label_, 5, 0); // 添加左边距，与前面的元素分隔
+    lv_obj_set_style_translate_y(battery_label_, 10, 0);
 
     low_battery_popup_ = lv_obj_create(screen);
     lv_obj_set_scrollbar_mode(low_battery_popup_, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_set_size(low_battery_popup_, LV_HOR_RES * 0.9, fonts_.text_font->line_height * 2);
+    lv_obj_set_size(low_battery_popup_, LV_PCT(100), fonts_.text_font->line_height * 2 + 5);  // 100% width, height + 5
     lv_obj_align(low_battery_popup_, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_style_bg_color(low_battery_popup_, current_theme_.low_battery, 0);
-    lv_obj_set_style_radius(low_battery_popup_, 10, 0);
+    lv_obj_set_style_bg_color(low_battery_popup_, lv_color_white(), 0);  // White background
+    lv_obj_set_style_bg_opa(low_battery_popup_, LV_OPA_COVER, 0);  // Make background opaque
+    lv_obj_set_style_border_width(low_battery_popup_, 0, 0);  // No border
+    lv_obj_set_style_radius(low_battery_popup_, 0, 0);  // No rounded corners
     low_battery_label_ = lv_label_create(low_battery_popup_);
     lv_label_set_text(low_battery_label_, Lang::Strings::BATTERY_NEED_CHARGE);
-    lv_obj_set_style_text_color(low_battery_label_, lv_color_white(), 0);
+    lv_obj_set_style_text_color(low_battery_label_, lv_color_black(), 0);  // Black text
     lv_obj_center(low_battery_label_);
+    lv_obj_set_style_translate_y(low_battery_label_, -3, 0);  // Move text up by 3 pixels
     lv_obj_add_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN);
 }
 #if CONFIG_IDF_TARGET_ESP32P4
@@ -608,168 +711,198 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_color(screen, current_theme_.text, 0);
     lv_obj_set_style_bg_color(screen, current_theme_.background, 0);
 
-    /* Container */
-    container_ = lv_obj_create(screen);
-    lv_obj_set_size(container_, LV_HOR_RES, LV_VER_RES);
-    lv_obj_set_flex_flow(container_, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(container_, 0, 0);
-    lv_obj_set_style_border_width(container_, 0, 0);
-    lv_obj_set_style_pad_row(container_, 0, 0);
-    lv_obj_set_style_bg_color(container_, current_theme_.background, 0);
-    lv_obj_set_style_border_color(container_, current_theme_.border, 0);
-
-    /* Status bar */
-    status_bar_ = lv_obj_create(container_);
-    lv_obj_set_size(status_bar_, LV_HOR_RES, fonts_.text_font->line_height);
-    lv_obj_set_style_radius(status_bar_, 0, 0);
-    lv_obj_set_style_bg_color(status_bar_, current_theme_.background, 0);
-    lv_obj_set_style_text_color(status_bar_, current_theme_.text, 0);
-    
-    /* Content */
-    content_ = lv_obj_create(container_);
+    /* Content - make it full screen */
+    content_ = lv_obj_create(screen);
     lv_obj_set_scrollbar_mode(content_, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_style_radius(content_, 0, 0);
-    lv_obj_set_width(content_, LV_HOR_RES);
-    lv_obj_set_flex_grow(content_, 1);
+    lv_obj_set_size(content_, LV_HOR_RES, LV_VER_RES);
+    lv_obj_set_pos(content_, 0, 0);
     lv_obj_set_style_pad_all(content_, 5, 0);
     lv_obj_set_style_bg_color(content_, current_theme_.chat_background, 0);
-    lv_obj_set_style_border_color(content_, current_theme_.border, 0); // Border color for content
+    lv_obj_set_style_border_width(content_, 0, 0);
+    
+    /* Background image - try to load from SPIFFS first, fallback to embedded image */
+    background_image_ = lv_image_create(content_);
+    lv_obj_set_size(background_image_, LV_HOR_RES, LV_VER_RES);
+    lv_obj_set_pos(background_image_, -5, -5);  // Adjust position to cover padding
+    lv_obj_clear_flag(background_image_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(background_image_, LV_OBJ_FLAG_FLOATING);  // Make it floating, not part of flex layout
+    lv_obj_move_background(background_image_);  // Move to background layer
+    
+    // Try to load from bg.raw (RGB565 format)
+    char raw_path[128];
+    snprintf(raw_path, sizeof(raw_path), "%s/bg.raw", BACKGROUND_MOUNT_POINT);
+    lv_image_dsc_t* img_dsc = LoadRGB565FromFile(raw_path);
+    if (img_dsc != nullptr) {
+        lv_image_set_src(background_image_, img_dsc);
+        ESP_LOGI(TAG, "Background image loaded from RGB565 raw file: %s", raw_path);
+    } else {
+        // Fallback to embedded image
+        ESP_LOGI(TAG, "Background image not found, using embedded image");
+        lv_image_set_src(background_image_, &bg_1_img);
+    }
+
+    /* Status bar - floating on top */
+    status_bar_ = lv_obj_create(screen);
+    lv_obj_set_size(status_bar_, LV_HOR_RES, fonts_.text_font->line_height + 20);
+    lv_obj_set_pos(status_bar_, 0, 2);  // Position at top with 2px offset to avoid being cut off
+    lv_obj_set_style_radius(status_bar_, 0, 0);
+    lv_obj_set_style_bg_opa(status_bar_, LV_OPA_90, 0); 
+    lv_obj_set_style_bg_color(status_bar_, lv_color_white(), 0);  // White background
+    lv_obj_set_style_text_color(status_bar_, current_theme_.text, 0);
+    lv_obj_set_style_border_width(status_bar_, 0, 0);
 
     lv_obj_set_flex_flow(content_, LV_FLEX_FLOW_COLUMN); // 垂直布局（从上到下）
     lv_obj_set_flex_align(content_, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_SPACE_EVENLY); // 子对象居中对齐，等距分布
 
-    emotion_label_ = lv_label_create(content_);
-    lv_obj_set_style_text_font(emotion_label_, &font_awesome_30_4, 0);
+    // 创建时间显示容器（带白色透明背景和圆角）
+    lv_obj_t* time_container = lv_obj_create(content_);
+    lv_obj_set_size(time_container, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_color(time_container, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(time_container, LV_OPA_90, 0);  // 白色半透明，增加不透明度
+    lv_obj_set_style_radius(time_container, 15, 0);  // 圆角
+    lv_obj_set_style_pad_all(time_container, 20, 0);  // 内边距
+    lv_obj_set_style_border_width(time_container, 0, 0);  // 无边框
+    lv_obj_add_flag(time_container, LV_OBJ_FLAG_FLOATING);  // 不受 flex 布局影响
+    lv_obj_align(time_container, LV_ALIGN_BOTTOM_MID, 0, -10);  // 底部居中，距离底部10px
+    lv_obj_add_flag(time_container, LV_OBJ_FLAG_HIDDEN);  // 默认隐藏
+    lv_obj_move_foreground(time_container);  // Ensure it's on top of background
+    
+    emotion_label_ = lv_label_create(time_container);
+    lv_obj_set_style_text_font(emotion_label_, fonts_.text_font, 0);
     lv_obj_set_style_text_color(emotion_label_, current_theme_.text, 0);
-    lv_label_set_text(emotion_label_, FONT_AWESOME_AI_CHIP);
+    lv_label_set_text(emotion_label_, "2024-01-01\n00:00:00");  // Initial text with date and time
+    lv_label_set_long_mode(emotion_label_, LV_LABEL_LONG_WRAP);  // 支持多行显示
+    lv_obj_set_style_text_align(emotion_label_, LV_TEXT_ALIGN_CENTER, 0);  // 文本居中对齐
+    lv_obj_center(emotion_label_);  // 在容器中居中
 
     preview_image_ = lv_image_create(content_);
     lv_obj_set_size(preview_image_, width_ * 0.5, height_ * 0.5);
     lv_obj_align(preview_image_, LV_ALIGN_CENTER, 0, 0);
     lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
 
-    chat_message_label_ = lv_label_create(content_);
+    // 创建字幕容器（带白色透明背景和圆角）
+    chat_container_ = lv_obj_create(content_);
+    lv_obj_set_size(chat_container_, LV_HOR_RES, LV_SIZE_CONTENT);  // 宽度100%
+    lv_obj_set_style_bg_color(chat_container_, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(chat_container_, LV_OPA_90, 0);  // 白色半透明
+    lv_obj_set_style_radius(chat_container_, 0, 0);  // 无圆角
+    lv_obj_set_style_pad_all(chat_container_, 15, 0);  // 内边距
+    lv_obj_set_style_border_width(chat_container_, 0, 0);  // 无边框
+    lv_obj_add_flag(chat_container_, LV_OBJ_FLAG_FLOATING);  // 不受 flex 布局影响
+    lv_obj_align(chat_container_, LV_ALIGN_BOTTOM_MID, 0, 0);  // 贴住底部
+    lv_obj_add_flag(chat_container_, LV_OBJ_FLAG_HIDDEN);  // 默认隐藏，只有有内容时才显示
+    
+    chat_message_label_ = lv_label_create(chat_container_);
     lv_label_set_text(chat_message_label_, "");
-    lv_obj_set_width(chat_message_label_, LV_HOR_RES * 0.9); // 限制宽度为屏幕宽度的 90%
-    lv_label_set_long_mode(chat_message_label_, LV_LABEL_LONG_WRAP); // 设置为自动换行模式
-    lv_obj_set_style_text_align(chat_message_label_, LV_TEXT_ALIGN_CENTER, 0); // 设置文本居中对齐
+    lv_obj_set_width(chat_message_label_, LV_PCT(100)); // 使用容器的全部宽度
+    lv_label_set_long_mode(chat_message_label_, LV_LABEL_LONG_CLIP); // 设置为裁剪模式，手动控制滚动
+    lv_obj_set_style_text_align(chat_message_label_, LV_TEXT_ALIGN_LEFT, 0); // 设置文本左对齐
     lv_obj_set_style_text_color(chat_message_label_, current_theme_.text, 0);
 
-    /* Status bar */
+    /* Status bar layout */
     lv_obj_set_flex_flow(status_bar_, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_all(status_bar_, 0, 0);
-    lv_obj_set_style_border_width(status_bar_, 0, 0);
-    lv_obj_set_style_pad_column(status_bar_, 0, 0);
-    lv_obj_set_style_pad_left(status_bar_, 2, 0);
-    lv_obj_set_style_pad_right(status_bar_, 2, 0);
+    lv_obj_set_style_pad_column(status_bar_, 5, 0);
+    lv_obj_set_style_pad_left(status_bar_, 5, 0);  // Less padding needed with translate
+    lv_obj_set_style_pad_right(status_bar_, 5, 0); // Less padding needed with translate
 
     network_label_ = lv_label_create(status_bar_);
     lv_label_set_text(network_label_, "");
     lv_obj_set_style_text_font(network_label_, fonts_.icon_font, 0);
     lv_obj_set_style_text_color(network_label_, current_theme_.text, 0);
+    // Move network icon inward to avoid left rounded corner
+    lv_obj_set_style_translate_x(network_label_, 25, 0);  // Move 5px to the right
+    lv_obj_set_style_translate_y(network_label_, 14, 0);
 
     notification_label_ = lv_label_create(status_bar_);
     lv_obj_set_flex_grow(notification_label_, 1);
     lv_obj_set_style_text_align(notification_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(notification_label_, current_theme_.text, 0);
     lv_label_set_text(notification_label_, "");
+    lv_obj_set_style_pad_left(notification_label_, 20, 0);
+    lv_obj_set_style_pad_right(notification_label_, 20, 0);
     lv_obj_add_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_translate_y(notification_label_, 15, 0);  // 与 status_label_ 保持一致
 
     status_label_ = lv_label_create(status_bar_);
     lv_obj_set_flex_grow(status_label_, 1);
-    lv_label_set_long_mode(status_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    // 使用省略号模式，文字过长时显示省略号而不是被顶上去
+    lv_label_set_long_mode(status_label_, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_align(status_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(status_label_, current_theme_.text, 0);
     lv_label_set_text(status_label_, Lang::Strings::INITIALIZING);
+    lv_obj_set_style_translate_y(status_label_, 15, 0);
     mute_label_ = lv_label_create(status_bar_);
     lv_label_set_text(mute_label_, "");
     lv_obj_set_style_text_font(mute_label_, fonts_.icon_font, 0);
     lv_obj_set_style_text_color(mute_label_, current_theme_.text, 0);
+    lv_obj_set_style_translate_y(mute_label_, 15, 0);
 
     battery_label_ = lv_label_create(status_bar_);
     lv_label_set_text(battery_label_, "");
     lv_obj_set_style_text_font(battery_label_, fonts_.icon_font, 0);
     lv_obj_set_style_text_color(battery_label_, current_theme_.text, 0);
+    // Move battery icon inward to avoid right rounded corner
+    lv_obj_set_style_translate_x(battery_label_, -30, 0);  // Move 5px to the left
+    lv_obj_set_style_translate_y(battery_label_, 15, 0);
 
     low_battery_popup_ = lv_obj_create(screen);
     lv_obj_set_scrollbar_mode(low_battery_popup_, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_set_size(low_battery_popup_, LV_HOR_RES * 0.9, fonts_.text_font->line_height * 2);
+    lv_obj_set_size(low_battery_popup_, LV_PCT(100), fonts_.text_font->line_height * 2 + 5);  // 100% width, height + 5
     lv_obj_align(low_battery_popup_, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_style_bg_color(low_battery_popup_, current_theme_.low_battery, 0);
-    lv_obj_set_style_radius(low_battery_popup_, 10, 0);
+    lv_obj_set_style_bg_color(low_battery_popup_, lv_color_white(), 0);  // White background
+    lv_obj_set_style_bg_opa(low_battery_popup_, LV_OPA_COVER, 0);  // Make background opaque
+    lv_obj_set_style_border_width(low_battery_popup_, 0, 0);  // No border
+    lv_obj_set_style_radius(low_battery_popup_, 0, 0);  // No rounded corners
     low_battery_label_ = lv_label_create(low_battery_popup_);
     lv_label_set_text(low_battery_label_, Lang::Strings::BATTERY_NEED_CHARGE);
-    lv_obj_set_style_text_color(low_battery_label_, lv_color_white(), 0);
+    lv_obj_set_style_text_color(low_battery_label_, lv_color_black(), 0);  // Black text
     lv_obj_center(low_battery_label_);
+    lv_obj_set_style_translate_y(low_battery_label_, -3, 0);  // Move text up by 3 pixels
     lv_obj_add_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN);
 }
 #endif
 
 void LcdDisplay::SetEmotion(const char* emotion) {
-    struct Emotion {
-        const char* icon;
-        const char* text;
-    };
-
-    static const std::vector<Emotion> emotions = {
-        {"😶", "neutral"},
-        {"🙂", "happy"},
-        {"😆", "laughing"},
-        {"😂", "funny"},
-        {"😔", "sad"},
-        {"😠", "angry"},
-        {"😭", "crying"},
-        {"😍", "loving"},
-        {"😳", "embarrassed"},
-        {"😯", "surprised"},
-        {"😱", "shocked"},
-        {"🤔", "thinking"},
-        {"😉", "winking"},
-        {"😎", "cool"},
-        {"😌", "relaxed"},
-        {"🤤", "delicious"},
-        {"😘", "kissy"},
-        {"😏", "confident"},
-        {"😴", "sleepy"},
-        {"😜", "silly"},
-        {"🙄", "confused"}
-    };
+    // Don't hide if countdown is active
+    if (countdown_active_) {
+        ESP_LOGD(TAG, "SetEmotion called but countdown is active, ignoring");
+        return;
+    }
     
-    // 查找匹配的表情
-    std::string_view emotion_view(emotion);
-    auto it = std::find_if(emotions.begin(), emotions.end(),
-        [&emotion_view](const Emotion& e) { return e.text == emotion_view; });
-
     DisplayLockGuard lock(this);
     if (emotion_label_ == nullptr) {
         return;
     }
-
-    // 如果找到匹配的表情就显示对应图标，否则显示默认的neutral表情
-    lv_obj_set_style_text_font(emotion_label_, fonts_.emoji_font, 0);
-    if (it != emotions.end()) {
-        lv_label_set_text(emotion_label_, it->icon);
-    } else {
-        lv_label_set_text(emotion_label_, "😶");
-    }
     
-    // 显示emotion_label_，隐藏preview_image_
-    lv_obj_clear_flag(emotion_label_, LV_OBJ_FLAG_HIDDEN);
+    // Hide time container (which contains emotion_label_) and preview_image_ only if countdown is not active
+    lv_obj_t* time_container = lv_obj_get_parent(emotion_label_);
+    if (time_container != nullptr) {
+        lv_obj_add_flag(time_container, LV_OBJ_FLAG_HIDDEN);
+    }
     if (preview_image_ != nullptr) {
         lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
 void LcdDisplay::SetIcon(const char* icon) {
+    // Don't hide if countdown is active
+    if (countdown_active_) {
+        ESP_LOGD(TAG, "SetIcon called but countdown is active, ignoring");
+        return;
+    }
+    
     DisplayLockGuard lock(this);
     if (emotion_label_ == nullptr) {
         return;
     }
-    lv_obj_set_style_text_font(emotion_label_, &font_awesome_30_4, 0);
-    lv_label_set_text(emotion_label_, icon);
     
-    // 显示emotion_label_，隐藏preview_image_
-    lv_obj_clear_flag(emotion_label_, LV_OBJ_FLAG_HIDDEN);
+    // Hide time container (which contains emotion_label_) and preview_image_ only if countdown is not active
+    lv_obj_t* time_container = lv_obj_get_parent(emotion_label_);
+    if (time_container != nullptr) {
+        lv_obj_add_flag(time_container, LV_OBJ_FLAG_HIDDEN);
+    }
     if (preview_image_ != nullptr) {
         lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
     }
@@ -787,15 +920,21 @@ void LcdDisplay::SetPreviewImage(const lv_img_dsc_t* img_dsc) {
         // 设置图片源并显示预览图片
         lv_img_set_src(preview_image_, img_dsc);
         lv_obj_clear_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
-        // 隐藏emotion_label_
+        // 隐藏时间容器（包含 emotion_label_）
         if (emotion_label_ != nullptr) {
-            lv_obj_add_flag(emotion_label_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_t* time_container = lv_obj_get_parent(emotion_label_);
+            if (time_container != nullptr) {
+                lv_obj_add_flag(time_container, LV_OBJ_FLAG_HIDDEN);
+            }
         }
     } else {
-        // 隐藏预览图片并显示emotion_label_
+        // 隐藏预览图片并显示时间容器（包含 emotion_label_）
         lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
         if (emotion_label_ != nullptr) {
-            lv_obj_clear_flag(emotion_label_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_t* time_container = lv_obj_get_parent(emotion_label_);
+            if (time_container != nullptr) {
+                lv_obj_clear_flag(time_container, LV_OBJ_FLAG_HIDDEN);
+            }
         }
     }
 }
@@ -984,11 +1123,2420 @@ void LcdDisplay::SetTheme(const std::string& theme_name) {
 #endif
     }
     
-    // Update low battery popup
+    // Update low battery popup - keep white background and black text regardless of theme
     if (low_battery_popup_ != nullptr) {
-        lv_obj_set_style_bg_color(low_battery_popup_, current_theme_.low_battery, 0);
+        lv_obj_set_style_bg_color(low_battery_popup_, lv_color_white(), 0);
+        lv_obj_set_style_bg_opa(low_battery_popup_, LV_OPA_COVER, 0);
+        if (low_battery_label_ != nullptr) {
+            lv_obj_set_style_text_color(low_battery_label_, lv_color_black(), 0);
+        }
     }
 
     // No errors occurred. Save theme to settings
     Display::SetTheme(theme_name);
+}
+
+void LcdDisplay::SetStatus(const char* status) {
+    ESP_LOGI(TAG, "SetStatus called with: %s", status);
+    
+    // Call parent implementation
+    Display::SetStatus(status);
+    
+    // No longer handle clock display here - now handled by SetSocketConnected
+}
+
+void LcdDisplay::ShowNotification(const char* notification, int duration_ms) {
+    DisplayLockGuard lock(this);
+    
+    // 调用父类方法显示通知
+    Display::ShowNotification(notification, duration_ms);
+    
+    // 当显示通知时，隐藏时间容器
+    if (emotion_label_ != nullptr && countdown_active_) {
+        lv_obj_t* time_container = lv_obj_get_parent(emotion_label_);
+        if (time_container != nullptr) {
+            lv_obj_add_flag(time_container, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
+void LcdDisplay::UpdateStatusBar(bool update_all) {
+    // 调用父类方法更新状态栏
+    Display::UpdateStatusBar(update_all);
+    
+    // 检查低电量弹窗是否显示，如果显示则隐藏时间容器
+    if (emotion_label_ != nullptr && countdown_active_) {
+        if (low_battery_popup_ != nullptr && !lv_obj_has_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN)) {
+            lv_obj_t* time_container = lv_obj_get_parent(emotion_label_);
+            if (time_container != nullptr) {
+                lv_obj_add_flag(time_container, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+    }
+}
+
+void LcdDisplay::SetChatMessage(const char* role, const char* content) {
+    DisplayLockGuard lock(this);
+    if (chat_message_label_ == nullptr || chat_container_ == nullptr) {
+        return;
+    }
+    
+    // Show/hide container based on whether content is empty
+    if (content == nullptr || strlen(content) == 0) {
+        // Hide container when content is empty
+        StopSubtitleScroll();
+        lv_obj_add_flag(chat_container_, LV_OBJ_FLAG_HIDDEN);
+        subtitle_text_.clear();
+        subtitle_role_.clear();
+        return;
+    }
+    
+    // Clean up newline characters and replace with spaces
+    std::string cleaned_content(content);
+    std::replace(cleaned_content.begin(), cleaned_content.end(), '\n', ' ');
+    std::replace(cleaned_content.begin(), cleaned_content.end(), '\r', ' ');
+    
+    // Remove multiple consecutive spaces
+    std::string final_content;
+    bool prev_space = false;
+    for (char c : cleaned_content) {
+        if (c == ' ') {
+            if (!prev_space) {
+                final_content += c;
+            }
+            prev_space = true;
+        } else {
+            final_content += c;
+            prev_space = false;
+        }
+    }
+    
+    // Trim leading and trailing spaces
+    if (!final_content.empty()) {
+        size_t start = final_content.find_first_not_of(" \t");
+        if (start != std::string::npos) {
+            size_t end = final_content.find_last_not_of(" \t");
+            final_content = final_content.substr(start, end - start + 1);
+        } else {
+            final_content.clear();
+        }
+    }
+    
+    // Store old text and role before updating (for append detection)
+    std::string old_text = subtitle_text_;
+    std::string old_role = subtitle_role_;
+    std::string current_role = role;
+    
+    // Check if role has changed - if so, reset scroll state
+    bool role_changed = (current_role != old_role);
+    if (role_changed) {
+        ESP_LOGI(TAG, "Role changed from '%s' to '%s', resetting scroll state and delay timer", 
+                 old_role.c_str(), current_role.c_str());
+        StopSubtitleScroll();
+        subtitle_scroll_pos_ = 0;
+        subtitle_first_char_time_ms_ = 0;  // Reset timestamp
+    }
+    
+    // Check if this is an append operation (for user/assistant role with incremental text)
+    bool is_append = false;
+    if ((strcmp(role, "user") == 0 || strcmp(role, "assistant") == 0) && 
+        !old_text.empty() && 
+        current_role == old_role &&  // Same role
+        !role_changed &&  // Role hasn't changed
+        final_content.length() > old_text.length()) {
+        // Check if new text starts with old text
+        std::string prefix = final_content.substr(0, old_text.length());
+        if (prefix == old_text) {
+            // New text is longer and starts with old text - it's an append
+            is_append = true;
+        }
+    }
+    
+    // Update current role
+    subtitle_role_ = current_role;
+    
+    // Store the cleaned content for scrolling
+    subtitle_text_ = final_content;
+    
+    // Set initial text (will be updated by scroll timer)
+    if (subtitle_text_.empty()) {
+        lv_obj_add_flag(chat_container_, LV_OBJ_FLAG_HIDDEN);
+        subtitle_scroll_pos_ = 0;
+        return;
+    }
+    
+    // Show container
+    lv_obj_clear_flag(chat_container_, LV_OBJ_FLAG_HIDDEN);
+    
+    // Get container width to determine if scrolling is needed (subtract padding like UpdateSubtitleDisplay)
+    lv_coord_t container_width = lv_obj_get_width(chat_container_);
+    if (container_width <= 0) {
+        container_width = LV_HOR_RES; // Use default width if not set (100%)
+    }
+    // Subtract horizontal padding (left + right) to match UpdateSubtitleDisplay logic
+    lv_coord_t pad_left = lv_obj_get_style_pad_left(chat_container_, 0);
+    lv_coord_t pad_right = lv_obj_get_style_pad_right(chat_container_, 0);
+    container_width = container_width - pad_left - pad_right;
+    
+    // Calculate text width
+    lv_coord_t text_width = lv_txt_get_width(subtitle_text_.c_str(), subtitle_text_.length(), fonts_.text_font, 0);
+    
+    // For append operations, preserve scroll state
+    if (is_append) {
+        // If text was already scrolling, keep scrolling
+        // If text wasn't scrolling but now needs to, start scrolling
+        if (!subtitle_scrolling_) {
+            // Wasn't scrolling before, check if we need to start now
+            if (text_width > container_width + 2) {
+                // Text grew and now needs scrolling
+                // Check how long since first character was displayed
+                int64_t current_time_ms = esp_timer_get_time() / 1000;  // Convert to milliseconds
+                
+                // If this is the first time we see text (no timestamp recorded), record it now
+                // if (subtitle_first_char_time_ms_ == 0) {
+                //     subtitle_first_char_time_ms_ = current_time_ms;
+                //     ESP_LOGI(TAG, "First character displayed, recording timestamp: %lld ms", subtitle_first_char_time_ms_);
+                // }
+                
+                int64_t elapsed_ms = current_time_ms - subtitle_first_char_time_ms_;
+                int64_t remaining_delay_ms = kSubtitleScrollDelayMs - elapsed_ms;
+                
+                // ESP_LOGI(TAG, "Append: text needs scrolling, elapsed=%lld ms, remaining_delay=%lld ms", 
+                //          elapsed_ms, remaining_delay_ms);
+                
+                // For append operations, start scrolling from the beginning (position 0)
+                // This ensures the user sees the text from the start, not jumping to the end
+                subtitle_scroll_pos_ = 0;
+                
+                if (remaining_delay_ms <= 0) {
+                    // Delay time has passed, start scrolling immediately
+                    // ESP_LOGI(TAG, "Delay time has passed, starting scroll immediately");
+                    StartSubtitleScrollDelayed();
+                } else {
+                    // Delay time hasn't passed yet, start delay timer with remaining time
+                    // ESP_LOGI(TAG, "Starting delay timer with remaining time: %lld ms", remaining_delay_ms);
+                    StartSubtitleScrollWithDelay((int)remaining_delay_ms);
+                }
+            }
+            // If still fits, don't start scrolling
+        } else {
+            // Was already scrolling, continue scrolling naturally from current position
+            // Don't adjust scroll_pos_ to avoid jitter - let it continue naturally
+            // Continue scrolling - scroll_pos_ will increment naturally by timer until end of text
+        }
+    } else {
+        // Not an append
+        // Check if text is identical - if so, keep current scroll state
+        if (final_content == old_text && !old_text.empty()) {
+            // Don't reset scroll state, just update display
+        } else {
+            // Text changed - reset scroll position
+            // Stop any existing scroll first
+            StopSubtitleScroll();
+            
+            subtitle_scroll_pos_ = 0;
+            
+            // Record timestamp when first character is displayed (for new message)
+            subtitle_first_char_time_ms_ = esp_timer_get_time() / 1000;  // Convert to milliseconds
+            // ESP_LOGI(TAG, "New message, recording first character timestamp: %lld ms", subtitle_first_char_time_ms_);
+            
+            // Check if scrolling is needed
+            if (text_width > container_width + 2) {
+                StartSubtitleScroll();
+            } else {
+                subtitle_scrolling_ = false;
+            }
+        }
+    }
+    
+    // Update display with current text
+    UpdateSubtitleDisplay();
+}
+
+void LcdDisplay::SetSocketConnected(bool connected) {
+    ESP_LOGI(TAG, "SetSocketConnected: %s", connected ? "connected" : "disconnected");
+    
+    // 更新 socket 连接状态
+    socket_connected_ = connected;
+    
+    if (!connected) {
+        // Show clock when socket is not connected
+        ESP_LOGI(TAG, "Socket disconnected, showing clock");
+        StartIdleCountdown();
+        // ShowBackgroundImage();
+
+    } else {
+        // Hide clock when socket is connected
+        ESP_LOGI(TAG, "Socket connected, hiding clock");
+        StopIdleCountdown();
+        // 音频监控任务会自动处理 video 播放和背景显示
+
+    }
+}
+
+void LcdDisplay::StartIdleCountdown() {
+    ESP_LOGI(TAG, "Starting clock display");
+    DisplayLockGuard lock(this);
+    
+    if (countdown_active_) {
+        StopCountdown();
+    }
+    
+    countdown_active_ = true;
+    
+    // Show emotion_label_ for clock display
+    if (emotion_label_ != nullptr) {
+        // Make sure we have a valid font
+        if (fonts_.text_font != nullptr) {
+            lv_obj_set_style_text_font(emotion_label_, fonts_.text_font, 0);
+        }
+        
+        // 只有在 NTP 同步成功时才显示时间容器（包括框框）
+        lv_obj_t* time_container = lv_obj_get_parent(emotion_label_);
+        if (time_container != nullptr) {
+            if (NtpClient::GetInstance().IsSynced()) {
+                lv_obj_clear_flag(time_container, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_move_foreground(time_container);  // Move to front when showing
+            } else {
+                // NTP 未同步，隐藏时间容器（包括框框）
+                lv_obj_add_flag(time_container, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+        
+        UpdateCountdownDisplay();  // Update immediately to show current time or placeholder
+        ESP_LOGI(TAG, "Clock display initialized on emotion_label_, font: %p, NTP synced: %d", 
+                 fonts_.text_font, NtpClient::GetInstance().IsSynced());
+        
+        // Debug: check if label is visible
+        bool is_hidden = lv_obj_has_flag(emotion_label_, LV_OBJ_FLAG_HIDDEN);
+        ESP_LOGI(TAG, "emotion_label_ hidden flag: %d", is_hidden);
+    } else {
+        ESP_LOGW(TAG, "emotion_label_ is null!");
+    }
+    
+    // Hide preview image and chat message
+    if (preview_image_ != nullptr) {
+        lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (chat_message_label_ != nullptr) {
+        // 隐藏字幕容器（包含 chat_message_label_）
+        lv_obj_t* chat_container = lv_obj_get_parent(chat_message_label_);
+        if (chat_container != nullptr) {
+            lv_obj_add_flag(chat_container, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    
+    StartCountdown();  // Start timer to update clock every second
+}
+
+void LcdDisplay::StopIdleCountdown() {
+    ESP_LOGI(TAG, "Stopping clock display");
+    StopCountdown();
+    
+    // Hide the clock display and show chat message
+    DisplayLockGuard lock(this);
+    if (emotion_label_ != nullptr) {
+        // 隐藏时间容器（包含 emotion_label_）
+        lv_obj_t* time_container = lv_obj_get_parent(emotion_label_);
+        if (time_container != nullptr) {
+            lv_obj_add_flag(time_container, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    if (chat_message_label_ != nullptr) {
+        // 显示字幕容器（包含 chat_message_label_）
+        lv_obj_t* chat_container = lv_obj_get_parent(chat_message_label_);
+        if (chat_container != nullptr) {
+            lv_obj_clear_flag(chat_container, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
+void LcdDisplay::StartCountdown() {
+    if (countdown_timer_ != nullptr) {
+        esp_timer_stop(countdown_timer_);
+        esp_timer_delete(countdown_timer_);
+        countdown_timer_ = nullptr;
+    }
+    
+    esp_timer_create_args_t timer_args = {
+        .callback = CountdownTimerCallback,
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "countdown_timer",
+        .skip_unhandled_events = true,
+    };
+    
+    esp_err_t err = esp_timer_create(&timer_args, &countdown_timer_);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create countdown timer: %s", esp_err_to_name(err));
+        return;
+    }
+    
+    // Start timer with 1 second period
+    err = esp_timer_start_periodic(countdown_timer_, 1000000); // 1 second = 1,000,000 microseconds
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start countdown timer: %s", esp_err_to_name(err));
+        esp_timer_delete(countdown_timer_);
+        countdown_timer_ = nullptr;
+    }
+}
+
+void LcdDisplay::StopCountdown() {
+    countdown_active_ = false;
+    
+    if (countdown_timer_ != nullptr) {
+        esp_timer_stop(countdown_timer_);
+        esp_timer_delete(countdown_timer_);
+        countdown_timer_ = nullptr;
+    }
+}
+
+void LcdDisplay::UpdateCountdownDisplay() {
+    if (emotion_label_ == nullptr || !countdown_active_) {
+        return;
+    }
+    
+    // 获取时间容器
+    lv_obj_t* time_container = lv_obj_get_parent(emotion_label_);
+    
+    // 检查是否处于 OTA 模式，如果是则隐藏时间显示
+    if (Application::GetInstance().GetDeviceState() == kDeviceStateUpgrading) {
+        if (time_container != nullptr) {
+            lv_obj_add_flag(time_container, LV_OBJ_FLAG_HIDDEN);
+        }
+        ESP_LOGD(TAG, "OTA mode active, hiding time container");
+        return;
+    }
+    
+    // 检查是否有通知或错误显示（低电量弹窗）
+    bool has_notification = false;
+    if (notification_label_ != nullptr && !lv_obj_has_flag(notification_label_, LV_OBJ_FLAG_HIDDEN)) {
+        has_notification = true;
+    }
+    if (low_battery_popup_ != nullptr && !lv_obj_has_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN)) {
+        has_notification = true;
+    }
+    
+    // 如果有通知或错误，隐藏时间容器
+    if (time_container != nullptr) {
+        if (has_notification) {
+            lv_obj_add_flag(time_container, LV_OBJ_FLAG_HIDDEN);
+            return;
+        }
+    }
+    
+    // 检查 NTP 是否已同步，只有同步成功才显示时间
+    if (!NtpClient::GetInstance().IsSynced()) {
+        // NTP 未同步，隐藏时间容器（包括框框）
+        if (time_container != nullptr) {
+            lv_obj_add_flag(time_container, LV_OBJ_FLAG_HIDDEN);
+        }
+        ESP_LOGD(TAG, "NTP not synced, hiding time container");
+        return;
+    }
+    
+    // NTP 已同步，显示时间容器
+    if (time_container != nullptr) {
+        lv_obj_clear_flag(time_container, LV_OBJ_FLAG_HIDDEN);
+    }
+    
+    // Get current time
+    time_t now;
+    struct tm timeinfo;
+    time(&now);
+    localtime_r(&now, &timeinfo);
+    
+    // Format date and time with newline: YYYY-MM-DD on top, HH:MM:SS on bottom
+    char time_str[64];
+    snprintf(time_str, sizeof(time_str), "%04d-%02d-%02d\n%02d:%02d:%02d", 
+             timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
+             timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+    
+    lv_label_set_text(emotion_label_, time_str);
+    ESP_LOGD(TAG, "Clock updated: %s", time_str);
+}
+
+void LcdDisplay::CountdownTimerCallback(void* arg) {
+    LcdDisplay* display = static_cast<LcdDisplay*>(arg);
+    
+    if (!display->countdown_active_) {
+        return;
+    }
+    
+    // Update clock display in LVGL context
+    if (display->Lock(100)) {
+        display->UpdateCountdownDisplay();
+        display->Unlock();
+    }
+}
+
+void LcdDisplay::VideoPlayTask(void* arg) {
+    auto* self = static_cast<LcdDisplay*>(arg);
+    const esp_partition_t* part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "video");
+    if (!part) {
+        ESP_LOGE(TAG, "video partition not found");
+        self->video_playing_ = false;
+        vTaskDelete(nullptr);
+        return;
+    }
+    
+    // Read header: 1 byte count + N*4 bytes frame counts
+    uint8_t group_count = 0;
+    if (esp_partition_read(part, 0, &group_count, 1) != ESP_OK || group_count == 0) {
+        ESP_LOGE(TAG, "invalid video header");
+        self->video_playing_ = false;
+        vTaskDelete(nullptr);
+        return;
+    }
+    
+    std::vector<uint32_t> frame_counts(group_count, 0);
+    if (esp_partition_read(part, 1, frame_counts.data(), group_count * sizeof(uint32_t)) != ESP_OK) {
+        ESP_LOGE(TAG, "read frame counts failed");
+        self->video_playing_ = false;
+        vTaskDelete(nullptr);
+        return;
+    }
+    
+    // Compute offsets
+    const uint32_t frame_size = self->width_ * self->height_ * 2;
+    uint32_t data_offset = 1 + group_count * sizeof(uint32_t);
+    std::vector<uint32_t> group_base(group_count, 0);
+    uint32_t acc_frames = 0;
+    for (int i = 0; i < group_count; ++i) {
+        group_base[i] = data_offset + acc_frames * frame_size;
+        acc_frames += frame_counts[i];
+    }
+    
+    int g = self->video_group_index_;
+    if (g < 0 || g >= group_count) g = 0;
+    uint32_t frames = frame_counts[g];
+    ESP_LOGI(TAG, "Video header: groups=%u, frame_size=%u, data_offset=%u, play_group=%d, frames_in_group=%u, group_base=%u",
+             (unsigned)group_count, (unsigned)frame_size, (unsigned)data_offset, g, (unsigned)frames, (unsigned)group_base[g]);
+    
+    if (frames == 0) {
+        self->video_playing_ = false;
+        vTaskDelete(nullptr);
+        return;
+    }
+    
+    // Allocate frame buffer
+    // Prefer DMA-capable internal memory for SPI DMA
+    uint8_t* buf = nullptr;
+    
+    // Check if first frame buffer was provided by PlayVideoGroup (to avoid flicker)
+    if (self->first_frame_buf_ != nullptr) {
+        // Use the pre-loaded first frame buffer
+        buf = self->first_frame_buf_;
+        self->first_frame_buf_ = nullptr;  // Clear the pointer, task now owns it
+        ESP_LOGI(TAG, "Using pre-loaded first frame buffer");
+    } else {
+        // Allocate new buffer
+        buf = (uint8_t*)heap_caps_malloc(frame_size, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+        if (!buf) buf = (uint8_t*)heap_caps_malloc(frame_size, MALLOC_CAP_DMA);
+        if (!buf) buf = (uint8_t*)heap_caps_malloc(frame_size, MALLOC_CAP_INTERNAL);
+        if (!buf) buf = (uint8_t*)malloc(frame_size);
+        if (!buf) {
+            ESP_LOGE(TAG, "no memory for frame buffer");
+            self->video_playing_ = false;
+            vTaskDelete(nullptr);
+            return;
+        }
+        
+        // Read first frame
+        uint32_t idx = 0;
+        size_t off0 = group_base[g] + idx * frame_size;
+        if (esp_partition_read(part, off0, buf, frame_size) != ESP_OK) {
+            ESP_LOGE(TAG, "read first frame %u failed", (unsigned int)idx);
+            free(buf);
+            self->video_playing_ = false;
+            vTaskDelete(nullptr);
+            return;
+        }
+    }
+    
+    // First frame is already displayed (either pre-loaded or just read)
+    // Update the image descriptor to use our buffer if needed
+    uint32_t idx = 0;
+    {
+        if (self->Lock(50)) {
+            if (self->video_img_ == nullptr) {
+                // Create video image in content area (replace background_image_)
+                if (self->content_ != nullptr) {
+                    self->video_img_ = lv_image_create(self->content_);
+                    lv_obj_set_size(self->video_img_, self->width_, self->height_);
+                    lv_obj_set_pos(self->video_img_, -5, -5);  // Adjust position to cover padding
+                    lv_obj_clear_flag(self->video_img_, LV_OBJ_FLAG_SCROLLABLE);
+                    lv_obj_add_flag(self->video_img_, LV_OBJ_FLAG_FLOATING);
+                    lv_obj_move_background(self->video_img_);  // Move to background layer
+                }
+            }
+            
+            // Update image descriptor with current buffer (only if not already set)
+            if (self->video_img_dsc_.data != buf) {
+                self->video_img_dsc_.header.w = self->width_;
+                self->video_img_dsc_.header.h = self->height_;
+                self->video_img_dsc_.header.cf = LV_COLOR_FORMAT_RGB565;
+                self->video_img_dsc_.data = buf;
+                self->video_img_dsc_.data_size = frame_size;
+                lv_img_set_src(self->video_img_, &self->video_img_dsc_);
+                lv_obj_move_background(self->video_img_);
+                lv_obj_clear_flag(self->video_img_, LV_OBJ_FLAG_HIDDEN);
+            }
+            self->Unlock();
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(self->kVideoFrameDelayMs));
+        idx = (idx + 1) % frames;
+    }
+    
+    while (self->video_playing_) {
+        size_t off = group_base[g] + idx * frame_size;
+        if (esp_partition_read(part, off, buf, frame_size) != ESP_OK) {
+            ESP_LOGE(TAG, "read frame %u failed", (unsigned int)idx);
+            break;
+        }
+        
+        // Short lock per frame, update LVGL image (reduce lock time to avoid blocking audio task)
+        if (self->Lock(20)) {  // Reduced to 20ms for faster lock release
+            self->video_img_dsc_.header.w = self->width_;
+            self->video_img_dsc_.header.h = self->height_;
+            self->video_img_dsc_.header.cf = LV_COLOR_FORMAT_RGB565;
+            self->video_img_dsc_.data = buf;
+            self->video_img_dsc_.data_size = frame_size;
+            lv_img_set_src(self->video_img_, &self->video_img_dsc_);
+            self->Unlock();
+        }
+        
+        // if ((idx % 10) == 0) {
+        //     ESP_LOGI(TAG, "Playing group=%d idx=%u/%u off=%u", g, (unsigned)idx, (unsigned)frames, (unsigned)off);
+        // }
+        
+        vTaskDelay(pdMS_TO_TICKS(self->kVideoFrameDelayMs));
+        idx = (idx + 1) % frames; // Loop play current group until key switch
+    }
+    
+    free(buf);
+    self->video_playing_ = false;
+    // Clean up task handle, allow subsequent start of new playback task
+    self->video_task_handle_ = nullptr;
+    vTaskDelete(nullptr);
+}
+
+void LcdDisplay::StartVideoPlayback() {
+    // If there's already a task running, stop and wait for exit
+    if (video_task_handle_ != nullptr) {
+        video_playing_ = false;
+        for (int i = 0; i < 50 && video_task_handle_ != nullptr; ++i) { // Wait up to 500ms
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+        video_task_handle_ = nullptr;
+    }
+    
+    ESP_LOGI(TAG, "StartVideoPlayback group=%d", video_group_index_);
+    video_playing_ = true;
+    // Lower priority from 5 to 1, avoid blocking audio task (audio task usually priority 3-4)
+    xTaskCreate(VideoPlayTask, "video_play", 4096, this, 1, &video_task_handle_);
+}
+
+void LcdDisplay::StopVideoPlayback() {
+    if (!video_playing_ && video_task_handle_ == nullptr) return;
+    video_playing_ = false;
+    // Wait for task to self-delete and clean up handle
+    for (int i = 0; i < 50 && video_task_handle_ != nullptr; ++i) { // Wait up to 500ms
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    video_task_handle_ = nullptr;
+}
+
+void LcdDisplay::AudioMonitorTask(void* arg) {
+    LcdDisplay* display = static_cast<LcdDisplay*>(arg);
+    
+    ESP_LOGI(TAG, "Audio monitor task started (resident mode)");
+    
+    // 常驻运行，持续监听
+    while (display->audio_monitor_active_) {
+        // 只有当 socket 连接成功时才进入判断逻辑
+        if (display->socket_connected_) {
+            size_t queue_size = Application::GetInstance().GetDecodeQueueSize();
+            int64_t current_time_ms = esp_timer_get_time() / 1000;  // 当前时间（毫秒）
+            
+            if (queue_size > 0) {
+                // 播放管道有数据，播放 video
+                if (!display->video_playing_) {
+                    // ESP_LOGI(TAG, "Audio queue has data (%zu), starting video playback", queue_size);
+                    if (display->Lock(50)) {
+                        display->PlayVideoGroup(0);  // 播放第0组视频
+                        display->background_showing_ = false;  // 视频播放中，背景未显示
+                        display->Unlock();
+                    }
+                }
+                // 队列有数据，重置空队列计时器
+                display->empty_queue_start_time_ms_ = 0;
+            } else {
+                // 播放管道没有数据
+                if (display->video_playing_) {
+                    // 视频正在播放，需要延迟保护
+                    if (display->empty_queue_start_time_ms_ == 0) {
+                        // 第一次检测到队列为空，记录时间戳
+                        display->empty_queue_start_time_ms_ = current_time_ms;
+                        // ESP_LOGD(TAG, "Audio queue empty detected, starting protection timer (will wait %d ms)", 
+                        //          display->kVideoStopDelayMs);
+                    } else {
+                        // 检查是否已经过了保护时间
+                        int64_t elapsed_ms = current_time_ms - display->empty_queue_start_time_ms_;
+                        if (elapsed_ms >= display->kVideoStopDelayMs) {
+                            // 保护时间已过，停止视频并显示背景
+                            // ESP_LOGI(TAG, "Audio queue empty for %lld ms (threshold: %d ms), stopping video and showing background", 
+                            //          elapsed_ms, display->kVideoStopDelayMs);
+                            if (display->Lock(50)) {
+                                display->StopVideoPlayback();
+                                display->ShowBackgroundImage();
+                                display->background_showing_ = true;  // 背景已显示
+                                display->empty_queue_start_time_ms_ = 0;  // 重置计时器
+                                display->Unlock();
+                            }
+                        } else {
+                            // 还在保护时间内，继续等待
+                            ESP_LOGD(TAG, "Audio queue empty, but within protection period (%lld/%d ms), keeping video playing", 
+                                     elapsed_ms, display->kVideoStopDelayMs);
+                        }
+                    }
+                } else if (!display->background_showing_) {
+                    // 视频未播放，确保显示背景图片
+                    ESP_LOGD(TAG, "Ensuring background image is shown");
+                    if (display->Lock(50)) {
+                        display->ShowBackgroundImage();
+                        display->background_showing_ = true;  // 背景已显示
+                        display->empty_queue_start_time_ms_ = 0;  // 重置计时器
+                        display->Unlock();
+                    }
+                }
+            }
+        } else {
+            // Socket 未连接，确保显示背景图片
+            if (display->video_playing_) {
+                ESP_LOGI(TAG, "Socket disconnected, stopping video and showing background");
+                if (display->Lock(50)) {
+                    display->StopVideoPlayback();
+                    display->ShowBackgroundImage();
+                    display->background_showing_ = true;  // 背景已显示
+                    display->empty_queue_start_time_ms_ = 0;  // 重置计时器
+                    display->Unlock();
+                }
+            } else if (!display->background_showing_) {
+                // 只有在背景未显示时才调用 ShowBackgroundImage
+                ESP_LOGD(TAG, "Socket disconnected, ensuring background image is shown");
+                if (display->Lock(50)) {
+                    display->ShowBackgroundImage();
+                    display->background_showing_ = true;  // 背景已显示
+                    display->empty_queue_start_time_ms_ = 0;  // 重置计时器
+                    display->Unlock();
+                }
+            }
+        }
+        
+        // 每 100ms 检查一次
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    
+    ESP_LOGI(TAG, "Audio monitor task finished");
+    display->audio_monitor_task_handle_ = nullptr;
+    vTaskDelete(nullptr);
+}
+
+void LcdDisplay::StartAudioMonitor() {
+    // 如果已经有监控 task 在运行，直接返回
+    if (audio_monitor_task_handle_ != nullptr) {
+        ESP_LOGD(TAG, "Audio monitor task already running");
+        return;
+    }
+    
+    ESP_LOGI(TAG, "Starting resident audio monitor task");
+    audio_monitor_active_ = true;
+    
+    // 创建常驻音频监控 task，优先级较低，避免影响音频播放
+    BaseType_t ret = xTaskCreate(
+        AudioMonitorTask,
+        "audio_monitor",
+        4096 * 2,  // 增加栈大小以避免栈溢出
+        this,
+        1,  // 低优先级
+        &audio_monitor_task_handle_
+    );
+    
+    if (ret != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create audio monitor task");
+        audio_monitor_active_ = false;
+        audio_monitor_task_handle_ = nullptr;
+    }
+}
+
+void LcdDisplay::StopAudioMonitor() {
+    if (!audio_monitor_active_ && audio_monitor_task_handle_ == nullptr) {
+        return;
+    }
+    
+    ESP_LOGI(TAG, "Stopping audio monitor task");
+    audio_monitor_active_ = false;
+    
+    // 等待 task 完成
+    for (int i = 0; i < 50 && audio_monitor_task_handle_ != nullptr; ++i) { // Wait up to 500ms
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    audio_monitor_task_handle_ = nullptr;
+}
+
+// Helper function to convert RGB888 to RGB565
+static uint16_t rgb888_to_rgb565(uint8_t r, uint8_t g, uint8_t b) {
+    return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+}
+
+// Helper function to get LVGL file path from SPIFFS path
+static const char* GetLvglPathFromSpiffs(const char* spiffs_path) {
+    // Extract filename from SPIFFS path
+    const char* filename = strrchr(spiffs_path, '/');
+    if (filename == nullptr) {
+        filename = spiffs_path;
+    } else {
+        filename++;  // Skip the '/'
+    }
+    
+    // Create LVGL file system path (format: "B:filename")
+    static char lvgl_path[128];
+    snprintf(lvgl_path, sizeof(lvgl_path), "%c:%s", BACKGROUND_DRIVE_LETTER, filename);
+    
+    return lvgl_path;
+}
+
+// Static variable to store decoded background image to avoid repeated file reads
+static lv_image_dsc_t* cached_bg_image_dsc = nullptr;
+
+// Helper function to decode image and save as RGB565 raw file
+static bool DecodeAndSaveAsRGB565(const char* spiffs_path) {
+    ESP_LOGI(TAG, "Decoding image and saving as RGB565: %s", spiffs_path);
+    
+    // Extract filename from SPIFFS path
+    const char* filename = strrchr(spiffs_path, '/');
+    if (filename == nullptr) {
+        filename = spiffs_path;
+    } else {
+        filename++;  // Skip the '/'
+    }
+    
+    // Create LVGL file system path (format: "B:filename")
+    char lvgl_path[128];
+    snprintf(lvgl_path, sizeof(lvgl_path), "%c:%s", BACKGROUND_DRIVE_LETTER, filename);
+    
+    ESP_LOGI(TAG, "Decoding image from SPIFFS: %s", spiffs_path);
+    
+    // First, get image info using decoder
+    lv_image_header_t header;
+    lv_result_t res = lv_image_decoder_get_info(lvgl_path, &header);
+    
+    if (res != LV_RESULT_OK) {
+        ESP_LOGE(TAG, "Failed to get image info: %s (error: %d)", lvgl_path, res);
+        // Try to check if file exists directly
+        FILE* test_file = fopen(spiffs_path, "rb");
+        if (test_file == nullptr) {
+            ESP_LOGE(TAG, "File does not exist: %s", spiffs_path);
+        } else {
+            fseek(test_file, 0, SEEK_END);
+            size_t file_size = ftell(test_file);
+            fclose(test_file);
+            ESP_LOGE(TAG, "File exists but decoder failed: %s (size: %zu bytes)", spiffs_path, file_size);
+        }
+        return false;
+    }
+    
+    uint32_t width = header.w;
+    uint32_t height = header.h;
+    uint32_t stride = width * 2;  // RGB565: 2 bytes per pixel
+    size_t rgb565_size = stride * height;
+    
+    ESP_LOGI(TAG, "Image info: %dx%d, format=%d, size=%zu bytes", width, height, header.cf, rgb565_size);
+    
+    // Allocate buffer for RGB565 data
+    uint8_t* rgb565_data = (uint8_t*)heap_caps_malloc(rgb565_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (rgb565_data == nullptr) {
+        rgb565_data = (uint8_t*)malloc(rgb565_size);
+    }
+    
+    if (rgb565_data == nullptr) {
+        ESP_LOGE(TAG, "Failed to allocate memory for RGB565 data (%zu bytes)", rgb565_size);
+        return false;
+    }
+    
+    // Use LVGL decoder API directly to decode the image
+    // Create decoder descriptor
+    lv_image_decoder_dsc_t dsc;
+    memset(&dsc, 0, sizeof(dsc));
+    
+    // Set decoder args (optional, NULL uses defaults)
+    lv_image_decoder_args_t args = {0};
+    args.no_cache = true;  // Don't cache the decoded image
+    
+    // Open decoder - this will decode the image and set dsc->decoded
+    lv_result_t decode_res = lv_image_decoder_open(&dsc, lvgl_path, &args);
+    if (decode_res == LV_RESULT_OK && dsc.decoded != nullptr) {
+        // Check decoded format - accept RGB565 or RGB565A8 (both are 16-bit per pixel)
+        lv_color_format_t decoded_cf = (lv_color_format_t)dsc.decoded->header.cf;
+        bool is_rgb565_compatible = (decoded_cf == LV_COLOR_FORMAT_RGB565 || 
+                                     decoded_cf == LV_COLOR_FORMAT_RGB565A8);
+        
+        // Also check by data size: RGB565 should be width*height*2 bytes
+        // Some decoders may report wrong format but return correct data size
+        uint32_t decoded_stride = dsc.decoded->header.stride;
+        uint32_t decoded_width = dsc.decoded->header.w;
+        uint32_t decoded_height = dsc.decoded->header.h;
+        size_t expected_rgb565_size = decoded_width * decoded_height * 2;
+        bool size_matches_rgb565 = (dsc.decoded->data_size >= expected_rgb565_size);
+        
+        ESP_LOGI(TAG, "Decoded format: %d, stride: %u, data_size: %u, expected RGB565 size: %zu", 
+                 decoded_cf, decoded_stride, dsc.decoded->data_size, expected_rgb565_size);
+        
+        if (!is_rgb565_compatible && !size_matches_rgb565) {
+            ESP_LOGE(TAG, "Decoded image format not compatible: format=%d (expected RGB565=%d or RGB565A8=%d), size=%u (expected >=%zu)", 
+                     decoded_cf, LV_COLOR_FORMAT_RGB565, LV_COLOR_FORMAT_RGB565A8, 
+                     dsc.decoded->data_size, expected_rgb565_size);
+            lv_image_decoder_close(&dsc);
+            free(rgb565_data);
+            return false;
+        }
+        
+        // Copy decoded data - use the actual decoded size or our expected size, whichever is smaller
+        size_t copy_size = (dsc.decoded->data_size < rgb565_size) ? dsc.decoded->data_size : rgb565_size;
+        if (dsc.decoded->data != nullptr && copy_size > 0) {
+            memcpy(rgb565_data, dsc.decoded->data, copy_size);
+            lv_image_decoder_close(&dsc);
+            ESP_LOGI(TAG, "Image decoded successfully: format=%d, copied %zu bytes", decoded_cf, copy_size);
+        } else {
+            ESP_LOGE(TAG, "Invalid decoded data: data=%p, size=%u", dsc.decoded->data, dsc.decoded->data_size);
+            lv_image_decoder_close(&dsc);
+            free(rgb565_data);
+            return false;
+        }
+    } else {
+        ESP_LOGE(TAG, "LVGL decoder API failed: %d", decode_res);
+        free(rgb565_data);
+        return false;
+    }
+    
+    // Check SPIFFS space before writing
+    size_t total = 0, used = 0;
+    esp_err_t ret = esp_spiffs_info(BACKGROUND_PARTITION_LABEL, &total, &used);
+    if (ret == ESP_OK) {
+        size_t free_space = total - used;
+        size_t required_space = sizeof(uint32_t) * 2 + rgb565_size;  // header + data
+        ESP_LOGI(TAG, "SPIFFS space check: total=%zu, used=%zu, free=%zu, required=%zu", 
+                 total, used, free_space, required_space);
+        if (free_space < required_space) {
+            ESP_LOGE(TAG, "Not enough SPIFFS space: free=%zu, required=%zu", free_space, required_space);
+            free(rgb565_data);
+            return false;
+        }
+    }
+    
+    // Save RGB565 data to file (bg.raw)
+    char raw_path[128];
+    snprintf(raw_path, sizeof(raw_path), "%s/bg.raw", BACKGROUND_MOUNT_POINT);
+    
+    // Delete existing file first to ensure clean write
+    unlink(raw_path);
+    
+    FILE* raw_file = fopen(raw_path, "wb");
+    if (raw_file == nullptr) {
+        ESP_LOGE(TAG, "Failed to open RGB565 file for writing: %s (errno: %d)", raw_path, errno);
+        free(rgb565_data);
+        return false;
+    }
+    
+    // Write header: width (4 bytes) + height (4 bytes)
+    size_t header_written = fwrite(&width, sizeof(uint32_t), 1, raw_file);
+    header_written += fwrite(&height, sizeof(uint32_t), 1, raw_file);
+    if (header_written != 2) {
+        ESP_LOGE(TAG, "Failed to write RGB565 header: written %zu/2", header_written);
+        fclose(raw_file);
+        unlink(raw_path);
+        free(rgb565_data);
+        return false;
+    }
+    
+    // Flush header to ensure it's written
+    fflush(raw_file);
+    
+    // Write RGB565 data in chunks to avoid issues
+    size_t total_written = 0;
+    const size_t chunk_size = 4096;  // Write in 4KB chunks
+    size_t remaining = rgb565_size;
+    uint8_t* data_ptr = rgb565_data;
+    
+    while (remaining > 0) {
+        size_t to_write = (remaining > chunk_size) ? chunk_size : remaining;
+        size_t written = fwrite(data_ptr, 1, to_write, raw_file);
+        if (written == 0) {
+            // Check for error
+            if (ferror(raw_file)) {
+                ESP_LOGE(TAG, "File write error at offset %zu (errno: %d)", total_written, errno);
+                fclose(raw_file);
+                unlink(raw_path);
+                free(rgb565_data);
+                return false;
+            }
+            // EOF reached unexpectedly
+            ESP_LOGE(TAG, "Unexpected EOF at offset %zu", total_written);
+            fclose(raw_file);
+            unlink(raw_path);
+            free(rgb565_data);
+            return false;
+        }
+        total_written += written;
+        data_ptr += written;
+        remaining -= written;
+        
+        // Flush periodically
+        if (total_written % (chunk_size * 4) == 0) {
+            fflush(raw_file);
+        }
+    }
+    
+    // Final flush and sync
+    fflush(raw_file);
+    fsync(fileno(raw_file));
+    fclose(raw_file);
+    free(rgb565_data);  // Free temporary buffer
+    
+    if (total_written != rgb565_size) {
+        ESP_LOGE(TAG, "Failed to write RGB565 data. Expected: %zu, Written: %zu", rgb565_size, total_written);
+        unlink(raw_path);
+        return false;
+    }
+    
+    ESP_LOGI(TAG, "Successfully decoded and saved RGB565 image: %s (%dx%d, %zu bytes)", raw_path, width, height, rgb565_size);
+    return true;
+}
+
+// Helper function to load RGB565 raw file
+// Note: bg.raw file contains raw RGB565 data without header, fixed size 240x320
+static lv_image_dsc_t* LoadRGB565FromFile(const char* raw_path) {
+    FILE* raw_file = fopen(raw_path, "rb");
+    if (raw_file == nullptr) {
+        return nullptr;
+    }
+    
+    // Get screen size from LVGL
+    const uint32_t width = LV_HOR_RES;
+    const uint32_t height = LV_VER_RES;
+    const uint32_t stride = width * 2;  // RGB565: 2 bytes per pixel
+    const size_t rgb565_size = stride * height;
+    
+    // Get file size to verify
+    fseek(raw_file, 0, SEEK_END);
+    size_t file_size = ftell(raw_file);
+    fseek(raw_file, 0, SEEK_SET);
+    
+    ESP_LOGI(TAG, "Loading RGB565 raw file: %s, file_size=%zu, expected=%zu (%dx%d)", 
+             raw_path, file_size, rgb565_size, width, height);
+    
+    // Verify file size
+    if (file_size < rgb565_size) {
+        ESP_LOGE(TAG, "File too small: %zu < %zu", file_size, rgb565_size);
+        fclose(raw_file);
+        return nullptr;
+    }
+    
+    if (file_size > rgb565_size) {
+        ESP_LOGW(TAG, "File larger than expected: %zu > %zu, will read %zu bytes", 
+                 file_size, rgb565_size, rgb565_size);
+    }
+    
+    // Allocate buffer for RGB565 data
+    uint8_t* rgb565_data = (uint8_t*)heap_caps_malloc(rgb565_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (rgb565_data == nullptr) {
+        rgb565_data = (uint8_t*)malloc(rgb565_size);
+    }
+    
+    if (rgb565_data == nullptr) {
+        ESP_LOGE(TAG, "Failed to allocate memory for RGB565 data (%zu bytes)", rgb565_size);
+        fclose(raw_file);
+        return nullptr;
+    }
+    
+    // Read RGB565 data
+    size_t read = fread(rgb565_data, 1, rgb565_size, raw_file);
+    fclose(raw_file);
+    
+    if (read != rgb565_size) {
+        ESP_LOGE(TAG, "Failed to read RGB565 data. Expected: %zu, Read: %zu", rgb565_size, read);
+        free(rgb565_data);
+        return nullptr;
+    }
+    
+    // Create and cache lv_image_dsc_t structure
+    cached_bg_image_dsc = (lv_image_dsc_t*)malloc(sizeof(lv_image_dsc_t));
+    if (cached_bg_image_dsc == nullptr) {
+        ESP_LOGE(TAG, "Failed to allocate memory for image descriptor");
+        free(rgb565_data);
+        return nullptr;
+    }
+    
+    cached_bg_image_dsc->header.magic = LV_IMAGE_HEADER_MAGIC;
+    cached_bg_image_dsc->header.cf = LV_COLOR_FORMAT_RGB565;
+    cached_bg_image_dsc->header.flags = 0;
+    cached_bg_image_dsc->header.w = width;
+    cached_bg_image_dsc->header.h = height;
+    cached_bg_image_dsc->header.stride = stride;
+    cached_bg_image_dsc->data_size = rgb565_size;
+    cached_bg_image_dsc->data = rgb565_data;
+    
+    ESP_LOGI(TAG, "Successfully loaded RGB565 image: %dx%d, %zu bytes", width, height, rgb565_size);
+    return cached_bg_image_dsc;
+}
+
+
+void LcdDisplay::ShowBackgroundImage() {
+    // 如果背景已经在显示，避免重复加载
+    if (background_showing_ && !video_playing_) {
+        ESP_LOGD(TAG, "Background image already showing, skipping reload");
+        return;
+    }
+    
+    ESP_LOGI(TAG, "ShowBackgroundImage called");
+    
+    // Stop video playback if playing (outside lock to avoid deadlock)
+    if (video_playing_) {
+        StopVideoPlayback();
+    }
+    
+    DisplayLockGuard lock(this);
+    
+    // Hide video image if exists
+    if (video_img_ != nullptr) {
+        lv_obj_add_flag(video_img_, LV_OBJ_FLAG_HIDDEN);
+    }
+    
+    // Load background image from bg.raw (RGB565 format)
+    if (background_image_ != nullptr) {
+        char raw_path[128];
+        snprintf(raw_path, sizeof(raw_path), "%s/bg.raw", BACKGROUND_MOUNT_POINT);
+        lv_image_dsc_t* img_dsc = LoadRGB565FromFile(raw_path);
+        if (img_dsc != nullptr) {
+            lv_image_set_src(background_image_, img_dsc);
+            lv_obj_clear_flag(background_image_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_background(background_image_);
+            lv_obj_invalidate(background_image_);
+            lv_refr_now(nullptr);
+            ESP_LOGI(TAG, "Background image loaded from RGB565 raw file: %s", raw_path);
+        } else {
+            // Fallback to embedded image
+            ESP_LOGI(TAG, "Background image not found, using embedded image");
+            lv_image_set_src(background_image_, &bg_1_img);
+            lv_obj_clear_flag(background_image_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_background(background_image_);
+        }
+    }
+    
+    // 更新状态标志
+    background_showing_ = true;
+}
+
+void LcdDisplay::PlayVideoGroup(int index) {
+    ESP_LOGI(TAG, "PlayVideoGroup called with index=%d", index);
+    
+    // Validate index by reading partition
+    const esp_partition_t* part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "video");
+    if (!part) {
+        ESP_LOGE(TAG, "video partition not found");
+        return;
+    }
+    
+    uint8_t group_count = 0;
+    if (esp_partition_read(part, 0, &group_count, 1) != ESP_OK || group_count == 0) {
+        ESP_LOGE(TAG, "invalid video header or no groups");
+        return;
+    }
+    
+    if (index < 0 || index >= group_count) {
+        ESP_LOGE(TAG, "Invalid video group index %d, valid range: 0-%d", index, group_count - 1);
+        return;
+    }
+    
+    // Stop any existing playback first
+    if (video_playing_) {
+        StopVideoPlayback();
+    }
+    
+    // Set group index
+    video_group_index_ = index;
+    
+    // Read frame counts to calculate first frame offset
+    std::vector<uint32_t> frame_counts(group_count, 0);
+    if (esp_partition_read(part, 1, frame_counts.data(), group_count * sizeof(uint32_t)) != ESP_OK) {
+        ESP_LOGE(TAG, "read frame counts failed");
+        return;
+    }
+    
+    // Compute offsets
+    const uint32_t frame_size = width_ * height_ * 2;
+    uint32_t data_offset = 1 + group_count * sizeof(uint32_t);
+    std::vector<uint32_t> group_base(group_count, 0);
+    uint32_t acc_frames = 0;
+    for (int i = 0; i < group_count; ++i) {
+        group_base[i] = data_offset + acc_frames * frame_size;
+        acc_frames += frame_counts[i];
+    }
+    
+    int g = index;
+    if (g < 0 || g >= group_count) g = 0;
+    uint32_t frames = frame_counts[g];
+    
+    if (frames == 0) {
+        ESP_LOGE(TAG, "No frames in group %d", g);
+        return;
+    }
+    
+    // Allocate temporary buffer for first frame
+    uint8_t* first_frame_buf = (uint8_t*)heap_caps_malloc(frame_size, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    if (!first_frame_buf) first_frame_buf = (uint8_t*)heap_caps_malloc(frame_size, MALLOC_CAP_DMA);
+    if (!first_frame_buf) first_frame_buf = (uint8_t*)heap_caps_malloc(frame_size, MALLOC_CAP_INTERNAL);
+    if (!first_frame_buf) first_frame_buf = (uint8_t*)malloc(frame_size);
+    if (!first_frame_buf) {
+        ESP_LOGE(TAG, "no memory for first frame buffer");
+        return;
+    }
+    
+    // Read first frame
+    size_t first_frame_offset = group_base[g];
+    if (esp_partition_read(part, first_frame_offset, first_frame_buf, frame_size) != ESP_OK) {
+        ESP_LOGE(TAG, "read first frame failed");
+        free(first_frame_buf);
+        return;
+    }
+    
+    // Display first frame immediately to avoid flicker
+    {
+        DisplayLockGuard lock(this);
+        
+        // Create video image if not exists
+        if (video_img_ == nullptr) {
+            if (content_ != nullptr) {
+                video_img_ = lv_image_create(content_);
+                lv_obj_set_size(video_img_, width_, height_);
+                lv_obj_set_pos(video_img_, -5, -5);
+                lv_obj_clear_flag(video_img_, LV_OBJ_FLAG_SCROLLABLE);
+                lv_obj_add_flag(video_img_, LV_OBJ_FLAG_FLOATING);
+                lv_obj_move_background(video_img_);
+            }
+        }
+        
+        if (video_img_ != nullptr) {
+            // Set first frame to video image
+            video_img_dsc_.header.w = width_;
+            video_img_dsc_.header.h = height_;
+            video_img_dsc_.header.cf = LV_COLOR_FORMAT_RGB565;
+            video_img_dsc_.data = first_frame_buf;
+            video_img_dsc_.data_size = frame_size;
+            lv_img_set_src(video_img_, &video_img_dsc_);
+            lv_obj_move_background(video_img_);
+            lv_obj_clear_flag(video_img_, LV_OBJ_FLAG_HIDDEN);
+            
+            // Hide background image after first frame is displayed
+            if (background_image_ != nullptr) {
+                lv_obj_add_flag(background_image_, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+    }  // Lock released here
+    
+    // Save first frame buffer to member variable - video task will free it after taking over
+    first_frame_buf_ = first_frame_buf;
+    
+    // Start playback task (it will use first_frame_buf_ if available, then free it)
+    StartVideoPlayback();
+    
+    // 更新状态标志：视频播放中，背景未显示
+    background_showing_ = false;
+    // 重置空队列计时器
+    empty_queue_start_time_ms_ = 0;
+}
+
+// void LcdDisplay::RegisterDeviceStateCallback() {
+//     DeviceStateEventManager::GetInstance().RegisterStateChangeCallback(
+//         [this](DeviceState previous_state, DeviceState current_state) {
+//             ESP_LOGI(TAG, "Device state changed: %d -> %d", previous_state, current_state);
+            
+//             if (current_state == kDeviceStateRealSpeaking) {
+//                 // 说话中播放视频
+//                 ESP_LOGI(TAG, "Speaking state detected, starting video playback");
+//                 PlayVideoGroup(0);  // 播放第0组视频
+//             } else if (
+//                 current_state == kDeviceStateListening ||
+//                 current_state == kDeviceStateIdle ||
+//                 current_state == kDeviceStateFatalError ||
+//                 current_state == kDeviceStateSleeping
+//             ) {
+//                 // 启动音频监控 task，等待音频播放完成后显示背景图片
+//                 // ESP_LOGI(TAG, "Starting audio monitor task to wait for audio playback completion");
+//                 StartAudioMonitor();
+//             }
+//         }
+//     );
+// }
+
+void LcdDisplay::UpdateSubtitleDisplay() {
+    if (chat_message_label_ == nullptr) {
+        return;
+    }
+    
+    // If text is empty, hide container and return
+    if (subtitle_text_.empty()) {
+        if (chat_container_ != nullptr) {
+            lv_obj_add_flag(chat_container_, LV_OBJ_FLAG_HIDDEN);
+        }
+        return;
+    }
+    
+    // Get container width (subtract padding)
+    lv_coord_t container_width = lv_obj_get_width(chat_container_);
+    if (container_width <= 0) {
+        container_width = LV_HOR_RES; // 100% width
+    }
+    // Subtract horizontal padding (left + right)
+    lv_coord_t pad_left = lv_obj_get_style_pad_left(chat_container_, 0);
+    lv_coord_t pad_right = lv_obj_get_style_pad_right(chat_container_, 0);
+    container_width = container_width - pad_left - pad_right;
+    
+    // Check if scrolling has ended (scroll position reached end but scrolling flag is false)
+    // This can happen when scrolling just finished - hide container to avoid flickering
+    if (!subtitle_scrolling_ && !subtitle_text_.empty()) {
+        size_t text_len = subtitle_text_.length();
+        if (subtitle_scroll_pos_ >= text_len) {
+            // Scrolling has ended, hide container
+            if (chat_container_ != nullptr) {
+                lv_obj_add_flag(chat_container_, LV_OBJ_FLAG_HIDDEN);
+            }
+            if (chat_message_label_ != nullptr) {
+                lv_label_set_text(chat_message_label_, "");
+            }
+            return;
+        }
+    }
+    
+    if (subtitle_scrolling_) {
+        // Scrolling mode: show substring starting from scroll position
+        size_t text_len = subtitle_text_.length();
+        size_t start_pos = subtitle_scroll_pos_;
+        
+        // If we've scrolled past the end, hide container immediately to avoid flickering
+        if (start_pos >= text_len) {
+            if (chat_container_ != nullptr) {
+                lv_obj_add_flag(chat_container_, LV_OBJ_FLAG_HIDDEN);
+            }
+            if (chat_message_label_ != nullptr) {
+                lv_label_set_text(chat_message_label_, "");
+            }
+            return;
+        }
+        
+        
+        // Calculate how many characters can fit in container
+        int max_chars = 0;
+        lv_coord_t current_width = 0;
+        for (size_t i = 0; i < subtitle_text_.length(); i++) {
+            lv_coord_t char_width = lv_txt_get_width(&subtitle_text_[i], 1, fonts_.text_font, 0);
+            if (current_width + char_width > container_width) {
+                break;
+            }
+            current_width += char_width;
+            max_chars++;
+        }
+        
+        if (max_chars == 0) {
+            max_chars = 1; // At least show one character
+        }
+        
+        // Show substring from start_pos
+        std::string display_text = subtitle_text_.substr(start_pos);
+        
+        // Truncate to fit container
+        current_width = 0;
+        size_t display_len = 0;
+        for (size_t i = 0; i < display_text.length(); i++) {
+            lv_coord_t char_width = lv_txt_get_width(&display_text[i], 1, fonts_.text_font, 0);
+            if (current_width + char_width > container_width) {
+                break;
+            }
+            current_width += char_width;
+            display_len++;
+        }
+        
+        if (display_len < display_text.length()) {
+            display_text = display_text.substr(0, display_len);
+        }
+        
+        // If display text is empty, hide container
+        if (display_text.empty()) {
+            if (chat_container_ != nullptr) {
+                lv_obj_add_flag(chat_container_, LV_OBJ_FLAG_HIDDEN);
+            }
+            return;
+        }
+        
+        lv_label_set_text(chat_message_label_, display_text.c_str());
+    } else {
+        // Static mode: show full text or truncated
+        lv_coord_t text_width = lv_txt_get_width(subtitle_text_.c_str(), subtitle_text_.length(), fonts_.text_font, 0);
+        
+        if (text_width > container_width) {
+            // Truncate text to fit
+            int max_chars = 0;
+            lv_coord_t current_width = 0;
+            for (size_t i = 0; i < subtitle_text_.length(); i++) {
+                lv_coord_t char_width = lv_txt_get_width(&subtitle_text_[i], 1, fonts_.text_font, 0);
+                if (current_width + char_width > container_width) {
+                    break;
+                }
+                current_width += char_width;
+                max_chars++;
+            }
+            if (max_chars > 0) {
+                lv_label_set_text(chat_message_label_, subtitle_text_.substr(0, max_chars).c_str());
+            } else {
+                lv_label_set_text(chat_message_label_, subtitle_text_.substr(0, 1).c_str());
+            }
+        } else {
+            lv_label_set_text(chat_message_label_, subtitle_text_.c_str());
+        }
+    }
+}
+
+void LcdDisplay::StartSubtitleScroll() {
+    ESP_LOGI(TAG, "StartSubtitleScroll called, subtitle_scrolling_=%d", subtitle_scrolling_);
+    
+    // Stop any existing timers
+    if (subtitle_scroll_delay_timer_ != nullptr) {
+        ESP_LOGI(TAG, "Stopping existing delay timer");
+        esp_timer_stop(subtitle_scroll_delay_timer_);
+        esp_timer_delete(subtitle_scroll_delay_timer_);
+        subtitle_scroll_delay_timer_ = nullptr;
+    }
+    
+    if (subtitle_scroll_timer_ != nullptr) {
+        ESP_LOGI(TAG, "Stopping existing scroll timer");
+        esp_timer_stop(subtitle_scroll_timer_);
+        esp_timer_delete(subtitle_scroll_timer_);
+        subtitle_scroll_timer_ = nullptr;
+    }
+    
+    // Make sure scrolling flag is false during delay period
+    subtitle_scrolling_ = false;
+    
+    // Create delay timer to wait before starting scroll
+    esp_timer_create_args_t delay_timer_args = {
+        .callback = SubtitleScrollDelayTimerCallback,
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "subtitle_scroll_delay_timer",
+        .skip_unhandled_events = true,
+    };
+    
+    esp_err_t err = esp_timer_create(&delay_timer_args, &subtitle_scroll_delay_timer_);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create subtitle scroll delay timer: %s", esp_err_to_name(err));
+        return;
+    }
+    
+    // Start delay timer (one-shot)
+    // esp_timer_start_once expects microseconds, so convert milliseconds to microseconds
+    uint64_t delay_us = (uint64_t)kSubtitleScrollDelayMs * 1000ULL;
+    ESP_LOGI(TAG, "Starting subtitle scroll delay timer: %llu microseconds (%d ms)", delay_us, kSubtitleScrollDelayMs);
+    err = esp_timer_start_once(subtitle_scroll_delay_timer_, delay_us);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start subtitle scroll delay timer: %s", esp_err_to_name(err));
+        esp_timer_delete(subtitle_scroll_delay_timer_);
+        subtitle_scroll_delay_timer_ = nullptr;
+    } else {
+        ESP_LOGI(TAG, "Subtitle scroll delay timer started successfully, will start scrolling in %d ms", kSubtitleScrollDelayMs);
+    }
+}
+
+void LcdDisplay::StartSubtitleScrollWithDelay(int delay_ms) {
+    ESP_LOGI(TAG, "StartSubtitleScrollWithDelay called with delay=%d ms, subtitle_scrolling_=%d", delay_ms, subtitle_scrolling_);
+    
+    // Stop any existing timers
+    if (subtitle_scroll_delay_timer_ != nullptr) {
+        ESP_LOGI(TAG, "Stopping existing delay timer");
+        esp_timer_stop(subtitle_scroll_delay_timer_);
+        esp_timer_delete(subtitle_scroll_delay_timer_);
+        subtitle_scroll_delay_timer_ = nullptr;
+    }
+    
+    if (subtitle_scroll_timer_ != nullptr) {
+        ESP_LOGI(TAG, "Stopping existing scroll timer");
+        esp_timer_stop(subtitle_scroll_timer_);
+        esp_timer_delete(subtitle_scroll_timer_);
+        subtitle_scroll_timer_ = nullptr;
+    }
+    
+    // Make sure scrolling flag is false during delay period
+    subtitle_scrolling_ = false;
+    
+    // Ensure delay is at least 1ms (minimum for esp_timer)
+    if (delay_ms <= 0) {
+        delay_ms = 1;
+    }
+    
+    // Create delay timer to wait before starting scroll
+    esp_timer_create_args_t delay_timer_args = {
+        .callback = SubtitleScrollDelayTimerCallback,
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "subtitle_scroll_delay_timer",
+        .skip_unhandled_events = true,
+    };
+    
+    esp_err_t err = esp_timer_create(&delay_timer_args, &subtitle_scroll_delay_timer_);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create subtitle scroll delay timer: %s", esp_err_to_name(err));
+        return;
+    }
+    
+    // Start delay timer (one-shot) with custom delay
+    // esp_timer_start_once expects microseconds, so convert milliseconds to microseconds
+    uint64_t delay_us = (uint64_t)delay_ms * 1000ULL;
+    ESP_LOGI(TAG, "Starting subtitle scroll delay timer: %llu microseconds (%d ms)", delay_us, delay_ms);
+    err = esp_timer_start_once(subtitle_scroll_delay_timer_, delay_us);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start subtitle scroll delay timer: %s", esp_err_to_name(err));
+        esp_timer_delete(subtitle_scroll_delay_timer_);
+        subtitle_scroll_delay_timer_ = nullptr;
+    } else {
+        ESP_LOGI(TAG, "Subtitle scroll delay timer started successfully, will start scrolling in %d ms", delay_ms);
+    }
+}
+
+void LcdDisplay::StartSubtitleScrollDelayed() {
+    // This is called after the delay period
+    // ESP_LOGI(TAG, "StartSubtitleScrollDelayed called, starting actual scroll");
+    
+    if (subtitle_scroll_timer_ != nullptr) {
+        esp_timer_stop(subtitle_scroll_timer_);
+        esp_timer_delete(subtitle_scroll_timer_);
+        subtitle_scroll_timer_ = nullptr;
+    }
+    
+    subtitle_scrolling_ = true;
+    
+    esp_timer_create_args_t timer_args = {
+        .callback = SubtitleScrollTimerCallback,
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "subtitle_scroll_timer",
+        .skip_unhandled_events = true,
+    };
+    
+    esp_err_t err = esp_timer_create(&timer_args, &subtitle_scroll_timer_);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create subtitle scroll timer: %s", esp_err_to_name(err));
+        subtitle_scrolling_ = false;
+        return;
+    }
+    
+    // Start timer with configurable period (default: 100ms = 10 pixels per second at 1 char per pixel)
+    // kSubtitleScrollPeriodMs is defined in header, default to 100ms
+    err = esp_timer_start_periodic(subtitle_scroll_timer_, kSubtitleScrollPeriodMs * 1000);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start subtitle scroll timer: %s", esp_err_to_name(err));
+        esp_timer_delete(subtitle_scroll_timer_);
+        subtitle_scroll_timer_ = nullptr;
+        subtitle_scrolling_ = false;
+    }
+}
+
+void LcdDisplay::StopSubtitleScroll() {
+    subtitle_scrolling_ = false;
+    
+    // Stop and delete delay timer
+    if (subtitle_scroll_delay_timer_ != nullptr) {
+        esp_timer_stop(subtitle_scroll_delay_timer_);
+        esp_timer_delete(subtitle_scroll_delay_timer_);
+        subtitle_scroll_delay_timer_ = nullptr;
+    }
+    
+    // Stop and delete scroll timer
+    if (subtitle_scroll_timer_ != nullptr) {
+        esp_timer_stop(subtitle_scroll_timer_);
+        esp_timer_delete(subtitle_scroll_timer_);
+        subtitle_scroll_timer_ = nullptr;
+    }
+    
+    // Don't reset scroll_pos_ here - keep it so append operations can continue from the right position
+    // Only reset it when starting a new non-append message
+}
+
+void LcdDisplay::SubtitleScrollTimerCallback(void* arg) {
+    LcdDisplay* display = static_cast<LcdDisplay*>(arg);
+    
+    if (!display->subtitle_scrolling_ || display->subtitle_text_.empty()) {
+        return;
+    }
+    
+    size_t text_len = display->subtitle_text_.length();
+    size_t current_pos = display->subtitle_scroll_pos_;
+    
+    // Increment scroll position first
+    display->subtitle_scroll_pos_++;
+    
+    // Check if we've reached or passed the end of the text after incrementing
+    if (display->subtitle_scroll_pos_ >= text_len) {
+        // Stop scrolling when we reach the end
+        // First hide container and clear text to avoid flickering
+        if (display->Lock(50)) {
+            if (chat_container_ != nullptr) {
+                lv_obj_add_flag(chat_container_, LV_OBJ_FLAG_HIDDEN);
+            }
+            if (display->chat_message_label_ != nullptr) {
+                lv_label_set_text(display->chat_message_label_, "");
+            }
+            display->Unlock();
+        }
+        // Then stop scrolling
+        display->StopSubtitleScroll();
+        return;
+    }
+    
+    // Update display in LVGL context
+    if (display->Lock(50)) {
+        display->UpdateSubtitleDisplay();
+        display->Unlock();
+    }
+}
+
+void LcdDisplay::SubtitleScrollDelayTimerCallback(void* arg) {
+    LcdDisplay* display = static_cast<LcdDisplay*>(arg);
+    
+    // ESP_LOGI(TAG, "Subtitle scroll delay timer callback triggered, starting scroll");
+    
+    // Clean up delay timer
+    if (display->subtitle_scroll_delay_timer_ != nullptr) {
+        esp_timer_delete(display->subtitle_scroll_delay_timer_);
+        display->subtitle_scroll_delay_timer_ = nullptr;
+    }
+    
+    // Start actual scrolling after delay
+    display->StartSubtitleScrollDelayed();
+}
+
+// LVGL file system driver callbacks for SPIFFS
+static void* fs_open(lv_fs_drv_t* drv, const char* path, lv_fs_mode_t mode) {
+    (void)drv;
+    const char* flags = "r";
+    if (mode == LV_FS_MODE_WR) flags = "wb";
+    else if (mode == (LV_FS_MODE_WR | LV_FS_MODE_RD)) flags = "rb+";
+    
+    // Convert LVGL path (e.g., "B:bg.jpg" or "bg.jpg") to SPIFFS path (e.g., "/background/bg.jpg")
+    char spiffs_path[128];
+    if (path != nullptr && path[0] == BACKGROUND_DRIVE_LETTER && path[1] == ':') {
+        // Skip drive letter and colon (e.g., "B:")
+        // path + 2 points to the filename (e.g., "bg.jpg" or "/bg.jpg")
+        const char* filename = path + 2;
+        // Skip leading slash if present
+        if (filename[0] == '/') {
+            filename++;
+        }
+        snprintf(spiffs_path, sizeof(spiffs_path), "%s/%s", BACKGROUND_MOUNT_POINT, filename);
+    } else if (path != nullptr) {
+        // Path doesn't start with drive letter, might be just filename
+        // Try to construct full path
+        const char* filename = path;
+        // Skip leading slash if present
+        if (filename[0] == '/') {
+            filename++;
+        }
+        snprintf(spiffs_path, sizeof(spiffs_path), "%s/%s", BACKGROUND_MOUNT_POINT, filename);
+    } else {
+        ESP_LOGE(TAG, "LVGL fs_open: null path");
+        return nullptr;
+    }
+    
+    ESP_LOGI(TAG, "LVGL fs_open: path='%s' -> spiffs_path='%s', mode=%d, flags='%s'", 
+             path ? path : "(null)", spiffs_path, mode, flags);
+    
+    FILE* f = fopen(spiffs_path, flags);
+    if (f == nullptr) {
+        ESP_LOGW(TAG, "LVGL fs_open: failed to open file '%s' (errno: %d)", spiffs_path, errno);
+        // Try to check if file exists
+        struct stat st;
+        if (stat(spiffs_path, &st) == 0) {
+            ESP_LOGW(TAG, "File exists but cannot be opened (size: %ld)", st.st_size);
+        } else {
+            ESP_LOGW(TAG, "File does not exist at path '%s'", spiffs_path);
+        }
+    } else {
+        ESP_LOGD(TAG, "LVGL fs_open: successfully opened file '%s'", spiffs_path);
+    }
+    return (void*)(uintptr_t)f;
+}
+
+static lv_fs_res_t fs_close(lv_fs_drv_t* drv, void* file_p) {
+    (void)drv;
+    FILE* f = (FILE*)(uintptr_t)file_p;
+    fclose(f);
+    return LV_FS_RES_OK;
+}
+
+static lv_fs_res_t fs_read(lv_fs_drv_t* drv, void* file_p, void* buf, uint32_t btr, uint32_t* br) {
+    (void)drv;
+    FILE* f = (FILE*)(uintptr_t)file_p;
+    *br = fread(buf, 1, btr, f);
+    return (*br == btr) ? LV_FS_RES_OK : LV_FS_RES_UNKNOWN;
+}
+
+static lv_fs_res_t fs_write(lv_fs_drv_t* drv, void* file_p, const void* buf, uint32_t btw, uint32_t* bw) {
+    (void)drv;
+    FILE* f = (FILE*)(uintptr_t)file_p;
+    *bw = fwrite(buf, 1, btw, f);
+    return (*bw == btw) ? LV_FS_RES_OK : LV_FS_RES_UNKNOWN;
+}
+
+static lv_fs_res_t fs_seek(lv_fs_drv_t* drv, void* file_p, uint32_t pos, lv_fs_whence_t whence) {
+    (void)drv;
+    FILE* f = (FILE*)(uintptr_t)file_p;
+    int w = SEEK_SET;
+    if (whence == LV_FS_SEEK_CUR) w = SEEK_CUR;
+    else if (whence == LV_FS_SEEK_END) w = SEEK_END;
+    fseek(f, pos, w);
+    return LV_FS_RES_OK;
+}
+
+static lv_fs_res_t fs_tell(lv_fs_drv_t* drv, void* file_p, uint32_t* pos_p) {
+    (void)drv;
+    FILE* f = (FILE*)(uintptr_t)file_p;
+    *pos_p = ftell(f);
+    return LV_FS_RES_OK;
+}
+
+static void* fs_dir_open(lv_fs_drv_t* drv, const char* path) {
+    (void)drv;
+    // Convert LVGL path to SPIFFS path
+    char spiffs_path[128];
+    if (path[0] == BACKGROUND_DRIVE_LETTER && path[1] == ':') {
+        snprintf(spiffs_path, sizeof(spiffs_path), "%s%s", BACKGROUND_MOUNT_POINT, path + 2);
+    } else {
+        strncpy(spiffs_path, path, sizeof(spiffs_path) - 1);
+        spiffs_path[sizeof(spiffs_path) - 1] = '\0';
+    }
+    return (void*)opendir(spiffs_path);
+}
+
+static lv_fs_res_t fs_dir_read(lv_fs_drv_t* drv, void* dir_p, char* fn, uint32_t fn_len) {
+    (void)drv;
+    DIR* d = (DIR*)dir_p;
+    struct dirent* entry = readdir(d);
+    if (entry == NULL) {
+        fn[0] = '\0';
+        return LV_FS_RES_OK;
+    }
+    // Copy filename with length limit
+    strncpy(fn, entry->d_name, fn_len - 1);
+    fn[fn_len - 1] = '\0';
+    return LV_FS_RES_OK;
+}
+
+static lv_fs_res_t fs_dir_close(lv_fs_drv_t* drv, void* dir_p) {
+    (void)drv;
+    DIR* d = (DIR*)dir_p;
+    closedir(d);
+    return LV_FS_RES_OK;
+}
+
+void LcdDisplay::LoadBackgroundFromSPIFFS() {
+    ESP_LOGI(TAG, "Attempting to mount background SPIFFS partition...");
+    
+    // 先检查分区是否存在
+    const esp_partition_t* partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, BACKGROUND_PARTITION_LABEL);
+    
+    if (partition == nullptr) {
+        ESP_LOGE(TAG, "Background partition '%s' not found in partition table", BACKGROUND_PARTITION_LABEL);
+        return;
+    }
+    
+    ESP_LOGI(TAG, "Found background partition: address=0x%x, size=%d KB", 
+             partition->address, partition->size / 1024);
+    
+    // Mount SPIFFS partition
+    esp_vfs_spiffs_conf_t conf = {
+        .base_path = BACKGROUND_MOUNT_POINT,
+        .partition_label = BACKGROUND_PARTITION_LABEL,
+        .max_files = 5,
+        .format_if_mount_failed = true  // 如果挂载失败，自动格式化
+    };
+    
+    esp_err_t ret = esp_vfs_spiffs_register(&conf);
+    if (ret != ESP_OK) {
+        if (ret == ESP_FAIL) {
+            ESP_LOGW(TAG, "Failed to mount background SPIFFS partition, trying to format...");
+            // 尝试手动格式化
+            ret = esp_spiffs_format(BACKGROUND_PARTITION_LABEL);
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to format SPIFFS partition: %s", esp_err_to_name(ret));
+                return;
+            }
+            ESP_LOGI(TAG, "SPIFFS partition formatted successfully, retrying mount...");
+            // 重新尝试挂载
+            ret = esp_vfs_spiffs_register(&conf);
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to mount SPIFFS partition after format: %s", esp_err_to_name(ret));
+                return;
+            }
+        } else if (ret == ESP_ERR_NOT_FOUND) {
+            ESP_LOGE(TAG, "Background partition not found");
+            return;
+        } else {
+            ESP_LOGE(TAG, "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
+            return;
+        }
+    }
+    
+    // Check SPIFFS info
+    size_t total = 0, used = 0;
+    ret = esp_spiffs_info(BACKGROUND_PARTITION_LABEL, &total, &used);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to get SPIFFS partition information (%s)", esp_err_to_name(ret));
+    } else {
+        ESP_LOGI(TAG, "Background partition: total %d KB, used %d KB", total / 1024, used / 1024);
+    }
+    
+    // Register LVGL file system driver
+    static lv_fs_drv_t fs_drv;
+    lv_fs_drv_init(&fs_drv);
+    fs_drv.letter = BACKGROUND_DRIVE_LETTER;
+    fs_drv.cache_size = 0;
+    fs_drv.open_cb = fs_open;
+    fs_drv.close_cb = fs_close;
+    fs_drv.read_cb = fs_read;
+    fs_drv.write_cb = fs_write;
+    fs_drv.seek_cb = fs_seek;
+    fs_drv.tell_cb = fs_tell;
+    fs_drv.dir_open_cb = fs_dir_open;
+    fs_drv.dir_read_cb = fs_dir_read;
+    fs_drv.dir_close_cb = fs_dir_close;
+    lv_fs_drv_register(&fs_drv);
+    
+    ESP_LOGI(TAG, "LVGL file system driver registered for background partition (drive: %c:)", BACKGROUND_DRIVE_LETTER);
+}
+
+bool LcdDisplay::DownloadBackgroundImage(const std::string& url) {
+    ESP_LOGI(TAG, "Downloading background raw image from: %s", url.c_str());
+    
+    // 退出聊天，进入 OTA 模式
+    Application::GetInstance().QuitTalking();
+    SetChatMessage("system", "正在下载背景图片...");
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    if (video_playing_) {
+        StopVideoPlayback();
+    }
+    
+    Application::GetInstance().SetDeviceState(kDeviceStateUpgrading);
+    SetOTAProgress(0);
+    vTaskDelay(pdMS_TO_TICKS(3000));
+    
+    // 现在云端只发送 .raw 文件，直接下载为 bg.raw
+    const char* filename = "bg.raw";
+    
+    // 检查网络是否可用
+    auto network = Board::GetInstance().GetNetwork();
+    if (network == nullptr) {
+        ESP_LOGE(TAG, "Network interface not available");
+        SetChatMessage("system", "网络不可用");
+        return false;
+    }
+    
+    // 检查 SPIFFS 中是否已存在文件（用于断点续传）
+    char spiffs_path[128];
+    char url_meta_path[128];
+    snprintf(spiffs_path, sizeof(spiffs_path), "%s/%s", BACKGROUND_MOUNT_POINT, filename);
+    snprintf(url_meta_path, sizeof(url_meta_path), "%s/%s.url", BACKGROUND_MOUNT_POINT, filename);
+    
+    size_t existing_size = 0;
+    bool resume_download = false;
+    bool url_matches = false;
+    
+    // 检查元数据文件是否存在，验证 URL 是否匹配
+    FILE* url_meta_file = fopen(url_meta_path, "r");
+    if (url_meta_file != nullptr) {
+        char saved_url[512];
+        size_t url_len = fread(saved_url, 1, sizeof(saved_url) - 1, url_meta_file);
+        fclose(url_meta_file);
+        
+        if (url_len > 0) {
+            saved_url[url_len] = '\0';
+            // 去除末尾的换行符
+            while (url_len > 0 && (saved_url[url_len - 1] == '\n' || saved_url[url_len - 1] == '\r')) {
+                saved_url[--url_len] = '\0';
+            }
+            
+            if (url == saved_url) {
+                url_matches = true;
+                ESP_LOGI(TAG, "URL matches saved URL, checking file size");
+            } else {
+                ESP_LOGI(TAG, "URL changed from '%s' to '%s', will re-download", saved_url, url.c_str());
+                // URL 不匹配，删除旧文件和元数据文件
+                unlink(spiffs_path);
+                unlink(url_meta_path);
+                existing_size = 0;
+                resume_download = false;
+            }
+        }
+    }
+    
+    // 如果 URL 匹配，检查文件是否存在
+    if (url_matches) {
+        FILE* existing_file = fopen(spiffs_path, "rb");
+        if (existing_file != nullptr) {
+            // 获取已存在文件的大小
+            fseek(existing_file, 0, SEEK_END);
+            existing_size = ftell(existing_file);
+            fclose(existing_file);
+            
+            if (existing_size > 0) {
+                ESP_LOGI(TAG, "Found existing file: %s, size: %zu bytes", spiffs_path, existing_size);
+            } else {
+                // 文件大小为0，删除它
+                unlink(spiffs_path);
+                existing_size = 0;
+            }
+        }
+    }
+    
+    // 创建 HTTP 客户端
+    auto http = network->CreateHttp(2);
+    if (http == nullptr) {
+        ESP_LOGE(TAG, "Failed to create HTTP client");
+        return false;
+    }
+    
+    // 打开 HTTP 连接
+    if (!http->Open("GET", url)) {
+        ESP_LOGE(TAG, "Failed to open HTTP connection");
+        return false;
+    }
+    
+    // 获取内容长度
+    size_t content_length = http->GetBodyLength();
+    if (content_length == 0) {
+        ESP_LOGE(TAG, "Failed to get content length or content length is 0");
+        http->Close();
+        return false;
+    }
+    
+    ESP_LOGI(TAG, "Content length: %zu bytes", content_length);
+    
+    // 如果 URL 匹配且文件大小也匹配，才认为已下载完成
+    if (url_matches && existing_size > 0 && existing_size == content_length) {
+        ESP_LOGI(TAG, "File already downloaded completely (URL matches, size: %zu == %zu), skipping download", 
+                 existing_size, content_length);
+        // 关闭 HTTP 连接（因为已经打开但不需要下载）
+        http->Close();
+        // 显示完成状态
+        SetOTAProgress(100);
+        SetChatMessage("system", "");
+        // 清除缓存，强制重新加载
+        if (cached_bg_image_dsc != nullptr) {
+            if (cached_bg_image_dsc->data != nullptr) {
+                free((void*)cached_bg_image_dsc->data);
+            }
+            free(cached_bg_image_dsc);
+            cached_bg_image_dsc = nullptr;
+        }
+        // 刷新显示，使用已存在的背景图片
+        ShowBackgroundImage();
+        // 延迟一下，让用户看到提示
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        // 恢复正常状态
+        Application::GetInstance().SetDeviceState(kDeviceStateIdle);
+        return true;
+    }
+    
+    // 如果 URL 匹配但文件大小不匹配，或者文件大小大于服务器文件，需要重新下载
+    if (url_matches && existing_size > 0 && existing_size != content_length) {
+        ESP_LOGI(TAG, "File size mismatch (local: %zu, server: %zu), will re-download", 
+                 existing_size, content_length);
+        unlink(spiffs_path);
+        existing_size = 0;
+        resume_download = false;
+    }
+    
+    // 如果 URL 匹配且文件大小小于服务器文件，可以断点续传
+    if (url_matches && existing_size > 0 && existing_size < content_length) {
+        resume_download = true;
+        ESP_LOGI(TAG, "Attempting to resume download from byte %zu", existing_size);
+    }
+    
+    // 检查 SPIFFS 分区空间是否足够（考虑已存在的文件）
+    size_t total = 0, used = 0;
+    esp_err_t ret = esp_spiffs_info(BACKGROUND_PARTITION_LABEL, &total, &used);
+    if (ret == ESP_OK) {
+        // 计算实际需要的额外空间（如果断点续传，只需要下载剩余部分）
+        size_t remaining_size = resume_download ? (content_length - existing_size) : content_length;
+        size_t free_space = total - used;
+        
+        // 如果断点续传，需要加上已存在文件占用的空间（因为会先删除再重写）
+        if (resume_download) {
+            free_space += existing_size;
+        }
+        
+        if (content_length > free_space) {
+            ESP_LOGE(TAG, "Not enough space in SPIFFS partition. Required: %zu, Available: %zu", content_length, free_space);
+            http->Close();
+            return false;
+        }
+        ESP_LOGI(TAG, "SPIFFS free space: %zu bytes, remaining to download: %zu bytes", free_space, remaining_size);
+    }
+    
+    // 打开 SPIFFS 文件进行写入
+    // 如果断点续传，使用追加模式；否则使用覆盖模式
+    FILE* f = nullptr;
+    size_t bytes_to_skip = 0;
+    
+    if (resume_download && existing_size > 0) {
+        // 断点续传：以追加模式打开
+        f = fopen(spiffs_path, "ab");
+        if (f == nullptr) {
+            ESP_LOGW(TAG, "Failed to open file in append mode, trying overwrite mode");
+            f = fopen(spiffs_path, "wb");
+            resume_download = false;
+            existing_size = 0;
+        } else {
+            bytes_to_skip = existing_size;
+            ESP_LOGI(TAG, "Resuming download, will skip first %zu bytes", bytes_to_skip);
+        }
+    } else {
+        // 新下载：覆盖模式
+        f = fopen(spiffs_path, "wb");
+    }
+    
+    if (f == nullptr) {
+        ESP_LOGE(TAG, "Failed to open SPIFFS file for writing: %s", spiffs_path);
+        http->Close();
+        return false;
+    }
+    
+    // 读取并写入数据
+    char buffer[1024];
+    size_t total_read = 0;
+    size_t bytes_skipped = 0;
+    bool success = true;
+    size_t last_progress = 0;
+
+    while (true) {
+        int ret = http->Read(buffer, sizeof(buffer));
+        if (ret < 0) {
+            ESP_LOGE(TAG, "Failed to read HTTP data: %s", esp_err_to_name(ret));
+            success = false;
+            break;
+        }
+        
+        if (ret == 0) {
+            // 读取完成
+            break;
+        }
+        
+        // 如果断点续传，跳过已下载的部分
+        if (resume_download && bytes_skipped < bytes_to_skip) {
+            size_t skip_now = std::min(static_cast<size_t>(ret), bytes_to_skip - bytes_skipped);
+            bytes_skipped += skip_now;
+            
+            // 如果还有剩余数据需要写入
+            if (skip_now < static_cast<size_t>(ret)) {
+                size_t remaining = ret - skip_now;
+                size_t written = fwrite(buffer + skip_now, 1, remaining, f);
+                if (written != remaining) {
+                    ESP_LOGE(TAG, "Failed to write to SPIFFS file. Expected: %zu, Written: %zu", remaining, written);
+                    success = false;
+                    break;
+                }
+                total_read += remaining;
+            }
+        } else {
+            // 正常写入
+            size_t written = fwrite(buffer, 1, ret, f);
+            if (written != static_cast<size_t>(ret)) {
+                ESP_LOGE(TAG, "Failed to write to SPIFFS file. Expected: %d, Written: %zu", ret, written);
+                success = false;
+                break;
+            }
+            total_read += ret;
+        }
+        
+        // 计算总进度（包括已下载部分）
+        size_t total_progress = existing_size + total_read;
+        
+        // 更新下载进度（每 1% 或每 10KB 更新一次）
+        size_t progress = (total_progress * 100) / content_length;
+        if (total_progress % 10240 == 0 || total_progress == content_length || 
+            progress != last_progress) {
+            last_progress = progress;
+            SetOTAProgress(progress);
+            char progress_msg[64];
+            snprintf(progress_msg, sizeof(progress_msg), "下载中: %zu%%", progress);
+            SetChatMessage("system", progress_msg);
+            ESP_LOGI(TAG, "Download progress: %zu%% (%zu/%zu bytes)%s", 
+                     progress, total_progress, content_length,
+                     resume_download ? " (resumed)" : "");
+        }
+    }
+    
+    // 关闭文件
+    fclose(f);
+    
+    if (!success) {
+        // 如果下载失败，保留已下载的部分（用于下次断点续传）
+        ESP_LOGE(TAG, "Download failed, keeping partial file for resume: %s (%zu bytes)", spiffs_path, existing_size + total_read);
+        http->Close();
+        SetChatMessage("system", "下载失败");
+        // 恢复正常状态
+        Application::GetInstance().SetDeviceState(kDeviceStateIdle);
+        return false;
+    }
+    
+    // 计算总下载大小
+    size_t total_downloaded = existing_size + total_read;
+    
+    if (total_downloaded != content_length) {
+        ESP_LOGW(TAG, "Download incomplete. Expected: %zu, Received: %zu", content_length, total_downloaded);
+        // 仍然认为成功，因为可能服务器没有返回 Content-Length 或实际内容更少
+    }
+    
+    ESP_LOGI(TAG, "Background raw image downloaded successfully: %s (%zu bytes)%s", 
+             spiffs_path, total_downloaded, resume_download ? " (resumed)" : "");
+    
+    // 关闭 HTTP 连接
+    http->Close();
+    
+    // 保存 URL 到元数据文件，用于下次验证
+    FILE* url_meta_write_file = fopen(url_meta_path, "w");
+    if (url_meta_write_file != nullptr) {
+        fprintf(url_meta_write_file, "%s", url.c_str());
+        fclose(url_meta_write_file);
+        ESP_LOGI(TAG, "Saved URL to metadata file: %s", url_meta_path);
+    } else {
+        ESP_LOGW(TAG, "Failed to save URL to metadata file: %s", url_meta_path);
+    }
+    
+    // 确保文件写入完成
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
+    // 下载完成，更新进度为 100%
+    SetOTAProgress(100);
+    SetChatMessage("system", "");
+
+    
+    // 清除缓存，强制重新加载
+    if (cached_bg_image_dsc != nullptr) {
+        if (cached_bg_image_dsc->data != nullptr) {
+            free((void*)cached_bg_image_dsc->data);
+        }
+        free(cached_bg_image_dsc);
+        cached_bg_image_dsc = nullptr;
+    }
+    
+    // 刷新显示，使用新的背景图片（.raw 文件已经是 RGB565 格式，无需解码）
+    ShowBackgroundImage();
+    
+    // 延迟一下，让用户看到完成提示
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    
+    // 恢复正常状态
+    Application::GetInstance().SetDeviceState(kDeviceStateIdle);
+    
+    return true;
+}
+
+bool LcdDisplay::TestDownloadRawImage(const std::string& url) {
+    ESP_LOGI(TAG, "Test: Downloading raw image from: %s", url.c_str());
+    
+    // 检查网络是否可用
+    auto network = Board::GetInstance().GetNetwork();
+    if (network == nullptr) {
+        ESP_LOGE(TAG, "Network interface not available");
+        return false;
+    }
+    
+    // 目标文件路径
+    char raw_path[128];
+    snprintf(raw_path, sizeof(raw_path), "%s/bg.raw", BACKGROUND_MOUNT_POINT);
+    
+    // 删除现有文件
+    unlink(raw_path);
+    
+    // 创建 HTTP 客户端
+    auto http = network->CreateHttp(2);
+    if (http == nullptr) {
+        ESP_LOGE(TAG, "Failed to create HTTP client");
+        return false;
+    }
+    
+    // 打开 HTTP 连接
+    if (!http->Open("GET", url)) {
+        ESP_LOGE(TAG, "Failed to open HTTP connection");
+        return false;
+    }
+    
+    // 获取内容长度
+    size_t content_length = http->GetBodyLength();
+    if (content_length == 0) {
+        ESP_LOGE(TAG, "Failed to get content length or content length is 0");
+        http->Close();
+        return false;
+    }
+    
+    ESP_LOGI(TAG, "Content length: %zu bytes", content_length);
+    
+    // 检查 SPIFFS 分区空间是否足够
+    size_t total = 0, used = 0;
+    esp_err_t ret = esp_spiffs_info(BACKGROUND_PARTITION_LABEL, &total, &used);
+    if (ret == ESP_OK) {
+        size_t free_space = total - used;
+        if (content_length > free_space) {
+            ESP_LOGE(TAG, "Not enough space in SPIFFS partition. Required: %zu, Available: %zu", content_length, free_space);
+            http->Close();
+            return false;
+        }
+        ESP_LOGI(TAG, "SPIFFS free space: %zu bytes, file size: %zu bytes", free_space, content_length);
+    }
+    
+    // 打开 SPIFFS 文件进行写入
+    FILE* f = fopen(raw_path, "wb");
+    if (f == nullptr) {
+        ESP_LOGE(TAG, "Failed to open SPIFFS file for writing: %s (errno: %d)", raw_path, errno);
+        http->Close();
+        return false;
+    }
+    
+    // 读取并写入数据
+    char buffer[4096];
+    size_t total_written = 0;
+    bool success = true;
+    
+    while (true) {
+        int ret = http->Read(buffer, sizeof(buffer));
+        if (ret < 0) {
+            ESP_LOGE(TAG, "Failed to read HTTP data: %s", esp_err_to_name(ret));
+            success = false;
+            break;
+        }
+        
+        if (ret == 0) {
+            // 读取完成
+            break;
+        }
+        
+        // 写入数据
+        size_t written = fwrite(buffer, 1, ret, f);
+        if (written != static_cast<size_t>(ret)) {
+            ESP_LOGE(TAG, "Failed to write to SPIFFS file. Expected: %d, Written: %zu", ret, written);
+            success = false;
+            break;
+        }
+        total_written += written;
+        
+        // 每 10KB 输出一次进度
+        if (total_written % 10240 == 0 || total_written == content_length) {
+            size_t progress = (total_written * 100) / content_length;
+            ESP_LOGI(TAG, "Download progress: %zu%% (%zu/%zu bytes)", progress, total_written, content_length);
+        }
+    }
+    
+    // 关闭文件
+    fflush(f);
+    fsync(fileno(f));
+    fclose(f);
+    
+    if (!success) {
+        ESP_LOGE(TAG, "Download failed");
+        unlink(raw_path);
+        http->Close();
+        return false;
+    }
+    
+    if (total_written != content_length) {
+        ESP_LOGW(TAG, "Download incomplete. Expected: %zu, Received: %zu", content_length, total_written);
+    }
+    
+    ESP_LOGI(TAG, "Raw image downloaded successfully: %s (%zu bytes)", raw_path, total_written);
+    
+    // 关闭 HTTP 连接
+    http->Close();
+    
+    // 清除缓存，强制重新加载
+    if (cached_bg_image_dsc != nullptr) {
+        if (cached_bg_image_dsc->data != nullptr) {
+            free((void*)cached_bg_image_dsc->data);
+        }
+        free(cached_bg_image_dsc);
+        cached_bg_image_dsc = nullptr;
+    }
+    
+    // 刷新显示，使用新的背景图片
+    ShowBackgroundImage();
+    
+    ESP_LOGI(TAG, "Test: Raw image displayed successfully");
+    return true;
+}
+
+bool LcdDisplay::DownloadBackgroundVideo(const std::string& url) {
+    ESP_LOGI(TAG, "Downloading background video from: %s", url.c_str());
+    
+    
+    Application::GetInstance().QuitTalking();
+    SetChatMessage("system", "正在下载背景视频...");
+
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    if (video_playing_) {
+        StopVideoPlayback();
+    }
+    
+    
+    Application::GetInstance().SetDeviceState(kDeviceStateUpgrading);
+
+    SetOTAProgress(0);
+
+    vTaskDelay(pdMS_TO_TICKS(3000));
+    
+    // 检查网络是否可用
+    auto network = Board::GetInstance().GetNetwork();
+    if (network == nullptr) {
+        ESP_LOGE(TAG, "Network interface not available");
+        SetChatMessage("system", "网络不可用");
+        return false;
+    }
+    
+    // 查找 video 分区
+    const esp_partition_t* part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "video");
+    if (!part) {
+        ESP_LOGE(TAG, "video partition not found");
+        SetChatMessage("system", "视频分区不存在");
+        return false;
+    }
+    
+    ESP_LOGI(TAG, "Video partition found: size=%zu bytes", part->size);
+    
+    // 创建 HTTP 客户端
+    auto http = network->CreateHttp(2);
+    if (http == nullptr) {
+        ESP_LOGE(TAG, "Failed to create HTTP client");
+        SetChatMessage("system", "创建HTTP客户端失败");
+        return false;
+    }
+    
+    // 打开 HTTP 连接
+    if (!http->Open("GET", url)) {
+        ESP_LOGE(TAG, "Failed to open HTTP connection");
+        SetChatMessage("system", "打开HTTP连接失败");
+        return false;
+    }
+    
+    // 获取内容长度
+    size_t content_length = http->GetBodyLength();
+    if (content_length == 0) {
+        ESP_LOGE(TAG, "Failed to get content length or content length is 0");
+        http->Close();
+        SetChatMessage("system", "获取文件大小失败");
+        return false;
+    }
+    
+    ESP_LOGI(TAG, "Content length: %zu bytes", content_length);
+    
+    // 检查分区空间是否足够
+    if (content_length > part->size) {
+        ESP_LOGE(TAG, "Video file too large: %zu > %zu", content_length, part->size);
+        http->Close();
+        SetChatMessage("system", "视频文件过大");
+        return false;
+    }
+    
+    // 擦除分区
+    ESP_LOGI(TAG, "Erasing video partition...");
+    SetChatMessage("system", "正在下载壁纸...");
+    esp_err_t err = esp_partition_erase_range(part, 0, part->size);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to erase video partition: %s", esp_err_to_name(err));
+        http->Close();
+        SetChatMessage("system", "下载失败");
+        return false;
+    }
+    
+    // 读取并写入数据到分区
+    char buffer[4096];
+    size_t total_written = 0;
+    bool success = true;
+    size_t last_progress = 0;
+    while (true) {
+        int ret = http->Read(buffer, sizeof(buffer));
+
+        if (ret < 0) {
+            ESP_LOGE(TAG, "Failed to read HTTP data: %s", esp_err_to_name(ret));
+            success = false;
+            break;
+        }
+        
+        if (ret == 0) {
+            // 读取完成
+            break;
+        }
+        
+        // 写入到分区
+        err = esp_partition_write(part, total_written, buffer, ret);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to write to video partition at offset %zu: %s", total_written, esp_err_to_name(err));
+            success = false;
+            break;
+        }
+        
+        total_written += ret;
+        
+        // 更新下载进度（每 1% 或每 10KB 更新一次）
+        size_t progress = (total_written * 100) / content_length;
+        if (total_written % 10240 == 0 || total_written == content_length || 
+            progress != last_progress) {
+            last_progress = progress;
+            SetOTAProgress(progress);
+            char progress_msg[64];
+            snprintf(progress_msg, sizeof(progress_msg), "下载中: %zu%%", progress);
+            SetChatMessage("system", progress_msg);
+            ESP_LOGI(TAG, "Download progress: %zu%% (%zu/%zu bytes)", 
+                     progress, total_written, content_length);
+        }
+    }
+    
+    // 关闭 HTTP 连接
+    http->Close();
+    
+    if (!success) {
+        ESP_LOGE(TAG, "Download failed at offset %zu", total_written);
+        SetChatMessage("system", "下载失败");
+        return false;
+    }
+    
+    if (total_written != content_length) {
+        ESP_LOGW(TAG, "Download incomplete. Expected: %zu, Received: %zu", content_length, total_written);
+    }
+    
+    ESP_LOGI(TAG, "Background video downloaded successfully: %zu bytes", total_written);
+    
+    // 下载完成，更新进度为 100%
+    SetOTAProgress(100);
+    SetChatMessage("system", "下载完成");
+    
+    // 延迟一下，让用户看到完成提示
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    SetChatMessage("system", "");
+
+    
+    // 恢复正常状态
+    Application::GetInstance().SetDeviceState(kDeviceStateIdle);
+    
+    return true;
 }

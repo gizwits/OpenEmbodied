@@ -6,21 +6,21 @@
 #include <driver/gpio.h>
 #include <lvgl.h>
 
-#define AUDIO_INPUT_SAMPLE_RATE  24000
-#define AUDIO_OUTPUT_SAMPLE_RATE 24000
-#define AUDIO_INPUT_REFERENCE    true
-
-
-#define BOOT_BUTTON_GPIO        GPIO_NUM_41
+#define BOOT_BUTTON_GPIO        GPIO_NUM_41 // k1
 #define POWER_GPIO        GPIO_NUM_42
+#define RESET_BUTTON_GPIO        GPIO_NUM_16 // k2
+#define VOLUME_UP_BUTTON_GPIO   GPIO_NUM_7 // k3
+#define VOLUME_DOWN_BUTTON_GPIO   GPIO_NUM_0 // k4
+#define BREAK_BUTTON_GPIO   GPIO_NUM_2 // k5
+
 
 // ST7789W3 240x296 配置
 #define LCD_TYPE_ST7789_SERIAL
-#define DISPLAY_WIDTH   320
-#define DISPLAY_HEIGHT  240
-#define DISPLAY_MIRROR_X true
-#define DISPLAY_MIRROR_Y true
-#define DISPLAY_SWAP_XY true
+#define DISPLAY_WIDTH   240
+#define DISPLAY_HEIGHT  320
+#define DISPLAY_MIRROR_X false
+#define DISPLAY_MIRROR_Y false
+#define DISPLAY_SWAP_XY false
 #define DISPLAY_INVERT_COLOR    true
 #define DISPLAY_RGB_ORDER  LCD_RGB_ELEMENT_ORDER_RGB
 #define DISPLAY_OFFSET_X  0
@@ -43,18 +43,26 @@
 #define TOUCH_BUTTON_GPIO GPIO_NUM_46
 
 #define CHARGING_PIN     GPIO_NUM_11   // CHRG pin
-#define STANDBY_PIN      GPIO_NUM_3    // STDBY pin
+#define STANDBY_PIN      GPIO_NUM_12    // STDBY pin
 
-#define BAT_ADC_CHANNEL  ADC_CHANNEL_1  // Battery voltage ADC channel
+#define BAT_ADC_CHANNEL  ADC_CHANNEL_2  // Battery voltage ADC channel
 #define BAT_ADC_ATTEN    ADC_ATTEN_DB_11 // ADC attenuation
 #define BAT_ADC_UNIT     ADC_UNIT_2
 #define POWER_CHARGE_LED_PIN GPIO_NUM_NC
-#define CODEC_TX_GPIO           GPIO_NUM_10
-#define CODEC_RX_GPIO           GPIO_NUM_18
+#define CODEC_TX_GPIO           GPIO_NUM_3
+#define CODEC_RX_GPIO           GPIO_NUM_9
 
 #define ML307_RX_PIN GPIO_NUM_21
 #define ML307_TX_PIN GPIO_NUM_14
 #define ML307_EN GPIO_NUM_17
+
+// 耳机检测相关GPIO
+#define HPR_SIGN_PIN GPIO_NUM_6   // 耳机插入检测信号
+#define MCU_MUTE_PIN GPIO_NUM_10  // MCU静音控制信号
+
+#define FACTORY_TEST_UART_NUM       UART_NUM_0
+#define FACTORY_TEST_UART_TX_PIN    GPIO_NUM_43
+#define FACTORY_TEST_UART_RX_PIN    GPIO_NUM_44
 
 // 自动生成的螺旋图像数据
 

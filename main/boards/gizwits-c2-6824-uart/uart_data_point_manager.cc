@@ -237,7 +237,7 @@ size_t UartDataPointManager::GetDataPointCount() const {
 }
 
 // 标准实现：获取数据点值
-bool UartDataPointManager::GetDataPointValue(const std::string& name, int& value) const {
+bool UartDataPointManager::GetDataPointValue(const std::string& name, uint32_t& value) const {
     if (name == "switch") {
         value = 1; // 开关状态，固定为1
         return true;
@@ -326,26 +326,26 @@ bool UartDataPointManager::GetDataPointValue(const std::string& name, int& value
 }
 
 // 标准实现：设置数据点值
-bool UartDataPointManager::SetDataPointValue(const std::string& name, int value) {
+bool UartDataPointManager::SetDataPointValue(const std::string& name, uint32_t value) {
     if (name == "chat_mode") {
         if (set_chat_mode_callback_) {
-            set_chat_mode_callback_(value);
+            set_chat_mode_callback_(static_cast<int>(value));
             return true;
         }
     } else if (name == "volume_set") {
         if (set_volume_callback_) {
-            set_volume_callback_(value);
+            set_volume_callback_(static_cast<int>(value));
             return true;
         }
     } else if (name == "brightness") {
         if (set_brightness_callback_) {
-            set_brightness_callback_(value);
+            set_brightness_callback_(static_cast<int>(value));
             return true;
         }
     } else if (name == "speed") {
         if (set_speed_callback_) {
             // 限制语速值在有效范围内 (0-200, 对应-50%到150%)
-            int clamped_value = std::max(0, std::min(200, value));
+            int clamped_value = std::max(0, std::min(200, static_cast<int>(value)));
             set_speed_callback_(clamped_value);
             return true;
         }
@@ -441,8 +441,8 @@ void UartDataPointManager::GenerateReportData(uint8_t* buffer, size_t buffer_siz
 }
 
 // 标准实现：处理数据点值
-void UartDataPointManager::ProcessDataPointValue(const std::string& name, int value) {
-    ESP_LOGI(TAG, "ProcessDataPointValue: %s = %d", name.c_str(), value);
+void UartDataPointManager::ProcessDataPointValue(const std::string& name, uint32_t value) {
+    ESP_LOGI(TAG, "ProcessDataPointValue: %s = %u", name.c_str(), value);
     
     // control_value 是 binary 类型，不能通过 int 处理
     if (name == "control_value") {

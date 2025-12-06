@@ -42,8 +42,8 @@ private:
     Button* rec_button_ = nullptr;
     PowerSaveTimer* power_save_timer_;
     VbAduioCodec audio_codec;
-    bool sleep_flag_ = false;
     uint32_t power_on_time_;  // 上电时间戳
+    bool sleep_flag_ = false;
     
     // 唤醒词列表
     std::vector<std::string> wake_words_ = {"你好小智", "你好小云", "合养精灵", "嗨小火人", "你好冬冬"};
@@ -53,7 +53,11 @@ private:
         power_save_timer_ = new PowerSaveTimer(-1, SLEEP_TIME_SEC, portMAX_DELAY);  // peter mark 休眠时间
         power_save_timer_->OnEnterSleepMode([this]() {
             ESP_LOGI(TAG, "Enabling sleep mode");
-            run_sleep_mode(true);
+            auto& application = Application::GetInstance();
+            application.Alert("", "", "", Lang::Sounds::P3_SLEEP);
+            vTaskDelay(pdMS_TO_TICKS(3000));
+            ESP_LOGI(TAG, "Sleep mode");
+            PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
         });
         power_save_timer_->OnExitSleepMode([this]() {
             ESP_LOGI(TAG, "Shutting down");
@@ -64,27 +68,33 @@ private:
         power_save_timer_->SetEnabled(true);
     }
 
-    void run_sleep_mode(bool need_delay = true){
-        if (sleep_flag_) {
-            return;
-        }
-        sleep_flag_ = true;
-        auto& application = Application::GetInstance();
-        application.QuitTalking();
 
-        if (need_delay) {
+    void LongPressSleepCheck(int first_level) {
+        // 计算设备运行时间
+        int64_t current_time = esp_timer_get_time() / 1000; // 转换为毫秒
+        int64_t uptime_ms = current_time - power_on_time_;
+        ESP_LOGI(TAG, "设备运行时间: %lld ms", uptime_ms);
+        
+        // 首次上电5秒内且first_level==0才忽略
+        const int64_t MIN_UPTIME_MS = 5000; // 5秒
+        if (first_level == 0 && uptime_ms < MIN_UPTIME_MS) {
+            first_level = 1;
+            ESP_LOGI(TAG, "首次上电5秒内，忽略长按操作");
+        } else {
+            ESP_LOGI(TAG, "Long press");
+            sleep_flag_ = true;
+            auto& application = Application::GetInstance();
             application.Alert("", "", "", Lang::Sounds::P3_SLEEP);
-            vTaskDelay(pdMS_TO_TICKS(3000));
-            ESP_LOGI(TAG, "Sleep mode");
         }
-        // 检查不在充电就真休眠
-        PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
     }
 
     void InitializeButtons() {
 
         const int chat_mode = Application::GetInstance().GetChatMode();
         rec_button_ = new Button(BUILTIN_REC_BUTTON_GPIO);
+
+        static int rec_first_level = gpio_get_level(BUILTIN_REC_BUTTON_GPIO);
+        static int boot_first_level = gpio_get_level(BOOT_BUTTON_GPIO);
 
         if (chat_mode == 0) {
             rec_button_->OnPressUp([this]() {
@@ -136,32 +146,14 @@ private:
             });
         }
 
-        boot_button_.OnLongPress([this]() {
-            run_sleep_mode(true);
+        boot_button_.OnLongPress([this, boot_first_level]() {
+            LongPressSleepCheck(boot_first_level);
         });
-        rec_button_->OnLongPress([this]() {
-            run_sleep_mode(true);
+        rec_button_->OnLongPress([this, rec_first_level]() {
+            // 要忽略上电的时候首次长按
+            // 长按只播音频，并设置 flag，松手断电
+            LongPressSleepCheck(rec_first_level);
         });
-
-        // collision_button.OnPressDown([this]() {
-        //     ESP_LOGI(TAG, "collision_button.OnClick");
-        //     // 连续触发 1.5s，间隔<=300ms 视为有效
-        //     int64_t now = esp_timer_get_time();
-        //     if (collision_last_ts_us_ != 0 && (now - collision_last_ts_us_) <= COLLISION_MAX_INTERVAL_US) {
-        //         collision_accum_us_ += (now - collision_last_ts_us_);
-        //     } else {
-        //         // 超时或首次触发，重置累计
-        //         collision_accum_us_ = 0;
-        //     }
-        //     collision_last_ts_us_ = now;
-
-        //     if (collision_accum_us_ >= COLLISION_THRESHOLD_US) {
-        //         collision_accum_us_ = 0;
-        //         collision_last_ts_us_ = 0;
-        //         auto &app = Application::GetInstance();
-        //         app.ToggleChatState();
-        //     }
-        // });
 
         boot_button_.OnPressRepeat([this](uint16_t count) {
             ESP_LOGI(TAG, "boot_button_.OnPressRepeat: %d", count);
@@ -173,6 +165,65 @@ private:
             ESP_LOGI(TAG, "rec_button_.OnPressRepeat: %d", count);
             if(count >= RESET_WIFI_CONFIGURATION_COUNT){
                 ResetWifiConfiguration();
+            }
+        });
+
+        boot_button_.OnPressUp([this]() {
+            ESP_LOGI(TAG, "Press up");
+            if(sleep_flag_){
+                sleep_flag_ = false;
+                // 检查是否在充电状态
+                bool is_charging = PowerManager::GetInstance().IsCharging();
+                if (!is_charging) {
+                    // 电池模式下，等待音频播放完成后再关机
+                    ESP_LOGI(TAG, "等待音频播放完成");
+                    int wait_count = 0;
+                    while (!Application::GetInstance().GetAudioService().IsIdle() && wait_count < 80) {
+                        vTaskDelay(pdMS_TO_TICKS(50));  // 50ms检查一次，最多等待4秒
+                        wait_count++;
+                    }
+                    // 额外等待一小段时间，确保音频完全播放完毕
+                    vTaskDelay(pdMS_TO_TICKS(100));
+                    ESP_LOGI(TAG, "音频播放完成，准备关机");
+                    // 提前停止所有功能，加快关机速度
+                    Application::GetInstance().QuitTalking();
+                } else {
+                    // 充电模式下，禁用定时器，避免定时器再次触发休眠
+                    if (power_save_timer_) {
+                        power_save_timer_->SetEnabled(false);
+                        ESP_LOGI(TAG, "充电模式下长按关机，禁用PowerSaveTimer");
+                    }
+                }
+                PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
+            }
+        });
+        rec_button_->OnPressUp([this]() {
+            ESP_LOGI(TAG, "Press up");
+            if(sleep_flag_){
+                sleep_flag_ = false;
+                // 检查是否在充电状态
+                bool is_charging = PowerManager::GetInstance().IsCharging();
+                if (!is_charging) {
+                    // 电池模式下，等待音频播放完成后再关机
+                    ESP_LOGI(TAG, "等待音频播放完成");
+                    int wait_count = 0;
+                    while (!Application::GetInstance().GetAudioService().IsIdle() && wait_count < 80) {
+                        vTaskDelay(pdMS_TO_TICKS(50));  // 50ms检查一次，最多等待4秒
+                        wait_count++;
+                    }
+                    // 额外等待一小段时间，确保音频完全播放完毕
+                    vTaskDelay(pdMS_TO_TICKS(100));
+                    ESP_LOGI(TAG, "音频播放完成，准备关机");
+                    // 提前停止所有功能，加快关机速度
+                    Application::GetInstance().QuitTalking();
+                } else {
+                    // 充电模式下，禁用定时器，避免定时器再次触发休眠
+                    if (power_save_timer_) {
+                        power_save_timer_->SetEnabled(false);
+                        ESP_LOGI(TAG, "充电模式下长按关机，禁用PowerSaveTimer");
+                    }
+                }
+                PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
             }
         });
     }
@@ -244,6 +295,10 @@ public:
         // 如果是从深度睡眠被碰撞 GPIO 唤醒，则先等待稳定摇晃，否则重新睡眠
         // WaitForCollisionShakeOrSleepIfWokenByCollision();
 
+        // 先初始化 PowerSaveTimer，因为按钮回调可能会立即调用它
+        ESP_LOGI(TAG, "Initializing Power Save Timer...");
+        InitializePowerSaveTimer();
+
         if (s_factory_test_mode == 0) {
             InitializeLedSignal();
             InitializeButtons();
@@ -258,9 +313,6 @@ public:
         io_conf.intr_type = GPIO_INTR_DISABLE;
         gpio_config(&io_conf);
         gpio_set_level(BUILTIN_LED_GPIO, 0);
-
-        ESP_LOGI(TAG, "Initializing Power Save Timer...");
-        InitializePowerSaveTimer();
 
         ESP_LOGI(TAG, "Initializing IoT components...");
         InitializeIot();
@@ -282,6 +334,38 @@ public:
 
         PowerManager::GetInstance().CheckBatteryStatusImmediately();
 
+        // 注册充电状态变化回调，处理拔掉USB后的自动关机
+        PowerManager::GetInstance().SetChargingStateChangeCallback(
+            [this](bool was_charging, bool is_charging) {
+                // 检测到从充电变为非充电（拔掉USB）
+                if (was_charging && !is_charging) {
+                    ESP_LOGI(TAG, "检测到停止充电（拔掉USB）");
+                    
+                    // 延迟一小段时间确认状态稳定，避免误判
+                    Application::GetInstance().Schedule([this]() {
+                        // 再次确认不在充电状态
+                        if (!PowerManager::GetInstance().IsCharging()) {
+                            bool is_in_sleep_mode = (power_save_timer_ && power_save_timer_->IsInSleepMode());
+                            // 如果设备处于睡眠状态，自动关机
+                            if (is_in_sleep_mode) {
+                                ESP_LOGI(TAG, "设备处于睡眠状态且已拔掉USB，自动关机");
+                                // 等待音频播放完成后再关机
+                                int wait_count = 0;
+                                while (!Application::GetInstance().GetAudioService().IsIdle() && wait_count < 80) {
+                                    vTaskDelay(pdMS_TO_TICKS(50));
+                                    wait_count++;
+                                }
+                                vTaskDelay(pdMS_TO_TICKS(100));
+                                // 提前停止所有功能，加快关机速度
+                                Application::GetInstance().QuitTalking();
+                                PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
+                            }
+                        }
+                    }, "AutoPowerOffAfterUnplug");
+                }
+            }
+        );
+
         ESP_LOGI(TAG, "Initializing Data Point Manager...");
         InitializeDataPointManager();
         ESP_LOGI(TAG, "Data Point Manager initialized.");
@@ -290,7 +374,10 @@ public:
     virtual void WakeUpPowerSaveTimer() {
         sleep_flag_ = false;
         if (power_save_timer_) {
+            // 检测定时器是否已启用，如果没有开启就打开
+            power_save_timer_->SetEnabled(true);
             power_save_timer_->WakeUp();
+            ESP_LOGI(TAG, "唤醒定时器：确保定时器已启用并唤醒");
         }
     };
 
@@ -299,6 +386,11 @@ public:
 
     virtual bool NeedSilentStartup() override {
         return false;
+    }
+
+    // 低电量是否阻止启动（低电量时直接关机）
+    bool NeedBlockLowBattery() override {
+        return true;
     }
 
     virtual bool GetBatteryLevel(int &level, bool& charging, bool& discharging) override {
@@ -325,12 +417,57 @@ public:
         PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
     }
 
+    // 设备关机方法（低电量时调用）
+    virtual void PowerOff() override {
+        ESP_LOGI(TAG, "PowerOff called (低电量关机)");
+        
+        // 检查充电状态
+        bool is_charging = PowerManager::GetInstance().IsCharging();
+        if (is_charging) {
+            // 充电中，只断开 socket，不进入深度睡眠
+            ESP_LOGI(TAG, "充电中，只断开连接");
+            Application::GetInstance().QuitTalking();
+            return;
+        }
+        
+        // 电池模式下，确保音频输出已启用，然后等待低电量提示音播放完成后再关机
+        auto codec = GetAudioCodec();
+        if (codec) {
+            codec->EnableOutput(true);
+            ESP_LOGI(TAG, "已启用音频输出，等待低电量提示音播放完成");
+        }
+        
+        // 给一点时间让音频包放入队列并开始播放
+        vTaskDelay(pdMS_TO_TICKS(200));
+        
+        // 等待音频播放完成（队列为空）
+        int wait_count = 0;
+        while (!Application::GetInstance().GetAudioService().IsIdle() && wait_count < 80) {
+            vTaskDelay(pdMS_TO_TICKS(50));  // 50ms检查一次，最多等待4秒
+            wait_count++;
+        }
+        // 额外等待一小段时间，确保音频完全播放完毕
+        vTaskDelay(pdMS_TO_TICKS(200));
+        ESP_LOGI(TAG, "低电量提示音播放完成，准备关机");
+        
+        // 停止所有功能
+        Application::GetInstance().QuitTalking();
+        
+        // 电池模式下，进入深度睡眠
+        ESP_LOGI(TAG, "电池模式下低电量，进入深度睡眠");
+        PowerManager::GetInstance().EnterDeepSleepIfNotCharging();
+    }
+
     virtual AudioCodec* GetAudioCodec() override {
         return &audio_codec;
     }
 
     void SetPowerSaveTimer(bool enable) {
         power_save_timer_->SetEnabled(enable);
+    }
+
+    PowerSaveTimer* GetPowerSaveTimer() override {
+        return power_save_timer_;
     }
 
     uint8_t GetBrightness() {
@@ -374,11 +511,11 @@ public:
         return LvlinDataPointManager::GetInstance().GetDataPointCount();
     }
 
-    bool GetDataPointValue(const std::string& name, int& value) const override {
+    bool GetDataPointValue(const std::string& name, uint32_t& value) const override {
         return LvlinDataPointManager::GetInstance().GetDataPointValue(name, value);
     }
 
-    bool SetDataPointValue(const std::string& name, int value) override {
+    bool SetDataPointValue(const std::string& name, uint32_t value) override {
         return LvlinDataPointManager::GetInstance().SetDataPointValue(name, value);
     }
 
@@ -386,7 +523,7 @@ public:
         LvlinDataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
     }
 
-    void ProcessDataPointValue(const std::string& name, int value) override {
+    void ProcessDataPointValue(const std::string& name, uint32_t value) override {
         LvlinDataPointManager::GetInstance().ProcessDataPointValue(name, value);
     }
 

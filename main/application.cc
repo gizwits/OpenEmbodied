@@ -102,6 +102,8 @@ void Application::CheckNewVersion(Ota& ota) {
         retry_delay = 10; // 重置重试延迟时间
 
         if (ota.HasNewVersion()) {
+            // 等一下，防止 c2 音频队列太多数据
+            vTaskDelay(pdMS_TO_TICKS(1000));
             Alert(Lang::Strings::OTA_UPGRADE, Lang::Strings::UPGRADING, "happy", Lang::Sounds::P3_UPGRADE);
 
             vTaskDelay(pdMS_TO_TICKS(3000));
@@ -234,6 +236,14 @@ void Application::DismissAlert() {
 void Application::ToggleChatState() {
     Board::GetInstance().WakeUpPowerSaveTimer();
 
+    // 清空字幕
+    auto display = Board::GetInstance().GetDisplay();
+    if (display) {
+        display->SetChatMessage("system", "");
+        display->SetChatMessage("user", "");
+        display->SetChatMessage("assistant", "");
+    }
+
     if (player_.IsDownloading()) {
         CancelPlayMusic();
         return;
@@ -280,11 +290,17 @@ void Application::ToggleChatState() {
             AbortSpeaking(kAbortReasonNone);
             ESP_LOGI(TAG, "ToggleChatState(kDeviceStateSpeaking)");
             SetDeviceState(kDeviceStateListening);
+            ResetDecoder();
         }, "ToggleChatState_AbortSpeaking");
     } else if (device_state_ == kDeviceStateListening) {
         // Schedule([this]() {
         //     protocol_->CloseAudioChannel();
         // });
+        if (Board::GetInstance().NeedToogleIdle()) {
+            Schedule([this]() {
+                protocol_->CloseAudioChannel();
+            });
+        }
     }
 }
 
@@ -448,31 +464,42 @@ void Application::Start() {
     // auto json = board.GetJson();
     // ESP_LOGI(TAG, "json: %s", json.c_str());
 
-    bool battery_ok = CheckBatteryLevel();
-    if (!battery_ok && Board::GetInstance().NeedBlockLowBattery()) {
-        // 播放提示
-        vTaskDelay(pdMS_TO_TICKS(3000));
-        Board::GetInstance().PowerOff();
-        return;
-    }
-
+    // 先播放联网成功提示音
     audio_service_.ResetDecoder();
     if (!is_silent_startup_) {
         audio_service_.PlaySound(Lang::Sounds::P3_CONNECT_SUCCESS);
     }
     vTaskDelay(pdMS_TO_TICKS(500));
 
+    // 然后检查电量，如果低电量则播放低电量提示音并关机
+    bool battery_ok = CheckBatteryLevel();
+    if (!battery_ok && Board::GetInstance().NeedBlockLowBattery()) {
+        // 直接调用 PowerOff()，它会等待低电量提示音播放完成后再关机
+        Board::GetInstance().PowerOff();
+        return;
+    }
+
     // Initialize NTP client
-    // auto& ntp_client = NtpClient::GetInstance();
-    // esp_err_t ntp_ret = ntp_client.Init();
-    // if (ntp_ret == ESP_OK) {
-    //     ntp_client.StartSync();
-    //     ESP_LOGI(TAG, "NTP client initialized and started");
-    // } else {
-    //     ESP_LOGE(TAG, "Failed to initialize NTP client: %s", esp_err_to_name(ntp_ret));
-    // }
+    auto& ntp_client = NtpClient::GetInstance();
+    esp_err_t ntp_ret = ntp_client.Init();
+    if (ntp_ret == ESP_OK) {
+        ESP_LOGI(TAG, "Waiting for network to be fully ready before NTP sync...");
+        ntp_client.StartSync();
+        Schedule([]() {
+            auto& ntp_client = NtpClient::GetInstance();
+            ntp_client.ProcessSync();
+        }, "NTP_ProcessSync");
+        ESP_LOGI(TAG, "NTP client initialized and started");
+    } else {
+        ESP_LOGE(TAG, "Failed to initialize NTP client: %s", esp_err_to_name(ntp_ret));
+    }
+    
+
     // Update the status bar immediately to show the network state
     display->UpdateStatusBar(true);
+    
+    // Initially socket is not connected, show clock
+    display->SetSocketConnected(false);
     
     // 先创建protocol_，确保MQTT回调中能安全访问
 
@@ -507,13 +534,16 @@ void Application::Start() {
         auto packet_ptr = std::make_unique<AudioStreamPacket>(std::move(packet));
         audio_service_.PushPacketToDecodeQueue(std::move(packet_ptr));
     });
-    protocol_->OnAudioChannelOpened([this, codec, &board]() {
+    protocol_->OnAudioChannelOpened([this, codec, &board, display]() {
         board.SetPowerSaveMode(false);
         if (protocol_->server_sample_rate() != codec->output_sample_rate()) {
             ESP_LOGW(TAG, "Server sample rate %d does not match device output sample rate %d, resampling may cause distortion",
                 protocol_->server_sample_rate(), codec->output_sample_rate());
         }
         MqttClient::getInstance().sendTraceLog("info", "socket 通道打开");
+        
+        // Notify display that socket is connected
+        display->SetSocketConnected(true);
 
         if (board.NeedLocalWelcome()) {
             Schedule([this]() {
@@ -522,7 +552,7 @@ void Application::Start() {
         }
 
     });
-    protocol_->OnAudioChannelClosed([this, &board](bool is_clean) {
+    protocol_->OnAudioChannelClosed([this, &board, display](bool is_clean) {
         ESP_LOGW("OnAudioChannelClosed", "is_clean: %d", is_clean);
         if (!is_clean) {
             ESP_LOGW(TAG, "Audio channel closed unexpectedly");
@@ -537,6 +567,9 @@ void Application::Start() {
 
         const char* msg = is_clean ? "socket 通道正常关闭" : "socket 通道异常断开";
         MqttClient::getInstance().sendTraceLog("info", msg);
+        
+        // Notify display that socket is disconnected
+        display->SetSocketConnected(false);
     });
     protocol_->OnIncomingJson([this, display](const cJSON* root) {
         // Parse JSON data
@@ -551,6 +584,7 @@ void Application::Start() {
         if (strcmp(type->valuestring, "tts") == 0) {
             auto state = cJSON_GetObjectItem(root, "state");
             if (strcmp(state->valuestring, "start") == 0) {
+               
                 if (!has_emotion_) {
                     Schedule([this]() {
                         auto display = Board::GetInstance().GetDisplay();
@@ -564,6 +598,7 @@ void Application::Start() {
                 if (device_state_ == kDeviceStateIdle || device_state_ == kDeviceStateListening) {
                     SetDeviceState(kDeviceStateSpeaking);
                 }
+               
                 Schedule([this]() {
                     auto& board = Board::GetInstance();
                     if (board.NeedPlayProcessVoice() && chat_mode_ != 2) {
@@ -592,25 +627,43 @@ void Application::Start() {
                     }
                 }, "OnIncomingJson_TTS_Stop");
             } else if (strcmp(state->valuestring, "sentence_start") == 0) {
+
                 auto text = cJSON_GetObjectItem(root, "text");
                 if (!text || !cJSON_IsString(text)) {
                     ESP_LOGW(TAG, "Invalid JSON: missing or invalid 'text' field in tts sentence_start");
                     return;
                 }
                 if (cJSON_IsString(text)) {
+#ifndef CONFIG_IDF_TARGET_ESP32C2
                     // ESP_LOGI(TAG, "<< %s", text->valuestring);
-                    // Schedule([this, display, message = std::string(text->valuestring)]() {
-                    //     display->SetChatMessage("assistant", message.c_str());
-                    // }, "OnIncomingJson_TTS_SentenceStart");
+                    Schedule([this, display, message = std::string(text->valuestring)]() {
+                        display->SetChatMessage("assistant", message.c_str());
+                    });
+#endif
                 }
             }
-        } else if (strcmp(type->valuestring, "stt") == 0) {
+        }  else if (strcmp(type->valuestring, "firstaudio") == 0) {
+            ESP_LOGI(TAG, "firstaudio");
+            Schedule([this]() {
+                // 音画同步，这个事件才是最准确的
+                DeviceStateEventManager::GetInstance().PostStateChangeEvent(device_state_, kDeviceStateRealSpeaking);
+            }, "OnIncomingJson_FirstAudio");
+        }  else if (strcmp(type->valuestring, "stt") == 0) {
             auto text = cJSON_GetObjectItem(root, "text");
+
+
+            // Schedule([this]() {
+            //     if (device_state_ != kDeviceStateListening) {
+            //         SetDeviceState(kDeviceStateListening);
+            //     }
+            // });
+
+
             if (cJSON_IsString(text)) {
                 // ESP_LOGI(TAG, ">> %s", text->valuestring);
                 Schedule([this, display, message = std::string(text->valuestring)]() {
                     display->SetChatMessage("user", message.c_str());
-                }, "OnIncomingJson_STT_SentenceStart");
+                });
             }
         } else if (strcmp(type->valuestring, "llm") == 0) {
             auto emotion = cJSON_GetObjectItem(root, "emotion");
@@ -808,16 +861,16 @@ void Application::MainEventLoop() {
 
         
 #if CONFIG_IDF_TARGET_ESP32C2
-// 处理 MQTT 消息队列（替代独立任务）
-// 这样做的好处：
-// 1. 减少内存占用 - 不需要为每个任务分配独立的栈空间
-// 2. 简化任务管理 - 减少任务切换的开销
-// 3. 更好的控制 - 在主循环中可以更好地控制执行频率
-auto& mqtt_client = MqttClient::getInstance();
-if (mqtt_client.isInitialized()) {
-    mqtt_client.processMessageQueue();  // 处理接收到的消息
-    mqtt_client.processSendQueue();     // 处理待发送的消息
-}
+    // 处理 MQTT 消息队列（替代独立任务）
+    // 这样做的好处：
+    // 1. 减少内存占用 - 不需要为每个任务分配独立的栈空间
+    // 2. 简化任务管理 - 减少任务切换的开销
+    // 3. 更好的控制 - 在主循环中可以更好地控制执行频率
+    auto& mqtt_client = MqttClient::getInstance();
+    if (mqtt_client.isInitialized()) {
+        mqtt_client.processMessageQueue();  // 处理接收到的消息
+        mqtt_client.processSendQueue();     // 处理待发送的消息
+    }
 #endif
         
         // 每30秒检查一次电量
@@ -910,12 +963,12 @@ if (mqtt_client.isInitialized()) {
 }
 
 void Application::OnWakeWordDetected() {
+    ESP_LOGI(TAG, "OnWakeWordDetected");
     if (chat_mode_ == 0) {
         ESP_LOGI(TAG, "OnWakeWordDetected: chat_mode_ == 0");
         return;
     }
     Board::GetInstance().WakeUpPowerSaveTimer();
-    ESP_LOGI(TAG, "OnWakeWordDetected");
     if (!protocol_) {
         return;
     }
@@ -1096,7 +1149,10 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     if (device_state_ == kDeviceStateIdle) {
         Schedule([this, wake_word]() {
             audio_service_.ResetDecoder();
-            audio_service_.PlaySound(Lang::Sounds::P3_WAKE_WORD);
+            auto& board = Board::GetInstance();
+            if (board.GetNeedPlayWakeWordSound()) {
+                audio_service_.PlaySound(Lang::Sounds::P3_WAKE_WORD);
+            }
 
             ToggleChatState();
             // if (protocol_) {
@@ -1210,6 +1266,7 @@ void Application::initGizwitsServer() {
     Settings settings("wifi", true);
 #if CONFIG_USE_GIZWITS_MQTT && CONFIG_PROTOCOL_TYPE_COZE
     auto& mqtt_client = MqttClient::getInstance();
+    static bool is_first_params_received = false;
     mqtt_client.OnRoomParamsUpdated([this](const RoomParams& params, bool is_mutual) {
         // 判断 protocol_ 是否启动
         // 如果启动了，就断开重新连接
@@ -1245,6 +1302,17 @@ void Application::initGizwitsServer() {
                 ResetDecoder();
                 SetListeningMode(chat_mode_ == 2  ? kListeningModeRealtime : kListeningModeAutoStop);
             }, "initGizwitsServer_OpenAudioChannel");
+        }
+
+        // 第一次 强制连接
+        if (!is_first_params_received) {
+            is_first_params_received = true;
+            if (Board::GetInstance().NeedForceConnect()) {
+                Schedule([this]() {
+                    vTaskDelay(pdMS_TO_TICKS(500));
+                    ToggleChatState();
+                }); 
+            }
         }
     });
 
@@ -1395,10 +1463,12 @@ void Application::EnterSleepMode() {
         vTaskDelay(pdMS_TO_TICKS(1000));
 
         // 关闭 wifi
-        auto& wifi_station = WifiStation::GetInstance();
-        wifi_station.Stop();
+        // wifi 模式才关闭
+        if (Board::GetInstance().GetNetworkType() == NetworkType::WIFI) {
+            auto& wifi_station = WifiStation::GetInstance();
+            wifi_station.Stop();
+        }
         SetDeviceState(kDeviceStateSleeping);
-
     
         display->SetStatus(Lang::Strings::STANDBY);
         display->SetEmotion("sleepy");
@@ -1458,7 +1528,7 @@ void Application::HandleNetError() {
     PlaySound(Lang::Sounds::P3_NET_ERR);
 }
 void Application::SendTextToAI(const std::string& text) {
-    if (protocol_) {
+    if (protocol_ && protocol_->IsAudioChannelOpened()) {
         protocol_->SendTextToAI(text);
     }
 }
@@ -1467,14 +1537,18 @@ void Application::ResetDecoder() {
     audio_service_.ResetDecoder();
 }
 
+bool Application::IsAudioChannelOpened() const {
+    return protocol_ && protocol_->IsAudioChannelOpened();
+}
+
+
 void Application::QuitTalking() {
     // 不要使用这个判断protocol_->IsAudioChannelOpened 
     // 因为长时间没有使用 socket处于超时状态
     if (protocol_ != nullptr) {
         ESP_LOGI(TAG, "run close audio channel");
         // 先发送中止消息
-        protocol_->SendAbortSpeaking(kAbortReasonNone);
-        
+        ResetDecoder();
         // 关闭音频通道（可能阻塞，但这是必要的清理操作）
         protocol_->CloseAudioChannel();
     }
@@ -1495,17 +1569,25 @@ void Application::PlayMusic(const char* url) {
         url_str = "http:" + url_str.substr(6);
     }
     // 新增：如果以 .mp3 结尾，替换为 .p3
+#ifndef CONFIG_IDF_TARGET_ESP32S3
     if (url_str.size() >= 4 && url_str.substr(url_str.size() - 4) == ".mp3") {
         url_str.replace(url_str.size() - 4, 4, ".p3");
     }
+#endif
     QuitTalking();
 
-    player_.setPacketCallback([this](const std::vector<uint8_t>& data) {
+    // 设置数据包回调：快速发送数据，不阻塞
+    player_.setPacketCallback([this](std::vector<uint8_t>&& data) {
         auto packet = std::make_unique<AudioStreamPacket>();
-        packet->payload = data;
+        packet->payload = std::move(data);  // 使用move避免复制
         packet->sample_rate = 16000;
-        packet->frame_duration = OPUS_FRAME_DURATION_MS;
-        audio_service_.PushPacketToDecodeQueue(std::move(packet));
+        packet->frame_duration = 60;  // OPUS_FRAME_DURATION_MS
+        audio_service_.PushPacketToDecodeQueue(std::move(packet), false);
+    });
+    
+    // 设置队列状态查询回调：用于player内部控制下载速度
+    player_.setQueueSizeCallback([this]() {
+        return audio_service_.GetDecodeQueueSize();
     });
     auto display = Board::GetInstance().GetDisplay();
     display->SetStatus(Lang::Strings::SPEAKING);
@@ -1521,7 +1603,7 @@ void Application::PlayMusic(const char* url) {
         args->app->player_.processMP3Stream(args->url.c_str());
         delete args;
         vTaskDelete(NULL);
-    }, "process_mp3_stream", 4096, args, 4, nullptr);
+    }, "process_mp3_stream", 2048 * 4, args, 5, nullptr);
 
 }
 
@@ -1675,4 +1757,16 @@ void Application::AppendRecordedAudioData(const uint8_t* data, size_t size) {
         return;
     }
     recorded_audio_data_.insert(recorded_audio_data_.end(), data, data + size);
+}
+
+void Application::GenerateTTSFromText(const std::string& text) {
+    if (protocol_ && protocol_->IsAudioChannelOpened()) {
+        protocol_->GenerateTTSFromText(text);
+    }
+}
+
+void Application::SetAudioUploadEnabled(bool enabled) {
+    if (protocol_) {
+        protocol_->SetAudioUploadEnabled(enabled);
+    }
 }

@@ -34,9 +34,9 @@ public:
         esp_err_t ret = soft_uart_new(&cfg, &uart_port_);
         if (ret != ESP_OK) return ret;
         rx_gpio_ = rx_gpio;
-        // Bias RX low by default to avoid unintended sleep when floating
+        // Bias RX high by default
         gpio_set_direction((gpio_num_t)rx_gpio_, GPIO_MODE_INPUT);
-        gpio_set_pull_mode((gpio_num_t)rx_gpio_, GPIO_PULLDOWN_ONLY);
+        gpio_set_pull_mode((gpio_num_t)rx_gpio_, GPIO_PULLUP_ONLY);
         
         // Create motion queue (max 16 commands)
         motion_queue_ = xQueueCreate(10, sizeof(MotionCommand));
@@ -151,19 +151,45 @@ private:
     void taskLoop() {
         int last_level = gpio_get_level((gpio_num_t)rx_gpio_);
         int elapsed_ms = 0;
-        int ignore_changes = 1; // ignore the first detected edge after boot
+        int debounce_level = -1;  // 防抖目标电平（-1表示无待确认的变化）
+        int debounce_count = 0;   // 防抖计数器
+        const int DEBOUNCE_SAMPLES = 3;  // 需要连续3次（150ms）相同才确认变化
+        
         for (;;) {
             // Poll RX enable state every 50ms
             int level = gpio_get_level((gpio_num_t)rx_gpio_);
+            
+            // 防抖逻辑：检测到变化后，需要连续多次确认才触发
             if (level != last_level) {
-                last_level = level;
-                if (ignore_changes > 0) {
-                    ignore_changes--;
-                } else {
-                    bool working = (level == 0);
-                    if (enable_cb_) {
-                        enable_cb_(working, enable_cb_ctx_);
+                // 检测到电平变化
+                if (debounce_level == -1) {
+                    // 开始新的防抖周期
+                    debounce_level = level;
+                    debounce_count = 1;
+                } else if (debounce_level == level) {
+                    // 与防抖目标电平一致，增加计数
+                    debounce_count++;
+                    if (debounce_count >= DEBOUNCE_SAMPLES) {
+                        // 连续多次确认，认为是真实变化
+                        last_level = level;
+                        debounce_level = -1;
+                        debounce_count = 0;
+                        bool working = (level == 0);
+                        if (enable_cb_) {
+                            enable_cb_(working, enable_cb_ctx_);
+                        }
                     }
+                } else {
+                    // 电平与目标不一致（变回去了），重置防抖
+                    debounce_level = -1;
+                    debounce_count = 0;
+                }
+            } else {
+                // 电平没有变化
+                if (debounce_level != -1) {
+                    // 如果之前有待确认的变化，但现在电平又回到原来的值，说明是抖动，重置
+                    debounce_level = -1;
+                    debounce_count = 0;
                 }
             }
 
@@ -200,7 +226,10 @@ private:
                                 motion_code_a_ = 0x00;
                                 motion_code_b_ = 0x00;
                                 motion_ms_remaining_ = 0;
-                                // Send stop frame
+                                // Send stop frame with rhythm
+                                vTaskDelay(pdMS_TO_TICKS(100));  // Sleep to maintain sending rhythm
+                                sendFrame(0x00, 0x00, 0x00);
+                                vTaskDelay(pdMS_TO_TICKS(100));  // Sleep to maintain sending rhythm
                                 sendFrame(0x00, 0x00, 0x00);
                                 ESP_LOGI("SoftUart", "Motion completed, checking queue for next");
                             }

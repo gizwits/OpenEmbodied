@@ -91,6 +91,16 @@ NetworkInterface* Ml307Board::GetNetwork() {
     return modem_.get();
 }
 
+std::string Ml307Board::GetImei() const {
+    if (modem_) {
+        std::string imei = modem_->GetImei();
+        ESP_LOGI(TAG, "Ml307Board::GetImei() called, modem_ exists, IMEI: '%s'", imei.c_str());
+        return imei;
+    }
+    ESP_LOGW(TAG, "Ml307Board::GetImei() called, but modem_ is null");
+    return "";
+}
+
 const char* Ml307Board::GetNetworkStateIcon() {
     if (modem_ == nullptr || !modem_->network_ready()) {
         ESP_LOGW(TAG, "网络未就绪或modem为空");

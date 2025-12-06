@@ -13,10 +13,12 @@
 // If packet/frame size changes, adjust these accordingly
 #if CONFIG_IDF_TARGET_ESP32S3
 #define WS_BASE64_BUFFER_BYTES 256        // Base64 buffer capacity (includes null terminator headroom)
-#define WS_MESSAGE_BUFFER_RESERVE 320    // Typical JSON envelope reserve to avoid realloc churn
+#define WS_MESSAGE_BUFFER_RESERVE 1024 * 4    // Typical JSON envelope reserve to avoid realloc churn
+#define WS_AUDIO_PACKAGE_BUFFER 320    // Typical JSON envelope reserve to avoid realloc churn
 #else
 #define WS_BASE64_BUFFER_BYTES 64        // Base64 buffer capacity (includes null terminator headroom)
 #define WS_MESSAGE_BUFFER_RESERVE 320    // Typical JSON envelope reserve to avoid realloc churn
+#define WS_AUDIO_PACKAGE_BUFFER 320    // Typical JSON envelope reserve to avoid realloc churn
 #endif
 
 #define WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT (1 << 0)
@@ -30,7 +32,8 @@ public:
     virtual bool Start() override;
     virtual bool OpenAudioChannel() override;
     virtual void SendStopListening() override;
-    virtual void SendTextToAI(const std::string& text);
+    virtual void SendTextToAI(const std::string& text) override;
+    virtual void GenerateTTSFromText(const std::string& text) override;
     virtual void CloseAudioChannel() override;
     virtual bool IsAudioChannelOpened() const override;
     virtual bool SendAudio(const AudioStreamPacket& packet) override;

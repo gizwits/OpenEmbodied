@@ -32,8 +32,8 @@
 // 用户可以根据需要修改这些配置
 
 // GPIO引脚配置
-#define SOFT_UART_TX_PIN 20  // 发送引脚，可以根据需要修改
-#define SOFT_UART_RX_PIN 19  // 接收引脚，可以根据需要修改
+#define SOFT_UART_TX_PIN 1  // 发送引脚，可以根据需要修改
+#define SOFT_UART_RX_PIN 2  // 接收引脚，可以根据需要修改
 
 // 波特率配置
 // 可选值：SOFT_UART_115200, SOFT_UART_230400, SOFT_UART_460800, SOFT_UART_921600
@@ -105,9 +105,11 @@ public:
     void StopListening();
     void Reboot();
     void ResetDecoder();
+    bool IsAudioChannelOpened() const;
     void PlaySound(const std::string_view& sound);
     void WakeWordInvoke(const std::string& wake_word);
     bool CanEnterSleepMode();
+    void GenerateTTSFromText(const std::string& text);
     void SendMcpMessage(const std::string& payload);
     void QuitTalking();
     void SetChatMode(int mode);
@@ -133,12 +135,14 @@ public:
     const char* GetTraceId() const { return trace_id_; }
     void PlayMusic(const char* url);
     AudioService& GetAudioService() { return audio_service_; }
+    size_t GetDecodeQueueSize() const { return audio_service_.GetDecodeQueueSize(); }  // 获取音频解码队列大小
     bool IsNormalReset() const { return is_normal_reset_; }  // 获取重启状态
     bool IsSilentStartup() const { return is_silent_startup_; }  // 获取静默启动状态
     void ClearSilentStartup() { is_silent_startup_ = false; }  // 清除静默启动状态
 
     bool IsWebsocketWorking() const { return protocol_ ? protocol_->IsAudioChannelOpened() : false; }
     bool HasWebsocketError() const { return protocol_ ? protocol_->HasErrorOccurred() : false; }
+    void SetAudioUploadEnabled(bool enabled);  // 临时禁用/启用音频上传
 
 private:
     Application();

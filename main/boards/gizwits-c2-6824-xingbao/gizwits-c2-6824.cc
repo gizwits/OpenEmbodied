@@ -29,7 +29,7 @@
 #define TAG "CustomBoard"
 
 #define RESET_WIFI_CONFIGURATION_COUNT 3
-#define SLEEP_TIME_SEC 10 * 1
+#define SLEEP_TIME_SEC 60 * 3
 // #define SLEEP_TIME_SEC 30
 class CustomBoard : public WifiBoard {
 private:
@@ -43,19 +43,24 @@ private:
     bool is_sleep_ = false;
 
     PowerManager* power_manager_;
+    bool last_charging_state_ = false;  // 跟踪上一次充电状态，用于检测充电状态变化
     
     // LED control
     enum LedMode { kLedSolid, kLedSlowBlink, kLedFastBlink };
     esp_timer_handle_t led_timer_ = nullptr;
+    esp_timer_handle_t thinking_timer_ = nullptr;
+    esp_timer_handle_t thinking_detect_timer_ = nullptr;
     LedMode led_mode_ = kLedSolid;
     int led_logic_level_ = 0; // 0 = ON (active-low), 1 = OFF
     bool thinking_active_ = false;
+    LedMode saved_led_mode_ = kLedSolid; // 保存思考前的LED状态
 
     // 静默启动：插上USB充电时不上电启动，需长按电源键启动
     static bool silent_startup_from_board_;
 
     bool IsSilent() const {
-        return Application::GetInstance().IsSilentStartup() || silent_startup_from_board_;
+        // 仅充电导致的静默启动才认为是静默；异常重启不视为静默
+        return silent_startup_from_board_;
     }
     
     // 唤醒词列表
@@ -128,22 +133,94 @@ private:
             SetLedSolidOn();
         } else if (mode == kLedSlowBlink) {
             led_mode_ = kLedSlowBlink;
-            SetLedBlink(500); // 0.5s period
+            SetLedBlink(1000); // 1s period (慢闪：录音中/监听中)
         } else {
             led_mode_ = kLedFastBlink;
-            SetLedBlink(500); // 0.5s period
+            SetLedBlink(500); // 0.5s period (快闪：思考中)
+        }
+    }
+
+    void StartThinkingLed() {
+        if (IsSilent()) {
+            return;
+        }
+        if (!thinking_active_) {
+            thinking_active_ = true;
+            saved_led_mode_ = led_mode_; // 保存当前LED状态
+            ESP_LOGI(TAG, "开始思考状态，LED快闪");
+            ApplyLedMode(kLedFastBlink);
+            
+            // 创建思考定时器，2秒后自动结束
+            if (thinking_timer_ == nullptr) {
+                esp_timer_create_args_t timer_args = {
+                    .callback = [](void* arg) {
+                        auto* self = static_cast<CustomBoard*>(arg);
+                        self->StopThinkingLed();
+                    },
+                    .arg = this,
+                    .dispatch_method = ESP_TIMER_TASK,
+                    .name = "thinking_led_timer",
+                    .skip_unhandled_events = true,
+                };
+                ESP_ERROR_CHECK(esp_timer_create(&timer_args, &thinking_timer_));
+            }
+            esp_timer_stop(thinking_timer_);
+            esp_timer_start_once(thinking_timer_, 2000000); // 2秒
+        }
+    }
+
+    void StopThinkingLed() {
+        if (thinking_active_) {
+            thinking_active_ = false;
+            ESP_LOGI(TAG, "结束思考状态，恢复LED状态");
+            // 根据当前设备状态恢复LED
+            auto curr_state = Application::GetInstance().GetDeviceState();
+            if (curr_state == kDeviceStateListening) {
+                ApplyLedMode(kLedSlowBlink);
+            } else if (curr_state == kDeviceStateSpeaking) {
+                ApplyLedMode(kLedSolid);
+            } else {
+                ApplyLedMode(saved_led_mode_);
+            }
         }
     }
 
     void InitializeDeviceStateEvent() {
         DeviceStateEventManager::GetInstance().RegisterStateChangeCallback(
             [this](DeviceState prev, DeviceState curr) {
+                // 当从listening切换到speaking时，可能是思考状态
+                // 延迟一小段时间后启动思考LED（因为SetEmotion("thinking")会在状态切换后调用）
+                if (prev == kDeviceStateListening && curr == kDeviceStateSpeaking) {
+                    // 延迟100ms后启动思考LED，给SetEmotion("thinking")时间执行
+                    if (thinking_detect_timer_ == nullptr) {
+                        esp_timer_create_args_t timer_args = {
+                            .callback = [](void* arg) {
+                                auto* self = static_cast<CustomBoard*>(arg);
+                                // 假设从listening切换到speaking就是思考状态
+                                self->StartThinkingLed();
+                            },
+                            .arg = this,
+                            .dispatch_method = ESP_TIMER_TASK,
+                            .name = "thinking_detect_timer",
+                            .skip_unhandled_events = true,
+                        };
+                        ESP_ERROR_CHECK(esp_timer_create(&timer_args, &thinking_detect_timer_));
+                    }
+                    esp_timer_stop(thinking_detect_timer_);
+                    ESP_ERROR_CHECK(esp_timer_start_once(thinking_detect_timer_, 100000)); // 100ms延迟
+                }
+                
+                // 如果正在思考，LED保持快闪，不响应状态变化
+                if (thinking_active_) {
+                    return;
+                }
+                
                 // Speaking has highest priority -> solid on
                 if (curr == kDeviceStateSpeaking) {
                     ApplyLedMode(kLedSolid);
                     return;
                 }
-                // Listening -> slow blink
+                // Listening -> slow blink (1秒周期)
                 if (curr == kDeviceStateListening) {
                     ApplyLedMode(kLedSlowBlink);
                     return;
@@ -170,13 +247,14 @@ private:
         
         boot_button_.OnPressDown([this]() {
             ESP_LOGI(TAG, "boot_button_.OnPressDown");
-            // 开灯
-            gpio_set_level(BUILTIN_LED_GPIO, 0);
         });
         boot_button_.OnLongPress([this]() {
             ESP_LOGI(TAG, "boot_button_.OnLongPress");
-            // auto &app = Application::GetInstance();
-            // app.ToggleChatState();
+            // 仅充电静默时禁用，异常重启的静默允许长按进入配网
+            if (silent_startup_from_board_) {
+                ESP_LOGI(TAG, "充电静默启动状态，长按 BOOT 不进入配网");
+                return;
+            }
             ResetWifiConfiguration();
         });
 
@@ -194,9 +272,9 @@ private:
         power_button_.OnPressDown([this]() {
             ESP_LOGI(TAG, "power_button_.OnPressDown");
             auto& app = Application::GetInstance();
-            // 静默启动时，短按不生效
-            if (app.IsSilentStartup() || silent_startup_from_board_) {
-                ESP_LOGI(TAG, "静默启动，短按无效");
+            // 只有充电导致的静默启动才禁用按键，异常重启的静默启动允许按键工作
+            if (silent_startup_from_board_) {
+                ESP_LOGI(TAG, "充电静默启动状态，短按电源键不执行操作");
                 return;
             }
             // 无条件先打断，再直接进入监听并强制开启语音处理，确保“秒停+立即监听”
@@ -224,12 +302,12 @@ private:
                 first_level = 1;
                 ESP_LOGI(TAG, "首次上电5秒内，忽略长按操作");
             } else {
-                // 如果为静默启动，长按视为用户主动启动：清除静默标志并重启
-                if (app.IsSilentStartup() || silent_startup_from_board_) {
+                // 只有充电导致的静默启动才需要长按唤醒，异常重启的静默启动直接执行关机
+                if (silent_startup_from_board_) {
                     Settings settings("system", true);
                     settings.SetInt("silent_next", 0);
                     settings.SetInt("user_wakeup", 1);
-                    ESP_LOGI(TAG, "静默启动下长按：清除silent_next并设置user_wakeup，重启");
+                    ESP_LOGI(TAG, "充电静默启动状态，长按清除静默标志并重启");
                     esp_restart();
                     return;
                 }
@@ -313,17 +391,54 @@ private:
         
         // 注册充电状态改变回调
         power_manager_->SetChargingStatusCallback([this](bool is_charging) {
+            bool was_charging = last_charging_state_;
+            last_charging_state_ = is_charging;  // 更新状态
+            
             ESP_LOGI(TAG, "充电状态改变: %s", is_charging ? "开始充电" : "停止充电");
+            
+            // 只在静默启动状态下检查拔掉充电线的情况
+            if (silent_startup_from_board_) {
+                // 如果从充电变为非充电，且处于静默启动状态，则自动关机
+                if (was_charging && !is_charging) {
+                    ESP_LOGI(TAG, "🔋 静默启动状态下检测到USB已拔掉（从充电变为非充电），自动关机以节省功耗");
+                    // 保存标志位：电池模式下关机，保存silent_next=0
+                    {
+                        Settings settings("system", true);
+                        settings.SetInt("silent_next", 0);
+                        ESP_LOGI(TAG, "电池模式下关机，保存silent_next=0");
+                    }
+                    // 延迟一小段时间再关机，避免误判
+                    xTaskCreate([](void* arg) {
+                        vTaskDelay(pdMS_TO_TICKS(2000));  // 等待2秒确认
+                        CustomBoard* board = static_cast<CustomBoard*>(arg);
+                        if (!board->power_manager_->IsCharging() && board->silent_startup_from_board_) {
+                            ESP_LOGI(TAG, "确认USB已拔掉，执行静默关机（不播放音频）");
+                            // 静默启动状态下直接关机，不播放任何音频
+                            auto& app = Application::GetInstance();
+                            app.QuitTalking();
+                            // 拉低电源保持引脚，关闭电池供电
+                            gpio_set_level(POWER_HOLD_GPIO, 0);
+                            ESP_LOGI(TAG, "🔋 电源保持引脚已拉低，设备关机 (GPIO%d)", POWER_HOLD_GPIO);
+                            // 延时3秒后进入深度睡眠
+                            vTaskDelay(pdMS_TO_TICKS(3000));
+                            board->run_sleep_mode(false);
+                        }
+                        vTaskDelete(NULL);
+                    }, "auto_poweroff_task", 2048, this, 5, NULL);  // 减小栈大小：2KB足够（等待+关机操作）
+                    return;  // 静默模式下拔掉充电线直接返回，不执行后续逻辑
+                }
+            }
+            
             // XunguanDisplay* xunguan_display = static_cast<XunguanDisplay*>(GetDisplay());
             if (is_charging) {
                 // 充电开始时的处理逻辑
                 ESP_LOGI(TAG, "检测到开始充电");
             } else {
-                // 充电停止时的处理逻辑
+                // 充电停止时的处理逻辑（非静默模式）
                 ESP_LOGI(TAG, "检测到停止充电");
                 auto state = Application::GetInstance().GetDeviceState();
-                // 待机状态，直接关机
-                if (state == kDeviceStateIdle) {
+                // 待机或休眠状态，直接关机
+                if (state == kDeviceStateIdle || state == kDeviceStateSleeping) {
                     gpio_set_level(POWER_HOLD_GPIO, 0);
                 }
             }
@@ -425,8 +540,9 @@ public:
         InitializePowerManager();
         ESP_LOGI(TAG, "Power Manager initialized.");
 
-        // 立即检测一次充电状态
+        // 立即检测一次充电状态，并初始化 last_charging_state_
         power_manager_->CheckBatteryStatusImmediately();
+        last_charging_state_ = power_manager_->IsCharging();
 
         // 检查开机复位原因与充电状态，决定是否静默启动
         auto reset_reason = esp_reset_reason();
@@ -446,7 +562,13 @@ public:
             if (is_charging) {
                 silent_startup_from_board_ = true;
             }
+        } else {
+            // 异常重启（如看门狗复位、掉电复位等），应该正常启动，不要静默
+            ESP_LOGI(TAG, "异常重启（reset_reason: %d），设置正常启动", reset_reason);
+            silent_startup_from_board_ = false;
         }
+
+        ESP_LOGI(TAG, "silent_startup_from_board_ 最终值: %d", silent_startup_from_board_);
 
         // 静默启动时，禁止点亮内置指示灯，并禁用省电计时器
         if (silent_startup_from_board_) {
@@ -462,8 +584,9 @@ public:
 
         audio_codec.OnWakeUp([this](const std::string& command) {
             ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());
-            // 静默启动时忽略唤醒词
-            if (Application::GetInstance().IsSilentStartup() || silent_startup_from_board_) {
+            // 只有充电导致的静默启动才忽略唤醒词，异常重启的静默启动允许唤醒词工作
+            if (silent_startup_from_board_) {
+                ESP_LOGI(TAG, "充电静默启动状态，忽略唤醒词: %s", command.c_str());
                 return;
             }
             if (IsCommandInList(command, wake_words_)){
@@ -542,11 +665,11 @@ public:
         return DataPointManager::GetInstance().GetDataPointCount();
     }
 
-    bool GetDataPointValue(const std::string& name, int& value) const override {
+    bool GetDataPointValue(const std::string& name, uint32_t& value) const override {
         return DataPointManager::GetInstance().GetDataPointValue(name, value);
     }
 
-    bool SetDataPointValue(const std::string& name, int value) override {
+    bool SetDataPointValue(const std::string& name, uint32_t value) override {
         return DataPointManager::GetInstance().SetDataPointValue(name, value);
     }
 
@@ -554,7 +677,7 @@ public:
         DataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
     }
 
-    void ProcessDataPointValue(const std::string& name, int value) override {
+    void ProcessDataPointValue(const std::string& name, uint32_t value) override {
         DataPointManager::GetInstance().ProcessDataPointValue(name, value);
     }
 

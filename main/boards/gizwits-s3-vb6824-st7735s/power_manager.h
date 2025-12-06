@@ -99,12 +99,24 @@ private:
 
         uint32_t vbat_mv = (uint32_t)((int64_t)voltage_mv * VBAT_SCALE_NUM / VBAT_SCALE_DEN);
         last_vbat_mv_ = vbat_mv;
+        uint8_t old_level = battery_level_;
         CalculateBatteryLevel(vbat_mv);
 
-        static uint8_t log_counter = 0;
-        if ((log_counter++ % 50) == 0) {
-            ESP_LOGI("PowerManager", "电池电压(估算): %lu mV | ADC原始: %d | 平均: %lu | 电量: %u%%",
-                     (unsigned long)vbat_mv, adc_value, (unsigned long)average_adc, battery_level_);
+        static uint16_t log_counter = 0;
+        bool should_log = (battery_level_ != old_level);
+        if (!should_log) {
+            log_counter++;
+            // 每200次（约20秒）打印一次，确保定期输出
+            if (log_counter >= 200) {
+                should_log = true;
+                log_counter = 0;
+            }
+        } else {
+            log_counter = 0;  // 电量变化时重置计数器
+        }
+        
+        if (should_log) {
+            ESP_LOGI("PowerManager", "电量: %u%%", battery_level_);
         }
         return average_adc;
     }

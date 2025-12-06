@@ -156,11 +156,11 @@ bool Protocol::IsAudioChannelBusy() const {
 
 
 void Protocol::UpdateRoomParams(const RoomParams& params) {
-    ESP_LOGI(TAG, "Updating WebSocket parameters:");
-    ESP_LOGI(TAG, "  bot_id: %s", params.bot_id.c_str());
-    ESP_LOGI(TAG, "  voice_id: %s", params.voice_id.c_str());
-    ESP_LOGI(TAG, "  conv_id: %s", params.conv_id.c_str());
-    ESP_LOGI(TAG, "  access_token: %s", params.access_token.c_str());
+    // ESP_LOGI(TAG, "Updating WebSocket parameters:");
+    // ESP_LOGI(TAG, "  bot_id: %s", params.bot_id.c_str());
+    // ESP_LOGI(TAG, "  voice_id: %s", params.voice_id.c_str());
+    // ESP_LOGI(TAG, "  conv_id: %s", params.conv_id.c_str());
+    // ESP_LOGI(TAG, "  access_token: %s", params.access_token.c_str());
 
     room_params_ = params;
 }
@@ -179,4 +179,13 @@ void Protocol::SendTextToAI(const std::string& message) {
     snprintf(init_message_str, strlen(init_message) + message.length() + 1, init_message, message.c_str());
     SendText(init_message_str);
     free(init_message_str);
+}
+
+void Protocol::GenerateTTSFromText(const std::string& text) {
+    // 默认空实现，子类可以重写
+}
+
+void Protocol::SetAudioUploadEnabled(bool enabled) {
+    busy_sending_audio_ = !enabled;  // busy_sending_audio_ = true 表示禁用上传
+    ESP_LOGI(TAG, "Audio upload %s", enabled ? "enabled" : "disabled");
 }

@@ -4,6 +4,7 @@
 #include "assets/lang_config.h"
 #include "auth.h"
 #include "server/giz_api.h"
+#include "board.h"
 #include <cJSON.h>
 
 #include <esp_log.h>
@@ -66,6 +67,27 @@ bool Ota::CheckVersion() {
     std::string did = Auth::getInstance().getDeviceId();
     
      if (!did.empty()) {
+        // 判断是否是 4G 模式，如果是则获取 IMEI
+        const char* imei = nullptr;
+        auto& board = Board::GetInstance();
+        auto network_type = board.GetNetworkType();
+        ESP_LOGI(TAG, "Network type: %d (0=WIFI, 1=ML307)", static_cast<int>(network_type));
+        if (network_type == NetworkType::ML307) {
+            std::string imei_str = board.GetImei();
+            ESP_LOGI(TAG, "GetImei() returned: '%s' (length: %zu)", imei_str.c_str(), imei_str.length());
+            if (!imei_str.empty()) {
+                // 使用静态存储来保存 IMEI 字符串，确保在函数调用期间有效
+                static std::string imei_storage;
+                imei_storage = imei_str;
+                imei = imei_storage.c_str();
+                ESP_LOGI(TAG, "4G mode detected, IMEI: %s", imei);
+            } else {
+                ESP_LOGW(TAG, "IMEI is empty, will not include in firmware update request");
+            }
+        } else {
+            ESP_LOGI(TAG, "Not 4G mode, IMEI will not be included");
+        }
+
         // 存在 did的情况
         GServer::getFirmwareUpdate(
             hw_version.c_str(),
@@ -82,7 +104,8 @@ bool Ota::CheckVersion() {
                     ESP_LOGI(TAG, "No newer firmware available. Current: %s, Server: %s", 
                         current_version_.c_str(), firmware_version_.c_str());
                 }
-            }
+            },
+            imei
         );
 
         has_new_version_ = has_update;

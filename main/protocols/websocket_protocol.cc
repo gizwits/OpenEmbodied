@@ -7,6 +7,7 @@
 #include <optional>
 
 #include <cstring>
+#include <algorithm>
 #include <cJSON.h>
 #include <esp_log.h>
 #include <arpa/inet.h>
@@ -129,19 +130,20 @@ bool WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
     uint32_t random_value = esp_random();
     snprintf(event_id, sizeof(event_id), "%lu", random_value);
 
-    // 使用固定长度缓冲区构建消息
-    int len = snprintf(message_buffer_, sizeof(message_buffer_),
+    // 使用局部缓冲区构建消息，避免并发问题
+    char send_buffer[WS_AUDIO_PACKAGE_BUFFER];
+    int len = snprintf(send_buffer, sizeof(send_buffer),
         "{\"id\":\"%s\",\"event_type\":\"input_audio_buffer.append\",\"data\":{\"delta\":\"%s\"}}",
         event_id, base64_buffer_.get());
 
     // 发送消息
-    websocket_->Send(message_buffer_, len, false);
+    websocket_->Send(send_buffer, len, false);
     return true;
 }
 
 
 bool WebsocketProtocol::SendText(const std::string& text) {
-    if (!websocket_) {
+    if (!websocket_ || !websocket_->IsConnected()) {
         return false;
     }
     websocket_->Send(text);
@@ -149,7 +151,8 @@ bool WebsocketProtocol::SendText(const std::string& text) {
 }
 
 void WebsocketProtocol::SendStopListening() {
-    if (!websocket_) {
+    if (!websocket_ || !websocket_->IsConnected()) {
+        ESP_LOGD(TAG, "SendStopListening: WebSocket not connected, skipping");
         return;
     }
 
@@ -237,12 +240,25 @@ void WebsocketProtocol::CloseAudioChannelTask(void* param) {
         self->websocket_->Close();
     }
     
-    // 5. 清理资源
+    // 4. 清理内存资源
+    // 清理缓存的音频包
+    self->packet_cache_.clear();
+    self->cached_packet_count_ = 0;
+    
+    // 清理音频数据缓冲区（释放预分配的内存）
+    self->audio_data_buffer_.clear();
+    self->audio_data_buffer_.shrink_to_fit();
+    
+    // 清理 base64 编码缓冲区
+    self->base64_buffer_.reset();
+    self->base64_buffer_size_ = 0;
+    
+    // 5. 清理 websocket
     if (self->websocket_) {
         self->websocket_.reset();
     }
     
-    ESP_LOGI(TAG, "Audio channel closed successfully");
+    ESP_LOGI(TAG, "Audio channel closed successfully, memory cleaned");
     
     // 6. 清理任务句柄
     self->close_task_handle_ = nullptr;
@@ -255,6 +271,15 @@ bool WebsocketProtocol::OpenAudioChannel() {
     if (websocket_) {
         websocket_.reset();
     }
+    
+    // 清理旧的缓存和缓冲区，释放内存
+    packet_cache_.clear();
+    cached_packet_count_ = 0;
+    audio_data_buffer_.clear();
+    audio_data_buffer_.shrink_to_fit();
+    base64_buffer_.reset();
+    base64_buffer_size_ = 0;
+    
     if (room_params_.bot_id.empty() || room_params_.access_token.empty() || room_params_.voice_id.empty()) {
         ESP_LOGE(TAG, "Bot ID or access token or voice id is empty");
         return false;
@@ -302,6 +327,9 @@ bool WebsocketProtocol::OpenAudioChannel() {
         //     return;
         // }
         if(event_type == "conversation.audio.delta") {
+            // 性能分析：记录开始时间
+            // auto start_time = std::chrono::steady_clock::now();
+            // auto t0 = start_time;
             
             // 开场白没有明确的事件，只能用这种方式来检测是否要切换到说话模式
             if (need_check_play_prologue_ == true && need_play_prologue_ == true) {
@@ -324,97 +352,163 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 }
             }
             
+            // auto t1 = std::chrono::steady_clock::now();
+            // auto time_check = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
 
+            // 优化：先用快速字符串查找定位，然后用 cJSON 验证（避免解析整个 JSON）
             constexpr std::string_view content_key = "\"content\":\"";
             size_t content_start = str_data.find(content_key);
-            if (content_start != std::string_view::npos) {
-                content_start += content_key.length();
-                
-                size_t content_end = content_start;
-                bool escaped = false;
-                
-                while (content_end < str_data.length()) {
-                    if (str_data[content_end] == '\\') {
-                        escaped = !escaped;
-                    } else if (str_data[content_end] == '"' && !escaped) {
-                        break;
-                    } else {
-                        escaped = false;
-                    }
-                    content_end++;
+            if (content_start == std::string_view::npos) {
+                return;
+            }
+            content_start += content_key.length();
+            
+            size_t content_end = content_start;
+            bool escaped = false;
+            
+            while (content_end < str_data.length()) {
+                if (str_data[content_end] == '\\') {
+                    escaped = !escaped;
+                } else if (str_data[content_end] == '"' && !escaped) {
+                    break;
+                } else {
+                    escaped = false;
                 }
+                content_end++;
+            }
+            
+            // auto t2 = std::chrono::steady_clock::now();
+            // auto time_extract = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
+            
+            if (content_end < str_data.length()) {
+                std::string_view base64_content = str_data.substr(content_start, content_end - content_start);
                 
-                if (content_end < str_data.length()) {
-                    std::string_view base64_content = str_data.substr(content_start, content_end - content_start);
-                    
-                    // Calculate decoded size
-                    size_t output_len = 0;
-                    mbedtls_base64_decode(nullptr, 0, &output_len, 
-                        (const unsigned char*)base64_content.data(), 
-                        base64_content.length());
-
-                    // 只在初始化时分配最大 buffer
-                    if (audio_data_buffer_.capacity() < MAX_AUDIO_PACKET_SIZE) {
-                        audio_data_buffer_.reserve(MAX_AUDIO_PACKET_SIZE);
+                // Calculate decoded size - 优化：直接计算，不需要调用 mbedtls
+                // base64 解码后大小 = (输入长度 * 3) / 4，减去填充字符
+                size_t base64_len = base64_content.length();
+                size_t padding = 0;
+                if (base64_len > 0 && base64_content[base64_len - 1] == '=') {
+                    padding++;
+                    if (base64_len > 1 && base64_content[base64_len - 2] == '=') {
+                        padding++;
                     }
-                    // 限制最大长度，防止溢出
-                    if (output_len > MAX_AUDIO_PACKET_SIZE) {
-                        ESP_LOGW(TAG, "Audio packet too large: %u, truncated to %u", (unsigned)output_len, MAX_AUDIO_PACKET_SIZE);
-                        output_len = MAX_AUDIO_PACKET_SIZE;
-                    }
-                    audio_data_buffer_.resize(output_len);
+                }
+                size_t output_len = (base64_len * 3) / 4 - padding;
+                
+                // auto t4 = std::chrono::steady_clock::now();
+                // auto time_calc_size = std::chrono::duration_cast<std::chrono::microseconds>(t4 - t2).count();
 
-                    size_t actual_len = 0;
-                    int ret = mbedtls_base64_decode(
-                        audio_data_buffer_.data(), audio_data_buffer_.size(), &actual_len,
-                        (const unsigned char*)base64_content.data(), 
-                        base64_content.length());
+                // 只在初始化时分配最大 buffer
+                if (audio_data_buffer_.capacity() < MAX_AUDIO_PACKET_SIZE) {
+                    audio_data_buffer_.reserve(MAX_AUDIO_PACKET_SIZE);
+                }
+                // 限制最大长度，防止溢出
+                if (output_len > MAX_AUDIO_PACKET_SIZE) {
+                    ESP_LOGW(TAG, "Audio packet too large: %u, truncated to %u", (unsigned)output_len, MAX_AUDIO_PACKET_SIZE);
+                    output_len = MAX_AUDIO_PACKET_SIZE;
+                }
+                audio_data_buffer_.resize(output_len);
 
-                    if (ret == 0 && actual_len > 0) {
-                        if (on_incoming_audio_ != nullptr) {
-                            // 队列长度限制逻辑在下游
-                            if (is_first_packet_ == true) {
+                size_t actual_len = 0;
+                // auto t5 = std::chrono::steady_clock::now();
+                int ret = mbedtls_base64_decode(
+                    audio_data_buffer_.data(), audio_data_buffer_.size(), &actual_len,
+                    (const unsigned char*)base64_content.data(), 
+                    base64_content.length());
+                // auto t6 = std::chrono::steady_clock::now();
+                // auto time_decode = std::chrono::duration_cast<std::chrono::microseconds>(t6 - t5).count();
+
+                if (ret == 0 && actual_len > 0) {
+                    // auto t7 = std::chrono::steady_clock::now();
+                    if (on_incoming_audio_ != nullptr) {
+                        // 队列长度限制逻辑在下游
+                        if (is_first_packet_ == true) {
+                            // 发送 tts start 事件
+                            // auto t7a = std::chrono::steady_clock::now();
+                            snprintf(message_buffer_, sizeof(message_buffer_), 
+                                "{\"type\":\"tts\",\"state\":\"start\"}");
+                               
+                            auto message_json = cJSON_Parse(message_buffer_);
+                            if (message_json) {
+                                // ESP_LOGI(TAG, "tts start: %s", cJSON_Print(message_json));
+                                on_incoming_json_(message_json);
+                                cJSON_Delete(message_json);
+                            }
+                            // auto t7b = std::chrono::steady_clock::now();
+                            // auto time_first_packet = std::chrono::duration_cast<std::chrono::microseconds>(t7b - t7a).count();
+                            // ESP_LOGD(TAG, "First packet processing: %lld us", time_first_packet);
+                            
+                            is_first_packet_ = false;
+                            // 开始缓存模式，先缓存MAX_CACHED_PACKETS包数据
+                            cached_packet_count_ = 0;
+                            packet_cache_.clear();
+                        }
+                        
+                        // 创建当前音频包
+                        // auto t8 = std::chrono::steady_clock::now();
+                        AudioStreamPacket packet;
+                        packet.sample_rate = 16000;
+                        packet.frame_duration = OPUS_FRAME_DURATION_MS;
+                        packet.payload.assign(audio_data_buffer_.begin(), audio_data_buffer_.begin() + actual_len);
+                        // auto t9 = std::chrono::steady_clock::now();
+                        // auto time_create_packet = std::chrono::duration_cast<std::chrono::microseconds>(t9 - t8).count();
+                        
+                        if (cached_packet_count_ < MAX_CACHED_PACKETS) {
+                            // 还在缓存阶段，添加到缓存
+                            // auto t10 = std::chrono::steady_clock::now();
+                            packet_cache_.push_back(std::move(packet));
+                            cached_packet_count_++;
+                            // auto t11 = std::chrono::steady_clock::now();
+                            // auto time_cache = std::chrono::duration_cast<std::chrono::microseconds>(t11 - t10).count();
+                            // ESP_LOGD(TAG, "Cache packet: %lld us", time_cache);
+                        } else {
+                            // 缓存已满，开始推送
+                            if (!packet_cache_.empty()) {
+                                // 发送 firstaudio 事件（只在第一次缓存满时发送）
+                                // auto t12 = std::chrono::steady_clock::now();
                                 snprintf(message_buffer_, sizeof(message_buffer_), 
-                                    "{\"type\":\"tts\",\"state\":\"start\"}");
-                                   
+                                    "{\"type\":\"firstaudio\"}");
+                               
                                 auto message_json = cJSON_Parse(message_buffer_);
                                 if (message_json) {
                                     on_incoming_json_(message_json);
                                     cJSON_Delete(message_json);
                                 }
-                                is_first_packet_ = false;
-                                // 开始缓存模式，先缓存MAX_CACHED_PACKETS包数据
-                                cached_packet_count_ = 0;
-                                packet_cache_.clear();
-                            }
-                            
-                            // 创建当前音频包
-                            AudioStreamPacket packet;
-                            packet.sample_rate = server_sample_rate_;
-                            packet.frame_duration = OPUS_FRAME_DURATION_MS;
-                            packet.payload.assign(audio_data_buffer_.begin(), audio_data_buffer_.begin() + actual_len);
-                            
-                            if (cached_packet_count_ < MAX_CACHED_PACKETS) {
-                                // 还在缓存阶段，添加到缓存
-                                packet_cache_.push_back(std::move(packet));
-                                cached_packet_count_++;
-                                // ESP_LOGI(TAG, "Caching packet %d/%d", cached_packet_count_, MAX_CACHED_PACKETS);
-                            } else {
-                                // 缓存已满，开始推送
-                                if (!packet_cache_.empty()) {
-                                    // 先推送所有缓存的包
-                                    for (auto& cached_packet : packet_cache_) {
-                                        on_incoming_audio_(std::move(cached_packet));
-                                    }
-                                    packet_cache_.clear();
-                                    ESP_LOGI(TAG, "Pushed %d cached packets", cached_packet_count_);
+                                
+                                // 先推送所有缓存的包
+                                // auto t13 = std::chrono::steady_clock::now();
+                                for (auto& cached_packet : packet_cache_) {
+                                    on_incoming_audio_(std::move(cached_packet));
                                 }
-                                // 推送当前包
-                                on_incoming_audio_(std::move(packet));
+                                // auto t14 = std::chrono::steady_clock::now();
+                                // auto time_push_cached = std::chrono::duration_cast<std::chrono::microseconds>(t14 - t13).count();
+                                // ESP_LOGD(TAG, "Push cached packets: %lld us for %d packets", time_push_cached, cached_packet_count_);
+                                
+                                packet_cache_.clear();
+                                ESP_LOGI(TAG, "Pushed %d cached packets", cached_packet_count_);
                             }
-                            // on_incoming_audio_(std::move(packet));
+                            // 推送当前包
+                            // auto t15 = std::chrono::steady_clock::now();
+                            on_incoming_audio_(std::move(packet));
+                            // auto t16 = std::chrono::steady_clock::now();
+                            // auto time_push = std::chrono::duration_cast<std::chrono::microseconds>(t16 - t15).count();
+                            // ESP_LOGD(TAG, "Push packet: %lld us", time_push);
                         }
                     }
+                    
+                    // 性能分析：记录总时间
+                    // auto end_time = std::chrono::steady_clock::now();
+                    // auto total_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
+                    
+                    // 每10个包输出一次性能统计
+                    // static int packet_count = 0;
+                    // packet_count++;
+                    // if (packet_count % 10 == 0) {
+                    //     ESP_LOGI(TAG, "Performance: check=%lld, extract=%lld, calc_size=%lld, decode=%lld, total=%lld us, base64_len=%zu",
+                    //             time_check, time_extract, time_calc_size, time_decode, total_time, base64_content.length());
+                    // }
+                } else if (ret != 0) {
+                    ESP_LOGE(TAG, "Base64 decode failed: ret=%d, content_len=%zu", ret, base64_content.length());
                 }
             }
         } else {
@@ -514,16 +608,26 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 // 自然对话才要打断
                 int chat_mode = app.GetChatMode();
                 if (chat_mode == 2) {
-                    app.AbortSpeaking(kAbortReasonNone);
+                    app.Schedule([this]() {
+                        auto& app = Application::GetInstance();
+                        app.AbortSpeaking(kAbortReasonNone);
+                    }, "input_audio_buffer.speech_started_AbortSpeaking");
                 }
             } else if (event_type == "input_audio_buffer.speech_stopped") {
                 MqttClient::getInstance().sendTraceLog("info", "input_audio_buffer.speech_stopped");
                 ESP_LOGI(TAG, "input_audio_buffer.speech_stopped");
-            } else if (event_type == "conversation.message.delta") {
+            } else if (event_type == "conversation.audio.sentence_start") {
                 auto data_json = cJSON_GetObjectItem(root, "data");
-                auto content_json = cJSON_GetObjectItem(data_json, "content");
+                auto content_json = cJSON_GetObjectItem(data_json, "text");
 
-                message_cache_ += std::string(content_json->valuestring);
+                ESP_LOGI(TAG, "conversation.audio.sentence_start: %s", content_json->valuestring);
+
+                // Remove newline characters from content
+                std::string content(content_json->valuestring);
+                content.erase(std::remove(content.begin(), content.end(), '\n'), content.end());
+                content.erase(std::remove(content.begin(), content.end(), '\r'), content.end());
+                
+                message_cache_ += content;
                 snprintf(message_buffer_, sizeof(message_buffer_), 
                     "{\"type\":\"tts\",\"state\":\"sentence_start\",\"text\":\"%s\"}", message_cache_.c_str());
                 
@@ -573,6 +677,14 @@ bool WebsocketProtocol::OpenAudioChannel() {
             ESP_LOGI(TAG, "Websocket disconnected cleanly (client_initiated=%d) t_us=%lld", ws_client_initiated_close_, (long long)t_us);
             reconnect_attempts_ = 0;   // 正常断开，重置重连计数
             should_reconnect_ = false; // 正常断开不需要重连
+            
+            // 正常断开时清理内存资源
+            packet_cache_.clear();
+            cached_packet_count_ = 0;
+            audio_data_buffer_.clear();
+            audio_data_buffer_.shrink_to_fit();
+            base64_buffer_.reset();
+            base64_buffer_size_ = 0;
         } else {
             ESP_LOGI(TAG, "Websocket disconnected unexpectedly (client_initiated=%d) t_us=%lld", ws_client_initiated_close_, (long long)t_us);
             // 异常断开，尝试重连
@@ -709,15 +821,38 @@ bool WebsocketProtocol::OpenAudioChannel() {
 
 #ifndef CONFIG_IDF_TARGET_ESP32C2
     // C2 处理不过来
-    message += "\"conversation.message.delta\",";
+    // message += "\"conversation.message.delta\",";
+    message += "\"conversation.audio.sentence_start\",";
+    message += "\"conversation.audio_transcript.update\",";
 #endif
     message += "\"input_audio_buffer.speech_stopped\"";
     message += "],";
+    
+    // 获取打断关键词列表
+    auto interrupt_keywords = Board::GetInstance().GetInterruptKeywords();
+    
     if (chat_mode != 0) {
         message += "\"turn_detection\": {";
         message += "\"type\": \"server_vad\",";  // 判停类型，client_vad/server_vad，默认为 client_vad
         message += "\"prefix_padding_ms\": 300,"; // server_vad模式下，VAD 检测到语音之前要包含的音频量，单位为 ms。默认为 600ms
         message += "\"silence_duration_ms\": 500"; // server_vad模式下，检测语音停止的静音持续时间，单位为 ms。默认为 800ms
+        
+        // 如果存在关键词，添加 interrupt_config
+        if (!interrupt_keywords.empty()) {
+            message += ",";
+            message += "\"interrupt_config\":{";
+            message += "\"mode\":\"keyword_contains\",";
+            message += "\"keywords\":[";
+            for (size_t i = 0; i < interrupt_keywords.size(); i++) {
+                message += "\"" + interrupt_keywords[i] + "\"";
+                if (i < interrupt_keywords.size() - 1) {
+                    message += ",";
+                }
+            }
+            message += "]";
+            message += "}";
+        }
+        
         message += "},";
     }
     message += "\"chat_config\":{";
@@ -742,7 +877,23 @@ bool WebsocketProtocol::OpenAudioChannel() {
     message += "\"channel\":1,";
     message += "\"bit_depth\":16";
     message += "},";
-    message += "\"asr_config\":{\"user_language\":\"" + user_language + "\"},";
+    message += "\"asr_config\":{";
+    message += "\"user_language\":\"" + user_language + "\"";
+    
+    // 如果存在关键词，添加 hot_words
+    if (!interrupt_keywords.empty()) {
+        message += ",";
+        message += "\"hot_words\":[";
+        for (size_t i = 0; i < interrupt_keywords.size(); i++) {
+            message += "\"" + interrupt_keywords[i] + "\"";
+            if (i < interrupt_keywords.size() - 1) {
+                message += ",";
+            }
+        }
+        message += "]";
+    }
+    
+    message += "},";
     message += "\"output_audio\":{";
     message += "\"codec\":\"" + codec + "\",";
     message += "\"opus_config\":{";
@@ -785,6 +936,30 @@ void WebsocketProtocol::SendTextToAI(const std::string& text) {
     // 如果需要 const char* 类型
     const char* message_cstr = message.c_str();
     SendText(message_cstr);
+}
+
+void WebsocketProtocol::GenerateTTSFromText(const std::string& text) {
+    if (!websocket_ || !websocket_->IsConnected()) {
+        ESP_LOGW(TAG, "WebSocket not connected, cannot generate TTS");
+        return;
+    }
+    
+    // 创建事件 ID
+    char event_id[32];
+    uint32_t random_value = esp_random();
+    snprintf(event_id, sizeof(event_id), "%lu", random_value);
+    
+    // 构建 TTS 合成请求消息
+    std::string message = "{"
+        "\"id\":\"" + std::string(event_id) + "\","
+        "\"event_type\":\"input_text.generate_audio\","
+        "\"data\":{"
+            "\"mode\":\"text\","
+            "\"text\":\"" + text + "\""
+        "}"
+    "}";
+    
+    SendText(message);
 }
 
 void WebsocketProtocol::ParseServerHello(const cJSON* root) {

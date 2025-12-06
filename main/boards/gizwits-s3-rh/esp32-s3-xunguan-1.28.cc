@@ -11,7 +11,7 @@
 
 
 #include "led/single_led.h"
-#include "display/eye_display_horizontal_emojis.h"
+#include "display/eye_display_horizontal.h"
 #include "display/display.h"
 
 #include <wifi_station.h>
@@ -42,7 +42,7 @@ class MovecallMojiESP32S3 : public WifiBoard {
 private:
     Button boot_button_;
     Button touch_button_;
-    EyeDisplayHorizontalEmo* display_;
+    EyeDisplayHorizontal* display_;
 
     bool need_power_off_ = false;
     i2c_master_bus_handle_t i2c_bus_;
@@ -274,7 +274,7 @@ private:
             return;
         }
         
-        display_ = new EyeDisplayHorizontalEmo(panel_io, panel,
+        display_ = new EyeDisplayHorizontal(panel_io, panel,
             DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
             DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY,
             &qrcode_img,

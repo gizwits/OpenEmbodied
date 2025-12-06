@@ -12,7 +12,7 @@
 #include <esp_lcd_st7735s.h>
 #include "data_point_manager.h"
 #include "led/single_led.h"
-#include "display/eye_display_horizontal_emojis.h"
+#include "display/eye_display_horizontal.h"
 #include "display/display.h"
 #include <esp_lvgl_port.h>
 
@@ -27,6 +27,7 @@
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
+#include "driver/ledc.h"
 #include "esp_timer.h"
 #include <esp_system.h>
 #include <freertos/FreeRTOS.h>
@@ -49,10 +50,11 @@ private:
     
     Button power_button_;
     VbAduioCodec audio_codec;
-    EyeDisplayHorizontalEmo* display_;
+    EyeDisplayHorizontal* display_;
     bool need_power_off_ = false;
     int64_t power_on_time_ = 0;  // 记录上电时间
     PowerManager* power_manager_;
+    bool last_charging_state_ = false;  // 跟踪上一次充电状态，用于检测充电状态变化
     TickType_t last_touch_time_ = 0;  // 上次抚摸触发时间
     PowerSaveTimer* power_save_timer_;
     bool is_charging_sleep_ = false;
@@ -198,7 +200,7 @@ private:
         
         // 创建显示对象
         DisplayFonts fonts = { .text_font = &font_puhui_20_4, .icon_font = nullptr, .emoji_font = nullptr };
-        display_ = new EyeDisplayHorizontalEmo(panel_io, panel,
+        display_ = new EyeDisplayHorizontal(panel_io, panel,
             DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
             DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY,
             fonts);
@@ -253,6 +255,11 @@ private:
             ESP_LOGI(TAG, "BOOT 按键短按");
         });
         boot_button_.OnLongPress([this]() {
+            // 仅充电静默时禁用，异常重启的静默允许长按进入配网
+            if (silent_startup_from_board_) {
+                ESP_LOGI(TAG, "充电静默启动状态，长按 BOOT 不进入配网");
+                return;
+            }
             ESP_LOGI(TAG, "BOOT 按键长按，进入配网");
             ResetWifiConfiguration();
         });
@@ -335,17 +342,53 @@ private:
         // 注册充电状态改变回调
         power_manager_->SetChargingStatusCallback([this](bool is_charging) {
             ESP_LOGI(TAG, "充电状态改变: %s", is_charging ? "开始充电" : "停止充电");
-            static bool last_charging_state = false;
+            bool was_charging = last_charging_state_;
             static int64_t last_state_change_time = 0;
             const int64_t DEBOUNCE_TIME_MS = 1000; // 1秒防抖时间
             
             int64_t current_time = esp_timer_get_time() / 1000; // 转换为毫秒
             // 防抖处理：状态变化后1秒内不处理新的变化
-            if (last_charging_state != is_charging && 
+            if (was_charging != is_charging && 
                 (last_state_change_time == 0 || (current_time - last_state_change_time) > DEBOUNCE_TIME_MS)) {
                 
-                last_charging_state = is_charging;
+                last_charging_state_ = is_charging;  // 更新状态
                 last_state_change_time = current_time;
+                
+                // 只在静默启动状态下检查拔掉充电线的情况
+                if (silent_startup_from_board_) {
+                    // 如果从充电变为非充电，且处于静默启动状态，则自动关机
+                    if (was_charging && !is_charging) {
+                        ESP_LOGI(TAG, "🔋 静默启动状态下检测到USB已拔掉（从充电变为非充电），自动关机以节省功耗");
+                        // 保存标志位：电池模式下关机，保存silent_next=0
+                        {
+                            Settings settings("system", true);
+                            settings.SetInt("silent_next", 0);
+                            ESP_LOGI(TAG, "电池模式下关机，保存silent_next=0");
+                        }
+                        // 延迟一小段时间再关机，避免误判
+                        xTaskCreate([](void* arg) {
+                            vTaskDelay(pdMS_TO_TICKS(2000));  // 等待2秒确认
+                            MovecallMojiESP32S3* board = static_cast<MovecallMojiESP32S3*>(arg);
+                            if (!board->power_manager_->IsCharging() && board->silent_startup_from_board_) {
+                                ESP_LOGI(TAG, "确认USB已拔掉，执行静默关机（不播放音频）");
+                                // 静默启动状态下直接关机，不播放任何音频
+                                auto& app = Application::GetInstance();
+                                app.QuitTalking();
+                                // 先立即拉低背光GPIO
+                                gpio_set_direction(DISPLAY_BACKLIGHT_PIN, GPIO_MODE_OUTPUT);
+                                gpio_set_level(DISPLAY_BACKLIGHT_PIN, 0);
+                                // 拉低电源保持引脚，关闭电池供电
+                                gpio_set_level(POWER_HOLD_GPIO, 0);
+                                ESP_LOGI(TAG, "🔋 电源保持引脚已拉低，设备关机 (GPIO%d)", POWER_HOLD_GPIO);
+                                // 延时3秒后进入深度睡眠
+                                vTaskDelay(pdMS_TO_TICKS(3000));
+                                board->run_sleep_mode(false);
+                            }
+                            vTaskDelete(NULL);
+                        }, "auto_poweroff_task", 2048, this, 5, NULL);  // 减小栈大小：2KB足够（等待+关机操作）
+                        return;  // 静默模式下拔掉充电线直接返回，不执行后续逻辑
+                    }
+                }
                 
                 // XunguanDisplay* xunguan_display = static_cast<XunguanDisplay*>(GetDisplay());
                 if (is_charging) {
@@ -355,7 +398,7 @@ private:
                     // GetBacklight()->SetBrightness(5, false);
                     
                 } else {
-                    // 充电停止时的处理逻辑
+                    // 充电停止时的处理逻辑（非静默模式）
                     ESP_LOGI(TAG, "检测到停止充电");
                     
                     // 拔掉USB时，清除静默标志，让下次在电池模式下正常启动
@@ -364,8 +407,8 @@ private:
                     ESP_LOGI(TAG, "拔掉USB，清除NVS silent_next标志");
                     
                     auto state = Application::GetInstance().GetDeviceState();
-                    // 待机状态，直接关机
-                    if (state == kDeviceStateIdle) {
+                    // 待机或休眠状态，直接关机
+                    if (state == kDeviceStateIdle || state == kDeviceStateSleeping) {
                         PowerOff();
                     }
                 }
@@ -375,7 +418,7 @@ private:
                     auto& mqtt_client = MqttClient::getInstance();
                     mqtt_client.ReportTimer();
                 });
-            } else if (last_charging_state != is_charging) {
+            } else if (was_charging != is_charging) {
                 ESP_LOGI(TAG, "充电状态变化被防抖过滤: %s", is_charging ? "开始充电" : "停止充电");
             }
         });
@@ -400,9 +443,9 @@ private:
             ESP_LOGI(TAG, "power_button_.OnPressDown");
             auto& app = Application::GetInstance();
             
-            // 如果是静默启动状态（充电插入），短按不执行任何操作
-            if (app.IsSilentStartup()) {
-                ESP_LOGI(TAG, "静默启动状态，短按电源键不执行操作");
+            // 只有充电导致的静默启动才禁用按键，异常重启的静默启动允许按键工作
+            if (silent_startup_from_board_) {
+                ESP_LOGI(TAG, "充电静默启动状态，短按电源键不执行操作");
                 return;
             }
     
@@ -449,9 +492,9 @@ private:
                 return;
             }
             
-            // 如果是静默启动状态，清除静默标志并重启（开机）
-            if (app.IsSilentStartup()) {
-                ESP_LOGI(TAG, "静默启动状态，长按清除静默标志并重启");
+            // 只有充电导致的静默启动才需要长按唤醒，异常重启的静默启动直接执行关机
+            if (silent_startup_from_board_) {
+                ESP_LOGI(TAG, "充电静默启动状态，长按清除静默标志并重启");
                 Settings settings("system", true);
                 settings.SetInt("silent_next", 0);
                 // 设置一个标志，表示用户主动唤醒，下次启动不应该静默
@@ -561,12 +604,13 @@ public:
         InitializeIot();
         InitializePowerManager();
         
-        // 立即检测一次充电状态，确保能正确判断
+        // 立即检测一次充电状态，确保能正确判断，并初始化 last_charging_state_
         if (power_manager_) {
             power_manager_->CheckBatteryStatusImmediately();
             // 等待一下让充电状态稳定
             vTaskDelay(pdMS_TO_TICKS(100));
             power_manager_->CheckBatteryStatusImmediately();
+            last_charging_state_ = power_manager_->IsCharging();
         }
         
         // 检查NVS中的静默启动标志和充电状态
@@ -655,9 +699,9 @@ public:
             ESP_LOGE(TAG, "vb6824 recv cmd: %s", command.c_str());
             auto& app = Application::GetInstance();
             
-            // 如果是静默启动状态，忽略唤醒词
-            if (app.IsSilentStartup()) {
-                ESP_LOGI(TAG, "静默启动状态，忽略唤醒词: %s", command.c_str());
+            // 只有充电导致的静默启动才忽略唤醒词，异常重启的静默启动允许唤醒词工作
+            if (silent_startup_from_board_) {
+                ESP_LOGI(TAG, "充电静默启动状态，忽略唤醒词: %s", command.c_str());
                 return;
             }
             
@@ -731,7 +775,7 @@ public:
         
         // 使用更平滑的背光恢复
         self->GetBacklight()->RestoreBrightness();
-
+        
         vTaskDelete(NULL); // 任务结束时删除自己
     }
 
@@ -781,11 +825,11 @@ public:
         return DataPointManager::GetInstance().GetDataPointCount();
     }
 
-    bool GetDataPointValue(const std::string& name, int& value) const override {
+    bool GetDataPointValue(const std::string& name, uint32_t& value) const override {
         return DataPointManager::GetInstance().GetDataPointValue(name, value);
     }
 
-    bool SetDataPointValue(const std::string& name, int value) override {
+    bool SetDataPointValue(const std::string& name, uint32_t value) override {
         return DataPointManager::GetInstance().SetDataPointValue(name, value);
     }
 
@@ -793,7 +837,7 @@ public:
         DataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
     }
 
-    void ProcessDataPointValue(const std::string& name, int value) override {
+    void ProcessDataPointValue(const std::string& name, uint32_t value) override {
         DataPointManager::GetInstance().ProcessDataPointValue(name, value);
     }
     
@@ -815,6 +859,13 @@ public:
 
     void ProcessBinaryDataPointValue(const std::string& name, const uint8_t* data, size_t data_len) override {
         DataPointManager::GetInstance().ProcessBinaryDataPointValue(name, data, data_len);
+    }
+    virtual int GetPeriod() override { 
+        return 1; 
+    }
+    
+    virtual int GetMaxFrameNum() override { 
+        return 20;
     }
 
 };

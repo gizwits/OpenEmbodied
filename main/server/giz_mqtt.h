@@ -16,7 +16,7 @@
 // 内存优化配置
 // S3 用更大的内存
 #if CONFIG_IDF_TARGET_ESP32S3
-#define MQTT_TASK_STACK_SIZE_RCV     1024 * 6    // 消息接收任务栈大小 - 增加以处理大型JSON
+#define MQTT_TASK_STACK_SIZE_RCV     1024 * 10    // 消息接收任务栈大小 - 增加以处理大型JSON
 #define MQTT_TASK_STACK_SIZE_RESEND  4096    // 消息重发任务栈大小
 #else
 #define MQTT_TASK_STACK_SIZE_RCV     4096    // 消息接收任务栈大小 - 增加以处理大型JSON
@@ -83,6 +83,23 @@ typedef struct {
     int qos; // reserved for QoS or control (e.g. MQTT_SEND_CONTROL_ROOMINFO)
 } mqtt_send_msg_t;
 
+#ifdef CONFIG_IDF_TARGET_ESP32S3
+
+// RTC parameters structure
+typedef struct {
+    char bot_id[64];
+    char voice_id[64];
+    char user_id[64];
+    char conv_id[64];
+    char access_token[256];
+    char voice_lang[64];
+    char api_domain[256];
+    char config[4096];  // 新增：保存 coze_websocket.config 的 JSON 字符串，增加到 1KB
+    int expires_in;
+} room_params_t;
+
+#else
+
 // RTC parameters structure
 typedef struct {
     char bot_id[64];
@@ -95,6 +112,8 @@ typedef struct {
     char config[1024];  // 新增：保存 coze_websocket.config 的 JSON 字符串，增加到 1KB
     int expires_in;
 } room_params_t;
+
+#endif
 
 class MqttClient {
 public:
@@ -170,7 +189,7 @@ private:
     static void tokenRefreshTimerCallback(TimerHandle_t xTimer);  // Token 刷新定时器回调
     static void reconnectTask(void* arg);
 
-    void processAttrValue(std::string attr_name, int value);
+    void processAttrValue(std::string attr_name, uint32_t value);
     uint8_t mqttNumRemLenBytes(const uint8_t *buf);
     bool parseRealtimeAgent(const char* in_str, int in_len, room_params_t* params);
     bool parseM2MCtrlMsg(const char* in_str, int in_len);

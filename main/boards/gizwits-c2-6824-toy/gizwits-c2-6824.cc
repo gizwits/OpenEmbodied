@@ -24,10 +24,31 @@
 
 #define TAG "CustomBoard"
 
+// 音量映射包装类：拦截所有 SetOutputVolume 调用，将数据点/Speaker音量(0-100)映射到板端(0-90)
+class VolumeMappedAudioCodec : public VbAduioCodec {
+public:
+    VolumeMappedAudioCodec(gpio_num_t tx, gpio_num_t rx) : VbAduioCodec(tx, rx) {}
+    
+    void SetOutputVolume(int volume) override {
+        int datapoint_volume = volume;
+        int board_volume = volume;
+        
+        // 统一处理：所有0-100范围内的值都进行映射（数据点/Speaker都是0-100）
+        // 按键调节的值会先转换为数据点值再传入，所以也会被映射
+        if (volume >= 0 && volume <= 100) {
+            // 数据点/Speaker音量(0-100)映射到板端(0-90)，100对应90
+            board_volume = (volume * 90) / 100;
+            ESP_LOGI(TAG, "数据点下发音量: %d, 映射到板端音量: %d", datapoint_volume, board_volume);
+        }
+        
+        VbAduioCodec::SetOutputVolume(board_volume);
+    }
+};
+
 class CustomBoard : public WifiBoard {
 private:
     Button boot_button_;
-    VbAduioCodec audio_codec;
+    VolumeMappedAudioCodec audio_codec;
     Button volume_up_button_;
     // Button prev_button_;
     Button next_button_;
@@ -227,13 +248,17 @@ private:
         });
         volume_up_button_.OnClick([this]() {
             auto codec = GetAudioCodec();
-            auto volume = codec->output_volume() + 10;
-            if (volume > 100) {
-                volume = 100;
+            // 按键调节：获取当前板端值，转换为数据点值，加10，再传入（让包装类统一映射）
+            int current_board_volume = codec->output_volume();
+            int current_datapoint_volume = (current_board_volume * 100) / 90;
+            int new_datapoint_volume = current_datapoint_volume + 10;
+            if (new_datapoint_volume > 100) {
+                new_datapoint_volume = 100;
             }
-            codec->SetOutputVolume(volume);
+            codec->SetOutputVolume(new_datapoint_volume);
         });
         volume_up_button_.OnLongPress([this]() {
+            // 长按设置为数据点最大值100（映射后为板端90）
             GetAudioCodec()->SetOutputVolume(100);
         });
 
@@ -256,8 +281,21 @@ private:
                 GetBatteryLevel(level, charging, discharging);
                 return level;
             },
-            [this]() -> int { return GetAudioCodec()->output_volume(); },
-            [this](int value) { GetAudioCodec()->SetOutputVolume(value); },
+            [this]() -> int { 
+                // 将板端音量映射回数据点(0-100)
+                // 数据点100对应板端90，所以反向映射：数据点 = (板端 * 100) / 90
+                int board_volume = GetAudioCodec()->output_volume();
+                int datapoint_volume = (board_volume * 100) / 90;
+                // 限制最大值为100，防止超过数据点范围
+                if (datapoint_volume > 100) {
+                    datapoint_volume = 100;
+                }
+                return datapoint_volume;
+            },
+            [this](int value) { 
+                // 数据点回调：直接传入原始值(0-100)，让包装类统一处理映射和打印
+                GetAudioCodec()->SetOutputVolume(value);
+            },
             []() -> int { 
                 wifi_ap_record_t ap_info;
                 if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
@@ -436,6 +474,52 @@ public:
         return PowerManager::GetInstance().IsCharging();
     }
 
+    // 低电量是否阻止启动（低电量时直接关机）
+    bool NeedBlockLowBattery() override {
+        return true;
+    }
+
+    // 设备关机方法（低电量时调用）
+    virtual void PowerOff() override {
+        ESP_LOGI(TAG, "PowerOff called (低电量关机)");
+        
+        // 检查充电状态
+        bool is_charging = PowerManager::GetInstance().IsCharging();
+        if (is_charging) {
+            // 充电中，只断开 socket，不进入深度睡眠
+            ESP_LOGI(TAG, "充电中，只断开连接");
+            Application::GetInstance().QuitTalking();
+            return;
+        }
+        
+        // 电池模式下，确保音频输出已启用，然后等待低电量提示音播放完成后再关机
+        auto codec = GetAudioCodec();
+        if (codec) {
+            codec->EnableOutput(true);
+            ESP_LOGI(TAG, "已启用音频输出，等待低电量提示音播放完成");
+        }
+        
+        // 给一点时间让音频包放入队列并开始播放
+        vTaskDelay(pdMS_TO_TICKS(200));
+        
+        // 等待音频播放完成（队列为空）
+        int wait_count = 0;
+        while (!Application::GetInstance().GetAudioService().IsIdle() && wait_count < 80) {
+            vTaskDelay(pdMS_TO_TICKS(50));  // 50ms检查一次，最多等待4秒
+            wait_count++;
+        }
+        // 额外等待一小段时间，确保音频完全播放完毕
+        vTaskDelay(pdMS_TO_TICKS(200));
+        ESP_LOGI(TAG, "低电量提示音播放完成，准备关机");
+        
+        // 停止所有功能
+        Application::GetInstance().QuitTalking();
+        
+        // 电池模式下，进入深度睡眠
+        // ESP_LOGI(TAG, "电池模式下低电量，进入深度睡眠");
+        // run_sleep_mode(false);
+    }
+
     // 数据点相关方法实现
     const char* GetGizwitsProtocolJson() const override {
         return DataPointManager::GetInstance().GetGizwitsProtocolJson();
@@ -445,11 +529,11 @@ public:
         return DataPointManager::GetInstance().GetDataPointCount();
     }
 
-    bool GetDataPointValue(const std::string& name, int& value) const override {
+    bool GetDataPointValue(const std::string& name, uint32_t& value) const override {
         return DataPointManager::GetInstance().GetDataPointValue(name, value);
     }
 
-    bool SetDataPointValue(const std::string& name, int value) override {
+    bool SetDataPointValue(const std::string& name, uint32_t value) override {
         return DataPointManager::GetInstance().SetDataPointValue(name, value);
     }
 
@@ -457,7 +541,7 @@ public:
         DataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
     }
 
-    void ProcessDataPointValue(const std::string& name, int value) override {
+    void ProcessDataPointValue(const std::string& name, uint32_t value) override {
         DataPointManager::GetInstance().ProcessDataPointValue(name, value);
     }
 

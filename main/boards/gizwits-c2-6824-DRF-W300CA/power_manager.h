@@ -12,6 +12,7 @@
 #include "config.h"
 #include <esp_adc/adc_cali.h>
 #include <esp_adc/adc_cali_scheme.h>
+#include <functional>
 
 // Battery ADC configuration
 #define BAT_ADC_CHANNEL  ADC_CHANNEL_3  // Battery voltage ADC channel
@@ -47,6 +48,9 @@ private:
     uint8_t battery_level_ = 100;
     uint32_t average_adc = 0;
     bool is_charging_ = false;
+    
+    // 充电状态变化回调
+    std::function<void(bool was_charging, bool is_charging)> charging_state_change_callback_ = nullptr;
 
     adc_oneshot_unit_handle_t adc_handle_;
     adc_cali_handle_t cali_handle_ = nullptr;
@@ -245,31 +249,22 @@ private:
     void CheckChargingStatus() {
         uint32_t voltage = GetBatteryVoltage();
         
-        #define BATTERY_FULL_VOLTAGE 4200      // 根据规格书4.20V
-        #define BATTERY_NOT_CHARGING_VOLTAGE 4100
+        // 充电状态判定：基于估算电压，与 xingbao 项目保持一致
+        static constexpr uint32_t BATTERY_CHARGING_THRESHOLD_MV = 4400;
+        bool new_is_charging = (voltage >= BATTERY_CHARGING_THRESHOLD_MV);
         
-        static uint8_t not_charging_count = 0;
         bool previous_charging = is_charging_;
-        
-        if (voltage > BATTERY_FULL_VOLTAGE) {
-            is_charging_ = true;
-            not_charging_count = 0;
-        } else if (voltage < BATTERY_NOT_CHARGING_VOLTAGE) {
-            if (is_charging_) {
-                not_charging_count++;
-                if (not_charging_count >= 20) { // 2秒确认
-                    is_charging_ = false;
-                    not_charging_count = 0;
-                }
-            }
-        }
-        
-        // 充电状态变化时立即打印
-        if (previous_charging != is_charging_) {
+        if (new_is_charging != is_charging_) {
+            is_charging_ = new_is_charging;
+            // 充电状态变化时立即打印
             ESP_LOGI("PowerManager", "🔋 充电状态变化: %s -> %s (电压: %" PRIu32 "mV)", 
                      previous_charging ? "充电中" : "未充电", 
                      is_charging_ ? "充电中" : "未充电", 
                      voltage);
+            // 触发回调
+            if (charging_state_change_callback_) {
+                charging_state_change_callback_(previous_charging, is_charging_);
+            }
         }
     }
 
@@ -430,41 +425,36 @@ public:
         }
         
         // 直接使用阶梯式电量显示，不进行平滑过渡
+        uint8_t old_level = battery_level_;
         battery_level_ = calculated_battery_level;
         target_battery_level_ = calculated_battery_level;
         displayed_battery_level_ = calculated_battery_level;
 
-        // 每50次检测打印一次详细信息（约5秒一次）
-        static uint32_t print_counter = 0;
-        print_counter++;
-        if (print_counter >= 50) {
-            print_counter = 0;
-            
-            // 计算原始电压（补偿前）
-            int mv = average_adc;
-            if (cali_inited_) {
-                (void)adc_cali_raw_to_voltage(cali_handle_, average_adc, &mv);
+        // 仅打印电量百分比，且降低打印频率
+        static uint16_t log_counter = 0;
+        bool should_log = (battery_level_ != old_level);
+        if (!should_log) {
+            log_counter++;
+            if (log_counter >= 300) {  // 每200次（30秒）打印一次
+                should_log = true;
+                log_counter = 0;
             }
-            uint32_t original_voltage = (uint32_t)((int64_t)mv * VBAT_SCALE_NUM / VBAT_SCALE_DEN);
-            
-            // 获取补偿后的电压
-            uint32_t voltage = GetBatteryVoltage();
-            
-            // 计算补偿值
-            uint32_t compensation = voltage > original_voltage ? (voltage - original_voltage) : 0;
-            
-            // 电池状态详细打印
-            bool has_load = motor_running_ || led_enabled_;
-            ESP_LOGI("PowerManager", "🔋 ADC: %d, 原始: %" PRIu32 "mV, 补偿: +%" PRIu32 "mV, 最终: %" PRIu32 "mV, 电量: %d%%, 充电: %s, 负载: %s",
-                     adc_value, original_voltage, compensation, voltage, 
-                     displayed_battery_level_, is_charging_ ? "是" : "否",
-                     has_load ? (motor_running_ && led_enabled_ ? "电机+灯" : (motor_running_ ? "电机" : "灯")) : "无");
+        } else {
+            log_counter = 0;  // 电量变化时重置计数器
+        }
+        if (should_log) {
+            ESP_LOGI("PowerManager", "电量: %u%% (%s)", battery_level_, is_charging_ ? "充电中" : "未充电");
         }
     }
 
     bool IsCharging() { return is_charging_; }
 
     uint8_t GetBatteryLevel() { return battery_level_; }
+    
+    // 设置充电状态变化回调
+    void SetChargingStateChangeCallback(std::function<void(bool was_charging, bool is_charging)> callback) {
+        charging_state_change_callback_ = callback;
+    }
     
     // 立即检测一次电量
     void CheckBatteryStatusImmediately() {

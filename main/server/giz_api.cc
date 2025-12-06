@@ -558,13 +558,16 @@ static char* url_decode(const char* src) {
     return decoded;
 }
 
-int32_t GServer::getFirmwareUpdate(const char* hw_version, const char* sw_version, std::function<void(const char*, const char*, const char*, const char*)> callback) {
+int32_t GServer::getFirmwareUpdate(const char* hw_version, const char* sw_version, std::function<void(const char*, const char*, const char*, const char*)> callback, const char* imei) {
     std::string did = Auth::getInstance().getDeviceId();
     std::string url = "http://agent.gizwitsapi.com/v2/devices/" + did + "/firmwares";
     ESP_LOGI(TAG, "Firmware Update URL: %s", url.c_str());
     ESP_LOGI(TAG, "Hardware Version: %s", hw_version);
     ESP_LOGI(TAG, "Software Version: %s", sw_version);
     ESP_LOGI(TAG, "Device ID: %s", did.c_str());
+    if (imei) {
+        ESP_LOGI(TAG, "IMEI: %s", imei);
+    }
 
     // 创建token
     static uint8_t szNonce[PASSCODE_LEN + 1];
@@ -574,9 +577,16 @@ int32_t GServer::getFirmwareUpdate(const char* hw_version, const char* sw_versio
 
     // 准备请求体
     static uint8_t sFirmwareData[128];
-    int len = snprintf((char*)sFirmwareData, sizeof(sFirmwareData) - 1, 
+    int len;
+    if (imei && strlen(imei) > 0) {
+        len = snprintf((char*)sFirmwareData, sizeof(sFirmwareData) - 1, 
+                      "type=0&hw_version=%s&sw_version=%s&imei=%s", 
+                      hw_version, sw_version, imei);
+    } else {
+        len = snprintf((char*)sFirmwareData, sizeof(sFirmwareData) - 1, 
                       "type=0&hw_version=%s&sw_version=%s", 
                       hw_version, sw_version);
+    }
     sFirmwareData[len] = '\0';
     ESP_LOGI(TAG, "Request Body: %s", sFirmwareData);
     

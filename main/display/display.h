@@ -33,6 +33,7 @@ public:
     virtual void SetPreviewImage(const lv_img_dsc_t* image);
     virtual void SetTheme(const std::string& theme_name);
     virtual std::string GetTheme() { return current_theme_name_; }
+    virtual void SetSocketConnected(bool connected) {}
     virtual void UpdateStatusBar(bool update_all = false);
     virtual void EnterWifiConfig() {}
     virtual void EnterOTAMode() {}

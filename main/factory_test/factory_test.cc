@@ -19,6 +19,7 @@
 #include <string>
 #include <wifi_station.h>
 #include "config.h"
+#include "esp_wifi.h"
 
 static const char *TAG = "factory_test";
 
@@ -181,8 +182,9 @@ static void factory_test_send(const char *data, int len) {
         // 如果以+ENTER_TEST开头，直接返回OK
         if (strncmp(data, "+ENTER_TEST", strlen("+ENTER_TEST")) == 0
             || strncmp(data, "+EXIT_TEST", strlen("+EXIT_TEST")) == 0
-            || strncmp(data, "+REC", strlen("+REC")) == 0) {
-            // 通过print发送数据，这样可以在串口上看到
+            || strncmp(data, "+REC", strlen("+REC")) == 0
+            || strncmp(data, "+4G_TEST", strlen("+4G_TEST")) == 0) {
+            // 通过UART驱动直接发送数据到产测串口
             // 发送三次确保对方能收到
             for (int i = 0; i < 3; i++) {
                 printf("\r\n%.*s\r\n", len, data);
@@ -228,6 +230,54 @@ void factory_test_init(void) {
         // if (!wifi_station.WaitForConnected(30 * 1000)) {
         //     // wifi_station.Stop();
         // }
+
+        // 这里顺便初始化 4G 模块的 UART，只用于 AT+4G_TEST，不启动正常网络流程
+        #ifdef ML307_EN
+        ESP_LOGI(TAG, "Factory test: 初始化 ML307 UART 仅用于4G产测");
+
+        // 1. 打开 ML307 电源使能
+        gpio_config_t config = {
+            .pin_bit_mask = (1ULL << ML307_EN),
+            .mode = GPIO_MODE_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_ENABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        ESP_ERROR_CHECK(gpio_config(&config));
+        gpio_set_level(ML307_EN, 1);
+        ESP_LOGI(TAG, "Factory test: ML307_EN set HIGH");
+
+        // 2. 安装 UART2 驱动
+        uart_port_t ml307_uart = UART_NUM_2;
+        esp_err_t ret = uart_driver_install(ml307_uart, 1024, 1024, 0, nullptr, 0);
+        if (ret == ESP_ERR_INVALID_STATE) {
+            ESP_LOGW(TAG, "Factory test: UART_NUM_2 already in use, trying to uninstall first");
+            uart_driver_delete(ml307_uart);
+            vTaskDelay(pdMS_TO_TICKS(100));
+            ret = uart_driver_install(ml307_uart, 1024, 1024, 0, nullptr, 0);
+        }
+        if (ret == ESP_OK) {
+            // 3. 配置 UART 参数（使用 921600 波特率，和 AtModem 保持一致）
+            uart_config_t uart_config = {
+                .baud_rate = 115200,
+                .data_bits = UART_DATA_8_BITS,
+                .parity = UART_PARITY_DISABLE,
+                .stop_bits = UART_STOP_BITS_1,
+                .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+                .source_clk = UART_SCLK_DEFAULT,
+            };
+            ESP_ERROR_CHECK(uart_param_config(ml307_uart, &uart_config));
+
+            // 4. 设置引脚
+            ESP_ERROR_CHECK(uart_set_pin(ml307_uart, ML307_TX_PIN, ML307_RX_PIN,
+                                         UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+
+            ESP_LOGI(TAG, "Factory test: ML307 UART initialized successfully (UART_NUM_2, TX:%d, RX:%d)",
+                     ML307_TX_PIN, ML307_RX_PIN);
+        } else {
+            ESP_LOGE(TAG, "Factory test: Failed to install ML307 UART driver: %s", esp_err_to_name(ret));
+        }
+        #endif
     }
 }
 
@@ -473,6 +523,93 @@ static void handle_at_command(char *cmd) {
         // 返回RSSI信息
         snprintf(rssi_str, sizeof(rssi_str), "+RSSI=%ld", rssi);
         factory_test_send(rssi_str, strlen(rssi_str));
+    } else if (strcmp(cmd, "AT+4G_TEST") == 0) {
+        // 处理4G模块通信测试命令
+        ESP_LOGI(TAG, "Received 4G communication test command");
+        
+        esp_err_t test_result = ESP_FAIL;
+        
+        // 检测是否支持4G模块
+        #ifdef ML307_EN
+        // 轮询常见波特率，尝试与 4G 模块建立 AT 通信
+        uart_port_t ml307_uart = UART_NUM_2;
+        const char* test_cmd = "AT\r\n";
+        const int baud_list[] = {115200, 9600, 57600, 230400, 921600};
+        const size_t baud_count = sizeof(baud_list) / sizeof(baud_list[0]);
+
+        for (size_t i = 0; i < baud_count && test_result != ESP_OK; ++i) {
+            int baud = baud_list[i];
+            ESP_LOGI(TAG, "Trying ML307 baud rate: %d", baud);
+
+            uart_config_t uart_config = {
+                .baud_rate = baud,
+                .data_bits = UART_DATA_8_BITS,
+                .parity = UART_PARITY_DISABLE,
+                .stop_bits = UART_STOP_BITS_1,
+                .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+                .source_clk = UART_SCLK_DEFAULT,
+            };
+            if (uart_param_config(ml307_uart, &uart_config) != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to set UART param for baud %d", baud);
+                continue;
+            }
+
+            // 清空接收缓冲区，避免历史数据干扰
+            uart_flush_input(ml307_uart);
+            vTaskDelay(pdMS_TO_TICKS(20));
+
+            // 1. 发送AT命令
+            int bytes_written = uart_write_bytes(ml307_uart, test_cmd, strlen(test_cmd));
+            if (bytes_written <= 0) {
+                ESP_LOGE(TAG, "Failed to send data to ML307 at baud %d (UART may not be initialized)", baud);
+                continue;
+            }
+            ESP_LOGI(TAG, "Successfully sent %d bytes to ML307 at baud %d", bytes_written, baud);
+            
+            // 2. 等待模块响应（最多等待500ms）
+            vTaskDelay(pdMS_TO_TICKS(100));  // 等待模块处理
+            
+            // 3. 读取UART响应
+            uint8_t response[64] = {0};
+            int response_len = uart_read_bytes(ml307_uart, response, sizeof(response) - 1, pdMS_TO_TICKS(400));
+            
+            if (response_len > 0) {
+                response[response_len] = '\0';
+                ESP_LOGI(TAG, "Received response from ML307 at baud %d: %.*s", baud, response_len, response);
+                
+                // 4. 检查响应中是否包含"OK"（模块正常响应）
+                bool has_ok = false;
+                for (int j = 0; j <= response_len - 2; j++) {
+                    if (response[j] == 'O' && response[j+1] == 'K') {
+                        has_ok = true;
+                        break;
+                    }
+                }
+                
+                if (has_ok) {
+                    ESP_LOGI(TAG, "ML307 module responded with OK at baud %d - communication circuit is normal", baud);
+                    test_result = ESP_OK;  // 模块响应正常，收发电路正常
+                    break;
+                } else {
+                    ESP_LOGE(TAG, "ML307 module responded but without OK at baud %d - response: %.*s",
+                             baud, response_len, response);
+                }
+            } else {
+                ESP_LOGE(TAG, "No response from ML307 at baud %d (module may not exist, broken, or SIM slot issue)", baud);
+            }
+        }
+        #else
+        ESP_LOGW(TAG, "ML307_EN not defined in config.h, skipping test");
+        #endif
+        
+        // 返回测试结果
+        if (test_result == ESP_OK) {
+            factory_test_send("+4G_TEST OK", strlen("+4G_TEST OK"));
+            ESP_LOGI(TAG, "4G communication test passed");
+        } else {
+            factory_test_send("+4G_TEST ERROR", strlen("+4G_TEST ERROR"));
+            ESP_LOGE(TAG, "4G communication test failed");
+        }
     }
     else {
         // 未知命令处理

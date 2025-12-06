@@ -290,48 +290,48 @@ void EyeDisplayHorizontalEmo::ProcessEmotionChange(const char* emotion) {
     EyeState new_state = current_state_;
     
     if (strcmp(emotion, "neutral") == 0) {
-        new_state = EyeState::IDLE;
+        new_state = EyeState::NEUTRAL_FACE;
     } else if (strcmp(emotion, "happy") == 0) {
-        new_state = EyeState::HAPPY;
+        new_state = EyeState::HAPPY_FACE;
     } else if (strcmp(emotion, "laughing") == 0) {
-        new_state = EyeState::LOVING;
+        new_state = EyeState::STAR_LOVING;
     } else if (strcmp(emotion, "sad") == 0) {
-        new_state = EyeState::SAD;
+        new_state = EyeState::SAD_EMOJI;
     } else if (strcmp(emotion, "angry") == 0) {
         new_state = EyeState::ANGRY;
     } else if (strcmp(emotion, "crying") == 0) {
-        new_state = EyeState::SAD;
+        new_state = EyeState::SAD_EMOJI;
     } else if (strcmp(emotion, "loving") == 0) {
-        new_state = EyeState::LOVING;
+        new_state = EyeState::STAR_LOVING;
     } else if (strcmp(emotion, "embarrassed") == 0) {
-        new_state = EyeState::SHOCKED;
+        new_state = EyeState::SHOCKED_EMOJI;
     } else if (strcmp(emotion, "surprised") == 0) {
-        new_state = EyeState::SHOCKED;
+        new_state = EyeState::SHOCKED_EMOJI;
     } else if (strcmp(emotion, "shocked") == 0) {
-        new_state = EyeState::SHOCKED;
+        new_state = EyeState::SHOCKED_EMOJI;
     } else if (strcmp(emotion, "thinking") == 0) {
         new_state = EyeState::THINKING;
     } else if (strcmp(emotion, "winking") == 0) {
-        new_state = EyeState::WINKING;
+        new_state = EyeState::HAPPY_FACE;
     } else if (strcmp(emotion, "cool") == 0) {
-        new_state = EyeState::HAPPY;
+        new_state = EyeState::HAPPY_FACE;
     } else if (strcmp(emotion, "relaxed") == 0) {
-        new_state = EyeState::HAPPY;
+        new_state = EyeState::HAPPY_FACE;
     } else if (strcmp(emotion, "delicious") == 0) {
-        new_state = EyeState::SHOCKED;
+        new_state = EyeState::SHOCKED_EMOJI;
     } else if (strcmp(emotion, "kissy") == 0) {
-        new_state = EyeState::LOVING;
+        new_state = EyeState::STAR_LOVING;
     } else if (strcmp(emotion, "confident") == 0) {
-        new_state = EyeState::HAPPY;
+        new_state = EyeState::HAPPY_FACE;
     } else if (strcmp(emotion, "sleepy") == 0) {
         new_state = EyeState::SLEEPING;
     } else if (strcmp(emotion, "silly") == 0) {
-        new_state = EyeState::SILLY;
+        new_state = EyeState::NEUTRAL_FACE;
     } else if (strcmp(emotion, "confused") == 0) {
-        new_state = EyeState::SHOCKED;
+        new_state = EyeState::SHOCKED_EMOJI;
     } else if (strcmp(emotion, "vertigo") == 0) {
         new_state = EyeState::VERTIGO;
-    }else if (strcmp(emotion, "happy_face") == 0) {  // 添加开心表情的判断
+    } else if (strcmp(emotion, "happy_face") == 0) {  // 添加开心表情的判断
         new_state = EyeState::HAPPY_FACE;
     } else if (strcmp(emotion, "sad_emoji") == 0) {  // 添加悲伤表情的判断
         new_state = EyeState::SAD_EMOJI;
@@ -401,36 +401,40 @@ void EyeDisplayHorizontalEmo::ProcessEmotionChange(const char* emotion) {
     // 根据状态启动新的动画
     switch (current_state_) {
         case EyeState::SURPRISED:
+            StartShockedEmojiAnimation();  // 使用震惊表情动画
+            break;
         case EyeState::IDLE:
-            StartIdleAnimation();
+            StartNeutralFaceAnimation();  // 使用中性表情动画
             break;
         case EyeState::RELAXED:
         case EyeState::CONFIDENT:
         case EyeState::COOL:
         case EyeState::WINKING:
         case EyeState::HAPPY:
-            StartHappyAnimation();
+            StartHappyFaceAnimation();  // 使用开心表情动画
             break;
         case EyeState::ANGRY:
             StartAngryAnimation();
             break;
         case EyeState::CRYING:
         case EyeState::SAD:
-            StartSadAnimation();
+            StartSadEmojiAnimation();  // 使用悲伤表情动画
             break;
         case EyeState::KISSY:
         case EyeState::LAUGHING:
         case EyeState::LOVING:
-            StartLovingAnimation();
+            StartLovingEmojiAnimation();  // 使用喜爱表情动画
             break;
         case EyeState::CONFUSED:
         case EyeState::DELICIOUS:
         case EyeState::EMBARRASSED:
+            StartShockedEmojiAnimation();  // 使用震惊表情动画
+            break;
         case EyeState::THINKING:
              StartThinkingAnimation();
              break;
         case EyeState::SHOCKED:
-            StartShockedAnimation();
+            StartShockedEmojiAnimation();  // 使用震惊表情动画
             break;
         case EyeState::SLEEPING:
             StartSleepingAnimation();
@@ -441,7 +445,7 @@ void EyeDisplayHorizontalEmo::ProcessEmotionChange(const char* emotion) {
         case EyeState::VERTIGO:
             StartVertigoAnimation();
             break;
-            case EyeState::HAPPY_FACE:  // 添加新表情动画
+        case EyeState::HAPPY_FACE:  // 添加新表情动画
             StartHappyFaceAnimation();
             break;
         case EyeState::NEUTRAL_FACE:  // 添加中性表情动画
@@ -852,9 +856,20 @@ void EyeDisplayHorizontalEmo::StartLovingAnimation() {
 }
 
 void EyeDisplayHorizontalEmo::StartSleepingAnimation() {
+    // 统一清屏，重建基础容器并隐藏双眼（本函数会重新显示并调整双眼）
+    RebuildBaseContainerHidden();
     // 确保眼睛可见
     lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
+    
+    // 统一禁用屏幕滚动与滚动条，避免 zzz 标签因滚动产生位置变化
+    {
+        lv_obj_t* screen = lv_screen_active();
+        if (screen) {
+            lv_obj_clear_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_set_scrollbar_mode(screen, LV_SCROLLBAR_MODE_OFF);
+        }
+    }
     
     // 眼睛整体下移15像素
     {
@@ -972,6 +987,8 @@ void EyeDisplayHorizontalEmo::StartShockedAnimation() {
 }
 
 void EyeDisplayHorizontalEmo::StartSillyAnimation() {
+    // 统一清屏，重建基础容器并隐藏双眼
+    RebuildBaseContainerHidden();
     // 确保眼睛可见
     lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
@@ -1008,6 +1025,8 @@ void EyeDisplayHorizontalEmo::StartSillyAnimation() {
 }
 
 void EyeDisplayHorizontalEmo::StartAngryAnimation() {
+    // 统一清屏，重建基础容器并隐藏双眼
+    RebuildBaseContainerHidden();
     // 确保眼睛可见
     lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
@@ -1082,6 +1101,8 @@ void EyeDisplayHorizontalEmo::StartAngryAnimation() {
 
 
 void EyeDisplayHorizontalEmo::StartThinkingAnimation() {
+    // 统一清屏，重建基础容器并隐藏双眼
+    RebuildBaseContainerHidden();
     // 确保眼睛可见
     lv_obj_clear_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
@@ -1099,6 +1120,8 @@ void EyeDisplayHorizontalEmo::StartThinkingAnimation() {
         if (container) {
             lv_obj_clear_flag(container, LV_OBJ_FLAG_SCROLLABLE);
             lv_obj_set_scrollbar_mode(container, LV_SCROLLBAR_MODE_OFF);
+            // 整体向上移动10像素
+            lv_obj_set_style_pad_top(container, -DISPLAY_VERTICAL_OFFSET - 10, 0);
         }
     }
     
@@ -1232,40 +1255,63 @@ void EyeDisplayHorizontalEmo::SetupUI() {
     lv_obj_set_style_outline_width(right_eye_, 0, 0);
 
     // 启动默认的待机动画
-    StartIdleAnimation();
+    SetEmotion("neutral_face");
+}
+
+// 清空屏幕并重建基础容器和双眼（默认隐藏），用于进入整屏 Emoji 表情前保证干净画面
+void EyeDisplayHorizontalEmo::RebuildBaseContainerHidden() {
+    auto screen = lv_screen_active();
+    lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
+    lv_obj_clean(screen);
+
+    // Create a container for eyes - 适配128x160横屏显示（与 SetupUI 保持一致）
+    lv_obj_t* container = lv_obj_create(screen);
+    lv_obj_set_size(container, LV_HOR_RES, LV_VER_RES);
+    lv_obj_align(container, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_color(container, lv_color_black(), 0);
+    lv_obj_set_style_border_width(container, 0, 0);
+    lv_obj_set_style_pad_all(container, 0, 0);
+    lv_obj_set_flex_flow(container, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(container, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_top(container, -DISPLAY_VERTICAL_OFFSET, 0);
+
+    // Create left eye
+    left_eye_ = lv_obj_create(container);
+    lv_obj_set_size(left_eye_, 30, 60);
+    lv_obj_set_style_radius(left_eye_, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(left_eye_, lv_color_hex(EYE_COLOR), 0);
+    lv_obj_set_style_border_width(left_eye_, 0, 0);
+    lv_obj_set_style_border_side(left_eye_, LV_BORDER_SIDE_NONE, 0);
+    lv_obj_set_style_pad_all(left_eye_, 0, 0);
+    lv_obj_set_style_shadow_width(left_eye_, 0, 0);
+    lv_obj_set_style_outline_width(left_eye_, 0, 0);
+    lv_obj_add_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
+
+    // Create right eye
+    right_eye_ = lv_obj_create(container);
+    lv_obj_set_size(right_eye_, 30, 60);
+    lv_obj_set_style_radius(right_eye_, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(right_eye_, lv_color_hex(EYE_COLOR), 0);
+    lv_obj_set_style_border_width(right_eye_, 0, 0);
+    lv_obj_set_style_border_side(right_eye_, LV_BORDER_SIDE_NONE, 0);
+    lv_obj_set_style_pad_all(right_eye_, 0, 0);
+    lv_obj_set_style_shadow_width(right_eye_, 0, 0);
+    lv_obj_set_style_outline_width(right_eye_, 0, 0);
+    lv_obj_add_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
 }
 
 void EyeDisplayHorizontalEmo::TestNextEmotion() {
     // 定义所有表情的字符串数组，按EyeState枚举的顺序
     static const char* emotions[] = {
-        "neutral",      // IDLE
-        "happy",        // HAPPY
-        "happy_face",   // HAPPY_FACE
-        "sad_emoji",    // SAD_EMOJI
-        "shocked_emoji", // SHOCKED_EMOJI
-        "star_loving",   // STAR_LOVING
-        "neutral_face" , // NEUTRAL_FACE
-        "laughing",     // LAUGHING
-        "thinking",     // THINKING
-        "sad",          // SAD
-        "thinking",     // THINKING
-        "angry",        // ANGRY
-        "crying",       // CRYING
-        "loving",       // LOVING
-        "embarrassed",  // EMBARRASSED
-        "surprised",    // SURPRISED
-        "shocked",      // SHOCKED
-        "thinking",     // THINKING
-        "winking",      // WINKING
-        "cool",         // COOL
-        "relaxed",      // RELAXED
-        "delicious",    // DELICIOUS
-        "kissy",        // KISSY
-        "confident",    // CONFIDENT
-        "sleepy",       // SLEEPING
-        "silly",        // SILLY
-        "confused",     // CONFUSED
-        "vertigo"       // VERTIGO
+        "neutral_face", // 新中性
+        "happy_face",   // 新开心
+        "sad_emoji",    // 新悲伤
+        "shocked_emoji",// 新震惊
+        "star_loving",  // 新喜爱
+        "angry",        // 生气
+        "thinking",     // 思考
+        "sleepy",       // 困倦
+        "vertigo"       // 眩晕
     };
     
     static const size_t emotion_count = sizeof(emotions) / sizeof(emotions[0]);
@@ -1374,10 +1420,8 @@ void EyeDisplayHorizontalEmo::SetOTAProgress(int progress) {
 
 // 开心的表情
 void EyeDisplayHorizontalEmo::StartHappyFaceAnimation() {
-    // 仅显示表情：隐藏默认的圆形眼睛
-    
-    if (left_eye_) lv_obj_add_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
-    if (right_eye_) lv_obj_add_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
+    // 清屏并重建基础容器（双眼隐藏），保证干净画面
+    RebuildBaseContainerHidden();
 
     // 清理旧对象（防御性处理）
     if (face_) {
@@ -1390,6 +1434,14 @@ void EyeDisplayHorizontalEmo::StartHappyFaceAnimation() {
     }
 
     lv_obj_t* screen = lv_screen_active();
+    if (screen) {
+        lv_obj_clear_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scrollbar_mode(screen, LV_SCROLLBAR_MODE_OFF);
+    }
+    if (screen) {
+        lv_obj_clear_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scrollbar_mode(screen, LV_SCROLLBAR_MODE_OFF);
+    }
 
     // 适配不同分辨率（以240x240为基准）
     const int SCREEN_WIDTH = LV_HOR_RES;
@@ -1408,7 +1460,10 @@ void EyeDisplayHorizontalEmo::StartHappyFaceAnimation() {
     lv_obj_remove_style_all(face_);
     lv_obj_set_size(face_, SCREEN_WIDTH, SCREEN_HEIGHT);
     lv_obj_set_style_bg_opa(face_, LV_OPA_TRANSP, 0);
-    lv_obj_align(face_, LV_ALIGN_CENTER, 0, 0); // 容器完全居中
+    lv_obj_align(face_, LV_ALIGN_CENTER, 0, 0); // 恢复完全居中
+    // 禁用滚动，避免裁剪与滚动条
+    lv_obj_clear_flag(face_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(face_, LV_SCROLLBAR_MODE_OFF);
 
     // 嘴巴：使用主题色圆形 + 黑色上半遮罩，形成半圆笑嘴
     happy_mouth_ = lv_obj_create(face_);
@@ -1506,9 +1561,8 @@ void EyeDisplayHorizontalEmo::StartHappyFaceAnimation() {
 
 // 悲伤的表情
 void EyeDisplayHorizontalEmo::StartSadEmojiAnimation() {
-    // 隐藏原来的圆形眼睛
-    lv_obj_add_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
+    // 清屏并重建基础容器（双眼隐藏），保证干净画面
+    RebuildBaseContainerHidden();
     
     lv_obj_t* screen = lv_screen_active();
     
@@ -1529,7 +1583,10 @@ void EyeDisplayHorizontalEmo::StartSadEmojiAnimation() {
     lv_obj_remove_style_all(face);
     lv_obj_set_size(face, SCREEN_WIDTH, SCREEN_HEIGHT);
     lv_obj_set_style_bg_opa(face, LV_OPA_TRANSP, 0);
-    lv_obj_align(face, LV_ALIGN_CENTER, 0, 0); // 容器完全居中
+    lv_obj_align(face, LV_ALIGN_CENTER, 0, 0); // 恢复完全居中
+    // 禁用滚动，避免裁剪与滚动条
+    lv_obj_clear_flag(face, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(face, LV_SCROLLBAR_MODE_OFF);
     
     // 左眼（圆形）
     lv_obj_t* left_eye = lv_obj_create(face);
@@ -1701,12 +1758,53 @@ void EyeDisplayHorizontalEmo::StartSadEmojiAnimation() {
     // 显示左眼泪（之前被隐藏的第二颗眼泪）
     lv_obj_clear_flag(right_tear2, LV_OBJ_FLAG_HIDDEN);
     
-    // 添加眉毛轻微抖动动画
+    // 先删除旧动画，避免多次调用导致不同步
+    lv_anim_del(left_eyebrow, nullptr);
+    lv_anim_del(right_eyebrow, nullptr);
+    lv_anim_del(left_eye, nullptr);
+    lv_anim_del(right_eye, nullptr);
+    lv_anim_del(mouth, nullptr);
+    lv_anim_del(right_tear1, nullptr);
+    lv_anim_del(right_tear2, nullptr);
+    
+    // 添加眼睛大小动画（与眉毛同步：眉毛向上时眼睛变大）
+    static lv_anim_t left_eye_anim;
+    lv_anim_init(&left_eye_anim);
+    lv_anim_set_var(&left_eye_anim, left_eye);
+    lv_anim_set_values(&left_eye_anim, EYE_SIZE, (int)(EYE_SIZE * 1.15f)); // 眼睛大小变化：100% -> 115%
+    lv_anim_set_time(&left_eye_anim, 2000);
+    lv_anim_set_delay(&left_eye_anim, 0);
+    lv_anim_set_repeat_count(&left_eye_anim, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_playback_time(&left_eye_anim, 2000);
+    lv_anim_set_exec_cb(&left_eye_anim, [](void* obj, int32_t value) {
+        lv_obj_t* eye = (lv_obj_t*)obj;
+        lv_obj_set_size(eye, value, value);
+    });
+    lv_anim_set_path_cb(&left_eye_anim, lv_anim_path_ease_in_out);
+    lv_anim_start(&left_eye_anim);
+    
+    static lv_anim_t right_eye_anim;
+    lv_anim_init(&right_eye_anim);
+    lv_anim_set_var(&right_eye_anim, right_eye);
+    lv_anim_set_values(&right_eye_anim, EYE_SIZE, (int)(EYE_SIZE * 1.15f)); // 与左眼同步
+    lv_anim_set_time(&right_eye_anim, 2000);
+    lv_anim_set_delay(&right_eye_anim, 0);
+    lv_anim_set_repeat_count(&right_eye_anim, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_playback_time(&right_eye_anim, 2000);
+    lv_anim_set_exec_cb(&right_eye_anim, [](void* obj, int32_t value) {
+        lv_obj_t* eye = (lv_obj_t*)obj;
+        lv_obj_set_size(eye, value, value);
+    });
+    lv_anim_set_path_cb(&right_eye_anim, lv_anim_path_ease_in_out);
+    lv_anim_start(&right_eye_anim);
+    
+    // 添加眉毛轻微抖动动画（与眼睛同步：眉毛向上时眼睛变大）
     static lv_anim_t left_eyebrow_anim;
     lv_anim_init(&left_eyebrow_anim);
     lv_anim_set_var(&left_eyebrow_anim, left_eyebrow);
     lv_anim_set_values(&left_eyebrow_anim, -26, -30); // 最低点上调3、最高点上调2
     lv_anim_set_time(&left_eyebrow_anim, 2000);
+    lv_anim_set_delay(&left_eyebrow_anim, 0);
     lv_anim_set_repeat_count(&left_eyebrow_anim, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_playback_time(&left_eyebrow_anim, 2000);
     lv_anim_set_exec_cb(&left_eyebrow_anim, (lv_anim_exec_xcb_t)lv_obj_set_y);
@@ -1718,18 +1816,20 @@ void EyeDisplayHorizontalEmo::StartSadEmojiAnimation() {
     lv_anim_set_var(&right_eyebrow_anim, right_eyebrow);
     lv_anim_set_values(&right_eyebrow_anim, -26, -30); // 与左眉毛相同的动画范围
     lv_anim_set_time(&right_eyebrow_anim, 2000);
+    lv_anim_set_delay(&right_eyebrow_anim, 0);
     lv_anim_set_repeat_count(&right_eyebrow_anim, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_playback_time(&right_eyebrow_anim, 2000);
     lv_anim_set_exec_cb(&right_eyebrow_anim, (lv_anim_exec_xcb_t)lv_obj_set_y);
     lv_anim_set_path_cb(&right_eyebrow_anim, lv_anim_path_ease_in_out);
     lv_anim_start(&right_eyebrow_anim);
     
-    // 添加嘴巴上下移动动画，与眉毛同步
+    // 添加嘴巴上下移动动画，与眉毛、眼睛同步
     static lv_anim_t mouth_anim;
     lv_anim_init(&mouth_anim);
     lv_anim_set_var(&mouth_anim, mouth);
     lv_anim_set_values(&mouth_anim, 50, 42); // 嘴巴动画整体上移5：55->50, 47->42
     lv_anim_set_time(&mouth_anim, 2000);
+    lv_anim_set_delay(&mouth_anim, 0);
     lv_anim_set_repeat_count(&mouth_anim, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_playback_time(&mouth_anim, 2000);
     lv_anim_set_exec_cb(&mouth_anim, (lv_anim_exec_xcb_t)lv_obj_set_y);
@@ -1739,9 +1839,8 @@ void EyeDisplayHorizontalEmo::StartSadEmojiAnimation() {
 
 // 震惊的表情
 void EyeDisplayHorizontalEmo::StartShockedEmojiAnimation() {
-    // 隐藏原来的圆形眼睛
-    lv_obj_add_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
+    // 清屏并重建基础容器（双眼隐藏），保证干净画面
+    RebuildBaseContainerHidden();
     
     lv_obj_t* screen = lv_screen_active();
     
@@ -1981,9 +2080,8 @@ void EyeDisplayHorizontalEmo::StartShockedEmojiAnimation() {
 
 // 喜爱的表情
 void EyeDisplayHorizontalEmo::StartLovingEmojiAnimation() {
-    // 隐藏原来的圆形眼睛
-    lv_obj_add_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
+    // 清屏并重建基础容器（双眼隐藏），保证干净画面
+    RebuildBaseContainerHidden();
     // 禁用当前屏幕滚动与滚动条
     lv_obj_t* scr = lv_screen_active();
     lv_obj_set_scrollbar_mode(scr, LV_SCROLLBAR_MODE_OFF);
@@ -2066,9 +2164,8 @@ void EyeDisplayHorizontalEmo::StartLovingEmojiAnimation() {
 
 // 中性的表情
 void EyeDisplayHorizontalEmo::StartNeutralFaceAnimation() {
-    // 隐藏默认圆形眼睛
-    if (left_eye_) lv_obj_add_flag(left_eye_, LV_OBJ_FLAG_HIDDEN);
-    if (right_eye_) lv_obj_add_flag(right_eye_, LV_OBJ_FLAG_HIDDEN);
+    // 清屏并重建基础容器（双眼隐藏），保证干净画面
+    RebuildBaseContainerHidden();
 
     // 若存在之前创建的表情容器，先删除（避免叠加）
     if (face_) {
@@ -2078,6 +2175,18 @@ void EyeDisplayHorizontalEmo::StartNeutralFaceAnimation() {
         happy_right_eye_ = nullptr;
         happy_mouth_ = nullptr;
         happy_mouth_mask_ = nullptr;
+    }
+
+    // 确保屏幕级别创建的嘴巴对象被移除（防止干扰中性表情）
+    if (mouth_) {
+        lv_anim_del(mouth_, nullptr);
+        lv_obj_del(mouth_);
+        mouth_ = nullptr;
+    }
+    if (shocked_mouth_) {
+        lv_anim_del(shocked_mouth_, nullptr);
+        lv_obj_del(shocked_mouth_);
+        shocked_mouth_ = nullptr;
     }
 
     lv_obj_t* screen = lv_screen_active();
@@ -2097,6 +2206,9 @@ void EyeDisplayHorizontalEmo::StartNeutralFaceAnimation() {
     lv_obj_set_style_bg_opa(neutral_face, LV_OPA_TRANSP, 0);
     // 与 StartHappyFaceAnimation 保持容器完全居中（不再上移）
     lv_obj_align(neutral_face, LV_ALIGN_CENTER, 0, 0);
+    // 禁用滚动，避免裁剪与滚动条
+    lv_obj_clear_flag(neutral_face, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(neutral_face, LV_SCROLLBAR_MODE_OFF);
 
     // 左右眼（主题色圆形，局部变量）
     lv_obj_t* neutral_left_eye = lv_obj_create(neutral_face);
@@ -2150,6 +2262,13 @@ void EyeDisplayHorizontalEmo::StartNeutralFaceAnimation() {
     // 先停止之前的动画，避免冲突
     lv_anim_del(&left_eye_anim, nullptr);
     lv_anim_del(&right_eye_anim, nullptr);
+    // 也删除对象上的旧动画（如果对象仍然有效）
+    if (neutral_left_eye && lv_obj_is_valid(neutral_left_eye)) {
+        lv_anim_del(neutral_left_eye, nullptr);
+    }
+    if (neutral_right_eye && lv_obj_is_valid(neutral_right_eye)) {
+        lv_anim_del(neutral_right_eye, nullptr);
+    }
     
     lv_anim_init(&left_eye_anim);
     lv_anim_set_var(&left_eye_anim, &left_eye_data);
@@ -2160,12 +2279,9 @@ void EyeDisplayHorizontalEmo::StartNeutralFaceAnimation() {
         // 检查对象是否仍然有效
         if (anim_data->eye && lv_obj_is_valid(anim_data->eye)) {
             lv_obj_set_size(anim_data->eye, v, v);
-            // 保持眼睛中心位置不变，向四周扩展
-            if (anim_data->is_left) {
-                lv_obj_align(anim_data->eye, LV_ALIGN_CENTER, -anim_data->spacing, anim_data->y_offset);
-            } else {
-                lv_obj_align(anim_data->eye, LV_ALIGN_CENTER, anim_data->spacing, anim_data->y_offset);
-            }
+            // 保持眼睛中心位置不变，向四周扩展（左眼固定使用 -spacing）
+            // lv_obj_align 会自动处理布局更新，不需要手动调用 lv_obj_update_layout
+            lv_obj_align(anim_data->eye, LV_ALIGN_CENTER, -anim_data->spacing, anim_data->y_offset);
         }
     });
     lv_anim_set_path_cb(&left_eye_anim, lv_anim_path_ease_in_out);
@@ -2182,12 +2298,9 @@ void EyeDisplayHorizontalEmo::StartNeutralFaceAnimation() {
         // 检查对象是否仍然有效
         if (anim_data->eye && lv_obj_is_valid(anim_data->eye)) {
             lv_obj_set_size(anim_data->eye, v, v);
-            // 保持眼睛中心位置不变，向四周扩展
-            if (anim_data->is_left) {
-                lv_obj_align(anim_data->eye, LV_ALIGN_CENTER, -anim_data->spacing, anim_data->y_offset);
-            } else {
-                lv_obj_align(anim_data->eye, LV_ALIGN_CENTER, anim_data->spacing, anim_data->y_offset);
-            }
+            // 保持眼睛中心位置不变，向四周扩展（右眼固定使用 +spacing）
+            // lv_obj_align 会自动处理布局更新，不需要手动调用 lv_obj_update_layout
+            lv_obj_align(anim_data->eye, LV_ALIGN_CENTER, anim_data->spacing, anim_data->y_offset);
         }
     });
     lv_anim_set_path_cb(&right_eye_anim, lv_anim_path_ease_in_out);

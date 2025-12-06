@@ -38,7 +38,7 @@ private:
     // PowerManager* power_manager_;
     
     // 唤醒词列表
-    std::vector<std::string> wake_words_ = {"你好小智", "你好小云", "合养精灵", "嗨小火人"};
+    std::vector<std::string> wake_words_ = {"你好小智", "你好小云", "合养精灵", "嗨小火人", "小鹿小鹿", "你好小鹿"};
     std::vector<std::string> network_config_words_ = {"开始配网"};
 
     void InitializePowerSaveTimer() {
@@ -240,6 +240,15 @@ public:
         return &audio_codec;
     }
 
+    virtual std::vector<std::string> GetInterruptKeywords() override {
+        return {"帷幕开了"};
+    }
+
+
+    virtual bool NeedForceConnect() override {
+        return true;
+    }
+
     void SetPowerSaveTimer(bool enable) {
         power_save_timer_->SetEnabled(enable);
     }
@@ -252,11 +261,11 @@ public:
         return DataPointManager::GetInstance().GetDataPointCount();
     }
 
-    bool GetDataPointValue(const std::string& name, int& value) const override {
+    bool GetDataPointValue(const std::string& name, uint32_t& value) const override {
         return DataPointManager::GetInstance().GetDataPointValue(name, value);
     }
 
-    bool SetDataPointValue(const std::string& name, int value) override {
+    bool SetDataPointValue(const std::string& name, uint32_t value) override {
         return DataPointManager::GetInstance().SetDataPointValue(name, value);
     }
 
@@ -264,7 +273,7 @@ public:
         DataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
     }
 
-    void ProcessDataPointValue(const std::string& name, int value) override {
+    void ProcessDataPointValue(const std::string& name, uint32_t value) override {
         DataPointManager::GetInstance().ProcessDataPointValue(name, value);
     }
 

@@ -343,6 +343,7 @@ public:
                     wifi_station.SetPowerSaveMode(false);
                     Application::GetInstance().ToggleChatState();
                     Application::GetInstance().PlaySound(Lang::Sounds::P3_SUCCESS);
+                  
                 });
             } else {
                 ESP_LOGI(TAG, "U0RXD=HIGH -> AI模块休眠");
@@ -351,6 +352,8 @@ public:
                     // 休眠模式：开启省电，降低功耗（保留连接）
                     Application::GetInstance().QuitTalking();
                     wifi_station.SetPowerSaveMode(true);
+                    // 关闭 6824
+                    vb6824_shutdown();
                 });
             }
         }, nullptr);
@@ -419,11 +422,11 @@ public:
         return UartDataPointManager::GetInstance().GetDataPointCount();
     }
 
-    bool GetDataPointValue(const std::string& name, int& value) const override {
+    bool GetDataPointValue(const std::string& name, uint32_t& value) const override {
         return UartDataPointManager::GetInstance().GetDataPointValue(name, value);
     }
 
-    bool SetDataPointValue(const std::string& name, int value) override {
+    bool SetDataPointValue(const std::string& name, uint32_t value) override {
         return UartDataPointManager::GetInstance().SetDataPointValue(name, value);
     }
 
@@ -431,7 +434,7 @@ public:
         UartDataPointManager::GetInstance().GenerateReportData(buffer, buffer_size, data_size);
     }
 
-    void ProcessDataPointValue(const std::string& name, int value) override {
+    void ProcessDataPointValue(const std::string& name, uint32_t value) override {
         UartDataPointManager::GetInstance().ProcessDataPointValue(name, value);
     }
 
