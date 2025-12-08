@@ -106,6 +106,7 @@ bool WebsocketProtocol::HasErrorOccurred() const {
 }
 
 bool WebsocketProtocol::OpenAudioChannel() {
+    busy_sending_audio_ = false;
     Settings settings("websocket", false);
     std::string url = settings.GetString("url");
     std::string token = settings.GetString("token");
@@ -445,6 +446,7 @@ void WebsocketProtocol::SendStopListening() {
 }
 
 void WebsocketProtocol::SendStartListening(ListeningMode mode) {
+    busy_sending_audio_ = false;
     std::string message = "{\"session_id\":\"" + session_id_ + "\"";
     message += ",\"type\":\"listen\",\"state\":\"start\"";
     if (mode == kListeningModeRealtime) {
