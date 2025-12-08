@@ -31,11 +31,7 @@ bool WebsocketProtocol::Start() {
 }
 
 bool WebsocketProtocol::SendAudio(const AudioStreamPacket& packet) {
-    // if (need_abort_speaking_) {
-    //     ESP_LOGI(TAG, "SendAudio: ignore audio");
-    //     return false;
-    // }
-    if (websocket_ == nullptr || !websocket_->IsConnected()) {
+    if (!websocket_ || !websocket_->IsConnected() || packet.payload.empty() || busy_sending_audio_) {
         return false;
     }
 
@@ -426,9 +422,81 @@ void WebsocketProtocol::SendTextToAI(const std::string& message) {
     SendText(json);
 }
 
+void WebsocketProtocol::GenerateTTSFromText(const std::string& text) {
+    if (!websocket_ || !websocket_->IsConnected()) {
+        ESP_LOGW(TAG, "WebSocket not connected, cannot generate TTS");
+        return;
+    }
+    
+    // 创建事件 ID
+    char event_id[32];
+    uint32_t random_value = esp_random();
+    snprintf(event_id, sizeof(event_id), "%lu", random_value);
+    
+    // 构建 TTS 合成请求消息（xiaozhi 协议格式）
+    std::string message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"tts\",\"text\":\"" + text + "\"}";
+    
+    SendText(message);
+}
+
 void WebsocketProtocol::SendStopListening() {
     std::string message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"listen\",\"state\":\"stop\"}";
     SendText(message);
+}
+
+void WebsocketProtocol::SendStartListening(ListeningMode mode) {
+    std::string message = "{\"session_id\":\"" + session_id_ + "\"";
+    message += ",\"type\":\"listen\",\"state\":\"start\"";
+    if (mode == kListeningModeRealtime) {
+        message += ",\"mode\":\"realtime\"";
+    } else if (mode == kListeningModeAutoStop) {
+        message += ",\"mode\":\"auto\"";
+    } else {
+        message += ",\"mode\":\"manual\"";
+    }
+    message += "}";
+    SendText(message);
+}
+
+void WebsocketProtocol::SendMessage(const std::string& message) {
+    std::string json = "{\"session_id\":\"" + session_id_ + 
+    "\",\"type\":\"listen\",\"state\":\"detect\",\"text\":\"" + message + "\"}";
+    SendText(json);
+}
+
+void WebsocketProtocol::SendWakeWordDetected(const std::string& wake_word) {
+    std::string json = "{\"session_id\":\"" + session_id_ + 
+                      "\",\"type\":\"listen\",\"state\":\"detect\",\"text\":\"" + wake_word + "\"}";
+    SendText(json);
+}
+
+void WebsocketProtocol::SendAbortSpeaking(AbortReason reason) {
+    // 记录打断AI说话的时间戳
+    abort_speaking_timestamp_ = std::chrono::steady_clock::now();
+    abort_speaking_recorded_ = true;
+    ESP_LOGI(TAG, "Abort speaking timestamp recorded, will ignore server audio for 1.5s");
+    
+    std::string message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"abort\"";
+    if (reason == kAbortReasonWakeWordDetected) {
+        message += ",\"reason\":\"wake_word_detected\"";
+    }
+    message += "}";
+    ESP_LOGI(TAG, "SendAbortSpeaking: %s", message.c_str());
+    SendText(message);
+}
+
+void WebsocketProtocol::PreAbortSpeaking() {
+    SendAbortSpeaking(kAbortReasonNone);
+}
+
+void WebsocketProtocol::SendMcpMessage(const std::string& payload) {
+    std::string message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"mcp\",\"payload\":" + payload + "}";
+    SendText(message);
+}
+
+void WebsocketProtocol::SetAudioUploadEnabled(bool enabled) {
+    busy_sending_audio_ = !enabled;  // busy_sending_audio_ = true 表示禁用上传
+    ESP_LOGI(TAG, "Audio upload %s", enabled ? "enabled" : "disabled");
 }
 
 void WebsocketProtocol::HandleReconnect() {

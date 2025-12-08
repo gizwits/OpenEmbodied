@@ -113,3 +113,12 @@ bool Protocol::IsTimeout() const {
     }
     return timeout;
 }
+
+void Protocol::SetAudioUploadEnabled(bool enabled) {
+    busy_sending_audio_ = !enabled;  // busy_sending_audio_ = true 表示禁用上传
+    ESP_LOGI(TAG, "Audio upload %s", enabled ? "enabled" : "disabled");
+}
+
+void Protocol::GenerateTTSFromText(const std::string& text) {
+    // 默认空实现，子类可以重写
+}

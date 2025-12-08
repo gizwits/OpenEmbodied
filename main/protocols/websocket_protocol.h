@@ -32,6 +32,7 @@ public:
     virtual bool Start() override;
     virtual bool OpenAudioChannel() override;
     virtual void SendStopListening() override;
+    virtual void SendStartListening(ListeningMode mode) override;
     virtual void SendTextToAI(const std::string& text) override;
     virtual void GenerateTTSFromText(const std::string& text) override;
     virtual void CloseAudioChannel() override;
@@ -39,6 +40,12 @@ public:
     virtual bool SendAudio(const AudioStreamPacket& packet) override;
     virtual bool HasErrorOccurred() const override;
     virtual bool IsAudioCanEnterSleepMode() const override;
+    virtual void SendMessage(const std::string& message) override;
+    virtual void SendWakeWordDetected(const std::string& wake_word) override;
+    virtual void SendAbortSpeaking(AbortReason reason) override;
+    virtual void PreAbortSpeaking() override;
+    virtual void SendMcpMessage(const std::string& message) override;
+    virtual void SetAudioUploadEnabled(bool enabled) override;
     virtual void HandleReconnect();
     
 private:
